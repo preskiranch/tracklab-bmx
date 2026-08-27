@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Gauge, HeartPulse, Play, RotateCcw, TimerReset, Zap } from 'lucide-react';
+import {
+  Activity,
+  Gauge,
+  HeartPulse,
+  Play,
+  RotateCcw,
+  TabletSmartphone,
+  TimerReset,
+  Zap,
+} from 'lucide-react';
 import {
   addGetPulledSample,
   addGetPulledSampleThroughEnd,
@@ -44,6 +53,7 @@ import {
   demoHeartRateEffort,
   demoHeartRateReading,
 } from '../lib/demoHeartRate';
+import { getPulledFullscreenStyles } from '../lib/getPulledFullscreenLayout';
 
 export const getPulledDeviceDisconnectGraceMs = 750;
 
@@ -198,6 +208,11 @@ type GetPulledViewProps = {
   /** Club Tablet results remain visible until the rider explicitly exits. */
   holdResultsUntilExit?: boolean;
   fullscreen?: boolean;
+  fullscreenSecondaryAction?: Readonly<{
+    label: string;
+    disabled?: boolean;
+    onClick: () => void;
+  }>;
   onAssignRider: (deviceId: number, riderId: string | null) => void;
   onComplete: (result: GetPulledResult) => void;
   onFullscreenChange?: (enabled: boolean) => void;
@@ -233,6 +248,7 @@ export function GetPulledView({
   canAssignRiders = true,
   holdResultsUntilExit = false,
   fullscreen = false,
+  fullscreenSecondaryAction,
   onAssignRider,
   onComplete,
   onFullscreenChange,
@@ -692,10 +708,34 @@ export function GetPulledView({
 
   return (
     <main className="get-pulled-view" aria-label="Get Pulled timed Wattbike test">
-      {fullscreen && (phase === 'countdown' || phase === 'armed' || phase === 'active') && (
-        <button className="get-pulled-exit-fullscreen" type="button" onClick={() => reset('user-cancelled')}>
-          <RotateCcw size={18} /> Cancel sprint
-        </button>
+      {fullscreen && <style>{getPulledFullscreenStyles}</style>}
+      {fullscreen && (
+        phase === 'countdown' || phase === 'armed' || phase === 'active' || fullscreenSecondaryAction
+      ) && (
+        <div className="get-pulled-fullscreen-actions" role="group" aria-label="Get Pulled session controls">
+          {(phase === 'countdown' || phase === 'armed' || phase === 'active') && (
+            <button
+              aria-label="Cancel sprint"
+              className="get-pulled-exit-fullscreen"
+              type="button"
+              onClick={() => reset('user-cancelled')}
+            >
+              <RotateCcw aria-hidden="true" size={18} /> <span>Cancel sprint</span>
+            </button>
+          )}
+          {fullscreenSecondaryAction && (
+            <button
+              aria-label={fullscreenSecondaryAction.label}
+              className="get-pulled-end-session-fullscreen"
+              disabled={fullscreenSecondaryAction.disabled}
+              type="button"
+              onClick={fullscreenSecondaryAction.onClick}
+            >
+              <TabletSmartphone aria-hidden="true" size={18} />
+              <span>{fullscreenSecondaryAction.label}</span>
+            </button>
+          )}
+        </div>
       )}
       <section className="get-pulled-hero">
         <PullSledScene

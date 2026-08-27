@@ -77,6 +77,7 @@ import {
 import {
   bootstrapNativeBluetooth,
   getNativeBluetoothBootstrapStatus,
+  isNativeTrackLabShell,
   NATIVE_BLUETOOTH_STATUS_EVENT,
   type NativeBluetoothBootstrapStatus,
 } from './lib/nativeBluetoothBootstrap';
@@ -10329,7 +10330,7 @@ export default function App() {
   const handleUtilityFullscreenChange = useCallback((enabled: boolean) => {
     setUtilityFullscreen(enabled);
     if (enabled) {
-      requestBrowserFullscreen(raceShellRef.current);
+      if (!isNativeTrackLabShell()) requestBrowserFullscreen(raceShellRef.current);
     } else {
       releaseBrowserFullscreen();
     }
@@ -10338,7 +10339,7 @@ export default function App() {
   const openFullscreenUtility = useCallback((mode: 'monitor' | 'club-monitor') => {
     setAppMode(mode);
     setUtilityFullscreen(true);
-    requestBrowserFullscreen(raceShellRef.current);
+    if (!isNativeTrackLabShell()) requestBrowserFullscreen(raceShellRef.current);
   }, []);
 
   useEffect(() => {
@@ -11364,9 +11365,11 @@ export default function App() {
       {clubTabletRuntime}
       {(clubTabletSessionActive || (clubTabletKioskMode && demoMode))
         && appMode !== 'club-tablet'
+        && appMode !== 'get-pulled'
         && (raceViewFullscreen || exploreRideFullscreen || utilityFullscreen) && (
         <button
-          className="race-cancel-overlay"
+          aria-label={clubTabletSessionActive ? 'End athlete session' : 'Exit demo activity'}
+          className="race-cancel-overlay club-tablet-session-exit-overlay"
           type="button"
           onClick={() => {
             if (clubTabletSessionActive) void handleClubTabletEndAthlete();
@@ -11380,7 +11383,8 @@ export default function App() {
             zIndex: 2147483001,
           }}
         >
-          <TabletSmartphone size={18} /> {clubTabletSessionActive ? 'End athlete session' : 'Exit demo activity'}
+          <TabletSmartphone aria-hidden="true" size={18} />
+          <span>{clubTabletSessionActive ? 'End athlete session' : 'Exit demo activity'}</span>
         </button>
       )}
       {bluetoothPairingOpen && showBluetoothPairing && !liveBikeAccessLocked && !nativeBluetoothFailed && (
@@ -12427,6 +12431,15 @@ export default function App() {
                 onLiveStateChange: setGetPulledLiveState,
                 fullscreen: utilityFullscreen,
                 onFullscreenChange: handleUtilityFullscreenChange,
+                fullscreenSecondaryAction: clubTabletSessionActive || (clubTabletKioskMode && demoMode)
+                  ? {
+                    label: clubTabletSessionActive ? 'End athlete session' : 'Exit demo activity',
+                    onClick: () => {
+                      if (clubTabletSessionActive) void handleClubTabletEndAthlete();
+                      else returnToClubTablet();
+                    },
+                  }
+                  : undefined,
                 holdResultsUntilExit: clubTabletSessionActive,
                 heartRateByPlayer,
                 heartRateMeasurements: heartRate.measurements,
