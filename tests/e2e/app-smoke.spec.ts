@@ -6818,6 +6818,10 @@ test('demo rider names and the last track view restore from the signed-in accoun
   await expect(
     page.locator('.race-rider-overlay-card').filter({ hasText: 'Gate Master' }).locator('.rider-avatar img'),
   ).toBeVisible();
+  const lockedStageViewport = await page.locator('.earth-stage').evaluate((stage) => ({
+    width: stage.clientWidth,
+    height: stage.clientHeight,
+  }));
   await page.getByRole('button', { name: 'Lock View', exact: true }).click();
   await expect.poll(() => globalRaceViewPreferences?.cameraLocked).toBe(true);
   await expect.poll(
@@ -6826,6 +6830,13 @@ test('demo rider names and the last track view restore from the signed-in accoun
   await expect.poll(
     () => globalRaceViewPreferences?.earthCamerasByTrack['black-mountain-bmx'].heading,
   ).toBe(195);
+  await expect.poll(
+    () => (
+      globalRaceViewPreferences?.earthCamerasByTrack['black-mountain-bmx'] as
+        | { referenceViewport?: { width: number; height: number } }
+        | undefined
+    )?.referenceViewport,
+  ).toEqual(lockedStageViewport);
   await page.getByRole('button', { name: /Cancel Race/i }).click();
 
   cloudRaceViewPreferences = {
@@ -7513,6 +7524,41 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
     bikeDeviceId: 58701,
     expiresAt: now + 10 * 60_000,
   };
+  const sprintTrackId = 'custom-studio-sprint-lane';
+  const studioSprintTrack = {
+    id: sprintTrackId,
+    name: 'Studio Sprint Lane',
+    country: 'Custom Routes',
+    countryCode: 'CUSTOM',
+    state: 'California',
+    region: 'California',
+    source: 'Custom',
+    sourceUrl: 'local://studio-sprint-lane',
+    address: 'Preski Ranch, California',
+    latitude: 33.713,
+    longitude: -112.0663,
+    lengthMeters: 500,
+    elevationMeters: 0,
+    surface: 'Custom sprint route',
+    outline: [
+      { lat: 33.713, lng: -112.0663 },
+      { lat: 33.7175, lng: -112.0663 },
+    ],
+    routeStatus: 'user-mapped',
+    zones: [],
+    leaderboards: { rpm: [], speed: [] },
+  };
+  const studioSprintMapping = {
+    ...mockNoPedalZoneMapping,
+    trackId: sprintTrackId,
+    trackName: studioSprintTrack.name,
+    country: studioSprintTrack.country,
+    state: studioSprintTrack.state,
+    lengthMeters: 500,
+    centerline: studioSprintTrack.outline,
+    startGate: studioSprintTrack.outline[0],
+    finishLine: studioSprintTrack.outline[1],
+  };
   let racePresentation = {
     cameraLocked: true,
     cameraLockedUpdatedAt: 760,
@@ -7528,10 +7574,20 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
       'black-mountain-bmx:sprint:100ft': {
         angle: 32,
         heading: 90,
-        center: { lat: 33.71225, lng: -112.0663 },
-        zoom: 20.2,
-        referenceViewport: { width: 1366, height: 1024 },
         updatedAt: 755,
+      },
+      [sprintTrackId]: {
+        angle: 47,
+        heading: 180,
+        center: { lat: 33.713, lng: -112.0663 },
+        zoom: 20.78,
+        referenceViewport: { width: 1366, height: 1024 },
+        updatedAt: 756,
+      },
+      [`${sprintTrackId}:sprint:100ft`]: {
+        angle: 32,
+        heading: 90,
+        updatedAt: 757,
       },
     },
     riderOverlaysByTrack: {
@@ -7539,7 +7595,15 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
         xPct: 0.04,
         yPct: 0.7,
         width: 940,
-        height: 220,
+        height: 190,
+        locked: true,
+        referenceViewport: { width: 1366, height: 1024 },
+      },
+      [sprintTrackId]: {
+        xPct: 0.04,
+        yPct: 0.7,
+        width: 940,
+        height: 190,
         locked: true,
         referenceViewport: { width: 1366, height: 1024 },
       },
@@ -7741,9 +7805,18 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
-        trackMappings: { 'black-mountain-bmx': mockPedalZoneMapping },
-        customRoutes: [],
+        trackMappings: {
+          'black-mountain-bmx': mockPedalZoneMapping,
+          [sprintTrackId]: studioSprintMapping,
+        },
+        customRoutes: [studioSprintTrack],
       }),
+    });
+  });
+  await page.route('**/api/public-custom-routes*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ customRoutes: [studioSprintTrack], count: 1 }),
     });
   });
   await page.route('**/api/club-tablet/devices', async (route) => {
@@ -7964,7 +8037,8 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
     {
       button: /Straight Sprint/,
       workflow: 'Straight Sprint setup workflow',
-      camera: { angle: 32, heading: 90 },
+      camera: { angle: 32, heading: 90, latitude: 33.713 },
+      race: true,
     },
     { button: /Get Pulled/, workflow: 'Get Pulled setup workflow', start: true },
     { button: /Explore the World/, workflow: 'Explore the World setup workflow', picker: true },
@@ -7987,9 +8061,12 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
     }
     if (activity.race) {
       expect(rosterRequests).toBeGreaterThan(rosterRequestsBeforeProgramLaunch);
-      await expect(page.getByText('Angle 43 deg', { exact: true })).toBeVisible();
-      await expect(page.getByText('Heading 195 deg', { exact: true })).toBeVisible();
-      await expect(page.locator('.workflow-step.primary-action')).toContainText('Start Demo Race');
+      const expectedCamera = activity.camera ?? { angle: 43, heading: 195, latitude: 33.71225 };
+      await expect(page.getByText(`Angle ${expectedCamera.angle} deg`, { exact: true })).toBeVisible();
+      await expect(page.getByText(`Heading ${expectedCamera.heading} deg`, { exact: true })).toBeVisible();
+      await expect(page.locator('.workflow-step.primary-action')).toContainText(
+        activity.camera ? 'Start Demo Sprint' : 'Start Demo Race',
+      );
       await expect(page.locator('.platform-shell')).not.toHaveClass(/race-fullscreen/);
       await expect(page.locator('.race-staging-countdown')).toHaveCount(0);
       await page.waitForTimeout(500);
@@ -7997,6 +8074,29 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
       await expect(page.locator('.race-staging-countdown')).toHaveCount(0);
       await page.locator('.workflow-step.primary-action').click();
       await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
+      const earthStage = page.locator('.earth-stage');
+      await expect.poll(async () => earthStage.evaluate((stage) => {
+        const zoom = Number(stage.getAttribute('data-race-camera-zoom'));
+        const expectedZoom = 20.78 + Math.log2(Math.min(
+          stage.clientWidth / 1366,
+          stage.clientHeight / 1024,
+        ));
+        return {
+          angle: Number(stage.getAttribute('data-race-camera-angle')),
+          heading: Number(stage.getAttribute('data-race-camera-heading')),
+          latitude: Number(stage.getAttribute('data-race-camera-lat')),
+          referenceHeight: Number(stage.getAttribute('data-race-camera-reference-height')),
+          referenceWidth: Number(stage.getAttribute('data-race-camera-reference-width')),
+          zoomMatches: Number.isFinite(zoom) && Math.abs(zoom - expectedZoom) < 0.01,
+        };
+      })).toEqual({
+        angle: expectedCamera.angle,
+        heading: expectedCamera.heading,
+        latitude: expectedCamera.latitude,
+        referenceHeight: 1024,
+        referenceWidth: 1366,
+        zoomMatches: true,
+      });
       const riderPanel = page.locator('.race-rider-overlay');
       await expect(riderPanel).toBeVisible();
       const geometry = await riderPanel.evaluate((panel) => {
@@ -8014,8 +8114,8 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
       });
       expect(geometry.width).toBeGreaterThan(680);
       expect(geometry.width).toBeLessThan(730);
-      expect(geometry.height).toBeGreaterThan(150);
-      expect(geometry.height).toBeLessThan(180);
+      expect(geometry.height).toBeGreaterThan(138);
+      expect(geometry.height).toBeLessThan(148);
       expect(geometry.insideStage).toBe(true);
       await page.getByRole('button', { name: 'Exit demo activity', exact: true }).click();
       await expect(page.locator('.platform-shell')).not.toHaveClass(/race-fullscreen/);

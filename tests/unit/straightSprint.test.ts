@@ -3,6 +3,7 @@ import {
   clipRouteAtMeter,
   normalizeStraightSprintAirSetting,
   normalizeStraightSprintDistance,
+  resolveStraightSprintCamera,
   straightSprintCameraPreferenceKey,
   straightSprintDistanceOptions,
   straightSprintFeetToMeters,
@@ -44,5 +45,59 @@ describe('straight sprint configurations', () => {
       .toBe('custom-drag-strip:sprint:145ft');
     expect(straightSprintCameraPreferenceKey('custom-drag-strip', 500))
       .toBe('custom-drag-strip:sprint:500ft');
+  });
+
+  it('keeps exact sprint angles while restoring a complete venue composition', () => {
+    const camera = resolveStraightSprintCamera({
+      'custom-drag-strip': {
+        angle: 47,
+        heading: 180,
+        center: { lat: 38.41, lng: -121.96 },
+        zoom: 20.78,
+        referenceViewport: { width: 1366, height: 1024 },
+        updatedAt: 10,
+      },
+      'custom-drag-strip:sprint:100ft': {
+        angle: 32,
+        heading: 90,
+        updatedAt: 20,
+      },
+    }, 'custom-drag-strip', 100);
+
+    expect(camera).toEqual({
+      angle: 32,
+      heading: 90,
+      center: { lat: 38.41, lng: -121.96 },
+      zoom: 20.78,
+      referenceViewport: { width: 1366, height: 1024 },
+      updatedAt: 20,
+    });
+  });
+
+  it('falls back to the newest saved sprint view when the selected distance and base view are absent', () => {
+    const camera = resolveStraightSprintCamera({
+      'custom-drag-strip:sprint:300ft': {
+        angle: 30,
+        heading: 80,
+        center: { lat: 38.4, lng: -121.9 },
+        zoom: 19.5,
+        updatedAt: 30,
+      },
+      'custom-drag-strip:sprint:400ft': {
+        angle: 40,
+        heading: 100,
+        center: { lat: 38.5, lng: -121.8 },
+        zoom: 20.5,
+        updatedAt: 40,
+      },
+    }, 'custom-drag-strip', 100);
+
+    expect(camera).toMatchObject({
+      angle: 40,
+      heading: 100,
+      center: { lat: 38.5, lng: -121.8 },
+      zoom: 20.5,
+      updatedAt: 40,
+    });
   });
 });

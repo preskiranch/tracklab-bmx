@@ -31,6 +31,8 @@ describe('race rider responsive layout', () => {
 
   it('replays the iPad Pro panel at the studio tablet presentation scale', () => {
     expect(raceRiderOverlayMinimumHeight(1024, 768, 1024 / 1366)).toBe(165);
+    expect(raceRiderOverlayMinimumHeight(1024, 768, 1024 / 1366, 190 * (1024 / 1366)))
+      .toBeCloseTo(190 * (1024 / 1366), 6);
     expect(raceRiderOverlayMinimumHeight(1366, 1024, 1)).toBe(220);
   });
 

@@ -1,4 +1,4 @@
-import type { TrackPoint } from '../types';
+import type { EarthCamera, TrackPoint } from '../types';
 import { distanceBetweenTrackPoints, pointAtRouteMeter } from './trackMapping';
 
 export const straightSprintMaximumFeet = 1500;
@@ -29,6 +29,47 @@ export function straightSprintFeetToMeters(feet: number) {
 
 export function straightSprintCameraPreferenceKey(trackId: string, distanceFeet: number) {
   return `${trackId}:sprint:${normalizeStraightSprintDistance(distanceFeet)}ft`;
+}
+
+function completeCameraComposition(camera: EarthCamera | undefined) {
+  return camera?.center != null && camera.zoom != null;
+}
+
+/**
+ * Resolves the camera used by Straight Sprint without dropping a known-good
+ * venue composition. Older distance-specific records can contain only the
+ * angle and heading; selecting one directly leaves Google Maps to choose its
+ * own center/zoom and makes a studio tablet look heavily cropped.
+ */
+export function resolveStraightSprintCamera(
+  cameras: Record<string, EarthCamera>,
+  trackId: string,
+  distanceFeet: number,
+) {
+  const exactKey = straightSprintCameraPreferenceKey(trackId, distanceFeet);
+  const siblingPrefix = `${trackId}:sprint:`;
+  const siblings = Object.entries(cameras)
+    .filter(([key]) => key !== exactKey && key.startsWith(siblingPrefix))
+    .sort(([leftKey, left], [rightKey, right]) => (
+      right.updatedAt - left.updatedAt || leftKey.localeCompare(rightKey)
+    ))
+    .map(([, camera]) => camera);
+  const candidates = [cameras[exactKey], cameras[trackId], ...siblings]
+    .filter((camera): camera is EarthCamera => camera != null);
+  const primary = candidates[0];
+  if (!primary) return undefined;
+
+  const composition = candidates.find(completeCameraComposition);
+  if (!composition || composition === primary) return primary;
+
+  return {
+    ...primary,
+    center: composition.center,
+    zoom: composition.zoom,
+    ...(composition.referenceViewport
+      ? { referenceViewport: composition.referenceViewport }
+      : { referenceViewport: undefined }),
+  } satisfies EarthCamera;
 }
 
 export function straightSprintConfigurationKey(distanceFeet: number, airSetting: number) {

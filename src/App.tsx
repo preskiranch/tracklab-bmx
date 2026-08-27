@@ -175,6 +175,7 @@ import { readPublicTrackCatalog } from './lib/publicTrackMappings';
 import {
   normalizeStraightSprintAirSetting,
   normalizeStraightSprintDistance,
+  resolveStraightSprintCamera,
   straightSprintCameraPreferenceKey,
   straightSprintDistanceOptions,
   straightSprintFeetToMeters,
@@ -359,6 +360,7 @@ import type {
   PlayMode,
   RaceCapture,
   RaceCommentaryPreferences,
+  RacePresentationViewport,
   RaceRiderOverlayLayout,
   RaceViewPreferences,
   ReactionTimesByPlayer,
@@ -3365,14 +3367,32 @@ export default function App() {
   const raceCameraPreferenceKey = raceWorkspaceMode === 'straight-sprint'
     ? straightSprintCameraPreferenceKey(selectedTrack.id, straightSprintDistanceFeet)
     : selectedTrack.id;
+  const accountRaceCamera = useMemo(
+    () => (raceWorkspaceMode === 'straight-sprint'
+      ? resolveStraightSprintCamera(
+          earthCamerasByTrack,
+          selectedTrack.id,
+          straightSprintDistanceFeet,
+        )
+      : earthCamerasByTrack[selectedTrack.id]),
+    [earthCamerasByTrack, raceWorkspaceMode, selectedTrack.id, straightSprintDistanceFeet],
+  );
   const clubTabletRacePresentation = clubTabletKioskMode
     && clubTabletRoster?.device.id === clubTabletDevice?.device.id
     ? clubTabletRoster?.racePresentation ?? null
     : null;
-  const clubTabletRaceCamera = clubTabletRacePresentation
-    ? clubTabletRacePresentation.earthCamerasByTrack[raceCameraPreferenceKey]
-      ?? clubTabletRacePresentation.earthCamerasByTrack[selectedTrack.id]
-    : undefined;
+  const clubTabletRaceCamera = useMemo(
+    () => (clubTabletRacePresentation
+      ? raceWorkspaceMode === 'straight-sprint'
+        ? resolveStraightSprintCamera(
+            clubTabletRacePresentation.earthCamerasByTrack,
+            selectedTrack.id,
+            straightSprintDistanceFeet,
+          )
+        : clubTabletRacePresentation.earthCamerasByTrack[selectedTrack.id]
+      : undefined),
+    [clubTabletRacePresentation, raceWorkspaceMode, selectedTrack.id, straightSprintDistanceFeet],
+  );
   // Every enrolled tablet replays a fixed owner-authored presentation. Even a
   // track without a saved camera uses the legacy authoring frame so the rider
   // panel and 3-D scene still scale to this tablet instead of using raw pixels.
@@ -3426,8 +3446,7 @@ export default function App() {
       ? activeClubEventRaceView?.camera
       : clubTabletKioskMode
         ? clubTabletRaceCamera
-        : earthCamerasByTrack[raceCameraPreferenceKey]
-          ?? earthCamerasByTrack[selectedTrack.id];
+        : accountRaceCamera;
     const isCustomRoute = selectedTrack.countryCode === 'CUSTOM';
     const fallbackCenter = isCustomRoute ? trackCenter(selectedTrack) : null;
     const fallbackZoom = isCustomRoute ? customRouteInitialZoom : null;
@@ -3437,11 +3456,10 @@ export default function App() {
     setEarthZoom(savedCamera?.zoom ?? fallbackZoom);
   }, [
     activeClubEventRaceView?.camera,
+    accountRaceCamera,
     clubTabletRaceCamera,
     clubTabletKioskMode,
     clubEventRaceViewApplies,
-    earthCamerasByTrack,
-    raceCameraPreferenceKey,
     selectedTrack.countryCode,
     selectedTrack.id,
     selectedTrack.latitude,
@@ -8391,16 +8409,50 @@ export default function App() {
     handleEarthCameraChange({ heading });
   }, [handleEarthCameraChange]);
 
-  const handleRaceCameraLockedChange = useCallback((locked: boolean) => {
+  const handleRaceCameraLockedChange = useCallback((
+    locked: boolean,
+    referenceViewportValue?: RacePresentationViewport | null,
+  ) => {
     if (!developerRaceLayoutActive) {
       return;
     }
+    const updatedAt = Date.now();
+    const referenceViewport = normalizeRacePresentationViewport(referenceViewportValue)
+      ?? currentRacePresentationViewport();
+    const candidateCamera = locked
+      ? normalizeEarthCamera({
+          angle: earthAngle,
+          heading: earthHeading,
+          center: earthCenter ?? accountRaceCamera?.center,
+          zoom: earthZoom ?? accountRaceCamera?.zoom,
+          referenceViewport,
+          updatedAt,
+        })
+      : null;
+    const stampedCamera = candidateCamera && cameraCenterBelongsToTrack(candidateCamera, effectiveTrack)
+      ? candidateCamera
+      : candidateCamera
+        ? normalizeEarthCamera({
+            angle: candidateCamera.angle,
+            heading: candidateCamera.heading,
+            referenceViewport,
+            updatedAt,
+          })
+        : null;
+    const earthCameras = stampedCamera
+      ? {
+          ...raceViewPreferencesRef.current.earthCamerasByTrack,
+          [raceCameraPreferenceKey]: stampedCamera,
+        }
+      : raceViewPreferencesRef.current.earthCamerasByTrack;
     setRaceCameraLocked(locked);
     const nextPreferences = normalizeRaceViewPreferences({
       ...raceViewPreferencesRef.current,
       cameraLocked: locked,
-      cameraLockedUpdatedAt: Date.now(),
+      cameraLockedUpdatedAt: updatedAt,
+      earthCamerasByTrack: earthCameras,
     });
+    setEarthCamerasByTrack(nextPreferences.earthCamerasByTrack);
     persistRaceViewPreferences(nextPreferences);
     if (locked && Object.keys(nextPreferences.earthCamerasByTrack).length > 0) {
       void saveGlobalRaceViewPreferences(nextPreferences)
@@ -8417,10 +8469,17 @@ export default function App() {
         });
     }
   }, [
+    accountRaceCamera,
     applyRaceViewPreferences,
     cloudProfileKey,
     developerRaceLayoutActive,
+    earthAngle,
+    earthCenter,
+    earthHeading,
+    earthZoom,
+    effectiveTrack,
     persistRaceViewPreferences,
+    raceCameraPreferenceKey,
   ]);
 
   const handleRiderOverlayPreferenceChange = useCallback((trackId: string, layout: RaceRiderOverlayLayout) => {
@@ -12392,9 +12451,11 @@ export default function App() {
                 const riderOverlay = clubEventRiderOverlaySnapshot(riderOverlaysByTrack[track.id]);
                 const sprintRaceViewCamerasByDistance = Object.fromEntries(
                   straightSprintDistanceOptions.flatMap((distanceFeet) => {
-                    const distanceCamera = clubEventCameraSnapshot(earthCamerasByTrack[
-                      straightSprintCameraPreferenceKey(track.id, distanceFeet)
-                    ]);
+                    const distanceCamera = clubEventCameraSnapshot(resolveStraightSprintCamera(
+                      earthCamerasByTrack,
+                      track.id,
+                      distanceFeet,
+                    ));
                     return distanceCamera ? [[distanceFeet, distanceCamera]] : [];
                   }),
                 );
@@ -12617,10 +12678,18 @@ export default function App() {
                   earthCenter={earthCenter}
                   earthZoom={earthZoom}
                   raceCameraLocked={raceCameraLocked}
-                  raceCameraImmutable={clubEventRaceViewApplies || clubTabletRaceViewApplies}
+                  raceCameraImmutable={
+                    clubEventRaceViewApplies
+                    || clubTabletRaceViewApplies
+                    || raceCameraLocked
+                  }
                   raceCameraSnapshot={clubEventRaceViewApplies
                     ? clubEventRaceCamera
-                    : clubTabletRaceCamera}
+                    : clubTabletRaceViewApplies
+                      ? clubTabletRaceCamera
+                      : raceCameraLocked
+                        ? accountRaceCamera
+                        : undefined}
                   canEditRaceLayout={developerRaceLayoutActive && !regularUserPreview}
                   riderOverlayPreference={clubEventRaceViewApplies
                     ? activeClubEventRaceView?.riderOverlay ?? {
