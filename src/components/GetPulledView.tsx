@@ -10,7 +10,7 @@ import {
   getPulledMetrics,
   getPulledPresetSeconds,
   getPulledResultFromAccumulator,
-  getPulledResultHoldMs,
+  getPulledResultResetDelay,
   getPulledTakeoffSignal,
   normalizeGetPulledSeconds,
   normalizeGetPulledAirSetting,
@@ -195,6 +195,8 @@ type GetPulledViewProps = {
   samplesByDevice: Map<number, BikeSample>;
   speedUnit: SpeedUnit;
   canAssignRiders?: boolean;
+  /** Club Tablet results remain visible until the rider explicitly exits. */
+  holdResultsUntilExit?: boolean;
   fullscreen?: boolean;
   onAssignRider: (deviceId: number, riderId: string | null) => void;
   onComplete: (result: GetPulledResult) => void;
@@ -229,6 +231,7 @@ export function GetPulledView({
   samplesByDevice,
   speedUnit,
   canAssignRiders = true,
+  holdResultsUntilExit = false,
   fullscreen = false,
   onAssignRider,
   onComplete,
@@ -630,9 +633,11 @@ export function GetPulledView({
 
   useEffect(() => {
     if (phase !== 'results') return undefined;
-    const timer = window.setTimeout(reset, getPulledResultHoldMs);
+    const resetDelayMs = getPulledResultResetDelay(holdResultsUntilExit);
+    if (resetDelayMs == null) return undefined;
+    const timer = window.setTimeout(reset, resetDelayMs);
     return () => window.clearTimeout(timer);
-  }, [phase, reset]);
+  }, [holdResultsUntilExit, phase, reset]);
 
   useEffect(() => {
     if (phase !== 'results' || !sessionDemoMode) return undefined;
@@ -904,7 +909,11 @@ export function GetPulledView({
                 ? `Demo result shown at Wattbike Air ${sessionAirSetting}; not saved`
                 : `Result recorded at Wattbike Air ${sessionAirSetting}`}
             >
-              <button className="primary" type="button" onClick={() => reset()}><RotateCcw size={18} /> {sessionDemoMode ? 'Run another demo' : 'Next athlete now'}</button>
+              <button className="primary" type="button" onClick={() => reset()}>
+                <RotateCcw size={18} /> {sessionDemoMode
+                  ? 'Run another demo'
+                  : holdResultsUntilExit ? 'Run another pull' : 'Next athlete now'}
+              </button>
             </div>
           )}
         </>

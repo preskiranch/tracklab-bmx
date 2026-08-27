@@ -66,6 +66,10 @@ export type GetPulledLiveState = {
   result: GetPulledResult | null;
 };
 
+export function getPulledResultResetDelay(holdResultsUntilExit: boolean) {
+  return holdResultsUntilExit ? null : getPulledResultHoldMs;
+}
+
 export function normalizeGetPulledSeconds(value: unknown) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return 3;

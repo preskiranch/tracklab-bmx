@@ -61,9 +61,9 @@ describe('Club Event owner race view', () => {
 
   it('uses the selected Sprint distance camera before the base saved camera', () => {
     const course: ClubEventCourseOption = {
-      id: 'my-dragstrip',
-      name: 'My Dragstrip',
-      track: { ...courseTrack('My Dragstrip'), id: 'my-dragstrip' },
+      id: 'my-sprint',
+      name: 'My Sprint',
+      track: { ...courseTrack('My Sprint'), id: 'my-sprint' },
       raceView: {
         mode: 'satellite',
         camera: { angle: 10, heading: 20, center: { lat: 38.42, lng: -122.7 }, zoom: 16 },
@@ -175,7 +175,7 @@ describe('Club Event owner race view', () => {
     expect(raceCameraSource).not.toContain('mapping3DSafeCenter');
   });
 
-  it('offers a camera-free Game Arena only for an eligible custom Dragstrip', () => {
+  it('forces a camera-free Game Arena for every Straight Sprint view request on a custom Dragstrip', () => {
     const dragstrip: ClubEventCourseOption = {
       id: 'my-dragstrip',
       name: 'My Dragstrip',
@@ -190,6 +190,12 @@ describe('Club Event owner race view', () => {
     };
 
     expect(clubEventRaceViewForCourse(dragstrip, 'game', 300)).toEqual({ mode: 'game' });
+    expect(clubEventRaceViewForCourse(dragstrip, 'satellite', 300)).toEqual({ mode: 'game' });
+    expect(clubEventRaceViewForCourse(dragstrip, '3d', 300)).toEqual({ mode: 'game' });
+    expect(clubEventRaceViewForCourse(dragstrip, 'game')).toEqual({
+      mode: 'satellite',
+      camera: { angle: 20, heading: 40 },
+    });
     expect(clubEventRaceViewForCourse(ordinaryTrack, 'game', 300)).toEqual({
       mode: 'satellite',
       camera: { angle: 20, heading: 40 },
@@ -209,6 +215,8 @@ describe('Club Event owner race view', () => {
     expect(venueSelection).toBeLessThan(sprintSetup);
     expect(source.slice(venueSelection, sprintSetup)).toContain('Saved Straight Sprint venues');
     expect(source.slice(venueSelection, sprintSetup)).toContain('{isAdminProfile && (isPendingDelete ? (');
+    expect(source).not.toContain('aria-label="Straight Sprint race view"');
+    expect(source).toContain('mappingMode && !(showCustomRoutes && straightSprintGameArenaAvailable)');
   });
 
   it('keeps the active private Sprint snapshot visible in the locked tablet venue list', () => {

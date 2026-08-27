@@ -6,6 +6,8 @@ import {
   getPulledDemoMetrics,
   getPulledMetrics,
   getPulledResultFromAccumulator,
+  getPulledResultHoldMs,
+  getPulledResultResetDelay,
   getPulledTakeoffSignal,
   normalizeGetPulledAirSetting,
   normalizeGetPulledSeconds,
@@ -44,6 +46,11 @@ const player: PlayerSlot = {
 };
 
 describe('Get Pulled test math and record categories', () => {
+  it('keeps Club Tablet results open while regular results retain the timed reset', () => {
+    expect(getPulledResultResetDelay(true)).toBeNull();
+    expect(getPulledResultResetDelay(false)).toBe(getPulledResultHoldMs);
+  });
+
   it('keeps the committed pull time while an editable duration is empty or invalid', () => {
     expect(getPulledSecondsFromInput('')).toBeNull();
     expect(getPulledSecondsFromInput('invalid')).toBeNull();

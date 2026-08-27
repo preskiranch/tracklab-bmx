@@ -167,16 +167,6 @@ const clubTabletSessionMaxTtlMs = 4 * 60 * 60 * 1000;
 const clubTabletResultAuthorizationTtlMs = 14 * 24 * 60 * 60 * 1000;
 const clubEventParticipantReleaseRetryBaseMs = 1_000;
 const clubEventParticipantReleaseRetryMaxMs = 60_000;
-const configuredClubEventSessionReleaseGraceMs = Number(
-  process.env.TRACKLAB_CLUB_EVENT_SESSION_RELEASE_GRACE_MS,
-);
-// A completed exercise remains visible for 15 seconds on a Club Tablet. Keep a
-// five-second timing buffer around that review when event closure shortens an
-// athlete selection. The upper bound prevents a cancelled event from leaving a
-// shared tablet claimed for an unexpectedly long time.
-const clubEventSessionReleaseGraceMs = Number.isFinite(configuredClubEventSessionReleaseGraceMs)
-  ? Math.max(20_000, Math.min(60_000, Math.round(configuredClubEventSessionReleaseGraceMs)))
-  : 30_000;
 const configuredClubEventStartLeadMs = Number(process.env.TRACKLAB_CLUB_EVENT_START_LEAD_MS);
 const clubEventStartLeadMs = Number.isFinite(configuredClubEventStartLeadMs)
   ? Math.max(3_000, Math.min(30_000, Math.round(configuredClubEventStartLeadMs)))
@@ -5389,20 +5379,19 @@ function validClubEventTrackSnapshot(value, expectedTrackId) {
 }
 
 function sanitizeClubEventRaceView(activityType, value, trackRecord) {
-  if (value === undefined) return undefined;
+  const normalizedTrackName = String(trackRecord?.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const dragStripGameArenaRequired = activityType === 'straight-sprint'
+    && trackRecord?.countryCode === 'CUSTOM'
+    && normalizedTrackName.includes('dragstrip');
+  if (value === undefined) return dragStripGameArenaRequired ? { mode: 'game' } : undefined;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const mode = value.mode === 'satellite' || value.mode === '3d' || value.mode === 'game'
+  const requestedMode = value.mode === 'satellite' || value.mode === '3d' || value.mode === 'game'
     ? value.mode
     : null;
-  if (!mode) return null;
-  if (mode === 'game') {
-    const normalizedTrackName = String(trackRecord?.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (
-      activityType !== 'straight-sprint'
-      || trackRecord?.countryCode !== 'CUSTOM'
-      || !normalizedTrackName.includes('dragstrip')
-    ) return null;
-  }
+  if (!requestedMode) return null;
+  if (dragStripGameArenaRequired) return { mode: 'game' };
+  if (requestedMode === 'game') return null;
+  const mode = requestedMode;
 
   let camera;
   if (Object.prototype.hasOwnProperty.call(value, 'camera')) {
@@ -5952,29 +5941,6 @@ function scheduleClubTabletSessionExpiry(session) {
     }
   }, Math.max(1, deadline - Date.now() + 25));
   session._expiryTimer.unref?.();
-}
-
-function capClubEventParticipantSessionExpiries(event, now = Date.now()) {
-  if (!event || event.status !== 'cancelled' || !Array.isArray(event.participants)) return 0;
-  const releaseAt = now + clubEventSessionReleaseGraceMs;
-  let cappedCount = 0;
-  for (const participant of event.participants) {
-    const session = clubTabletSessionsByTokenHash.get(participant?.sessionTokenHash);
-    if (
-      !clubTabletSessionIsCurrent(session, now)
-      || session.clubId !== event.clubId
-      || session.deviceId !== participant.deviceId
-      || session.studioRiderId !== participant.studioRiderId
-      || session.bikeDeviceId !== participant.bikeDeviceId
-    ) {
-      continue;
-    }
-    session.expiresAt = Math.min(session.expiresAt, releaseAt);
-    session.maxExpiresAt = Math.min(session.maxExpiresAt, releaseAt);
-    scheduleClubTabletSessionExpiry(session);
-    cappedCount += 1;
-  }
-  return cappedCount;
 }
 
 function pruneClubTabletSessions(now = Date.now()) {
@@ -15688,9 +15654,6 @@ async function serveStatic(request, response) {
     }
     clubEventClosedAtByEventId.delete(created.event.id);
     if (created.replacedEventId && created.replacedEventId !== created.event.id) {
-      if (created.replacedEvent?.id === created.replacedEventId) {
-        capClubEventParticipantSessionExpiries(created.replacedEvent);
-      }
       closeClubEventRoom(created.replacedEventId, 'club-event-replaced');
     }
     writeJson(
@@ -15889,9 +15852,6 @@ async function serveStatic(request, response) {
           : 'Club Event storage is temporarily unavailable.',
       });
       return;
-    }
-    if (cancelled.event?.id === eventId) {
-      capClubEventParticipantSessionExpiries(cancelled.event);
     }
     closeClubEventRoom(eventId, 'club-event-cancelled');
     writeJson(response, 200, { event: null, pollAfterMs: 2_000 }, { 'Cache-Control': 'no-store' });

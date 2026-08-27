@@ -76,7 +76,6 @@ function sharedProps(group: ClubOwnerTrainingCoordinatorEntry | null, tablet = f
   const resumeRelay = vi.fn(async () => ({ configured: false }));
   const cancelActiveGroup = vi.fn(async () => undefined);
   const onTabletExerciseReviewStart = vi.fn();
-  const onTabletExerciseSaved = vi.fn(async () => undefined);
   const onHistoryChanged = vi.fn();
   const props = {
     owner: {
@@ -113,7 +112,6 @@ function sharedProps(group: ClubOwnerTrainingCoordinatorEntry | null, tablet = f
       cancelActiveGroup,
       onHistoryChanged,
       onTabletExerciseReviewStart,
-      onTabletExerciseSaved,
     },
     heartRateContext: {
       heartRate: {
@@ -150,7 +148,6 @@ function sharedProps(group: ClubOwnerTrainingCoordinatorEntry | null, tablet = f
     cancelActiveGroup,
     onHistoryChanged,
     onTabletExerciseReviewStart,
-    onTabletExerciseSaved,
   };
 }
 
@@ -190,7 +187,6 @@ describe('ClubOwnerUtilityMode integration', () => {
       clear,
       onHistoryChanged,
       onTabletExerciseReviewStart,
-      onTabletExerciseSaved,
     } = sharedProps(null, true);
     renderToStaticMarkup(createElement(ClubOwnerUtilityMode, {
       ...props,
@@ -236,7 +232,6 @@ describe('ClubOwnerUtilityMode integration', () => {
     expect(mocks.complete).not.toHaveBeenCalled();
     expect(onHistoryChanged).not.toHaveBeenCalled();
     expect(onTabletExerciseReviewStart).not.toHaveBeenCalled();
-    expect(onTabletExerciseSaved).not.toHaveBeenCalled();
   });
 
   it('activates and atomically completes an authorized Get Pulled session without legacy or personal duplicates', async () => {
@@ -286,7 +281,7 @@ describe('ClubOwnerUtilityMode integration', () => {
     expect(mocks.saveLegacyGetPulled).not.toHaveBeenCalled();
   });
 
-  it('releases a Club Tablet athlete only after Get Pulled history and heart rate finish saving', async () => {
+  it('saves Club Tablet Get Pulled history without releasing the athlete after the old review delay', async () => {
     vi.useFakeTimers();
     let finishHistory: (() => void) | null = null;
     mocks.saveLegacyGetPulled.mockImplementationOnce(() => new Promise<void>((resolve) => {
@@ -295,8 +290,8 @@ describe('ClubOwnerUtilityMode integration', () => {
     const {
       props,
       finalize,
+      onHistoryChanged,
       onTabletExerciseReviewStart,
-      onTabletExerciseSaved,
     } = sharedProps(null, true);
     renderToStaticMarkup(createElement(ClubOwnerUtilityMode, {
       ...props,
@@ -326,16 +321,14 @@ describe('ClubOwnerUtilityMode integration', () => {
 
     expect(finalize).toHaveBeenCalledOnce();
     expect(onTabletExerciseReviewStart).toHaveBeenCalledOnce();
-    expect(onTabletExerciseSaved).not.toHaveBeenCalled();
     finishHistory?.();
-    await vi.advanceTimersByTimeAsync(14_999);
-    expect(onTabletExerciseSaved).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1);
-    expect(onTabletExerciseSaved).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(onHistoryChanged).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(onTabletExerciseReviewStart).toHaveBeenCalledOnce();
   });
 
   it('refreshes regular account history even when independent heart-rate finalization fails', async () => {
-    const { props, finalize, onHistoryChanged, onTabletExerciseSaved } = sharedProps(null);
+    const { props, finalize, onHistoryChanged } = sharedProps(null);
     finalize.mockRejectedValueOnce(new Error('heart rate unavailable'));
     renderToStaticMarkup(createElement(ClubOwnerUtilityMode, {
       ...props,
@@ -363,13 +356,12 @@ describe('ClubOwnerUtilityMode integration', () => {
     });
 
     await vi.waitFor(() => expect(onHistoryChanged).toHaveBeenCalledOnce());
-    expect(onTabletExerciseSaved).not.toHaveBeenCalled();
   });
 
   it('keeps the Club Tablet athlete selected when a completed Explore ride cannot be saved', async () => {
     mocks.saveLegacyExplore.mockRejectedValueOnce(new Error('offline'));
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const { props, onTabletExerciseSaved } = sharedProps(null, true);
+    const { props } = sharedProps(null, true);
     renderToStaticMarkup(createElement(ClubOwnerUtilityMode, {
       ...props,
       mode: 'explore',
@@ -414,7 +406,6 @@ describe('ClubOwnerUtilityMode integration', () => {
     });
 
     await vi.waitFor(() => expect(warning).toHaveBeenCalledWith(expect.stringContaining('Could not save Explore')));
-    expect(onTabletExerciseSaved).not.toHaveBeenCalled();
     warning.mockRestore();
   });
 
@@ -428,7 +419,6 @@ describe('ClubOwnerUtilityMode integration', () => {
       resumeRelay,
       onHistoryChanged,
       onTabletExerciseReviewStart,
-      onTabletExerciseSaved,
     } = sharedProps(null, true);
     renderToStaticMarkup(createElement(ClubOwnerUtilityMode, {
       ...props,
@@ -500,7 +490,6 @@ describe('ClubOwnerUtilityMode integration', () => {
     expect(mocks.complete).not.toHaveBeenCalled();
     expect(onHistoryChanged).not.toHaveBeenCalled();
     expect(onTabletExerciseReviewStart).not.toHaveBeenCalled();
-    expect(onTabletExerciseSaved).not.toHaveBeenCalled();
   });
 
   it('fails a legacy Explore restore closed before any ride resumes', async () => {

@@ -31,7 +31,6 @@ import {
   saveLegacyExploreHistory,
   saveLegacyGetPulledHistory,
 } from '../lib/clubOwnerUtilityTrainingActions';
-import { releaseClubTabletAthleteAfterSaves } from '../lib/clubTabletExerciseCompletion';
 import type {
   ExploreRideAuthorizationReferences,
   ExploreRideCompleteEvent,
@@ -86,7 +85,6 @@ type OwnerContext = Readonly<{
   cancelActiveGroup: (options?: { keepalive?: boolean; preserveStatus?: boolean }) => Promise<void>;
   onHistoryChanged: () => void;
   onTabletExerciseReviewStart: (session: ClubTabletSessionCredential) => void;
-  onTabletExerciseSaved: (session: ClubTabletSessionCredential) => Promise<void> | void;
 }>;
 
 type HeartRateContext = Readonly<{
@@ -267,10 +265,8 @@ export function ClubOwnerUtilityMode(props: ClubOwnerUtilityModeProps) {
     const historySave = saveLegacyGetPulledHistory(result, owner.clubTrainingSelection);
     if (completedTabletSession) {
       owner.onTabletExerciseReviewStart(completedTabletSession);
-      void releaseClubTabletAthleteAfterSaves([heartRateSave, historySave], async () => {
-        owner.onHistoryChanged();
-        await owner.onTabletExerciseSaved(completedTabletSession);
-      })
+      void Promise.all([heartRateSave, historySave])
+        .then(owner.onHistoryChanged)
         .catch((error: Error) => console.warn(`Could not save Get Pulled history: ${error.message}`));
       return;
     }
@@ -414,10 +410,8 @@ export function ClubOwnerUtilityMode(props: ClubOwnerUtilityModeProps) {
     });
     if (completedTabletSession) {
       owner.onTabletExerciseReviewStart(completedTabletSession);
-      void releaseClubTabletAthleteAfterSaves([heartRateSave, historySave], async () => {
-        owner.onHistoryChanged();
-        await owner.onTabletExerciseSaved(completedTabletSession);
-      })
+      void Promise.all([heartRateSave, historySave])
+        .then(owner.onHistoryChanged)
         .catch((error: Error) => console.warn(`Could not save Explore the World history: ${error.message}`));
       return;
     }

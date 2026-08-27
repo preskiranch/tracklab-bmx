@@ -133,14 +133,15 @@ describe('server-authored Club Event Explore routes', () => {
     expect(appSource).toContain('onClubEventProgramReady: setClubEventProgramReadyId');
   });
 
-  it('clears a finished tablet athlete before beginning network cleanup', () => {
+  it('clears a tablet athlete only through the explicit exit before network cleanup', () => {
     const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
     const handoff = appSource.slice(
-      appSource.indexOf('const handleClubTabletExerciseSaved'),
-      appSource.indexOf('clubTabletExerciseSavedRef.current = handleClubTabletExerciseSaved'),
+      appSource.indexOf('const handleClubTabletEndAthlete = useCallback(async () => {'),
+      appSource.indexOf('  useEffect(() => {', appSource.indexOf('const handleClubTabletEndAthlete')),
     );
     expect(handoff.indexOf('handleClubTabletSessionChange(null)')).toBeGreaterThan(-1);
     expect(handoff.indexOf('handleClubTabletSessionChange(null)'))
-      .toBeLessThan(handoff.indexOf('void Promise.all(['));
+      .toBeLessThan(handoff.indexOf("import('./lib/clubTablet')"));
+    expect(handoff).toContain('await endClubTabletSession(activeSession).catch(() => undefined);');
   });
 });
