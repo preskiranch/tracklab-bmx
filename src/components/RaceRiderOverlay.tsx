@@ -89,10 +89,20 @@ export function raceRiderOverlayMinimumHeight(
   containerWidth: number,
   containerHeight: number,
   presentationScale = 1,
+  requestedPresentationHeight?: number,
 ) {
   const scale = normalizeRiderPresentationScale(presentationScale);
   if (Math.abs(scale - 1) > 0.001) {
-    return Math.max(110, Math.round(defaultRaceRiderOverlayLayout.height * scale));
+    const scaledDefaultMinimum = Math.max(
+      110,
+      Math.round(defaultRaceRiderOverlayLayout.height * scale),
+    );
+    // A locked owner layout has already been mapped into this viewport. Do not
+    // inflate a deliberately short saved panel (for example 190px -> 142.5px)
+    // back to the 220px default's 165px presentation height.
+    return requestedPresentationHeight == null
+      ? scaledDefaultMinimum
+      : Math.min(scaledDefaultMinimum, Math.max(1, requestedPresentationHeight));
   }
   if (raceRiderOverlayUsesCompactLandscape(containerWidth, containerHeight)) {
     return 138;
@@ -141,11 +151,15 @@ function clampLayout(
     container.clientWidth,
     container.clientHeight,
     scale,
+    layout.height,
   );
   const maximumHeight = presentationScaled
     ? Number.POSITIVE_INFINITY
     : raceRiderOverlayMaximumHeight(container.clientWidth, container.clientHeight);
-  const minimumWidth = presentationScaled ? Math.max(220, Math.round(320 * scale)) : 320;
+  const scaledMinimumWidth = Math.max(220, Math.round(320 * scale));
+  const minimumWidth = presentationScaled
+    ? Math.min(scaledMinimumWidth, Math.max(1, layout.width))
+    : 320;
   const width = Math.max(
     minimumWidth,
     Math.min(layout.width, Math.max(minimumWidth, container.clientWidth - 24)),
@@ -504,6 +518,7 @@ export function RaceRiderOverlay({
           overlayRef.current?.parentElement?.clientWidth ?? 1366,
           overlayRef.current?.parentElement?.clientHeight ?? 1024,
           normalizedPresentationScale,
+          layout.height,
         )}px`,
       } as CSSProperties}
     >

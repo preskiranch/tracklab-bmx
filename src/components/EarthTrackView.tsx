@@ -146,7 +146,10 @@ type EarthTrackViewProps = {
   onEarthCameraChange: (camera: Partial<EarthCamera>) => void;
   onEarthAngleChange: (angle: number) => void;
   onEarthHeadingChange: (heading: number) => void;
-  onRaceCameraLockedChange: (locked: boolean) => void;
+  onRaceCameraLockedChange: (
+    locked: boolean,
+    referenceViewport?: RacePresentationViewport | null,
+  ) => void;
   onRiderOverlayPreferenceChange: (trackId: string, layout: RaceRiderOverlayLayout) => void;
   onRaceFullscreenInteraction: () => void;
   onStartCountdownPauseToggle: () => void;
@@ -526,7 +529,17 @@ export function EarthTrackView({
         </div>
       </div>
 
-      <div className="earth-stage google-enabled" ref={stageRef}>
+      <div
+        className="earth-stage google-enabled"
+        ref={stageRef}
+        data-race-camera-angle={activeEarthAngle}
+        data-race-camera-heading={activeEarthHeading}
+        data-race-camera-lat={presentedEarthCenter?.lat}
+        data-race-camera-lng={presentedEarthCenter?.lng}
+        data-race-camera-zoom={presentedEarthZoom ?? undefined}
+        data-race-camera-reference-width={cameraReferenceViewport.width}
+        data-race-camera-reference-height={cameraReferenceViewport.height}
+      >
         {showingGameArena ? (
           <Suspense fallback={<div className="google-map-status loading">Loading BMX game arena…</div>}>
             <DragStripGameArenaLayer
@@ -754,7 +767,7 @@ export function EarthTrackView({
           <button
             className={`race-camera-lock-overlay${raceCameraLocked ? ' locked' : ''}`}
             type="button"
-            onClick={() => onRaceCameraLockedChange(!raceCameraLocked)}
+            onClick={() => onRaceCameraLockedChange(!raceCameraLocked, presentationViewport)}
             aria-pressed={raceCameraLocked}
             title={raceCameraLocked ? 'Unlock satellite view' : 'Lock camera angle and track position'}
           >

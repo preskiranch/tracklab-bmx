@@ -130,10 +130,12 @@ describe('Club Event owner race view', () => {
     const satelliteSource = readFileSync(new URL('../../src/components/GoogleMapsTrackLayer.tsx', import.meta.url), 'utf8');
 
     expect(appSource).toContain('raceCameraSnapshot={clubEventRaceViewApplies');
-    expect(appSource).toContain('? clubEventRaceCamera\n                    : clubTabletRaceCamera}');
+    expect(appSource).toContain('? clubEventRaceCamera\n                    : clubTabletRaceViewApplies');
+    expect(appSource).toContain('? clubTabletRaceCamera\n                      : raceCameraLocked');
+    expect(appSource).toContain('? accountRaceCamera\n                        : undefined}');
     expect(earthViewSource).toContain('const presentedEarthAngle = raceCameraImmutable');
     expect(appSource).toContain(
-      'raceCameraImmutable={clubEventRaceViewApplies || clubTabletRaceViewApplies}',
+      'clubEventRaceViewApplies\n                    || clubTabletRaceViewApplies\n                    || raceCameraLocked',
     );
     expect(appSource).toContain(': clubTabletKioskMode\n        ? clubTabletRaceCamera');
     expect(appSource).toContain('clubTabletRoster?.device.id === clubTabletDevice?.device.id');
@@ -146,6 +148,9 @@ describe('Club Event owner race view', () => {
     expect(satelliteSource).toContain('cameraForTrack(cameraRef.current, track, cameraLocked)');
     expect(appSource).toContain(
       'if (clubEventConfigurationLocked || clubTabletKioskMode) {\n        return current;',
+    );
+    expect(appSource).toContain(
+      'const distanceCamera = clubEventCameraSnapshot(resolveStraightSprintCamera(',
     );
   });
 
