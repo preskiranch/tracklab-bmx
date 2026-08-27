@@ -3986,7 +3986,7 @@ test('legacy North Bay game mappings fall back to the satellite race route', asy
   await expect(page.getByLabel('Mapping route layout')).toBeVisible();
 });
 
-test('straight sprint restores and saves a separate camera for each distance', async ({ page }) => {
+test('custom Drag Strip locks Straight Sprint setup and rendering to Game Arena', async ({ page }) => {
   test.setTimeout(110_000);
   const trackId = 'custom-camera-distance-sprint';
   const customTrack = {
@@ -4180,28 +4180,17 @@ test('straight sprint restores and saves a separate camera for each distance', a
   await page.getByRole('button', { name: 'Open App' }).click();
   await page.getByRole('button', { name: 'Straight Sprint', exact: true }).click();
   await expect(page.locator('.platform-topbar').getByText('Straight Sprint', { exact: true })).toBeVisible();
-  await expect(page.getByText('Angle 10 deg', { exact: true })).toBeVisible();
-  await expect(page.getByText('Heading 20 deg', { exact: true })).toBeVisible();
-
-  await page.getByLabel('Sprint distance').selectOption('500');
-  await expect(page.getByText('Angle 50 deg', { exact: true })).toBeVisible();
-  await expect(page.getByText('Heading 200 deg', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Tilt map up', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Edit map' }).click();
-  await page.getByRole('button', { name: 'Tilt map up', exact: true }).click();
-  await page.locator('.mapping-section').getByRole('button', { name: 'View', exact: true }).click();
-  await expect.poll(() => preferences.earthCamerasByTrack[`${trackId}:sprint:500ft`]?.angle).toBe(55);
-  expect(preferences.earthCamerasByTrack[`${trackId}:sprint:100ft`]?.angle).toBe(10);
-
-  await page.getByLabel('Sprint distance').selectOption('100');
-  await expect(page.getByText('Angle 10 deg', { exact: true })).toBeVisible();
-  await expect(page.getByText('Heading 20 deg', { exact: true })).toBeVisible();
-
-  const sprintRaceView = page.getByRole('group', { name: 'Straight Sprint race view' });
-  await expect(sprintRaceView.getByRole('button', { name: 'Game Arena', exact: true })).toBeVisible();
-  await sprintRaceView.getByRole('button', { name: 'Game Arena', exact: true }).click();
   await expect(page.getByLabel('Drag Strip Game Arena', { exact: true })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Straight Sprint race view' })).toHaveCount(0);
+  const sprintSetup = page.locator('.straight-sprint-setup-section');
+  await expect(sprintSetup.getByLabel('Sprint distance')).toBeVisible();
+  await expect(sprintSetup.getByRole('group', { name: 'Wattbike Air setting' })).toBeVisible();
+  await expect(sprintSetup.getByText('Satellite', { exact: true })).toHaveCount(0);
+  await expect(sprintSetup.getByText('3D Terrain', { exact: true })).toHaveCount(0);
+
   await page.getByLabel('Sprint distance').selectOption('500');
+  await expect(page.getByLabel('Drag Strip Game Arena', { exact: true })).toBeVisible();
+  expect(preferences.earthCamerasByTrack[`${trackId}:sprint:100ft`]?.angle).toBe(10);
 
   await page.getByRole('button', { name: /Demo/i }).first().click();
   const sprintDemoRacers = page.getByRole('group', { name: 'Choose demo riders' });
@@ -8000,6 +7989,12 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
       expect(rosterRequests).toBeGreaterThan(rosterRequestsBeforeProgramLaunch);
       await expect(page.getByText('Angle 43 deg', { exact: true })).toBeVisible();
       await expect(page.getByText('Heading 195 deg', { exact: true })).toBeVisible();
+      await expect(page.locator('.workflow-step.primary-action')).toContainText('Start Demo Race');
+      await expect(page.locator('.platform-shell')).not.toHaveClass(/race-fullscreen/);
+      await expect(page.locator('.race-staging-countdown')).toHaveCount(0);
+      await page.waitForTimeout(500);
+      await expect(page.locator('.platform-shell')).not.toHaveClass(/race-fullscreen/);
+      await expect(page.locator('.race-staging-countdown')).toHaveCount(0);
       await page.locator('.workflow-step.primary-action').click();
       await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
       const riderPanel = page.locator('.race-rider-overlay');

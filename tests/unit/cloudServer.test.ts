@@ -2606,23 +2606,23 @@ describe('cloud API trust boundaries', () => {
         lng: -122,
       })),
     };
+    const nonDragstripTrack = { ...privateDragStrip, name: 'Private Sprint' };
     const invalidRaceView = await api('/api/club-events', {
       method: 'POST',
       body: JSON.stringify({
         activityType: 'straight-sprint',
         configuration: {
-          trackId: privateDragStrip.id,
-          trackName: privateDragStrip.name,
+          trackId: nonDragstripTrack.id,
+          trackName: nonDragstripTrack.name,
           distanceFeet: 300,
           airSetting: 1,
-          trackRecord: privateDragStrip,
+          trackRecord: nonDragstripTrack,
           raceView: { mode: '3d', camera: { angle: 68, heading: 90 } },
         },
       }),
     });
     expect(invalidRaceView.status).toBe(400);
 
-    const nonDragstripTrack = { ...privateDragStrip, name: 'Private Sprint' };
     const invalidGameArena = await api('/api/club-events', {
       method: 'POST',
       body: JSON.stringify({
@@ -2649,7 +2649,6 @@ describe('cloud API trust boundaries', () => {
           distanceFeet: 300,
           airSetting: 1,
           trackRecord: privateDragStrip,
-          raceView: { mode: 'game' },
         },
       }),
     });
@@ -2668,27 +2667,7 @@ describe('cloud API trust boundaries', () => {
           distanceFeet: 300,
           airSetting: 1,
           trackRecord: privateDragStrip,
-          raceView: {
-            mode: '3d',
-            camera: {
-              angle: 47,
-              heading: 90,
-              center: { lat: 38.0004, lng: -122, altitude: 500 },
-              zoom: 18.5,
-              referenceViewport: { width: 1366.125, height: 1024.555 },
-              updatedAt: 99_999,
-            },
-            riderOverlay: {
-              xPct: 0.04,
-              yPct: 0.7,
-              width: 940,
-              height: 220,
-              locked: true,
-              referenceViewport: { width: 1366.125, height: 1024.555 },
-              accountKey: 'must not survive',
-            },
-            accountKey: 'must not survive',
-          },
+          raceView: { mode: '3d', accountKey: 'must not survive' },
           constructor: 'must not survive',
         },
       }),
@@ -2702,24 +2681,7 @@ describe('cloud API trust boundaries', () => {
         configuration: {
           distanceFeet: 300,
           airSetting: 1,
-          raceView: {
-            mode: '3d',
-            camera: {
-              angle: 47,
-              heading: 90,
-              center: { lat: 38.0004, lng: -122 },
-              zoom: 18.5,
-              referenceViewport: { width: 1366.13, height: 1024.56 },
-            },
-            riderOverlay: {
-              xPct: 0.04,
-              yPct: 0.7,
-              width: 940,
-              height: 220,
-              locked: true,
-              referenceViewport: { width: 1366.13, height: 1024.56 },
-            },
-          },
+          raceView: { mode: 'game' },
         },
         status: 'lobby',
         startAt: null,
@@ -2731,9 +2693,8 @@ describe('cloud API trust boundaries', () => {
     });
     expect(eventCreatedPayload.event.configuration.trackRecord.centerline).toHaveLength(80);
     expect(eventCreatedPayload.event.configuration.raceView).not.toHaveProperty('accountKey');
-    expect(eventCreatedPayload.event.configuration.raceView.camera).not.toHaveProperty('updatedAt');
-    expect(eventCreatedPayload.event.configuration.raceView.camera.center).not.toHaveProperty('altitude');
-    expect(eventCreatedPayload.event.configuration.raceView.riderOverlay).not.toHaveProperty('accountKey');
+    expect(eventCreatedPayload.event.configuration.raceView).not.toHaveProperty('camera');
+    expect(eventCreatedPayload.event.configuration.raceView).not.toHaveProperty('riderOverlay');
     const eventId = eventCreatedPayload.event.id;
     expect(JSON.stringify(eventCreatedPayload)).not.toMatch(/token|ProfileKey|constructor/i);
     const createdSlotDeviceIds = new Set(eventCreatedPayload.event.slots.map(
@@ -3325,17 +3286,19 @@ describe('cloud API trust boundaries', () => {
       },
     });
     expect(livePublishPayload.athleteSessionExpiresAt).toBe(stillSelectedPayload.session.expiresAt);
+    await new Promise((resolve) => setTimeout(resolve, 5));
     const explicitAthleteHeartbeat = await api('/api/club-tablet/sessions/current', {
       headers: athleteHeaders(selectedPayload.sessionToken),
     });
     expect(explicitAthleteHeartbeat.status).toBe(200);
     const explicitAthleteHeartbeatPayload = await explicitAthleteHeartbeat.json();
-    // Ending the Club Event caps both expiry fields, so later live publishing
-    // and explicit heartbeats cannot renew the athlete beyond the release grace.
-    expect(explicitAthleteHeartbeatPayload.session.expiresAt).toBe(
+    // Ending the Club Event does not end the selected athlete. The kiosk's
+    // explicit heartbeat continues renewing the normal idle window until the
+    // rider chooses End activity on that tablet.
+    expect(explicitAthleteHeartbeatPayload.session.expiresAt).toBeGreaterThan(
       livePublishPayload.athleteSessionExpiresAt,
     );
-    expect(explicitAthleteHeartbeatPayload.session.expiresAt).toBeLessThanOrEqual(Date.now() + 30_000);
+    expect(explicitAthleteHeartbeatPayload.session.expiresAt).toBeGreaterThan(Date.now() + 14 * 60_000);
     cookie = monitorCookie;
     const monitored = await api('/api/club-live/sessions');
     await expect(monitored.json()).resolves.toMatchObject({

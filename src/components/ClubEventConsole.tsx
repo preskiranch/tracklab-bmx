@@ -4,7 +4,6 @@ import {
   Box,
   CheckCircle2,
   Compass,
-  Gamepad2,
   LoaderCircle,
   Play,
   RadioTower,
@@ -61,10 +60,10 @@ export function clubEventRaceViewForCourse(
   mode: ClubEventRaceViewMode,
   sprintDistanceFeet?: number,
 ): ClubEventRaceView {
-  const safeMode = mode === 'game' && !supportsDragStripGameArena(course.track)
-    ? 'satellite'
-    : mode;
-  if (safeMode === 'game') return { mode: safeMode };
+  if (sprintDistanceFeet != null && supportsDragStripGameArena(course.track)) {
+    return { mode: 'game' };
+  }
+  const safeMode = mode === 'game' ? 'satellite' : mode;
   const distanceCamera = sprintDistanceFeet == null
     ? undefined
     : course.sprintRaceViewCamerasByDistance?.[sprintDistanceFeet];
@@ -202,9 +201,11 @@ export function ClubEventConsole({
   useEffect(() => {
     if (activityType === 'explore') return;
     const savedMode = selectedCourse?.raceView?.mode;
-    setRaceViewMode(savedMode === '3d'
+    setRaceViewMode(gameArenaAvailable
+      ? 'game'
+      : savedMode === '3d'
       ? '3d'
-      : savedMode === 'game' && gameArenaAvailable ? 'game' : 'satellite');
+      : 'satellite');
   }, [
     activityType,
     gameArenaAvailable,
@@ -298,7 +299,7 @@ export function ClubEventConsole({
       const envelope = await cancelCurrentClubEvent(event.id);
       setEvent(envelope.event);
       setMode('independent');
-      setMessage('Coach event ended. Tablets will release each athlete after the results review and return to Independent Training shortly.');
+      setMessage('Coach event ended. Completed activities stay open for rider review until End activity; tablets that had not completed return to Independent Training.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'The coach event could not be ended.');
     } finally {
@@ -388,7 +389,9 @@ export function ClubEventConsole({
             </label>
           </>}
 
-          {(activityType === 'bmx-race' || activityType === 'straight-sprint') && selectedCourse && (
+          {(activityType === 'bmx-race' || activityType === 'straight-sprint')
+            && selectedCourse
+            && !gameArenaAvailable && (
             <div className="club-event-race-view club-event-builder-wide">
               <span>Tablet race view</span>
               <div role="group" aria-label="Club Event race view">
@@ -408,16 +411,6 @@ export function ClubEventConsole({
                 >
                   <Box size={15} /> 3D Terrain
                 </button>
-                {gameArenaAvailable && (
-                  <button
-                    className={raceViewMode === 'game' ? 'selected' : ''}
-                    type="button"
-                    aria-pressed={raceViewMode === 'game'}
-                    onClick={() => setRaceViewMode('game')}
-                  >
-                    <Gamepad2 size={15} /> Game Arena
-                  </button>
-                )}
               </div>
               <small>The selected view and saved camera will open identically on every ready tablet.</small>
             </div>

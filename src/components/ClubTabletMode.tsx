@@ -1070,7 +1070,7 @@ export default function ClubTabletMode({
           ? 'DEMO MODE · Simulated activity data is not saved or shown as a connected Wattbike.'
           : busy === 'starting'
           ? 'Verifying the athlete and opening the selected activity…'
-          : 'The athlete is released after the completed exercise. The Wattbike stays with this tablet.'}</span>
+          : 'Completed results stay with this athlete until they choose End activity. The Wattbike stays with this tablet.'}</span>
         {sessionStartFailed && (
           <button
             className="club-tablet-primary"

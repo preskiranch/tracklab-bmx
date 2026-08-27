@@ -26,12 +26,9 @@ import {
   clubTabletShouldAutoStartSelection,
 } from '../../src/components/ClubTabletMode';
 import { expireClubTabletSessionLocallyFirst } from '../../src/components/ClubTabletRuntime';
-import {
-  clubTabletResultReviewHoldMs,
-  releaseClubTabletAthleteAfterSaves,
-  safelyReleaseCompletedClubTabletSession,
-} from '../../src/lib/clubTabletExerciseCompletion';
+import { safelyReleaseCompletedClubTabletSession } from '../../src/lib/clubTabletExerciseCompletion';
 import type { HeartRateLiveEvent } from '../../src/lib/heartRateCloud';
+import { clubTabletRaceStartAllowed } from '../../src/lib/clubTabletRaceStart';
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -97,6 +94,50 @@ afterEach(() => {
 });
 
 describe('Club Tablet client state', () => {
+  it('requires an explicit rider start on independent Club Tablet activities', () => {
+    expect(clubTabletRaceStartAllowed({
+      clubTabletKioskMode: true,
+      roomClockAuthorized: false,
+      source: 'manual',
+    })).toBe(false);
+    expect(clubTabletRaceStartAllowed({
+      clubTabletKioskMode: true,
+      roomClockAuthorized: false,
+      source: 'room-clock',
+    })).toBe(false);
+    expect(clubTabletRaceStartAllowed({
+      clubTabletKioskMode: true,
+      roomClockAuthorized: false,
+      source: 'club-tablet-control',
+    })).toBe(true);
+  });
+
+  it('preserves account starts and synchronized Club Event starts', () => {
+    expect(clubTabletRaceStartAllowed({
+      clubTabletKioskMode: false,
+      roomClockAuthorized: false,
+      source: 'manual',
+    })).toBe(true);
+    expect(clubTabletRaceStartAllowed({
+      clubTabletKioskMode: true,
+      roomClockAuthorized: true,
+      source: 'room-clock',
+    })).toBe(true);
+  });
+
+  it('preserves validated ordinary multiplayer room-clock starts on Club Tablets', () => {
+    expect(clubTabletRaceStartAllowed({
+      clubTabletKioskMode: true,
+      roomClockAuthorized: true,
+      source: 'room-clock',
+    })).toBe(true);
+    expect(clubTabletRaceStartAllowed({
+      clubTabletKioskMode: true,
+      roomClockAuthorized: false,
+      source: 'room-clock',
+    })).toBe(false);
+  });
+
   it('keeps the roster upsert compatible with the production club_members schema', () => {
     const persistenceSource = readFileSync(
       new URL('../../cloud/persistence.mjs', import.meta.url),
@@ -418,44 +459,6 @@ describe('Club Tablet client state', () => {
 
     expect(readStoredClubTabletSession()).toBeNull();
     expect(readStoredClubTabletDevice()).toEqual(deviceCredential);
-  });
-
-  it('releases the athlete only after every completed-exercise artifact and the 15-second review hold', async () => {
-    let finishHistory: (() => void) | null = null;
-    let finishHeartRate: (() => void) | null = null;
-    let finishReview: (() => void) | null = null;
-    const history = new Promise<void>((resolve) => { finishHistory = resolve; });
-    const heartRate = new Promise<void>((resolve) => { finishHeartRate = resolve; });
-    const review = new Promise<void>((resolve) => { finishReview = resolve; });
-    const waitForReview = vi.fn(() => review);
-    const release = vi.fn(async () => undefined);
-
-    const completion = releaseClubTabletAthleteAfterSaves(
-      [history, heartRate],
-      release,
-      { waitForReview },
-    );
-    expect(waitForReview).toHaveBeenCalledWith(clubTabletResultReviewHoldMs);
-    finishHistory?.();
-    await Promise.resolve();
-    expect(release).not.toHaveBeenCalled();
-    finishHeartRate?.();
-    await Promise.resolve();
-    expect(release).not.toHaveBeenCalled();
-    finishReview?.();
-    await completion;
-    expect(release).toHaveBeenCalledOnce();
-  });
-
-  it('keeps the athlete selected when any completed-exercise save fails', async () => {
-    const release = vi.fn(async () => undefined);
-
-    await expect(releaseClubTabletAthleteAfterSaves(
-      [Promise.resolve(), Promise.reject(new Error('save failed'))],
-      release,
-      { waitForReview: () => Promise.resolve() },
-    )).rejects.toThrow('save failed');
-    expect(release).not.toHaveBeenCalled();
   });
 
   it('does not let athlete A finishing late clear athlete B', async () => {
@@ -860,7 +863,7 @@ describe('Club Tablet client state', () => {
     expect(completedResultCleanup).toContain('setReactionTimesByPlayer({});');
     expect(appSource).toContain("'Race finished / false-start disqualification captured'");
     expect(appSource).toContain('!synchronizedFalseStartPlayerIdSet.has(tabletLocalPlayer.id)');
-    expect(appSource).toContain('clubTabletExerciseSavedRef.current(completedSession);');
+    expect(appSource).not.toContain('clubTabletExerciseSavedRef');
     const explicitExit = multiplayerSource.slice(
       multiplayerSource.indexOf("if (message.type === 'room-left')"),
       multiplayerSource.indexOf("if (message.type === 'room-chat')"),
@@ -876,8 +879,16 @@ describe('Club Tablet client state', () => {
     expect(appSource).toContain('const canChooseStartHereSplitLine = !clubEventConfigurationLocked');
   });
 
-  it('keeps a Club Event athlete selected while the completed result is under review', () => {
+  it('keeps completed Club Tablet results and athlete identity until explicit exit', () => {
     const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
+    const tabletModeSource = readFileSync(
+      new URL('../../src/components/ClubTabletMode.tsx', import.meta.url),
+      'utf8',
+    );
+    const utilitySource = readFileSync(
+      new URL('../../src/components/ClubOwnerUtilityMode.tsx', import.meta.url),
+      'utf8',
+    );
     const reviewArmIndex = appSource.indexOf(
       'clubTabletCompletionReviewSessionTokenRef.current = clubTabletSession.sessionToken;',
     );
@@ -891,9 +902,25 @@ describe('Club Tablet client state', () => {
     expect(reviewLayout).toContain('raceSummary.some');
     expect(reviewLayout).not.toContain("raceCapture.status !== 'finished'");
     expect(appSource).toContain('clubTabletCompletionReviewSessionTokenRef.current === activeSession.sessionToken');
-    expect(appSource).toContain('clubTabletCompletionReviewSessionTokenRef.current === completedSession.sessionToken');
     expect(appSource).toContain('clubTabletCompletionReviewSessionTokenRef.current = completedSession.sessionToken;');
     expect(appSource).not.toContain('clubTabletCompletionReviewActiveRef');
+    expect(appSource).not.toContain('resultReviewHold');
+    expect(appSource).not.toContain('clubTabletExerciseSavedRef');
+    expect(utilitySource).not.toContain('releaseClubTabletAthleteAfterSaves');
+    expect(utilitySource).not.toContain('onTabletExerciseSaved');
     expect(appSource).toContain('onTabletExerciseReviewStart: handleClubTabletExerciseReviewStart,');
+    expect(appSource).toContain('holdResultsUntilExit: clubTabletSessionActive,');
+    expect(appSource).toContain('roomClockAuthorized: Boolean(multiplayer.currentRoom && roomAuthority),');
+    expect(tabletModeSource).toContain(
+      'Completed results stay with this athlete until they choose End activity.',
+    );
+
+    const explicitExitStart = appSource.indexOf('const handleClubTabletEndAthlete = useCallback(async () => {');
+    const explicitExitEnd = appSource.indexOf('  useEffect(() => {', explicitExitStart);
+    const explicitExit = appSource.slice(explicitExitStart, explicitExitEnd);
+    expect(explicitExit).toContain('handleClubTabletSessionChange(null);');
+    expect(explicitExit).toContain('await endClubTabletSession(activeSession).catch(() => undefined);');
+    expect(explicitExit.indexOf('handleClubTabletSessionChange(null);'))
+      .toBeLessThan(explicitExit.indexOf('await endClubTabletSession(activeSession)'));
   });
 });

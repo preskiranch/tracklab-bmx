@@ -71,6 +71,10 @@ import {
 } from './lib/bikeRaceAudio';
 import { safeSetLocalStorage } from './lib/browserStorage';
 import {
+  clubTabletRaceStartAllowed,
+  type RaceStartSource,
+} from './lib/clubTabletRaceStart';
+import {
   bootstrapNativeBluetooth,
   getNativeBluetoothBootstrapStatus,
   NATIVE_BLUETOOTH_STATUS_EVENT,
@@ -1966,7 +1970,6 @@ export default function App() {
   const [mappingHistoryVersion, setMappingHistoryVersion] = useState(0);
   const [mappingRestSeconds, setMappingRestSeconds] = useState(1);
   const [mappingRaceViewMode, setMappingRaceViewMode] = useState<TrackRaceViewMode>('satellite');
-  const [straightSprintViewMode, setStraightSprintViewMode] = useState<TrackRaceViewMode>('satellite');
   const [bikeProfiles, setBikeProfiles] = useState<BikeProfile[]>(readStoredBikeProfiles);
   const [studioRiders, setStudioRiders] = useState<StudioRider[]>([]);
   const [studioRidersProfileKey, setStudioRidersProfileKey] = useState<string | null>(null);
@@ -2007,9 +2010,6 @@ export default function App() {
   );
   const clubTabletEmergencyExitRef = useRef<() => void>(() => undefined);
   const clubTabletSessionRef = useRef<ClubTabletSessionCredential | null>(clubTabletSession);
-  const clubTabletExerciseSavedRef = useRef<(
-    session: ClubTabletSessionCredential,
-  ) => Promise<void> | void>(() => undefined);
   const clubTabletCompletionReviewSessionTokenRef = useRef<string | null>(null);
   clubTabletSessionRef.current = clubTabletSession;
   const clubTabletAutoSignOutStartedRef = useRef(false);
@@ -3461,9 +3461,6 @@ export default function App() {
       ? raceWorkspaceMode === 'straight-sprint' && straightSprintGameArenaAvailable ? 'game' : 'satellite'
       : activeClubEventRaceView.mode
     : null;
-  useEffect(() => {
-    setStraightSprintViewMode(selectedTrackMapping?.raceViewMode === '3d' ? '3d' : 'satellite');
-  }, [selectedTrack.id, selectedTrackMapping?.raceViewMode]);
   const baseRouteLengthMeters = useMemo(() => {
     if (!effectiveTrack.centerline || effectiveTrack.centerline.length < 2) {
       return effectiveTrack.lengthMeters;
@@ -6558,39 +6555,6 @@ export default function App() {
       || !raceCapture
       || raceCapture.status !== 'finished'
       || raceCapture.source !== 'live'
-      || !clubTabletSessionActive
-      || !clubTabletSession
-    ) return undefined;
-
-    const tabletLocalPlayer = racePlayers.find(
-      (player) => player.riderId === clubTabletSession.session.studioRiderId,
-    );
-    if (!tabletLocalPlayer || !synchronizedFalseStartPlayerIdSet.has(tabletLocalPlayer.id)) {
-      return undefined;
-    }
-
-    // A false starter receives the same 15-second review window, but the DQ
-    // deliberately bypasses race history, ghost, and training-result saves.
-    const completedSession = clubTabletSession;
-    const timer = window.setTimeout(() => {
-      clubTabletExerciseSavedRef.current(completedSession);
-    }, 15_000);
-    return () => window.clearTimeout(timer);
-  }, [
-    clubTabletSession,
-    clubTabletSessionActive,
-    raceCapture,
-    racePlayers,
-    raceState,
-    synchronizedFalseStartPlayerIdSet,
-  ]);
-
-  useEffect(() => {
-    if (
-      raceState !== 'finished'
-      || !raceCapture
-      || raceCapture.status !== 'finished'
-      || raceCapture.source !== 'live'
       || raceCapture.summary.length === 0
     ) {
       return;
@@ -6776,13 +6740,12 @@ export default function App() {
     });
     if (tabletLocalPlayer) {
       if (!completedTabletSession) return;
-      const resultReviewHold = new Promise<void>((resolve) => {
-        window.setTimeout(resolve, 15_000);
-      });
-      void Promise.all([raceResultSave, trainingHistorySave, ...ghostSaves, resultReviewHold])
-        .then(() => clubTabletExerciseSavedRef.current(completedTabletSession))
+      // Saving is independent from identity release. Keep the completed race,
+      // athlete, and bike selected until the rider explicitly chooses the Club
+      // Tablet Exit/End control; a save finishing must never navigate for them.
+      void Promise.all([raceResultSave, trainingHistorySave, ...ghostSaves])
         .catch((error: Error) => {
-          console.warn(`Club Tablet save failed; athlete remains selected: ${error.message}`);
+          console.warn(`Club Tablet save failed; completed results remain open: ${error.message}`);
         });
     }
   }, [
@@ -9851,44 +9814,6 @@ export default function App() {
     };
   }, [clubEventLaunch?.eventId, clubTabletSession, handleClubTabletEndAthlete]);
 
-  const handleClubTabletExerciseSaved = useCallback((
-    completedSession: ClubTabletSessionCredential,
-  ) => {
-    if (clubTabletCompletionReviewSessionTokenRef.current === completedSession.sessionToken) {
-      clubTabletCompletionReviewSessionTokenRef.current = null;
-    }
-    const completedEvent = clubEventLaunchRef.current;
-    const currentSession = clubTabletSessionRef.current;
-    const currentSessionMatches = Boolean(
-      currentSession?.deviceId === completedSession.deviceId
-      && currentSession.sessionToken === completedSession.sessionToken
-    );
-    const completedEventMatches = Boolean(
-      currentSessionMatches
-      && completedEvent
-      && completedEvent.studioRiderId === completedSession.session.studioRiderId
-      && completedEvent.bikeDeviceId === completedSession.session.bikeDeviceId
-    );
-    if (currentSessionMatches) {
-      handleClubTabletSessionChange(null);
-    }
-    if (completedEventMatches && clubEventLaunchRef.current?.eventId === completedEvent?.eventId) {
-      setClubEventLaunch(null);
-      setClubEventProgramReadyId(null);
-    }
-    // Durable cleanup is session-specific, but it must never hold the
-    // finished athlete on a shared tablet while the next rider is waiting.
-    void Promise.all([
-      import('./lib/clubTablet')
-        .then(({ endClubTabletSession }) => endClubTabletSession(completedSession)),
-      completedEventMatches && completedEvent
-        ? import('./lib/clubEvent')
-          .then(({ leaveCurrentClubEvent }) => leaveCurrentClubEvent(completedEvent.eventId, completedSession))
-        : Promise.resolve(),
-    ]).catch(() => undefined);
-  }, [handleClubTabletSessionChange]);
-  clubTabletExerciseSavedRef.current = handleClubTabletExerciseSaved;
-
   const handleClubTabletExerciseReviewStart = useCallback((
     completedSession: ClubTabletSessionCredential,
   ) => {
@@ -10533,9 +10458,14 @@ export default function App() {
   }, []);
 
   const handleStart = async (
-    source: 'manual' | 'room-clock' = 'manual',
+    source: RaceStartSource = 'manual',
     roomAuthority?: RoomRaceStartAuthority,
   ): Promise<boolean> => {
+    if (!clubTabletRaceStartAllowed({
+      clubTabletKioskMode,
+      roomClockAuthorized: Boolean(multiplayer.currentRoom && roomAuthority),
+      source,
+    })) return false;
     if (clubEventConfigurationLocked && source !== 'room-clock') return false;
     if (clubEventLaunchRef.current && source === 'room-clock' && !roomAuthority) return false;
     const startingRacePlayers = racePlayers;
@@ -10672,6 +10602,9 @@ export default function App() {
     scheduleStagingCountdown(startingTrackId, sequenceId);
     return true;
   };
+  const handleExplicitStart = () => handleStart(
+    clubTabletKioskMode ? 'club-tablet-control' : 'manual',
+  );
   // The server-clock timer must call the newest render's start logic. Keeping
   // the handler in a ref prevents a one-shot room token from being consumed by
   // a stale closure while bikes, track readiness, or club authorization finish.
@@ -10697,11 +10630,11 @@ export default function App() {
     }
     if (entry) {
       void cancelActiveClubOwnerTrainingGroup({ preserveStatus: true })
-        .then(() => handleStart())
+        .then(() => handleExplicitStart())
         .catch(() => undefined);
       return;
     }
-    void handleStart();
+    void handleExplicitStart();
   };
 
   const clubOwnerUtilitySharedProps = {
@@ -10726,7 +10659,6 @@ export default function App() {
       cancelActiveGroup: cancelActiveClubOwnerTrainingGroup,
       onHistoryChanged: () => setTrainingHistoryRevision((revision) => revision + 1),
       onTabletExerciseReviewStart: handleClubTabletExerciseReviewStart,
-      onTabletExerciseSaved: handleClubTabletExerciseSaved,
     },
     heartRateContext: {
       heartRate: {
@@ -11118,7 +11050,7 @@ export default function App() {
       onClick: () => {
         setAppMode(raceWorkspaceMode);
         if (workflowRaceReady) {
-          void handleStart();
+          void handleExplicitStart();
         }
       },
     },
@@ -11383,7 +11315,7 @@ export default function App() {
             onCancel={handleCancel}
             onHeartRateOpen={setMonitorHeartRateOverlayPlayerId}
             onRetry={retryClubOwnerTrainingAction}
-            onStart={() => { void handleStart(); }}
+            onStart={() => { void handleExplicitStart(); }}
             phase={clubOwnerRacePreparation.phase === 'error'
               ? 'error'
               : clubOwnerRacePreparation.phase === 'ready'
@@ -12318,16 +12250,20 @@ export default function App() {
                 primeBikeRaceAudio(),
               ]).then(() => undefined)}
               openProgram={(mode) => {
+                clearStartGateSequence();
+                setLockedRacePlayers(null);
+                setMappingMode(false);
+                setMappingFullscreen(false);
+                setDemoRaceStartedAt(null);
+                setDemoSignalsStopped(false);
+                resetRace();
+                releaseRaceFullscreen();
                 if (demoMode) {
                   setPlayMode('local');
                   setDemoBikeCount(1);
                   setSelectedDemoPlayerIds(defaultPlayerSlots.slice(0, 1).map((player) => player.id));
                   setDemoRaceSeed(Date.now());
-                  setDemoRaceStartedAt(null);
-                  setDemoSignalsStopped(false);
-                  resetRace();
                 }
-                setMappingMode(false);
                 if (mode === 'race') openBmxRaceIntervals();
                 else if (mode === 'straight-sprint') openStraightSprint();
                 else if (mode === 'get-pulled') openGetPulled();
@@ -12491,6 +12427,7 @@ export default function App() {
                 onLiveStateChange: setGetPulledLiveState,
                 fullscreen: utilityFullscreen,
                 onFullscreenChange: handleUtilityFullscreenChange,
+                holdResultsUntilExit: clubTabletSessionActive,
                 heartRateByPlayer,
                 heartRateMeasurements: heartRate.measurements,
               }}
@@ -12691,12 +12628,10 @@ export default function App() {
                   mappingFullscreen={mappingFullscreen}
                   mappingEditMode={mappingEditMode}
                   mappingObstacleView3D={mappingObstacleView3D}
-                  raceViewMode={activeClubEventRaceViewMode
-                    ?? (appMode === 'straight-sprint' && straightSprintGameArenaAvailable
-                      ? straightSprintViewMode
-                      : mappingMode
-                        ? mappingRaceViewMode
-                        : bmxRaceViewMode)}
+                  raceViewMode={appMode === 'straight-sprint' && straightSprintGameArenaAvailable
+                    ? 'game'
+                    : activeClubEventRaceViewMode
+                      ?? (mappingMode ? mappingRaceViewMode : bmxRaceViewMode)}
                   mappingRouteVariantId={mappingRouteVariantId}
                   mappingZoneBranchChoice={mappingZoneBranchChoice}
                   draftPoints={draftPoints}
@@ -12766,7 +12701,6 @@ export default function App() {
                   straightSprintAirSetting={straightSprintAirSetting}
                   straightSprintMappedFeet={straightSprintMappedFeet}
                   straightSprintMaximumRouteReady={straightSprintMaximumRouteReady}
-                  straightSprintViewMode={activeClubEventRaceViewMode ?? straightSprintViewMode}
                   straightSprintGameArenaAvailable={straightSprintGameArenaAvailable}
                   isAdminProfile={developerUiActive}
                   showCustomRoutes={appMode === 'straight-sprint'}
@@ -12824,7 +12758,6 @@ export default function App() {
                     setStraightSprintAirSetting(normalizeStraightSprintAirSetting(setting));
                     setSelectedGhostIds([]);
                   }}
-                  onStraightSprintViewModeChange={setStraightSprintViewMode}
                   onDemoModeChange={handleDemoModeChange}
                   onDemoPlayerSelectionChange={handleDemoPlayerSelectionChange}
                   onMappingModeChange={handleMappingModeChange}
@@ -12853,7 +12786,7 @@ export default function App() {
                   onMappingImport={importMapping}
                   onCommentaryPreferencesChange={handleRaceCommentaryPreferencesChange}
                   onPrimeAudio={primeRaceAudio}
-                  onStart={handleStart}
+                  onStart={handleExplicitStart}
                   onCancel={handleCancel}
                   onReset={handleReset}
                   />
