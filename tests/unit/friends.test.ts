@@ -643,52 +643,31 @@ describe('TrackLab friends client', () => {
     }]);
   });
 
-  it('subscribes to generic friend invalidations and refreshes again after reconnect', () => {
-    class FakeEventSource {
-      static instances: FakeEventSource[] = [];
-      listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
-      close = vi.fn();
-
-      constructor(readonly url: string) {
-        FakeEventSource.instances.push(this);
-      }
-
-      addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
-        const listeners = this.listeners.get(type) ?? new Set();
-        listeners.add(listener);
-        this.listeners.set(type, listeners);
-      }
-
-      removeEventListener(type: string, listener: EventListenerOrEventListenerObject) {
-        this.listeners.get(type)?.delete(listener);
-      }
-
-      dispatch(type: string) {
-        this.listeners.get(type)?.forEach((listener) => {
-          const event = { type } as Event;
-          if (typeof listener === 'function') listener(event);
-          else listener.handleEvent(event);
-        });
-      }
-    }
-    vi.stubGlobal('EventSource', FakeEventSource);
+  it('subscribes to generic friend invalidations over authenticated fetch streaming', async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    const fetcher = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) { streamController = controller; },
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }));
+    vi.stubGlobal('fetch', fetcher);
     const invalidated = vi.fn();
     const unsubscribe = subscribeToFriendNetworkEvents(invalidated);
-    const stream = FakeEventSource.instances[0];
-
-    expect(stream?.url).toBe('/api/friends/events');
-    stream?.dispatch('open');
-    stream?.dispatch('graph-invalidated');
-    stream?.dispatch('track-shares-invalidated');
-    stream?.dispatch('live-audio-invites-invalidated');
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledWith(
+      '/api/friends/events',
+      expect.objectContaining({
+        credentials: 'same-origin',
+        headers: { Accept: 'text/event-stream' },
+      }),
+    ));
+    streamController!.enqueue(new TextEncoder().encode([
+      'event: graph-invalidated\ndata: {}\n\n',
+      'event: track-shares-invalidated\ndata: {}\n\n',
+      'event: live-audio-invites-invalidated\ndata: {}\n\n',
+    ].join('')));
+    await vi.waitFor(() => expect(invalidated).toHaveBeenCalledTimes(4));
     expect(invalidated).toHaveBeenCalledTimes(4);
 
     unsubscribe();
-    stream?.dispatch('graph-invalidated');
-    stream?.dispatch('track-shares-invalidated');
-    stream?.dispatch('live-audio-invites-invalidated');
     expect(invalidated).toHaveBeenCalledTimes(4);
-    expect(stream?.close).toHaveBeenCalledOnce();
   });
 
   it('scopes offline requests by account and retries only transient failures', async () => {

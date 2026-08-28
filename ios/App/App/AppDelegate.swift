@@ -8,6 +8,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        // StoreKit transaction updates can arrive before Capacitor creates the
+        // web view. Start observing at process launch and retain verified,
+        // unfinished transactions until the JS bridge is ready.
+        StoreKitPurchaseManager.shared.startObserving()
         // HealthKit may launch the companion in the background when the Watch
         // begins mirroring. Install the handler before the web view is created.
         RecoveryAlertManager.shared.configureAtLaunch()

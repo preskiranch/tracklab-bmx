@@ -8,5 +8,7 @@ final class TrackLabBridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(HeartRatePlugin())
         bridge?.registerPluginInstance(RecoveryAlertPlugin())
         bridge?.registerPluginInstance(PushInstallationPlugin())
+        bridge?.registerPluginInstance(StoreKitPlugin())
+        bridge?.registerPluginInstance(NativeSessionPlugin())
     }
 }

@@ -12,6 +12,7 @@ describe('native iOS push integration', () => {
   const entitlements = read('../../ios/App/App/App.entitlements');
   const project = read('../../ios/App/App.xcodeproj/project.pbxproj');
   const config = read('../../capacitor.config.ts');
+  const offlinePage = read('../../public/offline.html');
   const unsignedBuild = read('../../scripts/build-ios-unsigned.mjs');
 
   it('uses the official Capacitor push callbacks and one notification router', () => {
@@ -52,16 +53,26 @@ describe('native iOS push integration', () => {
     expect(installation).toContain('deadline: .now() + 1.0');
   });
 
-  it('enables app push, preserves Watch capability scope, and ships build 16', () => {
+  it('enables app push, preserves Watch capability scope, and ships build 18', () => {
     expect(entitlements).toContain('<key>aps-environment</key>');
     expect(project).toContain('com.apple.Push');
-    expect(project.match(/CURRENT_PROJECT_VERSION = 16;/gu)).toHaveLength(4);
-    expect(project).not.toContain('CURRENT_PROJECT_VERSION = 15;');
+    expect(project.match(/CURRENT_PROJECT_VERSION = 18;/gu)).toHaveLength(4);
+    expect(project).not.toContain('CURRENT_PROJECT_VERSION = 17;');
     expect(unsignedBuild).toContain("node_modules/@capacitor/push-notifications/Package.swift");
     expect(unsignedBuild).toContain('binaryArtifactIsValid');
     expect(unsignedBuild).toContain("'ios-arm64'");
     expect(unsignedBuild).toContain('TRACKLAB_IOS_SDK');
     expect(unsignedBuild).toContain('generic/platform=iOS Simulator');
     expect(unsignedBuild).toContain('originalWorkspaceResolved');
+  });
+
+  it('ships the audited web bundle and a local outage screen', () => {
+    expect(config).toContain("webDir: 'dist'");
+    expect(config).not.toMatch(/server\s*:\s*\{/u);
+    expect(config).not.toContain("url: 'https://tracklab-bmx.onrender.com'");
+    expect(offlinePage).toContain('TrackLab is temporarily offline');
+    expect(offlinePage).toContain('window.location.reload()');
+    expect(unsignedBuild).toContain("'Platforms/iPhoneOS.platform'");
+    expect(unsignedBuild).toContain("'Platforms/iPhoneSimulator.platform'");
   });
 });

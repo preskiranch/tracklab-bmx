@@ -35,6 +35,9 @@
 		B14DA05E67A74D38B70DA581 /* WatchConnectSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30ACAEF452E45D8A8D5D46D /* WatchConnectSession.swift */; };
 		D1873E16AA122B3C72AA5148 /* TrackLabWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04176BF8C892D4CA5BA627D6 /* TrackLabWatchApp.swift */; };
 		E43147A6D3F44AF1B2131001 /* PushInstallationPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = E43147A6D3F44AF1B2132001 /* PushInstallationPlugin.swift */; };
+		A9B7C1D10000000100000001 /* StoreKitPurchaseManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B7C1D20000000100000001 /* StoreKitPurchaseManager.swift */; };
+		A9B7C1D10000000200000002 /* StoreKitPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B7C1D20000000200000002 /* StoreKitPlugin.swift */; };
+		A9B7C1D10000000300000003 /* NativeSessionPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B7C1D20000000300000003 /* NativeSessionPlugin.swift */; };
 		FAC30C7438B083BF3F9CD616 /* TrackLab Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 71DBE0594E337BEF31CC810F /* TrackLab Watch App.app */; };
 /* End PBXBuildFile section */
 
@@ -91,6 +94,9 @@
 		D4750F6CE8882F23509585E7 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		E9A4380DA630675844059865 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		E43147A6D3F44AF1B2132001 /* PushInstallationPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PushInstallationPlugin.swift; sourceTree = "<group>"; };
+		A9B7C1D20000000100000001 /* StoreKitPurchaseManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StoreKitPurchaseManager.swift; sourceTree = "<group>"; };
+		A9B7C1D20000000200000002 /* StoreKitPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StoreKitPlugin.swift; sourceTree = "<group>"; };
+		A9B7C1D20000000300000003 /* NativeSessionPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NativeSessionPlugin.swift; sourceTree = "<group>"; };
 		F007C69B26274CBC3949C03A /* HeartRatePlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HeartRatePlugin.swift; sourceTree = "<group>"; };
 		FADA3E08274186CD24A607E4 /* HeartRateCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HeartRateCoordinator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -162,6 +168,9 @@
 				0B8A3C8B39DE41A9B65D2001 /* RecoveryAlertManager.swift */,
 				0B8A3C8B39DE41A9B65D2002 /* RecoveryAlertPlugin.swift */,
 				E43147A6D3F44AF1B2132001 /* PushInstallationPlugin.swift */,
+				A9B7C1D20000000100000001 /* StoreKitPurchaseManager.swift */,
+				A9B7C1D20000000200000002 /* StoreKitPlugin.swift */,
+				A9B7C1D20000000300000003 /* NativeSessionPlugin.swift */,
 				C30ACAEF452E45D8A8D5D46D /* WatchConnectSession.swift */,
 				B57481343D689AF7667233D7 /* TrackLabBridgeViewController.swift */,
 				E9A4380DA630675844059865 /* PrivacyInfo.xcprivacy */,
@@ -246,6 +255,9 @@
 							com.apple.HealthKit = {
 								enabled = 1;
 							};
+							com.apple.InAppPurchase = {
+								enabled = 1;
+							};
 							com.apple.Push = {
 								enabled = 1;
 							};
@@ -327,6 +339,9 @@
 				0B8A3C8B39DE41A9B65D1001 /* RecoveryAlertManager.swift in Sources */,
 				0B8A3C8B39DE41A9B65D1002 /* RecoveryAlertPlugin.swift in Sources */,
 				E43147A6D3F44AF1B2131001 /* PushInstallationPlugin.swift in Sources */,
+				A9B7C1D10000000100000001 /* StoreKitPurchaseManager.swift in Sources */,
+				A9B7C1D10000000200000002 /* StoreKitPlugin.swift in Sources */,
+				A9B7C1D10000000300000003 /* NativeSessionPlugin.swift in Sources */,
 				0B8A3C8B39DE41A9B65D1003 /* RecoveryAlertWire.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -381,7 +396,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = TrackLabWatch/TrackLabWatch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 16;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = DU7FUS4N34;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TrackLabWatch/Info.plist;
@@ -403,7 +418,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = TrackLabWatch/TrackLabWatch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 16;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = DU7FUS4N34;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TrackLabWatch/Info.plist;
@@ -536,7 +551,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 16;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = DU7FUS4N34;
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
@@ -561,7 +576,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 16;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = DU7FUS4N34;
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;

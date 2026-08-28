@@ -12,6 +12,16 @@ on:
         required: true
         type: boolean
         default: true
+      expect_apple_iap:
+        description: Require configured Apple in-app purchases
+        required: true
+        type: boolean
+        default: false
+      expect_apple_only_cutover:
+        description: Require final Apple-only Wattbike billing cutover
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -39,6 +49,8 @@ jobs:
           TRACKLAB_SMOKE_URL: ${{ inputs.target_url }}
           TRACKLAB_EXPECT_POSTGRES: "1"
           TRACKLAB_EXPECT_APNS: "1"
+          TRACKLAB_EXPECT_APPLE_IAP: ${{ inputs.expect_apple_iap && '1' || '0' }}
+          TRACKLAB_EXPECT_APPLE_ONLY_CUTOVER: ${{ inputs.expect_apple_only_cutover && '1' || '0' }}
 
       - name: Run bounded read-only load probe
         if: inputs.run_load_probe

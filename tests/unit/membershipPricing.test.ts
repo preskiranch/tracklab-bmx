@@ -1,22 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
-  bikeSeatMonthlyCents,
+  clampAppleWattbikeConnections,
   clampBillingBikeSeats,
+  maxAppleWattbikeConnections,
   maxBillingBikeSeats,
-  racerMonthlyCents,
 } from '../../src/lib/membership';
 
-describe('Wattbike seat billing', () => {
-  it('prices every personal or club seat at $9.99 per month', () => {
-    expect(bikeSeatMonthlyCents).toBe(999);
-    expect(racerMonthlyCents(1)).toBe(999);
-    expect(racerMonthlyCents(4)).toBe(3_996);
-    expect(racerMonthlyCents(20)).toBe(19_980);
+describe('Wattbike membership connection limits', () => {
+  it('offers fixed one-through-four App Store connection tiers', () => {
+    expect(maxAppleWattbikeConnections).toBe(4);
+    expect(clampAppleWattbikeConnections(0)).toBe(1);
+    expect(clampAppleWattbikeConnections(3)).toBe(3);
+    expect(clampAppleWattbikeConnections(99)).toBe(4);
   });
 
-  it('supports large clubs without using the four-racer event limit as a billing cap', () => {
-    expect(maxBillingBikeSeats).toBeGreaterThanOrEqual(20);
-    expect(clampBillingBikeSeats(20)).toBe(20);
+  it('never projects more capacity than the four App Store tiers', () => {
+    expect(maxBillingBikeSeats).toBe(4);
+    expect(clampBillingBikeSeats(20)).toBe(4);
     expect(clampBillingBikeSeats(maxBillingBikeSeats + 1)).toBe(maxBillingBikeSeats);
     expect(clampBillingBikeSeats(0)).toBe(1);
   });

@@ -51,7 +51,7 @@ const baseSession: ClubLiveSession = {
 };
 
 describe('Club Live Monitor client state', () => {
-  it('normalizes untrusted sessions and keeps every unique club seat while preserving the newest rider snapshot', () => {
+  it('normalizes untrusted sessions and keeps the four App Store seats while preserving the newest rider snapshot', () => {
     const sessions = normalizeClubLiveSessions({
       sessions: [
         { ...baseSession, id: 'old', updatedAt: 1_000 },
@@ -66,7 +66,7 @@ describe('Club Live Monitor client state', () => {
       ],
     });
 
-    expect(sessions).toHaveLength(6);
+    expect(sessions).toHaveLength(4);
     expect(sessions[0]).toMatchObject({ id: 'new', deviceId: 'tablet-1', progress: { fraction: 1 }, metrics: { watts: 500 } });
     expect(sessions.filter((session) => session.studioRiderId === 'rider-1')).toHaveLength(1);
     expect(sessions[0]).not.toHaveProperty('roomId');
@@ -164,7 +164,7 @@ describe('Club Live Monitor client state', () => {
     });
   });
 
-  it('preserves a 20-seat club entitlement without changing race capacity', () => {
+  it('clamps stale oversized club access to the four App Store connection maximum', () => {
     expect(normalizeClubLiveAccess({
       clubId: 'club-1',
       active: true,
@@ -174,7 +174,7 @@ describe('Club Live Monitor client state', () => {
       clubId: 'club-1',
       active: true,
       expiresAt: expect.any(Number),
-      bikeSeats: 20,
+      bikeSeats: 4,
     });
   });
 
@@ -259,16 +259,25 @@ describe('Club Live Monitor client state', () => {
 
   it('stops error-state connector hardware for the owner monitor without looping after idle', () => {
     expect(shouldStopAdvancedConnector({
+      authStatus: 'loading',
+      authenticatedRacerAccess: false,
+      clubMonitorOpen: false,
+      sourceState: 'running',
+    })).toBe(false);
+    expect(shouldStopAdvancedConnector({
+      authStatus: 'signed-in',
       authenticatedRacerAccess: true,
       clubMonitorOpen: true,
       sourceState: 'error',
     })).toBe(true);
     expect(shouldStopAdvancedConnector({
+      authStatus: 'signed-in',
       authenticatedRacerAccess: true,
       clubMonitorOpen: true,
       sourceState: 'stopping',
     })).toBe(false);
     expect(shouldStopAdvancedConnector({
+      authStatus: 'signed-in',
       authenticatedRacerAccess: true,
       clubMonitorOpen: true,
       sourceState: 'idle',

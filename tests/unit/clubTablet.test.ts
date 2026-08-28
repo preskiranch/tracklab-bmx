@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  claimClubTabletPickerWattbikeCapacity,
   clearClubTabletBikePresence,
   clearStoredClubTabletSession,
   clubTabletOutboxStorageKey,
@@ -13,10 +14,12 @@ import {
   publishClubTabletBikePresence,
   readStoredClubTabletDevice,
   readStoredClubTabletSession,
+  releaseClubTabletPickerWattbikeCapacity,
   saveClubTabletRaceResult,
   startClubTabletSession,
   storeClubTabletDevice,
   storeClubTabletSession,
+  validateClubTabletSessionCapacity,
   type ClubTabletDeviceCredential,
   type ClubTabletSessionCredential,
 } from '../../src/lib/clubTablet';
@@ -426,6 +429,79 @@ describe('Club Tablet client state', () => {
     expect(JSON.stringify(fetchMock.mock.calls)).not.toContain('clubId');
   });
 
+  it('claims and releases only the enrolled picker\'s one short-lived Wattbike grant', async () => {
+    const now = Date.now();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        capacity: {
+          type: 'wattbike-capacity',
+          requestedConnections: 1,
+          grantedConnections: 1,
+          connectionLimit: 4,
+          accountConnectionsInUse: 2,
+          action: 'none',
+          reason: 'club-tablet-picker-reserved',
+        },
+        expiresAt: now + 45_000,
+        pollAfterMs: 15_000,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ released: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(claimClubTabletPickerWattbikeCapacity(deviceCredential)).resolves.toMatchObject({
+      capacity: {
+        requestedConnections: 1,
+        grantedConnections: 1,
+        reason: 'club-tablet-picker-reserved',
+      },
+      expiresAt: now + 45_000,
+      pollAfterMs: 15_000,
+    });
+    await expect(releaseClubTabletPickerWattbikeCapacity(
+      deviceCredential,
+      { keepalive: true },
+    )).resolves.toBe(true);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/club-tablet/wattbike-capacity', expect.objectContaining({
+      method: 'PUT',
+      headers: expect.objectContaining({ Authorization: 'Bearer device-token' }),
+    }));
+    expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty('body');
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/club-tablet/wattbike-capacity', expect.objectContaining({
+      method: 'DELETE',
+      keepalive: true,
+      headers: expect.objectContaining({ Authorization: 'Bearer device-token' }),
+    }));
+  });
+
+  it('rejects a picker response that attempts to grant more than one Wattbike', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      capacity: {
+        type: 'wattbike-capacity',
+        requestedConnections: 2,
+        grantedConnections: 2,
+        connectionLimit: 4,
+        accountConnectionsInUse: 2,
+        action: 'none',
+        reason: 'invalid-picker-grant',
+      },
+      expiresAt: Date.now() + 45_000,
+      pollAfterMs: 15_000,
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+
+    await expect(claimClubTabletPickerWattbikeCapacity(deviceCredential))
+      .rejects.toThrow('invalid Club Tablet Wattbike authorization');
+  });
+
   it('preserves durable result credentials while accepting old stored athlete sessions', () => {
     expect(normalizeClubTabletSessionCredential(durableSessionCredential)).toMatchObject(durableSessionCredential);
     expect(normalizeClubTabletSessionCredential(sessionCredential)).toMatchObject(sessionCredential);
@@ -600,6 +676,29 @@ describe('Club Tablet client state', () => {
 
     expect(readStoredClubTabletSession()).toBeNull();
     expect(readStoredClubTabletDevice()).toEqual(deviceCredential);
+  });
+
+  it('revalidates tablet Wattbike capacity without renewing the athlete session', async () => {
+    const localStorage = new MemoryStorage();
+    const sessionStorage = new MemoryStorage();
+    vi.stubGlobal('window', { localStorage, sessionStorage });
+    storeClubTabletDevice(deviceCredential);
+    storeClubTabletSession(sessionCredential);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      session: sessionCredential.session,
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(validateClubTabletSessionCapacity(sessionCredential)).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith('/api/club-tablet/sessions', expect.objectContaining({
+      headers: expect.objectContaining({
+        'X-TrackLab-Club-Tablet-Session': 'athlete-session-token',
+      }),
+    }));
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/club-tablet/sessions/current', expect.anything());
   });
 
   it('keeps a failed race artifact in a selected-athlete outbox and retries it safely', async () => {

@@ -1733,6 +1733,267 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           ON ${schema}.club_tablet_result_authorizations (expires_at, device_id)`,
       ],
     },
+    {
+      version: 29,
+      name: 'make verified apple subscriptions authoritative for wattbike seats',
+      statements: [
+        `ALTER TABLE ${schema}.auth_users
+          ADD COLUMN IF NOT EXISTS legacy_membership_tier TEXT`,
+        `ALTER TABLE ${schema}.auth_users
+          ADD COLUMN IF NOT EXISTS legacy_bike_seats INTEGER`,
+        `UPDATE ${schema}.auth_users
+          SET legacy_membership_tier = COALESCE(legacy_membership_tier, membership_tier),
+              legacy_bike_seats = COALESCE(legacy_bike_seats, bike_seats)
+          WHERE legacy_membership_tier IS NULL OR legacy_bike_seats IS NULL`,
+        `ALTER TABLE ${schema}.auth_users
+          ALTER COLUMN legacy_membership_tier SET DEFAULT 'spectator',
+          ALTER COLUMN legacy_membership_tier SET NOT NULL,
+          ALTER COLUMN legacy_bike_seats SET DEFAULT 1,
+          ALTER COLUMN legacy_bike_seats SET NOT NULL`,
+        `ALTER TABLE ${schema}.auth_users
+          ADD COLUMN IF NOT EXISTS apple_billing_managed BOOLEAN NOT NULL DEFAULT false`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.apple_iap_subscriptions (
+          original_transaction_id TEXT PRIMARY KEY
+            CHECK (original_transaction_id ~ '^[1-9][0-9]{1,30}$'),
+          user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          app_account_token TEXT NOT NULL
+            CHECK (app_account_token ~* '^[0-9a-f-]{36}$'),
+          product_id TEXT NOT NULL CHECK (product_id IN (
+            'com.preskilranch.tracklabbmx.wattbike.1.monthly',
+            'com.preskilranch.tracklabbmx.wattbike.2.monthly',
+            'com.preskilranch.tracklabbmx.wattbike.3.monthly',
+            'com.preskilranch.tracklabbmx.wattbike.4.monthly'
+          )),
+          environment TEXT NOT NULL CHECK (environment IN ('sandbox', 'production')),
+          status TEXT NOT NULL CHECK (status IN (
+            'active', 'expired', 'billing_retry', 'grace_period', 'revoked'
+          )),
+          bike_seats SMALLINT NOT NULL CHECK (bike_seats BETWEEN 1 AND 4),
+          active BOOLEAN NOT NULL DEFAULT false,
+          latest_transaction_id TEXT NOT NULL,
+          purchased_at TIMESTAMPTZ NOT NULL,
+          expires_at TIMESTAMPTZ NOT NULL,
+          entitlement_expires_at TIMESTAMPTZ NOT NULL,
+          signed_at TIMESTAMPTZ NOT NULL,
+          revoked_at TIMESTAMPTZ,
+          reconciled_at TIMESTAMPTZ NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (environment, original_transaction_id),
+          CHECK (entitlement_expires_at >= expires_at OR status = 'grace_period')
+        )`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.apple_iap_transactions (
+          transaction_id TEXT PRIMARY KEY CHECK (transaction_id ~ '^[1-9][0-9]{1,30}$'),
+          original_transaction_id TEXT NOT NULL
+            REFERENCES ${schema}.apple_iap_subscriptions(original_transaction_id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          app_account_token TEXT NOT NULL,
+          product_id TEXT NOT NULL,
+          environment TEXT NOT NULL CHECK (environment IN ('sandbox', 'production')),
+          status TEXT NOT NULL CHECK (status IN (
+            'active', 'expired', 'billing_retry', 'grace_period', 'revoked'
+          )),
+          bike_seats SMALLINT NOT NULL CHECK (bike_seats BETWEEN 1 AND 4),
+          active BOOLEAN NOT NULL DEFAULT false,
+          purchased_at TIMESTAMPTZ NOT NULL,
+          expires_at TIMESTAMPTZ NOT NULL,
+          entitlement_expires_at TIMESTAMPTZ NOT NULL,
+          signed_at TIMESTAMPTZ NOT NULL,
+          revoked_at TIMESTAMPTZ,
+          revocation_reason INTEGER,
+          is_upgraded BOOLEAN NOT NULL DEFAULT false,
+          reconciled_at TIMESTAMPTZ NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_apple_iap_subscriptions_user
+          ON ${schema}.apple_iap_subscriptions (user_id, active, entitlement_expires_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_apple_iap_transactions_original
+          ON ${schema}.apple_iap_transactions
+          (original_transaction_id, signed_at DESC, transaction_id)`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.apple_iap_notifications (
+          notification_uuid TEXT PRIMARY KEY CHECK (char_length(notification_uuid) BETWEEN 16 AND 64),
+          notification_type TEXT NOT NULL CHECK (char_length(notification_type) BETWEEN 2 AND 80),
+          subtype TEXT CHECK (subtype IS NULL OR char_length(subtype) <= 80),
+          environment TEXT NOT NULL CHECK (environment IN ('sandbox', 'production')),
+          original_transaction_id TEXT
+            REFERENCES ${schema}.apple_iap_subscriptions(original_transaction_id) ON DELETE SET NULL,
+          user_id TEXT REFERENCES ${schema}.auth_users(id) ON DELETE SET NULL,
+          signed_at TIMESTAMPTZ NOT NULL,
+          signed_payload_sha256 TEXT NOT NULL CHECK (char_length(signed_payload_sha256) = 64),
+          processing_state TEXT NOT NULL CHECK (processing_state IN ('processed', 'ignored')),
+          received_at TIMESTAMPTZ NOT NULL,
+          processed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_apple_iap_notifications_original
+          ON ${schema}.apple_iap_notifications
+          (original_transaction_id, received_at DESC)
+          WHERE original_transaction_id IS NOT NULL`,
+      ],
+    },
+    {
+      version: 30,
+      name: 'enforce account wide wattbike connection capacity',
+      statements: [
+        `CREATE TABLE IF NOT EXISTS ${schema}.wattbike_connection_leases (
+          billing_owner_user_id TEXT NOT NULL
+            REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          allocation_key TEXT NOT NULL
+            CHECK (char_length(allocation_key) BETWEEN 8 AND 220),
+          allocation_kind TEXT NOT NULL
+            CHECK (allocation_kind IN ('owner-websocket', 'club-tablet')),
+          holder_instance_id TEXT NOT NULL
+            CHECK (char_length(holder_instance_id) BETWEEN 8 AND 120),
+          holder_id TEXT NOT NULL
+            CHECK (char_length(holder_id) BETWEEN 8 AND 220),
+          seat_count SMALLINT NOT NULL CHECK (seat_count BETWEEN 1 AND 4),
+          expires_at TIMESTAMPTZ NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (billing_owner_user_id, allocation_key)
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_wattbike_connection_leases_expiry
+          ON ${schema}.wattbike_connection_leases (expires_at)`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_wattbike_connection_leases_owner_order
+          ON ${schema}.wattbike_connection_leases
+          (billing_owner_user_id, created_at, allocation_kind, allocation_key)`,
+      ],
+    },
+    {
+      version: 31,
+      name: 'prepare query time apple billing entitlement projection',
+      statements: [
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_auth_users_apple_billing_projection
+          ON ${schema}.auth_users (apple_billing_managed, membership_tier, bike_seats)`,
+      ],
+    },
+    {
+      version: 32,
+      name: 'add accountable community report moderation',
+      statements: [
+        `ALTER TABLE ${schema}.friend_reports
+          ADD COLUMN IF NOT EXISTS moderation_action TEXT NOT NULL DEFAULT 'none'
+            CHECK (moderation_action IN (
+              'none', 'investigating', 'protect-reporter', 'warning-issued',
+              'safety-escalated', 'no-violation'
+            ))`,
+        `ALTER TABLE ${schema}.friend_reports
+          ADD COLUMN IF NOT EXISTS moderation_note TEXT NOT NULL DEFAULT ''`,
+        `ALTER TABLE ${schema}.friend_reports
+          ADD COLUMN IF NOT EXISTS reviewed_by_user_id TEXT
+            REFERENCES ${schema}.auth_users(id) ON DELETE SET NULL`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_friend_reports_review_queue
+          ON ${schema}.friend_reports (status, created_at, id)`,
+      ],
+    },
+    {
+      version: 33,
+      name: 'retain pseudonymous apple lineage for restore after account deletion',
+      statements: [
+        `CREATE TABLE IF NOT EXISTS ${schema}.apple_iap_lineage_token_bindings (
+          environment TEXT NOT NULL CHECK (environment IN ('sandbox', 'production')),
+          original_transaction_id TEXT NOT NULL
+            CHECK (original_transaction_id ~ '^[1-9][0-9]{1,30}$'),
+          app_account_token_sha256 TEXT NOT NULL
+            CHECK (app_account_token_sha256 ~ '^[a-f0-9]{64}$'),
+          bound_user_id TEXT REFERENCES ${schema}.auth_users(id) ON DELETE SET NULL,
+          deleted_at TIMESTAMPTZ,
+          rebound_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (environment, original_transaction_id, app_account_token_sha256)
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_apple_iap_lineage_bound_user
+          ON ${schema}.apple_iap_lineage_token_bindings
+          (bound_user_id, updated_at DESC)
+          WHERE bound_user_id IS NOT NULL`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_apple_iap_lineage_deleted_restore
+          ON ${schema}.apple_iap_lineage_token_bindings
+          (environment, original_transaction_id, deleted_at DESC)
+          WHERE bound_user_id IS NULL`,
+      ],
+    },
+    {
+      version: 34,
+      name: 'persist club tablet session assignment holders',
+      statements: [
+        `ALTER TABLE ${schema}.wattbike_connection_leases
+          ADD COLUMN IF NOT EXISTS club_id TEXT
+            REFERENCES ${schema}.clubs(id) ON DELETE CASCADE`,
+        `ALTER TABLE ${schema}.wattbike_connection_leases
+          ADD COLUMN IF NOT EXISTS studio_rider_id TEXT`,
+        `ALTER TABLE ${schema}.wattbike_connection_leases
+          ADD COLUMN IF NOT EXISTS bike_device_id TEXT`,
+        `ALTER TABLE ${schema}.wattbike_connection_leases
+          ADD CONSTRAINT wattbike_connection_leases_club_assignment_complete
+          CHECK (
+            (club_id IS NULL AND studio_rider_id IS NULL AND bike_device_id IS NULL)
+            OR (
+              allocation_kind = 'club-tablet'
+              AND club_id IS NOT NULL
+              AND studio_rider_id IS NOT NULL
+              AND bike_device_id IS NOT NULL
+            )
+            OR (
+              allocation_kind = 'club-tablet'
+              AND club_id IS NULL
+              AND studio_rider_id IS NULL
+              AND bike_device_id IS NULL
+            )
+          ) NOT VALID`,
+        `ALTER TABLE ${schema}.wattbike_connection_leases
+          VALIDATE CONSTRAINT wattbike_connection_leases_club_assignment_complete`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_tracklab_wattbike_leases_club_rider
+          ON ${schema}.wattbike_connection_leases (club_id, studio_rider_id)
+          WHERE club_id IS NOT NULL`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_tracklab_wattbike_leases_club_bike
+          ON ${schema}.wattbike_connection_leases (club_id, bike_device_id)
+          WHERE club_id IS NOT NULL`,
+      ],
+    },
+    {
+      version: 35,
+      name: 'share wattbike capacity with club personal devices',
+      statements: [
+        `ALTER TABLE ${schema}.wattbike_connection_leases
+          DROP CONSTRAINT IF EXISTS wattbike_connection_leases_allocation_kind_check`,
+        `ALTER TABLE ${schema}.wattbike_connection_leases
+          ADD CONSTRAINT wattbike_connection_leases_allocation_kind_check
+          CHECK (allocation_kind IN ('owner-websocket', 'club-tablet', 'club-personal'))`,
+        `ALTER TABLE ${schema}.wattbike_connection_leases
+          DROP CONSTRAINT IF EXISTS wattbike_connection_leases_club_assignment_complete`,
+        `ALTER TABLE ${schema}.wattbike_connection_leases
+          ADD CONSTRAINT wattbike_connection_leases_club_assignment_complete
+          CHECK (
+            (
+              allocation_kind = 'owner-websocket'
+              AND club_id IS NULL
+              AND studio_rider_id IS NULL
+              AND bike_device_id IS NULL
+            )
+            OR (
+              allocation_kind = 'club-tablet'
+              AND club_id IS NOT NULL
+              AND studio_rider_id IS NOT NULL
+              AND bike_device_id IS NOT NULL
+            )
+            OR (
+              allocation_kind = 'club-tablet'
+              AND club_id IS NULL
+              AND studio_rider_id IS NULL
+              AND bike_device_id IS NULL
+            )
+            OR (
+              allocation_kind = 'club-personal'
+              AND club_id IS NOT NULL
+              AND studio_rider_id IS NOT NULL
+              AND bike_device_id IS NULL
+            )
+          ) NOT VALID`,
+        `ALTER TABLE ${schema}.wattbike_connection_leases
+          VALIDATE CONSTRAINT wattbike_connection_leases_club_assignment_complete`,
+      ],
+    },
   ];
 }
 

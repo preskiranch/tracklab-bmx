@@ -1,4 +1,5 @@
 import { safeSetLocalStorage } from './browserStorage';
+import { subscribeToAuthenticatedEventStream } from './authenticatedEventStream';
 
 export type FriendOfficialKind = 'club' | 'founder';
 export type FriendRelationship = 'none' | 'friend' | 'incoming-request' | 'outgoing-request' | 'blocked' | 'self';
@@ -537,27 +538,19 @@ export function createFriendsApi(fetcher: typeof fetch = fetch): FriendsApi {
 }
 
 export function subscribeToFriendNetworkEvents(onInvalidated: () => void) {
-  if (typeof EventSource === 'undefined') return () => undefined;
-  let stream: EventSource;
-  try {
-    stream = new EventSource('/api/friends/events');
-  } catch {
-    return () => undefined;
-  }
-  const handleInvalidation = () => onInvalidated();
-  // Refreshing on every open makes this intentionally lossy stream safe across
-  // sleep, network changes, server restarts, and EventSource reconnects.
-  stream.addEventListener('open', handleInvalidation);
-  stream.addEventListener('graph-invalidated', handleInvalidation);
-  stream.addEventListener('track-shares-invalidated', handleInvalidation);
-  stream.addEventListener('live-audio-invites-invalidated', handleInvalidation);
-  return () => {
-    stream.removeEventListener('open', handleInvalidation);
-    stream.removeEventListener('graph-invalidated', handleInvalidation);
-    stream.removeEventListener('track-shares-invalidated', handleInvalidation);
-    stream.removeEventListener('live-audio-invites-invalidated', handleInvalidation);
-    stream.close();
-  };
+  const invalidations = new Set([
+    'graph-invalidated',
+    'track-shares-invalidated',
+    'live-audio-invites-invalidated',
+  ]);
+  // Refreshing on every authenticated open keeps this intentionally lossy
+  // stream safe across sleep, network changes, server restarts, and reconnects.
+  return subscribeToAuthenticatedEventStream('/api/friends/events', {
+    onOpen: onInvalidated,
+    onEvent: (event) => {
+      if (invalidations.has(event.type)) onInvalidated();
+    },
+  });
 }
 
 export function createClientRequestId() {

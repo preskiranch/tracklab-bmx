@@ -1,5 +1,6 @@
 import type { TrackLocatorRecord, TrackRecord } from '../types';
 import { trackCenter } from './googleMaps';
+import { trackLabPublicOrigin } from './serviceOrigins';
 
 type MapLinkTrack = TrackRecord | TrackLocatorRecord;
 
@@ -60,7 +61,7 @@ export function normalizeTrackLocatorId(value: unknown) {
 export function trackLocatorShareUrl(trackId: unknown, origin?: string) {
   const normalizedTrackId = normalizeTrackLocatorId(trackId);
   if (!normalizedTrackId) return '';
-  const baseOrigin = origin ?? (typeof window === 'undefined' ? '' : window.location.origin);
+  const baseOrigin = origin ?? trackLabPublicOrigin;
   try {
     const url = new URL('/', baseOrigin);
     if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) return '';

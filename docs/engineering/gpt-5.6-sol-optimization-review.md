@@ -12,7 +12,7 @@ This review implemented the improvements that provide measurable security, relia
 
 The automated release gate passes in full: 82 unit/API tests, 13 Chromium end-to-end workflows, type checking, catalog validation, production build, dependency audit, and bundle budgets. The production server smoke passes, and a bounded local load probe completed 100/100 requests with 12 ms p95 latency.
 
-The software engineering work on this branch is release-candidate quality. A literal 10/10 production signoff is intentionally conditional on the external acceptance items that code alone cannot prove: the documented physical 1-4 Wattbike matrix, PostgreSQL restore drill, Square lifecycle reconciliation, and representative deployed multiplayer/voice load. Calling the product perfect before those checks would hide operational risk rather than remove it.
+The software engineering work on this branch is release-candidate quality. A literal 10/10 production signoff is intentionally conditional on the external acceptance items that code alone cannot prove: the documented physical 1-4 Wattbike matrix, PostgreSQL restore drill, Apple StoreKit sandbox and server-notification acceptance, and representative deployed multiplayer/voice load. Calling the product perfect before those checks would hide operational risk rather than remove it.
 
 ## Review Method
 
@@ -128,7 +128,7 @@ The software engineering work on this branch is release-candidate quality. A lit
 ### Resolved before or during this review
 
 1. Authenticated profile ownership is derived server-side rather than accepted from a caller-selected profile key.
-2. Square return claims are verified against server-held checkout state and provider order data.
+2. Apple subscription transactions are verified from signed JWS data, bound to the authenticated account, and reconciled against App Store Server API status.
 3. Multiplayer identity and membership are server-authoritative.
 4. Private room visibility is filtered per authenticated participant.
 5. The local connector restricts web origins and payload sizes.
@@ -140,7 +140,7 @@ The software engineering work on this branch is release-candidate quality. A lit
 
 ### Remaining security work
 
-- **Square lifecycle webhooks (High):** Validate signed renewal, cancellation, refund, and failed-payment events and make entitlement reconciliation authoritative.
+- **StoreKit lifecycle acceptance (High):** Validate sandbox renewal, cancellation, refund, revoke, grace-period, and failed-payment events end to end before public enrollment.
 - **Account lifecycle (Medium):** Add verified email, password reset, optional MFA/passkeys, session/device management, account export, and deletion.
 - **Content Security Policy (Medium):** Introduce a tested policy after inventorying Google Maps/Earth script, worker, image, and connection origins.
 - **Connector capability token (Medium):** Add a per-install secret in addition to origin checks to protect loopback APIs from other local processes.
@@ -253,7 +253,7 @@ The branch is ready for review and staging. Award a 10/10 production signoff onl
 3. PostgreSQL backup and restore is executed in staging, with migration versions and row counts verified.
 4. The candidate is deployed with PostgreSQL required and passes `smoke:deployment` with `TRACKLAB_EXPECT_POSTGRES=1`.
 5. Representative deployed WebSocket room and race load meets agreed p95 latency and error-rate targets.
-6. Square subscription lifecycle events are reconciled through validated webhooks before paid public enrollment.
+6. App Store Server Notifications V2 lifecycle events are reconciled through validated signed payloads before paid public enrollment.
 7. Voice, if enabled for public multiplayer, passes TURN-backed connection testing across restrictive networks.
 
 ## Remaining Opportunities

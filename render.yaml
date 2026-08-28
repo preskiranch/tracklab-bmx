@@ -50,15 +50,25 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
-      - key: SQUARE_ENVIRONMENT
+      - key: TRACKLAB_APPLE_IAP_ENABLED
+        value: "0"
+      - key: TRACKLAB_APPLE_ONLY_CUTOVER
+        value: "0"
+      - key: TRACKLAB_APPLE_BUNDLE_ID
+        value: com.preskilranch.tracklabbmx
+      - key: TRACKLAB_APPLE_APP_ID
         sync: false
-      - key: SQUARE_VERSION
+      - key: TRACKLAB_APPLE_SUBSCRIPTION_GROUP_ID
         sync: false
-      - key: SQUARE_ACCESS_TOKEN
+      - key: TRACKLAB_APPLE_ISSUER_ID
         sync: false
-      - key: SQUARE_LOCATION_ID
+      - key: TRACKLAB_APPLE_KEY_ID
         sync: false
-      - key: SQUARE_RACER_PLAN_VARIATION_ID
+      - key: TRACKLAB_APPLE_PRIVATE_KEY
         sync: false
-      - key: SQUARE_RACER_PLAN_VARIATION_1_BIKE
+      - key: TRACKLAB_APPLE_RECONCILE_INTERVAL_MS
+        value: "900000"
+      - key: TRACKLAB_APPLE_RECONCILE_BATCH_SIZE
+        value: "100"
+      - key: TRACKLAB_APPLE_SANDBOX_ACCOUNT_TOKENS
         sync: false

@@ -7,6 +7,10 @@ export function createAuthSessionCache({
 } = {}) {
   const entries = new Map();
   const touchScheduledAt = new Map();
+  // Account IDs are immutable UUIDs. Keeping an erasure tombstone prevents an
+  // already-started database lookup from putting a deleted account back into
+  // either auth cache after the deletion transaction commits.
+  const erasedUserIds = new Set();
 
   const prune = (currentTime = now()) => {
     for (const [hash, entry] of entries) {
@@ -30,7 +34,12 @@ export function createAuthSessionCache({
   };
 
   const remember = (hash, session, currentTime = now()) => {
-    if (!hash || !session?.user || Date.parse(session.expiresAt ?? '') <= currentTime) {
+    if (
+      !hash
+      || !session?.user
+      || erasedUserIds.has(session.user.id)
+      || Date.parse(session.expiresAt ?? '') <= currentTime
+    ) {
       entries.delete(hash);
       return null;
     }
@@ -43,6 +52,16 @@ export function createAuthSessionCache({
   const forget = (hash) => {
     entries.delete(hash);
     touchScheduledAt.delete(hash);
+  };
+
+  const forgetUser = (userId) => {
+    if (!userId) return;
+    erasedUserIds.add(userId);
+    for (const [hash, entry] of entries) {
+      if (entry.session?.user?.id !== userId) continue;
+      entries.delete(hash);
+      touchScheduledAt.delete(hash);
+    }
   };
 
   const refreshUser = (user) => {
@@ -108,6 +127,7 @@ export function createAuthSessionCache({
 
   return Object.freeze({
     forget,
+    forgetUser,
     load,
     refreshUser,
     remember,

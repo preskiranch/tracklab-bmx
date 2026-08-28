@@ -22,6 +22,11 @@ import {
   type ClubTabletSessionCredential,
 } from './clubTabletStorage';
 import { recordedBikeMetricsAreAccepted } from './bikeSampleSanity';
+import { clearNativeAuthToken } from './nativeAuthSession';
+import {
+  normalizeWattbikeCapacityMessage,
+  type WattbikeCapacityState,
+} from './wattbikeCapacity';
 
 export * from './clubTabletStorage';
 
@@ -43,6 +48,12 @@ export type ClubTabletBikePresenceInput = Readonly<{
 type ClubTabletBikePresenceRequestOptions = Readonly<{
   keepalive?: boolean;
   signal?: AbortSignal;
+}>;
+
+export type ClubTabletPickerWattbikeCapacity = Readonly<{
+  capacity: WattbikeCapacityState;
+  expiresAt: number;
+  pollAfterMs: number;
 }>;
 
 async function tabletFetch(path: string, init: RequestInit = {}) {
@@ -328,6 +339,9 @@ export async function enrollClubTablet(name: string) {
   const credential = normalizeClubTabletDeviceCredential(payload);
   if (!credential) throw new Error('TrackLab returned an invalid tablet authorization.');
   storeClubTabletDevice(credential);
+  // Enrollment atomically retires the owner's cloud session. Mirror that
+  // boundary in the device-only Keychain before any kiosk request can reuse it.
+  await clearNativeAuthToken();
   return credential;
 }
 
@@ -373,6 +387,49 @@ export async function clearClubTabletBikePresence(
     signal: options.signal,
     headers: { Authorization: `Bearer ${credential.deviceToken}` },
   });
+}
+
+export async function claimClubTabletPickerWattbikeCapacity(
+  credential = readStoredClubTabletDevice(),
+  signal?: AbortSignal,
+): Promise<ClubTabletPickerWattbikeCapacity> {
+  if (!credential) throw new Error('This tablet has not been authorized by the club owner.');
+  const payload = await tabletFetch('/api/club-tablet/wattbike-capacity', {
+    method: 'PUT',
+    signal,
+    headers: { Authorization: `Bearer ${credential.deviceToken}` },
+  }) as Record<string, unknown>;
+  const capacity = normalizeWattbikeCapacityMessage(payload.capacity);
+  const expiresAt = positiveNumber(payload.expiresAt);
+  const pollAfterMs = positiveNumber(payload.pollAfterMs);
+  if (
+    !capacity
+    || capacity.requestedConnections !== 1
+    || capacity.grantedConnections > 1
+    || !expiresAt
+    || !pollAfterMs
+  ) {
+    throw new Error('TrackLab returned an invalid Club Tablet Wattbike authorization.');
+  }
+  return {
+    capacity,
+    expiresAt,
+    pollAfterMs: Math.max(2_000, Math.min(30_000, pollAfterMs)),
+  };
+}
+
+export async function releaseClubTabletPickerWattbikeCapacity(
+  credential = readStoredClubTabletDevice(),
+  options: ClubTabletBikePresenceRequestOptions = {},
+) {
+  if (!credential) return false;
+  const payload = await tabletFetch('/api/club-tablet/wattbike-capacity', {
+    method: 'DELETE',
+    keepalive: options.keepalive,
+    signal: options.signal,
+    headers: { Authorization: `Bearer ${credential.deviceToken}` },
+  }) as { released?: unknown };
+  return payload.released === true;
 }
 
 export async function revokeClubTabletDevice(deviceId: string) {
@@ -538,6 +595,23 @@ export async function requestClubTabletMultiplayerTicket(
     throw new Error('TrackLab returned an invalid multiplayer ticket.');
   }
   return { ticket, expiresAt };
+}
+
+/**
+ * Revalidates (without extending) the selected athlete session and its
+ * server-reserved Wattbike connection. Unlike refreshClubTabletSession this
+ * must not keep an abandoned kiosk identity alive.
+ */
+export async function validateClubTabletSessionCapacity(
+  credential = readStoredClubTabletSession(),
+  signal?: AbortSignal,
+) {
+  if (!credential || !clubTabletSessionMatchesCurrentDevice(credential)) return false;
+  await tabletFetch('/api/club-tablet/sessions', {
+    signal,
+    headers: clubTabletSessionHeaders(credential.sessionToken),
+  });
+  return true;
 }
 
 export function clubTabletAthleteDisplayName(athlete: ClubTabletAthlete | ClubTabletSession) {

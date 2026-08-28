@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import './MultiplayerPanel.css';
 import {
   Check,
   Copy,
+  Flag,
   Link,
   LogOut,
   MessageSquare,
@@ -10,6 +12,7 @@ import {
   Plus,
   RadioTower,
   Send,
+  ShieldOff,
   Shuffle,
   Trophy,
   UserPlus,
@@ -107,6 +110,8 @@ type MultiplayerPanelProps = {
   onRespondToGroupInvite: (inviteId: string, accepted: boolean) => void;
   onChatDraftChange: (value: string) => void;
   onChatSend: () => void;
+  onReportRoomMember: (riderId: string) => void;
+  onBlockRoomMember: (riderId: string) => void;
   voiceEnabled: boolean;
   voiceSupported: boolean;
   voiceStatus: string;
@@ -194,6 +199,8 @@ export function MultiplayerPanel({
   onRespondToGroupInvite,
   onChatDraftChange,
   onChatSend,
+  onReportRoomMember,
+  onBlockRoomMember,
   voiceEnabled,
   voiceSupported,
   voiceStatus,
@@ -289,6 +296,7 @@ export function MultiplayerPanel({
       at: new Date(message.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
     }))
     : chatMessages;
+  const roomSafetyMembers = currentRoom?.members.filter((member) => member.id !== currentUserId) ?? [];
   const remoteTelemetryRows = remoteRaceStates
     .flatMap((state) => state.riders.map((rider) => ({ state, rider })))
     .slice(0, maxPlayers);
@@ -803,6 +811,54 @@ export function MultiplayerPanel({
           })}
         </div>
       </section>
+
+      {playMode === 'multiplayer' && currentRoom && roomSafetyMembers.length > 0 && (
+        <section className="panel-section room-safety-section" aria-labelledby="room-safety-heading">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Safety</span>
+              <h3 id="room-safety-heading">Room rider controls</h3>
+            </div>
+            <ShieldOff size={18} />
+          </div>
+          {profileReadOnly ? (
+            <p className="diagnostic-note">
+              Report and block from the athlete&apos;s signed-in personal account.
+            </p>
+          ) : (
+            <div className="room-safety-list">
+              {roomSafetyMembers.map((member) => (
+                <div className="room-safety-row" key={member.id}>
+                  <strong>{member.name}</strong>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm(`Report ${member.name} to TrackLab safety for this room?`)) {
+                          onReportRoomMember(member.id);
+                        }
+                      }}
+                    >
+                      <Flag size={14} /> Report
+                    </button>
+                    <button
+                      type="button"
+                      className="danger"
+                      onClick={() => {
+                        if (window.confirm(`Block ${member.name}? You will leave any shared room immediately.`)) {
+                          onBlockRoomMember(member.id);
+                        }
+                      }}
+                    >
+                      <ShieldOff size={14} /> Block
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="panel-section chat-section">
         <div className="section-heading">

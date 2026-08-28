@@ -90,4 +90,22 @@ describe('bounded auth session cache', () => {
     await Promise.resolve();
     expect(toucher).toHaveBeenCalledTimes(2);
   });
+
+  it('forgets every cached session for an erased user and blocks an in-flight lookup from restoring it', async () => {
+    let resolveLookup!: (value: ReturnType<typeof session>) => void;
+    const pendingLookup = new Promise<ReturnType<typeof session>>((resolve) => { resolveLookup = resolve; });
+    const cache = createAuthSessionCache({ now: () => 1_000 });
+    cache.remember('first-hash', session('erased-user'));
+    cache.remember('other-hash', session('other-user'));
+    const pending = cache.load('pending-hash', () => pendingLookup);
+
+    cache.forgetUser('erased-user');
+    resolveLookup(session('erased-user'));
+
+    await expect(pending).resolves.toBeNull();
+    await expect(cache.load('first-hash', async () => session('erased-user'))).resolves.toBeNull();
+    await expect(cache.load('other-hash', vi.fn())).resolves.toMatchObject({
+      user: { id: 'other-user' },
+    });
+  });
 });

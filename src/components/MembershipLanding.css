@@ -1,0 +1,93 @@
+.apple-tier-selector {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.apple-tier-selector button {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  min-height: 74px;
+  padding: 8px 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #253342;
+  text-align: center;
+}
+
+.apple-tier-selector button.active {
+  border-color: #2388e8;
+  outline: 2px solid rgba(35, 136, 232, 0.16);
+  background: rgba(35, 136, 232, 0.08);
+}
+
+.apple-tier-selector strong {
+  font-size: 18px;
+}
+
+.apple-tier-selector span,
+.apple-tier-selector small {
+  overflow-wrap: anywhere;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.apple-tier-selector small {
+  color: var(--muted);
+}
+
+.apple-current-access {
+  padding: 9px 10px;
+  border: 1px solid rgba(101, 214, 54, 0.42);
+  border-radius: 7px;
+  background: rgba(101, 214, 54, 0.09);
+  color: #28531c !important;
+  font-weight: 750;
+}
+
+.apple-plan-price {
+  margin-top: -6px !important;
+  color: #175993 !important;
+  font-size: 18px !important;
+  font-weight: 850 !important;
+  line-height: 1.2 !important;
+}
+
+.apple-subscription-disclosure {
+  font-size: 11px !important;
+  line-height: 1.4 !important;
+}
+
+.apple-subscription-disclosure a {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+  color: #175993;
+  font-weight: 800;
+}
+
+.apple-subscription-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.apple-subscription-actions button {
+  justify-content: center;
+  min-width: 0;
+  padding-inline: 8px;
+  font-size: 11px;
+}
+
+@media (max-width: 460px) {
+  .apple-tier-selector {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .apple-subscription-actions {
+    grid-template-columns: 1fr;
+  }
+}

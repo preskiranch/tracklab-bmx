@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import {
   databaseMigrations,
@@ -50,6 +51,27 @@ function fakeDatabase(options: {
 }
 
 describe('database migration runner', () => {
+  it('copies Apple billing and connection-capacity tables during database moves', () => {
+    const source = readFileSync(
+      new URL('../../scripts/migrate-tracklab-postgres.mjs', import.meta.url),
+      'utf8',
+    );
+    const authUsers = source.indexOf("'auth_users'");
+    const lineageBindings = source.indexOf("'apple_iap_lineage_token_bindings'");
+    const subscriptions = source.indexOf("'apple_iap_subscriptions'");
+    const transactions = source.indexOf("'apple_iap_transactions'");
+    const notifications = source.indexOf("'apple_iap_notifications'");
+    const leases = source.indexOf("'wattbike_connection_leases'");
+
+    expect(authUsers).toBeGreaterThanOrEqual(0);
+    expect(lineageBindings).toBeGreaterThan(authUsers);
+    expect(lineageBindings).toBeLessThan(subscriptions);
+    expect(subscriptions).toBeGreaterThan(authUsers);
+    expect(transactions).toBeGreaterThan(subscriptions);
+    expect(notifications).toBeGreaterThan(subscriptions);
+    expect(leases).toBeGreaterThan(authUsers);
+  });
+
   it('includes recovery for custom sprint maps saved while the location was still a preview', () => {
     const recoveryMigration = databaseMigrations().find((candidate) => candidate.version === 9);
 
@@ -145,6 +167,122 @@ describe('database migration runner', () => {
     expect(statements).toContain('session_token_hash TEXT NOT NULL UNIQUE');
     expect(statements).toContain('expires_at TIMESTAMPTZ NOT NULL');
     expect(statements).not.toContain('session_token TEXT');
+  });
+
+  it('stores verified Apple subscriptions, transaction history, and idempotent V2 notifications', () => {
+    const appleMigration = databaseMigrations().find((candidate) => candidate.version === 29);
+    const statements = appleMigration?.statements.join('\n') ?? '';
+
+    expect(appleMigration).toMatchObject({
+      version: 29,
+      name: 'make verified apple subscriptions authoritative for wattbike seats',
+    });
+    expect(statements).toContain('legacy_membership_tier');
+    expect(statements).toContain('apple_billing_managed');
+    expect(statements).toContain('apple_iap_subscriptions');
+    expect(statements).toContain('apple_iap_transactions');
+    expect(statements).toContain('bike_seats BETWEEN 1 AND 4');
+    expect(statements).toContain('app_account_token');
+    expect(statements).toContain('apple_iap_notifications');
+    expect(statements).toContain('notification_uuid TEXT PRIMARY KEY');
+    expect(statements).toContain('signed_payload_sha256');
+    expect(statements).toContain('reconciled_at TIMESTAMPTZ NOT NULL');
+  });
+
+  it('stores short account-wide Wattbike connection leases', () => {
+    const capacityMigration = databaseMigrations().find((candidate) => candidate.version === 30);
+    const statements = capacityMigration?.statements.join('\n') ?? '';
+
+    expect(capacityMigration).toMatchObject({
+      version: 30,
+      name: 'enforce account wide wattbike connection capacity',
+    });
+    expect(statements).toContain('wattbike_connection_leases');
+    expect(statements).toContain('billing_owner_user_id');
+    expect(statements).toContain("allocation_kind IN ('owner-websocket', 'club-tablet')");
+    expect(statements).toContain('seat_count BETWEEN 1 AND 4');
+    expect(statements).toContain('expires_at TIMESTAMPTZ NOT NULL');
+    expect(statements).toContain('PRIMARY KEY (billing_owner_user_id, allocation_key)');
+    expect(statements).toContain('idx_tracklab_wattbike_connection_leases_expiry');
+  });
+
+  it('persists cross-instance Club Tablet athlete and bike holders', () => {
+    const tabletHolderMigration = databaseMigrations().find((candidate) => candidate.version === 34);
+    const statements = tabletHolderMigration?.statements.join('\n') ?? '';
+
+    expect(tabletHolderMigration).toMatchObject({
+      version: 34,
+      name: 'persist club tablet session assignment holders',
+    });
+    expect(statements).toContain('wattbike_connection_leases');
+    expect(statements).toContain('club_id TEXT');
+    expect(statements).toContain('studio_rider_id TEXT');
+    expect(statements).toContain('bike_device_id TEXT');
+    expect(statements).toContain('wattbike_connection_leases_club_assignment_complete');
+    expect(statements).toContain('idx_tracklab_wattbike_leases_club_rider');
+    expect(statements).toContain('idx_tracklab_wattbike_leases_club_bike');
+  });
+
+  it('adds club-funded personal devices to the shared Wattbike lease pool', () => {
+    const personalLeaseMigration = databaseMigrations().find((candidate) => candidate.version === 35);
+    const statements = personalLeaseMigration?.statements.join('\n') ?? '';
+
+    expect(personalLeaseMigration).toMatchObject({
+      version: 35,
+      name: 'share wattbike capacity with club personal devices',
+    });
+    expect(statements).toContain("'club-personal'");
+    expect(statements).toContain('wattbike_connection_leases_allocation_kind_check');
+    expect(statements).toContain('wattbike_connection_leases_club_assignment_complete');
+    expect(statements).toMatch(/allocation_kind = 'club-tablet'[\s\S]*club_id IS NULL[\s\S]*studio_rider_id IS NULL[\s\S]*bike_device_id IS NULL/);
+    expect(statements).toContain("allocation_kind = 'club-personal'");
+    expect(statements).toContain('bike_device_id IS NULL');
+  });
+
+  it('adds accountable administrator review fields to community reports', () => {
+    const moderationMigration = databaseMigrations().find((candidate) => candidate.version === 32);
+    const statements = moderationMigration?.statements.join('\n') ?? '';
+
+    expect(moderationMigration).toMatchObject({
+      version: 32,
+      name: 'add accountable community report moderation',
+    });
+    expect(statements).toContain('moderation_action');
+    expect(statements).toContain('moderation_note');
+    expect(statements).toContain('reviewed_by_user_id');
+    expect(statements).toContain("'protect-reporter'");
+    expect(statements).toContain('ON DELETE SET NULL');
+    expect(statements).toContain('idx_tracklab_friend_reports_review_queue');
+  });
+
+  it('retains only a pseudonymous Apple lineage binding after account deletion', () => {
+    const recoveryMigration = databaseMigrations().find((candidate) => candidate.version === 33);
+    const statements = recoveryMigration?.statements.join('\n') ?? '';
+
+    expect(recoveryMigration).toMatchObject({
+      version: 33,
+      name: 'retain pseudonymous apple lineage for restore after account deletion',
+    });
+    expect(statements).toContain('apple_iap_lineage_token_bindings');
+    expect(statements).toContain('app_account_token_sha256');
+    expect(statements).toContain('bound_user_id TEXT');
+    expect(statements).toContain('ON DELETE SET NULL');
+    expect(statements).toContain('WHERE bound_user_id IS NULL');
+    expect(statements).not.toContain('email');
+    expect(statements).not.toContain('display_name');
+  });
+
+  it('prepares Apple billing projection without destructively cutting over customers', () => {
+    const cutoverMigration = databaseMigrations().find((candidate) => candidate.version === 31);
+    const statements = cutoverMigration?.statements.join('\n') ?? '';
+
+    expect(cutoverMigration).toMatchObject({
+      version: 31,
+      name: 'prepare query time apple billing entitlement projection',
+    });
+    expect(statements).toContain('idx_tracklab_auth_users_apple_billing_projection');
+    expect(statements).not.toContain("membership_tier = 'spectator'");
+    expect(statements).not.toContain('UPDATE');
   });
 
   it('adds durable per-account display unit preferences', () => {

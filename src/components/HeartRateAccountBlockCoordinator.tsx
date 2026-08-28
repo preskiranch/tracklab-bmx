@@ -14,6 +14,7 @@ import {
   HeartRateAccountBlockSettings,
   type HeartRateAccountBlockActionState,
 } from './HeartRateAccountBlockSettings';
+import { trackLabPublicOrigin, trackLabServiceOrigin } from '../lib/serviceOrigins';
 
 export const heartRateAccountBlockSettingsSlotId = 'heart-rate-account-block-settings-slot';
 
@@ -168,11 +169,15 @@ export function HeartRateAccountBlockCoordinator({
           setHandoffPending(false);
           return;
         }
+        const publicHandoffHref = helpers.heartRateAccountBlockHandoffHref(
+          trackLabPublicOrigin,
+          parsed.pairCode,
+        );
         secretRef.current = {
           pairCode: parsed.pairCode,
           pairingId: null,
           blockId: null,
-          handoffHref: window.location.href,
+          handoffHref: publicHandoffHref || null,
         };
         setHandoffPending(true);
       });
@@ -196,9 +201,15 @@ export function HeartRateAccountBlockCoordinator({
     ]).then(async ([nativeLinks, handoff]) => {
       listener = await nativeLinks.listenForHeartRateAccountBlockAppLinks((pairCode) => {
         if (disposed) return;
-        const handoffHref = handoff.heartRateAccountBlockHandoffHref(window.location.href, pairCode);
-        if (!handoffHref) return;
-        window.history.replaceState(window.history.state, '', handoffHref);
+        const handoffHref = handoff.heartRateAccountBlockHandoffHref(trackLabPublicOrigin, pairCode);
+        const localHandoff = handoff.heartRateAccountBlockHandoffHref(window.location.href, pairCode);
+        if (!handoffHref || !localHandoff) return;
+        const localUrl = new URL(localHandoff);
+        window.history.replaceState(
+          window.history.state,
+          '',
+          `${localUrl.pathname}${localUrl.search}${localUrl.hash}`,
+        );
         secretRef.current = { pairCode, pairingId: null, blockId: null, handoffHref };
         setHandoffPending(true);
       });
@@ -306,7 +317,7 @@ export function HeartRateAccountBlockCoordinator({
     }
     const request = import('../lib/heartRateAccountBlockActions').then((actions) => (
       actions.prepareHeartRateAccountBlockHandoff({
-        currentHref: window.location.href,
+        currentHref: trackLabPublicOrigin,
         waitingBlock,
         requestId,
       })
@@ -349,7 +360,7 @@ export function HeartRateAccountBlockCoordinator({
           accountId,
           secret,
           currentWorkout: heartRate.status,
-          baseUrl: window.location.origin,
+          baseUrl: trackLabServiceOrigin,
           startWorkout: heartRate.startWorkout,
           resumeWorkout: heartRate.resumeWorkout,
           endWorkout: heartRate.endWorkout,

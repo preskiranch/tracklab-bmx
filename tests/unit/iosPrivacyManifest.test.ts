@@ -74,10 +74,43 @@ describe('iOS required-reason API declarations', () => {
     }
   });
 
-  it('keeps iOS and embedded Watch Debug and Release builds on build 16', () => {
+  it('keeps iOS and embedded Watch Debug and Release builds on build 18', () => {
     const buildNumbers = [...xcodeProject.matchAll(
       /CURRENT_PROJECT_VERSION = (\d+);/g,
     )].map((match) => match[1]);
-    expect(buildNumbers).toEqual(['16', '16', '16', '16']);
+    expect(buildNumbers).toEqual(['18', '18', '18', '18']);
+  });
+
+  it('declares every linked account, training, social, route, purchase, and diagnostic type without tracking', () => {
+    for (const dataType of [
+      'NSPrivacyCollectedDataTypeHealth',
+      'NSPrivacyCollectedDataTypeFitness',
+      'NSPrivacyCollectedDataTypePurchaseHistory',
+      'NSPrivacyCollectedDataTypeUserID',
+      'NSPrivacyCollectedDataTypeName',
+      'NSPrivacyCollectedDataTypeEmailAddress',
+      'NSPrivacyCollectedDataTypePhysicalAddress',
+      'NSPrivacyCollectedDataTypeContacts',
+      'NSPrivacyCollectedDataTypeEmailsOrTextMessages',
+      'NSPrivacyCollectedDataTypePhotosorVideos',
+      'NSPrivacyCollectedDataTypePreciseLocation',
+      'NSPrivacyCollectedDataTypeGameplayContent',
+      'NSPrivacyCollectedDataTypeOtherUserContent',
+      'NSPrivacyCollectedDataTypeSearchHistory',
+      'NSPrivacyCollectedDataTypeDeviceID',
+      'NSPrivacyCollectedDataTypeProductInteraction',
+      'NSPrivacyCollectedDataTypeOtherDiagnosticData',
+    ]) {
+      expect(appPrivacyManifest).toMatch(new RegExp(
+        `<string>${dataType}</string>[\\s\\S]*?`
+          + '<key>NSPrivacyCollectedDataTypeLinked</key>\\s*<true\\/>[\\s\\S]*?'
+          + '<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>[\\s\\S]*?'
+          + '<key>NSPrivacyCollectedDataTypeTracking</key>\\s*<false\\/>',
+      ));
+    }
+    expect(appPrivacyManifest).toContain('NSPrivacyCollectedDataTypePurposeAnalytics');
+    expect(appPrivacyManifest).toMatch(
+      /<key>NSPrivacyTracking<\/key>\s*<false\/>/,
+    );
   });
 });

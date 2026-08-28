@@ -638,23 +638,18 @@ describe('cross-device live heart-rate cloud client', () => {
     }
   });
 
-  it('never replaces a consented club subscription with a personal snapshot', () => {
-    const fetchMock = vi.fn();
-    let openedUrl = '';
-    let closed = false;
-    class FakeEventSource {
-      constructor(url: string) { openedUrl = url; }
-      addEventListener() {}
-      removeEventListener() {}
-      close() { closed = true; }
-    }
+  it('keeps a consented club subscription on its authenticated stream without a personal snapshot', async () => {
+    const fetchMock = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      start() {},
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }));
     vi.stubGlobal('fetch', fetchMock);
-    vi.stubGlobal('EventSource', FakeEventSource);
 
     const unsubscribe = subscribeToHeartRateLive(vi.fn(), { clubId: 'club-1' });
-    expect(openedUrl).toBe('/api/heart-rate/live?clubId=club-1');
-    expect(fetchMock).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/heart-rate/live?clubId=club-1',
+      expect.objectContaining({ credentials: 'same-origin' }),
+    );
     unsubscribe();
-    expect(closed).toBe(true);
   });
 });

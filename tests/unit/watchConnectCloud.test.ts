@@ -2169,7 +2169,9 @@ describe('Watch Connect cloud workflow', () => {
     expect(responses[60].status).toBe(429);
     expect(responses[60].headers.get('ratelimit-limit')).toBe('60');
     expect(responses[60].headers.get('retry-after')).toMatch(/^\d+$/);
+    // Malformed session tokens are rejected before persistence; the anonymous
+    // per-IP admission budget still caps the flood at 60 requests.
     expect(await metricValue('tracklab_auth_session_lookups_total', '{backend="memory"}'))
-      .toBe(lookupsBefore + 60);
+      .toBe(lookupsBefore);
   });
 });

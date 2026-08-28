@@ -1,5 +1,18 @@
 const defaultRateLimitWindowMs = 15 * 60 * 1000;
 const maxRateLimitEntries = 10_000;
+export const trackLabCapacitorOrigin = 'capacitor://localhost';
+
+const nativeCorsMethods = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']);
+const nativeCorsHeaders = new Map([
+  ['accept', 'Accept'],
+  ['authorization', 'Authorization'],
+  ['content-type', 'Content-Type'],
+  ['x-tracklab-native-session', 'X-TrackLab-Native-Session'],
+  ['x-tracklab-club-tablet-session', 'X-TrackLab-Club-Tablet-Session'],
+  ['x-tracklab-club-tablet-result-token', 'X-TrackLab-Club-Tablet-Result-Token'],
+  ['x-tracklab-group-completion-token', 'X-TrackLab-Group-Completion-Token'],
+  ['x-tracklab-monitor-save-token', 'X-TrackLab-Monitor-Save-Token'],
+]);
 
 function firstHeaderValue(value) {
   return String(value || '').split(',')[0].trim();
@@ -29,12 +42,15 @@ export function publicRequestOrigin(request) {
 }
 
 export function mutationOriginAllowed(request) {
+  const origin = firstHeaderValue(request.headers.origin);
+  // WKWebView correctly labels its HTTPS service call as cross-site. The exact
+  // non-HTTP Capacitor origin cannot be asserted by an ordinary website.
+  if (origin === trackLabCapacitorOrigin) return true;
   const fetchSite = firstHeaderValue(request.headers['sec-fetch-site']).toLowerCase();
   if (fetchSite === 'cross-site') {
     return false;
   }
 
-  const origin = firstHeaderValue(request.headers.origin);
   if (!origin) {
     return true;
   }
@@ -49,6 +65,38 @@ export function mutationOriginAllowed(request) {
   } catch {
     return false;
   }
+}
+
+export function nativeAppCorsPreflight(request) {
+  if (
+    firstHeaderValue(request.headers.origin) !== trackLabCapacitorOrigin
+    || String(request.method || '').toUpperCase() !== 'OPTIONS'
+    || !String(request.url || '').startsWith('/api/')
+  ) return { native: false, allowed: false };
+  const method = firstHeaderValue(request.headers['access-control-request-method']).toUpperCase();
+  const requestedHeaders = String(request.headers['access-control-request-headers'] || '')
+    .toLowerCase()
+    .split(',')
+    .map((header) => header.trim())
+    .filter(Boolean);
+  return {
+    native: true,
+    allowed: nativeCorsMethods.has(method)
+      && requestedHeaders.every((header) => nativeCorsHeaders.has(header)),
+  };
+}
+
+export function applyNativeAppCors(request, response) {
+  if (
+    firstHeaderValue(request.headers.origin) !== trackLabCapacitorOrigin
+    || !String(request.url || '').startsWith('/api/')
+  ) return false;
+  response.setHeader('Access-Control-Allow-Origin', trackLabCapacitorOrigin);
+  response.setHeader('Access-Control-Allow-Methods', [...nativeCorsMethods].join(', '));
+  response.setHeader('Access-Control-Allow-Headers', [...nativeCorsHeaders.values()].join(', '));
+  response.setHeader('Access-Control-Max-Age', '600');
+  response.setHeader('Vary', 'Origin');
+  return true;
 }
 
 export function applySecurityHeaders(request, response) {

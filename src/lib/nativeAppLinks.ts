@@ -2,7 +2,7 @@ import { App as CapacitorApp, type URLOpenListenerEvent } from '@capacitor/app';
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { normalizeHeartRateAccountBlockCode } from './heartRateAccountBlock';
 import { normalizeHeartRateStudioInviteCode } from './heartRateCloud';
-import { normalizeTrackLocatorId, trackLocatorShareUrl } from './mapLinks';
+import { normalizeTrackLocatorId } from './mapLinks';
 
 export const trackLabUniversalLinkHost = 'tracklab-bmx.onrender.com' as const;
 
@@ -78,9 +78,15 @@ export async function listenForHeartRateStudioInviteAppLinks(
     if (!trackId || (lastDisposition === disposition && now - lastTrackDispositionAt < 1_000)) return;
     lastDisposition = disposition;
     lastTrackDispositionAt = now;
-    const href = typeof window === 'undefined' ? '' : trackLocatorShareUrl(trackId, window.location.origin);
-    if (href) {
-      window.history.replaceState(window.history.state, '', href);
+    if (typeof window !== 'undefined') {
+      const href = new URL(window.location.href);
+      href.searchParams.set('locator', trackId);
+      href.hash = 'track-locator';
+      window.history.replaceState(
+        window.history.state,
+        '',
+        `${href.pathname}${href.search}${href.hash}`,
+      );
       window.dispatchEvent(new PopStateEvent('popstate'));
     }
     options.onTrackLocator?.(trackId);

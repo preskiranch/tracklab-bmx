@@ -249,6 +249,51 @@ async function createMockBikeBridge(deviceIds = [58701]) {
   };
 }
 
+async function routeWattbikeCapacity(page: Page, seats = 4) {
+  const connectionLimit = Math.max(0, Math.min(4, Math.round(seats)));
+  await page.route('**/api/auth/websocket-ticket', async (route) => {
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ticket: 'c'.repeat(43),
+        expiresAt: Date.now() + 60_000,
+      }),
+    });
+  });
+  await page.routeWebSocket(/\/multiplayer(?:\?|$)/, (socket) => {
+    const socketConnectionLimit = new URL(socket.url()).searchParams.has('clubTabletTicket')
+      ? 1
+      : connectionLimit;
+    socket.onMessage((rawMessage) => {
+      let message: { type?: string; bikeCount?: number };
+      try {
+        message = JSON.parse(String(rawMessage)) as { type?: string; bikeCount?: number };
+      } catch {
+        return;
+      }
+      if (message.type === 'hello') {
+        socket.send(JSON.stringify({ type: 'connected', clientId: 'capacity-test' }));
+      }
+      if (message.type !== 'hello' && message.type !== 'presence') return;
+      const requestedConnections = Math.max(
+        0,
+        Math.min(4, Math.round(Number(message.bikeCount) || 0)),
+      );
+      const grantedConnections = Math.min(requestedConnections, socketConnectionLimit);
+      socket.send(JSON.stringify({
+        type: 'wattbike-capacity',
+        requestedConnections,
+        grantedConnections,
+        connectionLimit: socketConnectionLimit,
+        accountConnectionsInUse: grantedConnections,
+        action: requestedConnections > grantedConnections ? 'disconnect-excess' : 'none',
+        reason: 'playwright-capacity',
+      }));
+    });
+  });
+}
+
 test('public landing page exposes the global track locator without an account', async ({ page }, testInfo) => {
   await page.route('**/api/auth/me', async (route) => {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: null }) });
@@ -792,6 +837,14 @@ test('Friends hub shows removable official connections and private account disco
     });
   });
   await page.route('https://maps.googleapis.com/**', (route) => route.abort());
+  await page.route('**/api/auth/websocket-ticket', (route) => route.fulfill({
+    status: 201,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      ticket: 'a'.repeat(43),
+      expiresAt: Date.now() + 60_000,
+    }),
+  }));
   await page.addInitScript(() => {
     (window as any).__tracklabMicRequests = 0;
     Object.defineProperty(navigator, 'mediaDevices', {
@@ -1602,6 +1655,9 @@ test('iPhone seals one earlier Watch session once and keeps its finalized outbox
       },
     };
   }, { deadline: connectedUntil, connectionId: earlierConnectionId, sessionId: earlierSessionId });
+  await page.route('**/api/health', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+  });
   await page.route('**/api/auth/me', async (route) => {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
   });
@@ -1929,6 +1985,7 @@ test('live Get Pulled ignores backward cranking and starts on the first 1-watt p
   const deviceIds = [58701, 58702, 58703, 58704];
   const selectedDeviceId = deviceIds[1];
   const bridge = await createMockBikeBridge(deviceIds);
+  await routeWattbikeCapacity(page, deviceIds.length);
   let powerWatts = 0;
   let broadcastAllBikes = true;
   const sampleTimer = setInterval(() => {
@@ -2047,6 +2104,7 @@ test('Monitor View fills the screen, travels across the road, and rejects post-s
   test.setTimeout(35_000);
   const deviceId = 58701;
   const bridge = await createMockBikeBridge([deviceId]);
+  await routeWattbikeCapacity(page, 1);
   const authUser = {
     id: 'monitor-view-racer',
     profileKey: 'user:monitor-view-racer',
@@ -2135,6 +2193,7 @@ test('Monitor View fits four complete bike panels into a fullscreen 2-by-2 wall 
   test.setTimeout(30_000);
   const deviceIds = [58701, 58702, 58703, 58704];
   const bridge = await createMockBikeBridge(deviceIds);
+  await routeWattbikeCapacity(page, deviceIds.length);
   let connectedBikeCount = 4;
   const sampleTimer = setInterval(() => deviceIds.slice(0, connectedBikeCount).forEach((deviceId, index) => {
     bridge.broadcast(mockBikeSample({
@@ -3264,6 +3323,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
 test('live Explore ride survives a temporary Wattbike sample gap', async ({ page }) => {
   const deviceId = 733112;
   const bridge = await createMockBikeBridge([deviceId]);
+  await routeWattbikeCapacity(page, 1);
   const authUser = {
     id: 'live-explore-racer',
     profileKey: 'user:live-explore-racer',
@@ -3371,6 +3431,7 @@ test('unfinished local Explore ride restores across reload and after returning f
   test.setTimeout(90_000);
   const deviceId = 733113;
   const bridge = await createMockBikeBridge([deviceId]);
+  await routeWattbikeCapacity(page, 1);
   const sampleTimer = setInterval(() => {
     bridge.broadcast(mockBikeSample({
       deviceId,
@@ -3523,6 +3584,7 @@ test('Windows Bluetooth pairing widens discovery and stays pending until TrackLa
     admin: false,
     membership: { tier: 'racer', bikeSeats: 4, updatedAt: Date.now() },
   };
+  await routeWattbikeCapacity(page, authUser.membership.bikeSeats);
 
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'userAgent', {
@@ -3598,6 +3660,7 @@ test('Bluetooth pairing stays open for multiple Wattbikes and restores approved 
     admin: false,
     membership: { tier: 'racer', bikeSeats: 4, updatedAt: Date.now() },
   };
+  await routeWattbikeCapacity(page, authUser.membership.bikeSeats);
 
   await page.addInitScript(() => {
     const makeDevice = (index: number) => {
@@ -6125,6 +6188,7 @@ test('completed race finishes the active sentence and authoritative placements b
 test('live race with mapped pedal zones stays active through UCI gate cadence', async ({ page }, testInfo) => {
   test.setTimeout(60_000);
   const bridge = await createMockBikeBridge();
+  await routeWattbikeCapacity(page, 1);
   let moving = false;
   const sampleTimer = setInterval(() => bridge.broadcast(mockBikeSample({
     watts: moving ? 320 : 0,
@@ -6317,6 +6381,7 @@ test('live race with mapped pedal zones stays active through UCI gate cadence', 
 test('live cadence detects a false start and automatically rearms after five seconds', async ({ page }, testInfo) => {
   test.setTimeout(80_000);
   const bridge = await createMockBikeBridge();
+  await routeWattbikeCapacity(page, 1);
   let moving = false;
   const sampleTimer = setInterval(() => bridge.broadcast(mockBikeSample({
     watts: moving ? 140 : 0,
@@ -6421,6 +6486,7 @@ test('live cadence detects a false start and automatically rearms after five sec
 
 test('two-bike live race stays fullscreen through UCI cadence with no pedal zones', async ({ page }, testInfo) => {
   const bridge = await createMockBikeBridge([58701, 58702]);
+  await routeWattbikeCapacity(page, 2);
   const raceViewPreferencePatches: Array<{
     cameraLocked?: boolean;
     riderOverlaysByTrack?: Record<string, { locked?: boolean }>;
@@ -6573,6 +6639,7 @@ test('connected bike names remain bound to their monitor IDs after reload', asyn
   const deviceIds = [43853, 58701];
   const wattbikePmLabels = ['WattbikePM25043950', 'WattbikePM25043851'];
   const bridge = await createMockBikeBridge(deviceIds);
+  await routeWattbikeCapacity(page, deviceIds.length);
   const sampleTimer = setInterval(() => {
     deviceIds.forEach((deviceId, index) => {
       bridge.broadcast(mockBikeSample({
@@ -7473,6 +7540,7 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
 });
 
 test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode between sessions', async ({ page }) => {
+  test.setTimeout(120_000);
   const now = Date.now();
   const authUser = {
     id: 'club-tablet-owner',
@@ -7739,6 +7807,17 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
       },
     });
   });
+  await routeWattbikeCapacity(page, 1);
+  await page.route('**/api/club-tablet/multiplayer-ticket', async (route) => {
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ticket: 't'.repeat(43),
+        expiresAt: Date.now() + 60_000,
+      }),
+    });
+  });
   await page.route('**/api/auth/me', async (route) => {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
   });
@@ -7853,6 +7932,31 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
       body: JSON.stringify({ device: tabletDevice, athletes, racePresentation }),
     });
   });
+  await page.route('**/api/club-tablet/wattbike-capacity', async (route) => {
+    if (route.request().method() === 'DELETE') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ released: false }),
+      });
+      return;
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        capacity: {
+          type: 'wattbike-capacity',
+          requestedConnections: 1,
+          grantedConnections: 1,
+          connectionLimit: 4,
+          accountConnectionsInUse: 1,
+          action: 'none',
+          reason: 'club-tablet-picker-reserved',
+        },
+        expiresAt: Date.now() + 45_000,
+        pollAfterMs: 15_000,
+      }),
+    });
+  });
   await page.route('**/api/club-tablet/sessions', async (route) => {
     if (route.request().method() === 'POST') {
       sessionPosts += 1;
@@ -7867,6 +7971,13 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
           heartbeatTtlMs: 120_000,
           pollAfterMs: 30_000,
         }),
+      });
+      return;
+    }
+    if (route.request().method() === 'GET') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ session }),
       });
       return;
     }
@@ -8148,7 +8259,17 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
     (window as typeof window & { __tracklabRestoreClubTabletBike?: () => void })
       .__tracklabRestoreClubTabletBike?.();
   });
-  await page.getByRole('button', { name: 'Reconnect saved Wattbike', exact: true }).click();
+  const reconnectSavedWattbike = page.getByRole('button', {
+    name: 'Reconnect saved Wattbike',
+    exact: true,
+  });
+  await expect.poll(async () => (
+    await bikeChoices.getByRole('button').count()
+    + await reconnectSavedWattbike.count()
+  )).toBeGreaterThan(0);
+  if (await reconnectSavedWattbike.isVisible()) {
+    await reconnectSavedWattbike.click();
+  }
   await expect(bikeChoices.getByRole('button')).toHaveCount(1);
 
   // Program-first: choosing the athlete second creates exactly one secure
@@ -8237,6 +8358,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
 
 test('studio rider roster syncs to the account and can be assigned to a connected bike', async ({ page }) => {
   const bridge = await createMockBikeBridge([58701]);
+  await routeWattbikeCapacity(page, 1);
   const sampleTimer = setInterval(() => {
     bridge.broadcast(mockBikeSample({
       deviceId: 58701,
@@ -8336,6 +8458,7 @@ test('studio rider roster syncs to the account and can be assigned to a connecte
 test('four-bike Bluetooth heartbeat and sample churn keeps the exact rider selection stable', async ({ page }) => {
   const deviceIds = [58701, 58702, 58703, 58704];
   const bridge = await createMockBikeBridge(deviceIds);
+  await routeWattbikeCapacity(page, deviceIds.length);
   let sampledDeviceIds = [...deviceIds];
   const sampleTimer = setInterval(() => {
     sampledDeviceIds.forEach((deviceId, index) => bridge.broadcast(mockBikeSample({

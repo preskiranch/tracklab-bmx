@@ -61,24 +61,24 @@ import {
   maximumAcceptedTrainingSpeedKph,
   maximumAcceptedTrainingSpeedMph,
 } from '../bridge/bike-metric-sanity.mjs';
+import { AppleBillingError, createAppleBillingService } from './appleBilling.mjs';
+import { wattbikeMembershipForAccount } from './appleMembership.mjs';
 import {
-  createRacerSubscriptionCheckout,
-  racerMonthlyCents,
-  squareCheckoutConfigStatus,
-  verifyRacerSubscriptionOrder,
-} from './squareBilling.mjs';
-import {
+  applyNativeAppCors,
   applySecurityHeaders,
   createRateLimiter,
   mutationOriginAllowed,
+  nativeAppCorsPreflight,
   pathIsInside,
   publicRequestOrigin,
   requestClientIp,
   staticCacheControl,
+  trackLabCapacitorOrigin,
 } from './httpSecurity.mjs';
 import { fetchExploreElevationProfile } from './exploreElevation.mjs';
 import { generateSmartExplorePlan } from './exploreSmartRoute.mjs';
 import { createAuthSessionCache } from './authSessionCache.mjs';
+import { moderateRoomChatText } from './roomChatModeration.mjs';
 import {
   ApnsProvider,
   apnsConfigurationFromEnv,
@@ -102,6 +102,28 @@ const serverInstanceId = randomUUID();
 const apnsConfiguration = apnsConfigurationFromEnv(process.env);
 const pushTokenProtection = pushTokenProtectionConfiguration(process.env);
 const apnsProvider = new ApnsProvider(apnsConfiguration);
+const appleBilling = createAppleBillingService();
+const appleOnlyBillingCutoverRequested = ['1', 'true', 'yes', 'on'].includes(
+  String(process.env.TRACKLAB_APPLE_ONLY_CUTOVER || '').trim().toLowerCase(),
+);
+if (appleOnlyBillingCutoverRequested && !appleBilling.configuration.configured) {
+  throw new Error(
+    'TRACKLAB_APPLE_ONLY_CUTOVER requires a complete, enabled Apple IAP configuration.',
+  );
+}
+const appleOnlyBillingCutover = appleOnlyBillingCutoverRequested;
+const configuredAppleReconciliationIntervalMs = Number(
+  process.env.TRACKLAB_APPLE_RECONCILE_INTERVAL_MS,
+);
+const appleReconciliationIntervalMs = Number.isFinite(configuredAppleReconciliationIntervalMs)
+  ? Math.max(60_000, Math.min(24 * 60 * 60 * 1000, configuredAppleReconciliationIntervalMs))
+  : 15 * 60 * 1000;
+const configuredAppleReconciliationBatchSize = Number(
+  process.env.TRACKLAB_APPLE_RECONCILE_BATCH_SIZE,
+);
+const appleReconciliationBatchSize = Number.isFinite(configuredAppleReconciliationBatchSize)
+  ? Math.max(1, Math.min(200, Math.round(configuredAppleReconciliationBatchSize)))
+  : 100;
 let apnsRuntimeFailure = '';
 let apnsRuntimeFailureAt = 0;
 let pushWorkerRunning = false;
@@ -111,6 +133,7 @@ let pushWorkerKickTimer = null;
 
 const clients = new Map();
 const trainingHistoryStreams = new Map();
+const trainingHistoryStreamSessions = new WeakMap();
 const friendEventStreams = new Map();
 const friendEventStreamSessions = new WeakMap();
 const friendPresenceOnlineProfiles = new Set();
@@ -136,7 +159,7 @@ const clubTabletBikePresenceByDeviceId = new Map();
 const clubTabletSessionsByTokenHash = new Map();
 const clubTabletSessionTokenHashByDeviceId = new Map();
 const clubTabletWsTicketsByHash = new Map();
-const clubTabletSessionStartLocks = new Map();
+const authWebSocketTicketsByHash = new Map();
 const clubEventParticipantReleaseOutbox = new Map();
 const voteTimers = new Map();
 const routeSelectTimers = new Map();
@@ -147,7 +170,7 @@ let commentarySpeechProviderStatus = 'unknown';
 let commentarySpeechProviderRetryAt = 0;
 const maxRaceBikeCount = 4;
 const clubEventClosedTombstoneTtlMs = 6 * 60 * 60 * 1000;
-const maxBillingBikeSeats = 1000;
+const maxBillingBikeSeats = 4;
 const configuredClubLiveSessionTtlMs = Number(process.env.TRACKLAB_CLUB_LIVE_SESSION_TTL_MS);
 const clubLiveSessionTtlMs = Number.isFinite(configuredClubLiveSessionTtlMs)
   ? Math.max(250, Math.min(120_000, Math.round(configuredClubLiveSessionTtlMs)))
@@ -164,6 +187,16 @@ const clubTabletSessionIdleTtlMs = 15 * 60 * 1000;
 // survive an entire day. Active workouts can renew the 15-minute idle window,
 // but every selection has a four-hour hard stop and must then be reselected.
 const clubTabletSessionMaxTtlMs = 4 * 60 * 60 * 1000;
+const configuredWattbikeConnectionLeaseTtlMs = Number(
+  process.env.TRACKLAB_WATTBIKE_CONNECTION_LEASE_TTL_MS,
+);
+const wattbikeConnectionLeaseTtlMs = Number.isFinite(configuredWattbikeConnectionLeaseTtlMs)
+  ? Math.max(5_000, Math.min(120_000, Math.round(configuredWattbikeConnectionLeaseTtlMs)))
+  : 45_000;
+const wattbikeConnectionLeaseRefreshMs = Math.max(
+  2_000,
+  Math.min(15_000, Math.floor(wattbikeConnectionLeaseTtlMs / 3)),
+);
 const clubTabletResultAuthorizationTtlMs = 14 * 24 * 60 * 60 * 1000;
 const clubEventParticipantReleaseRetryBaseMs = 1_000;
 const clubEventParticipantReleaseRetryMaxMs = 60_000;
@@ -175,6 +208,11 @@ const configuredClubTabletWsTicketTtlMs = Number(process.env.TRACKLAB_CLUB_TABLE
 const clubTabletWsTicketTtlMs = Number.isFinite(configuredClubTabletWsTicketTtlMs)
   ? Math.max(100, Math.min(60_000, Math.round(configuredClubTabletWsTicketTtlMs)))
   : 30 * 1000;
+const configuredAuthWebSocketTicketTtlMs = Number(process.env.TRACKLAB_AUTH_WS_TICKET_TTL_MS);
+const authWebSocketTicketTtlMs = Number.isFinite(configuredAuthWebSocketTicketTtlMs)
+  ? Math.max(100, Math.min(60_000, Math.round(configuredAuthWebSocketTicketTtlMs)))
+  : 30 * 1000;
+const maxAuthWebSocketTickets = 4_096;
 const latencyGoodMs = 90;
 const latencyOkMs = 180;
 const defaultAdminAccountEmail = 'preskiranch@gmail.com';
@@ -222,11 +260,13 @@ const personalAuthSessions = createAuthSessionCache({
     cloudTelemetry.increment('tracklab_auth_session_cache_total', { cache: 'personal', outcome });
   },
 });
-const billingCheckoutMaxAgeMs = 60 * 60 * 1000;
 const transientStateMaxAgeMs = 6 * 60 * 60 * 1000;
 const scryptAsync = promisify(scryptCallback);
 const authRateLimiter = createRateLimiter();
+const accountDeletionRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const billingRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
+const authWebSocketTicketRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
+const appleNotificationRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const map3DLoadRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const exploreRouteRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const smartExploreRouteRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
@@ -301,6 +341,12 @@ const friendReportReasons = new Set([
   'spam',
   'unsafe-behavior',
   'other',
+]);
+const moderationReportStatuses = new Set(['open', 'reviewing', 'resolved', 'dismissed', 'all']);
+const moderationActionsByStatus = new Map([
+  ['reviewing', new Set(['none', 'investigating'])],
+  ['resolved', new Set(['protect-reporter', 'warning-issued', 'safety-escalated'])],
+  ['dismissed', new Set(['no-violation'])],
 ]);
 const friendInviteTtlMs = 7 * 24 * 60 * 60 * 1000;
 const liveAudioFriendInviteTtlMs = Math.max(250, Math.min(
@@ -960,15 +1006,113 @@ function clampBillingBikeSeats(value) {
 }
 
 function membershipForAccount(user) {
-  if (isAdminEmail(user?.email)) {
-    return { tier: 'racer', bikeSeats: Math.max(maxRaceBikeCount, clampBillingBikeSeats(user?.bikeSeats)) };
-  }
+  return wattbikeMembershipForAccount(user, {
+    appleOnlyCutover: appleOnlyBillingCutover,
+    operator: isAdminEmail(user?.email),
+    maximumSeats: maxBillingBikeSeats,
+  });
+}
 
-  const tier = user?.membershipTier === 'racer' ? 'racer' : 'spectator';
-  return {
-    tier,
-    bikeSeats: tier === 'racer' ? clampBillingBikeSeats(user?.bikeSeats) : 1,
+async function refreshConnectedMembershipForUser(user) {
+  if (!user?.id) return;
+  const loadedUser = await persistence.findEffectiveWattbikeBillingOwnerById(user.id);
+  // An Apple notification must never re-project a stale cached racer grant if
+  // the authoritative read cannot prove it. Admin identity is retained so the
+  // explicit operator override in membershipForAccount still applies.
+  const effectiveUser = loadedUser ?? {
+    ...user,
+    membershipTier: 'spectator',
+    bikeSeats: 1,
   };
+  const membership = membershipForAccount(effectiveUser);
+  for (const client of clients.values()) {
+    if (client.profileId !== effectiveUser.id) continue;
+    client.membershipTier = membership.tier;
+    client.membershipBikeSeats = membership.bikeSeats;
+  }
+  await reconcileAccountWattbikeCapacity(effectiveUser, 'membership-changed');
+}
+
+let appleBillingReconciliationRunning = false;
+let appleBillingReconciliationNeedsRerun = false;
+let appleBillingReconciliationKickTimer = null;
+
+async function reconcileAppleBillingLineages(reason = 'scheduled') {
+  if (!appleBilling.enabled) return;
+  if (appleBillingReconciliationRunning) {
+    appleBillingReconciliationNeedsRerun = true;
+    return;
+  }
+  appleBillingReconciliationRunning = true;
+  try {
+    const lineages = await persistence.loadAppleSubscriptionLineagesForReconciliation(
+      appleReconciliationBatchSize,
+    );
+    if (!lineages) {
+      cloudTelemetry.warn('apple_billing.reconciliation_list_unavailable', { reason });
+      return;
+    }
+    for (const lineage of lineages) {
+      try {
+        const reconciliation = await appleBilling.reconcileVerifiedTransaction(lineage);
+        const saved = await persistence.saveAppleSubscriptionReconciliation(
+          lineage.userId,
+          reconciliation,
+        );
+        if (saved?.status !== 'saved' || !saved.user) {
+          cloudTelemetry.warn('apple_billing.reconciliation_not_saved', {
+            reason,
+            status: String(saved?.status || 'unavailable').slice(0, 40),
+          });
+          continue;
+        }
+        authSessionLookups.refreshUser(saved.user);
+        personalAuthSessions.refreshUser(saved.user);
+        await refreshConnectedMembershipForUser(saved.user);
+      } catch (error) {
+        cloudTelemetry.warn('apple_billing.reconciliation_failed', {
+          reason,
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+          errorCode: typeof error?.code === 'string' ? error.code.slice(0, 120) : '',
+        });
+      } finally {
+        await persistence.touchAppleSubscriptionReconciliationAttempt(
+          lineage.originalTransactionId,
+          Date.now(),
+        ).catch((error) => {
+          cloudTelemetry.warn('apple_billing.reconciliation_cursor_failed', {
+            reason,
+            errorName: error instanceof Error ? error.name : 'UnknownError',
+          });
+        });
+      }
+    }
+  } catch (error) {
+    cloudTelemetry.warn('apple_billing.reconciliation_worker_failed', {
+      reason,
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    });
+  } finally {
+    appleBillingReconciliationRunning = false;
+    if (appleBillingReconciliationNeedsRerun) {
+      appleBillingReconciliationNeedsRerun = false;
+      kickAppleBillingReconciliation(250);
+    }
+  }
+}
+
+function kickAppleBillingReconciliation(delayMs = 0) {
+  if (!appleBilling.enabled) return;
+  if (appleBillingReconciliationRunning) {
+    appleBillingReconciliationNeedsRerun = true;
+    return;
+  }
+  if (appleBillingReconciliationKickTimer) return;
+  appleBillingReconciliationKickTimer = setTimeout(() => {
+    appleBillingReconciliationKickTimer = null;
+    void reconcileAppleBillingLineages('notification-or-startup');
+  }, Math.max(0, Math.min(60_000, Math.round(Number(delayMs) || 0))));
+  appleBillingReconciliationKickTimer.unref();
 }
 
 function authUserIdFromProfileKey(profileKey) {
@@ -978,12 +1122,263 @@ function authUserIdFromProfileKey(profileKey) {
 
 async function clubBikeAccessForOwnerProfileKey(ownerProfileKey) {
   const ownerUserId = authUserIdFromProfileKey(ownerProfileKey);
-  const owner = ownerUserId ? await persistence.findAuthUserById(ownerUserId) : null;
+  const owner = ownerUserId
+    ? await persistence.findEffectiveWattbikeBillingOwnerById(ownerUserId)
+    : null;
   const membership = membershipForAccount(owner);
   return {
+    ownerUserId,
     active: membership.tier === 'racer',
     bikeSeats: membership.tier === 'racer' ? clampBillingBikeSeats(membership.bikeSeats) : 0,
   };
+}
+
+function wattbikeConnectionSeatLimitForUser(user) {
+  const membership = membershipForAccount(user);
+  return membership.tier === 'racer' ? clampBillingBikeSeats(membership.bikeSeats) : 0;
+}
+
+function ownerWebsocketWattbikeAllocationKey(client) {
+  return client?.authSessionTokenHash
+    ? `owner-websocket:${client.authSessionTokenHash}`
+    : '';
+}
+
+function clubTabletWattbikeAllocationKey(deviceId) {
+  return `club-tablet:${deviceId}`;
+}
+
+function clubPersonalWattbikeAllocationKey(clubId, authSessionTokenHash) {
+  return `club-personal:${clubId}:${authSessionTokenHash}`;
+}
+
+function clubTabletWattbikeLeaseExpiresAt(session, now = Date.now()) {
+  return Math.min(
+    Number(session?.expiresAt) || now,
+    now + wattbikeConnectionLeaseTtlMs,
+  );
+}
+
+function wattbikeLeaseIdentity(lease) {
+  return `${lease?.billingOwnerUserId ?? ''}\u0000${lease?.allocationKey ?? ''}\u0000${lease?.holderInstanceId ?? ''}\u0000${lease?.holderId ?? ''}`;
+}
+
+function unavailableWattbikeCapacityResult() {
+  return {
+    status: 'unavailable',
+    seatLimit: 0,
+    seatsInUse: 0,
+    leases: [],
+    revoked: [],
+  };
+}
+
+function publicWattbikeCapacityState(result, requestedConnections, grantedConnections, reason = '') {
+  const requested = Math.max(0, Math.min(
+    maxRaceBikeCount,
+    Math.round(Number(requestedConnections) || 0),
+  ));
+  const granted = Math.max(0, Math.min(
+    requested,
+    Math.round(Number(grantedConnections) || 0),
+  ));
+  return {
+    type: 'wattbike-capacity',
+    requestedConnections: requested,
+    grantedConnections: granted,
+    connectionLimit: Math.max(0, Math.round(Number(result?.seatLimit) || 0)),
+    accountConnectionsInUse: Math.max(0, Math.round(Number(result?.seatsInUse) || 0)),
+    action: requested > granted ? 'disconnect-excess' : 'none',
+    reason: reason || (requested > granted ? 'capacity-full' : 'available'),
+  };
+}
+
+function sendWattbikeCapacityState(client, result, reason = '') {
+  if (!client) return;
+  const requestedConnections = Math.max(0, Math.min(
+    maxRaceBikeCount,
+    Math.round(Number(client.wattbikeCapacityRequestedSeats) || 0),
+  ));
+  const grantedConnections = Math.max(0, Math.min(
+    maxRaceBikeCount,
+    Math.round(Number(client.wattbikeCapacityGrantedSeats) || 0),
+  ));
+  send(client, publicWattbikeCapacityState(
+    result,
+    requestedConnections,
+    grantedConnections,
+    reason,
+  ));
+}
+
+function applyOwnerClientWattbikeGrant(client, grantedSeats, result, reason) {
+  const previousGrantedSeats = Math.max(
+    0,
+    Math.round(Number(client.wattbikeCapacityGrantedSeats) || 0),
+  );
+  const normalizedGrantedSeats = Math.max(0, Math.min(
+    maxRaceBikeCount,
+    Math.round(Number(grantedSeats) || 0),
+  ));
+  client.wattbikeCapacityGrantedSeats = normalizedGrantedSeats;
+  client.bikeCount = normalizedGrantedSeats;
+  const room = client.roomId ? rooms.get(client.roomId) : null;
+  const roomSeats = room?.racerSeatCounts?.get(client.id) ?? 0;
+  if (room?.racers?.has(client.id) && roomSeats > normalizedGrantedSeats) {
+    if (normalizedGrantedSeats > 0) {
+      room.racerSeatCounts.set(client.id, normalizedGrantedSeats);
+      client.racerSeatCount = normalizedGrantedSeats;
+      broadcastRoom(room.id, roomState(room));
+      broadcastLobby();
+    } else if (previousGrantedSeats > 0 && client.wattbikeCapacityRequestedSeats > 0) {
+      demoteClubLiveClient(client);
+    }
+  }
+  sendWattbikeCapacityState(client, result, reason);
+}
+
+async function applyWattbikeCapacitySnapshot(billingOwnerUserId, result, reason = '') {
+  if (!result) return;
+  const activeByIdentity = new Map(
+    result.leases.map((lease) => [wattbikeLeaseIdentity(lease), lease]),
+  );
+  for (const client of clients.values()) {
+    if (
+      client.profileId !== billingOwnerUserId
+      || !client.wattbikeCapacityAllocationKey
+      || !client.authSessionTokenHash
+    ) continue;
+    const identity = wattbikeLeaseIdentity({
+      billingOwnerUserId,
+      allocationKey: client.wattbikeCapacityAllocationKey,
+      holderInstanceId: serverInstanceId,
+      holderId: client.id,
+    });
+    const active = activeByIdentity.get(identity);
+    applyOwnerClientWattbikeGrant(client, active?.seatCount ?? 0, result, reason);
+  }
+
+  const sessionsToStop = [];
+  for (const session of clubTabletSessionsByTokenHash.values()) {
+    if (
+      (session.billingOwnerUserId || authUserIdFromProfileKey(session.ownerProfileKey))
+        !== billingOwnerUserId
+    ) continue;
+    const identity = wattbikeLeaseIdentity({
+      billingOwnerUserId,
+      allocationKey: session.wattbikeCapacityAllocationKey
+        || clubTabletWattbikeAllocationKey(session.deviceId),
+      holderInstanceId: serverInstanceId,
+      holderId: session.tokenHash,
+    });
+    if (!activeByIdentity.has(identity)) sessionsToStop.push(session);
+  }
+  await Promise.allSettled(sessionsToStop.map((session) => stopClubTabletSession(session, {
+    capacityReason: reason || 'capacity-reduced',
+  })));
+}
+
+async function reconcileAccountWattbikeCapacity(user, reason = 'capacity-reconciled') {
+  if (!user?.id) return null;
+  const result = await persistence.enforceWattbikeConnectionCapacity(
+    user.id,
+    wattbikeConnectionSeatLimitForUser(user),
+    Date.now(),
+  );
+  await applyWattbikeCapacitySnapshot(
+    user.id,
+    result ?? unavailableWattbikeCapacityResult(),
+    result ? reason : 'capacity-service-unavailable',
+  );
+  return result;
+}
+
+async function updateOwnerWebsocketWattbikeCapacity(client, requestedSeats, reason = '') {
+  if (
+    !client?.profileId
+    || !client.authSessionTokenHash
+    || client.clubTabletSessionTokenHash
+    || client.wattbikeCapacityClosed
+  ) {
+    return null;
+  }
+  const normalizedRequestedSeats = Math.max(0, Math.min(
+    maxRaceBikeCount,
+    Math.round(Number(requestedSeats) || 0),
+  ));
+  client.wattbikeCapacityRequestedSeats = normalizedRequestedSeats;
+  client.wattbikeCapacityAllocationKey = ownerWebsocketWattbikeAllocationKey(client);
+  const user = await persistence.findEffectiveWattbikeBillingOwnerById(client.profileId);
+  if (!user) {
+    await applyWattbikeCapacitySnapshot(
+      client.profileId,
+      unavailableWattbikeCapacityResult(),
+      'account-unavailable',
+    );
+    return null;
+  }
+  const membership = membershipForAccount(user);
+  client.membershipTier = membership.tier;
+  client.membershipBikeSeats = membership.bikeSeats;
+  if (client.wattbikeCapacityClosed) return null;
+  if (normalizedRequestedSeats <= 0) {
+    await persistence.releaseWattbikeConnectionLease({
+      billingOwnerUserId: user.id,
+      allocationKey: client.wattbikeCapacityAllocationKey,
+      holderInstanceId: serverInstanceId,
+      holderId: client.id,
+    });
+    return reconcileAccountWattbikeCapacity(user, reason || 'released');
+  }
+  const now = Date.now();
+  const result = await persistence.claimWattbikeConnectionLease({
+    billingOwnerUserId: user.id,
+    allocationKey: client.wattbikeCapacityAllocationKey,
+    allocationKind: 'owner-websocket',
+    holderInstanceId: serverInstanceId,
+    holderId: client.id,
+    requestedSeats: normalizedRequestedSeats,
+    seatLimit: wattbikeConnectionSeatLimitForUser(user),
+    expiresAt: now + wattbikeConnectionLeaseTtlMs,
+    now,
+  });
+  if (!result) {
+    await applyWattbikeCapacitySnapshot(
+      user.id,
+      unavailableWattbikeCapacityResult(),
+      'capacity-service-unavailable',
+    );
+    return null;
+  }
+  await applyWattbikeCapacitySnapshot(user.id, result, reason);
+  return result;
+}
+
+function queueOwnerWebsocketWattbikeCapacityUpdate(client, requestedSeats, reason = '') {
+  const previous = client.wattbikeCapacityUpdateChain ?? Promise.resolve();
+  const next = previous
+    .catch(() => {})
+    .then(() => updateOwnerWebsocketWattbikeCapacity(client, requestedSeats, reason));
+  client.wattbikeCapacityUpdateChain = next;
+  return next.finally(() => {
+    if (client.wattbikeCapacityUpdateChain === next) {
+      client.wattbikeCapacityUpdateChain = null;
+    }
+  });
+}
+
+async function releaseOwnerWebsocketWattbikeCapacity(client) {
+  if (
+    !client?.profileId
+    || !client.wattbikeCapacityAllocationKey
+    || !client.authSessionTokenHash
+  ) return false;
+  return persistence.releaseWattbikeConnectionLease({
+    billingOwnerUserId: client.profileId,
+    allocationKey: client.wattbikeCapacityAllocationKey,
+    holderInstanceId: serverInstanceId,
+    holderId: client.id,
+  });
 }
 
 function canPublishSharedTrackMappings(user) {
@@ -1044,14 +1439,123 @@ function tokenHash(token) {
   return createHash('sha256').update(token).digest('hex');
 }
 
+function requestIsNativeApp(request) {
+  return String(request.headers.origin || '').trim() === trackLabCapacitorOrigin
+    && String(request.headers['x-tracklab-native-session'] || '').trim() === '1';
+}
+
+function validOpaqueSessionToken(value) {
+  const token = typeof value === 'string' ? value.trim() : '';
+  if (!/^[A-Za-z0-9_-]{43}$/u.test(token)) return '';
+  try {
+    const decoded = Buffer.from(token, 'base64url');
+    return decoded.length === 32 && decoded.toString('base64url') === token ? token : '';
+  } catch {
+    return '';
+  }
+}
+
+function nativeBearerSessionToken(request) {
+  if (!requestIsNativeApp(request)) return '';
+  const authorization = String(request.headers.authorization || '').trim();
+  const match = /^Bearer\s+([A-Za-z0-9_-]{43})$/u.exec(authorization);
+  return match ? validOpaqueSessionToken(match[1]) : '';
+}
+
+function requestAuthSessionToken(request) {
+  // The explicit native marker is authoritative: a malformed/missing Bearer
+  // credential must never fall back to an ambient cookie.
+  return requestIsNativeApp(request)
+    ? nativeBearerSessionToken(request)
+    : validOpaqueSessionToken(cookieValue(request, authCookieName));
+}
+
+function nonPersonalBearerCredentialPresented(request) {
+  return /^Bearer\s+/i.test(String(request.headers.authorization || ''))
+    && !requestIsNativeApp(request);
+}
+
+function clearBrowserAuthCookie(response, request) {
+  if (!requestIsNativeApp(request)) clearAuthCookie(response, request);
+}
+
 function authCredentialRateLimitKey(request) {
-  const token = cookieValue(request, authCookieName);
+  const token = requestAuthSessionToken(request);
   // Never place a reusable credential in a limiter key or telemetry label.
-  return token ? `session:${tokenHash(token).slice(0, 24)}` : 'anonymous';
+  if (token) return `session:${tokenHash(token).slice(0, 24)}`;
+  return `anonymous:${tokenHash(requestClientIp(request)).slice(0, 24)}`;
 }
 
 function createSessionToken() {
   return randomBytes(32).toString('base64url');
+}
+
+const authWebSocketTicketScopes = new Set(['multiplayer', 'live-audio']);
+const liveAudioWebSocketMessageTypes = new Set([
+  'hello',
+  'presence',
+  'ping',
+  'latency',
+  'create-live-audio-invite',
+  'join-room',
+  'leave-room',
+  'voice-signal',
+]);
+
+function pruneAuthWebSocketTickets(now = Date.now()) {
+  authWebSocketTicketsByHash.forEach((ticket, hash) => {
+    if (ticket.expiresAt > now) return;
+    if (ticket._expiryTimer) clearTimeout(ticket._expiryTimer);
+    authWebSocketTicketsByHash.delete(hash);
+  });
+}
+
+function createAuthWebSocketTicket(sessionTokenHash, scope, now = Date.now()) {
+  pruneAuthWebSocketTickets(now);
+  if (
+    !/^[a-f0-9]{64}$/u.test(String(sessionTokenHash || ''))
+    || !authWebSocketTicketScopes.has(scope)
+    || authWebSocketTicketsByHash.size >= maxAuthWebSocketTickets
+  ) return null;
+  const token = createSessionToken();
+  const hash = tokenHash(token);
+  const ticket = {
+    sessionTokenHash,
+    scope,
+    expiresAt: now + authWebSocketTicketTtlMs,
+    _expiryTimer: null,
+  };
+  ticket._expiryTimer = setTimeout(() => {
+    if (authWebSocketTicketsByHash.get(hash) === ticket) {
+      authWebSocketTicketsByHash.delete(hash);
+    }
+  }, authWebSocketTicketTtlMs);
+  ticket._expiryTimer.unref?.();
+  authWebSocketTicketsByHash.set(hash, ticket);
+  return { token, expiresAt: ticket.expiresAt };
+}
+
+function consumeAuthWebSocketTicket(value, now = Date.now()) {
+  const token = validOpaqueSessionToken(value);
+  if (!token) return null;
+  const hash = tokenHash(token);
+  const ticket = authWebSocketTicketsByHash.get(hash);
+  // Consume synchronously before any database lookup, including expired
+  // tickets, so concurrent upgrade requests cannot replay the same grant.
+  if (ticket) {
+    if (ticket._expiryTimer) clearTimeout(ticket._expiryTimer);
+    authWebSocketTicketsByHash.delete(hash);
+  }
+  return ticket?.expiresAt > now ? ticket : null;
+}
+
+function revokeAuthWebSocketTicketsForSession(sessionTokenHash) {
+  if (!sessionTokenHash) return;
+  authWebSocketTicketsByHash.forEach((ticket, hash) => {
+    if (ticket.sessionTokenHash !== sessionTokenHash) return;
+    if (ticket._expiryTimer) clearTimeout(ticket._expiryTimer);
+    authWebSocketTicketsByHash.delete(hash);
+  });
 }
 
 async function hashPassword(password) {
@@ -1138,18 +1642,20 @@ async function createSignedInResponse(request, response, user, statusCode = 200)
   };
   authSessionLookups.remember(tokenHash(token), cachedSession);
   personalAuthSessions.remember(tokenHash(token), cachedSession);
-  setAuthCookie(response, request, token);
-  response.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
-  response.end(JSON.stringify({ user: publicAuthUser(user) }));
+  const native = requestIsNativeApp(request);
+  if (!native) setAuthCookie(response, request, token);
+  response.writeHead(statusCode, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  response.end(JSON.stringify({
+    user: publicAuthUser(user),
+    ...(native ? { nativeSessionToken: token } : {}),
+  }));
 }
 
-async function currentAuthSession(request, sessionCache = authSessionLookups) {
-  const token = cookieValue(request, authCookieName);
-  if (!token) {
-    return null;
-  }
-
-  const hash = tokenHash(token);
+async function currentAuthSessionByHash(hash, sessionCache = authSessionLookups) {
+  if (!/^[a-f0-9]{64}$/u.test(String(hash || ''))) return null;
   const session = await sessionCache.load(hash, persistence.findAuthSession);
   if (!session?.user) {
     return null;
@@ -1159,7 +1665,14 @@ async function currentAuthSession(request, sessionCache = authSessionLookups) {
   if (!Number.isFinite(lastSeenAt) || Date.now() - lastSeenAt >= authSessionTouchIntervalMs) {
     sessionCache.scheduleTouch(hash, session, persistence.touchAuthSession);
   }
-  return { ...session, token };
+  return { ...session, sessionTokenHash: hash };
+}
+
+async function currentAuthSession(request, sessionCache = authSessionLookups) {
+  const token = requestAuthSessionToken(request);
+  if (!token) return null;
+  const session = await currentAuthSessionByHash(tokenHash(token), sessionCache);
+  return session ? { ...session, token } : null;
 }
 
 async function requireAuthSession(request, response) {
@@ -1248,7 +1761,7 @@ async function requireAccountFriendSession(request, response) {
   if (
     request.tracklabClubTabletSession
     || String(request.headers['x-tracklab-club-tablet-session'] || '').trim()
-    || /^Bearer\s+/i.test(String(request.headers.authorization || ''))
+    || nonPersonalBearerCredentialPresented(request)
   ) {
     writeJson(response, 403, { error: 'Friend settings are available only from a rider’s personal account.' });
     return null;
@@ -1261,11 +1774,30 @@ async function requireAccountFriendSession(request, response) {
   return session;
 }
 
+async function requirePersonalAccountSession(request, response) {
+  if (
+    request.tracklabClubTabletSession
+    || String(request.headers['x-tracklab-club-tablet-session'] || '').trim()
+    || nonPersonalBearerCredentialPresented(request)
+  ) {
+    writeJson(response, 403, {
+      error: 'Account deletion is available only from the rider’s personal signed-in account.',
+    }, { 'Cache-Control': 'no-store' });
+    return null;
+  }
+  const session = await currentAuthSession(request, personalAuthSessions);
+  if (!session?.user) {
+    writeJson(response, 401, { error: 'Sign in to continue.' }, { 'Cache-Control': 'no-store' });
+    return null;
+  }
+  return session;
+}
+
 async function requirePersonalTrackSession(request, response) {
   if (
     request.tracklabClubTabletSession
     || String(request.headers['x-tracklab-club-tablet-session'] || '').trim()
-    || /^Bearer\s+/i.test(String(request.headers.authorization || ''))
+    || nonPersonalBearerCredentialPresented(request)
   ) {
     writeJson(response, 403, { error: 'Saved tracks are available only from a rider’s personal account.' });
     return null;
@@ -1282,7 +1814,7 @@ async function requirePersonalHeartRateSession(request, response) {
   if (
     request.tracklabClubTabletSession
     || String(request.headers['x-tracklab-club-tablet-session'] || '').trim()
-    || /^Bearer\s+/i.test(String(request.headers.authorization || ''))
+    || nonPersonalBearerCredentialPresented(request)
   ) {
     writeJson(response, 403, { error: 'Heart-rate settings are available only from the athlete’s personal account.' });
     return null;
@@ -1299,7 +1831,7 @@ async function requireClubMonitorOwnerSession(request, response) {
   if (
     request.tracklabClubTabletSession
     || String(request.headers['x-tracklab-club-tablet-session'] || '').trim()
-    || /^Bearer\s+/i.test(String(request.headers.authorization || ''))
+    || nonPersonalBearerCredentialPresented(request)
   ) {
     writeJson(response, 403, { error: 'Monitor View club history is available only from the signed-in club owner account.' });
     return null;
@@ -1344,6 +1876,24 @@ function friendPageOptions(requestUrl) {
     .trim()
     .replace(/^@+/, '');
   return { offset, limit, searchText };
+}
+
+function moderationPageOptions(requestUrl) {
+  const status = sanitizeText(requestUrl.searchParams.get('status'), 'open', 16).toLowerCase();
+  if (!moderationReportStatuses.has(status)) {
+    throw new HttpRequestError(400, 'Choose a valid moderation report status.');
+  }
+  const limit = Math.max(1, Math.min(100, Math.round(Number(requestUrl.searchParams.get('limit'))) || 25));
+  const offset = Math.max(0, Math.min(
+    1_000_000,
+    Math.round(Number(requestUrl.searchParams.get('offset'))) || 0,
+  ));
+  return { status, offset, limit };
+}
+
+function sanitizeModerationReportId(value) {
+  const id = sanitizeText(value, '', 80);
+  return /^[a-zA-Z0-9][a-zA-Z0-9._-]{5,79}$/.test(id) ? id : '';
 }
 
 function friendPageEnvelope(items, total, { offset, limit }) {
@@ -1506,8 +2056,28 @@ function closeFriendEventStreamsForSession(sessionTokenHash) {
   });
 }
 
+function removeTrainingHistoryStream(profileKey, response) {
+  const streams = trainingHistoryStreams.get(profileKey);
+  if (!streams?.delete(response)) return;
+  trainingHistoryStreamSessions.get(response)?.cancelExpiry?.();
+  trainingHistoryStreamSessions.delete(response);
+  if (streams.size === 0) trainingHistoryStreams.delete(profileKey);
+}
+
+function closeTrainingHistoryStreamsForSession(sessionTokenHash) {
+  if (!sessionTokenHash) return;
+  trainingHistoryStreams.forEach((streams, profileKey) => {
+    streams.forEach((response) => {
+      if (trainingHistoryStreamSessions.get(response)?.tokenHash !== sessionTokenHash) return;
+      removeTrainingHistoryStream(profileKey, response);
+      response.end();
+    });
+  });
+}
+
 function deactivateAuthenticatedClientsForSession(sessionTokenHash, reason) {
   if (!sessionTokenHash) return;
+  revokeAuthWebSocketTicketsForSession(sessionTokenHash);
   const affectedProfileIds = new Set();
   clients.forEach((client) => {
     if (client.authSessionTokenHash !== sessionTokenHash) return;
@@ -1524,6 +2094,94 @@ function deactivateAuthenticatedClientsForSession(sessionTokenHash, reason) {
       client.socket.close(1008, reason);
     }
   });
+}
+
+function closeFriendEventStreamsForProfile(profileId) {
+  const streams = friendEventStreams.get(profileId);
+  if (!streams) return;
+  [...streams].forEach((response) => {
+    removeFriendEventStream(profileId, response);
+    response.end();
+  });
+}
+
+function deactivateAuthenticatedClientsForProfile(profileId, reason) {
+  const affected = [];
+  clients.forEach((client) => {
+    if (client.profileId !== profileId && client.guestKey !== `user:${profileId}`) return;
+    client.presenceActive = false;
+    affected.push(client);
+  });
+  syncFriendPresenceTransition(profileId);
+  affected.forEach((client) => client.socket?.close(1008, reason));
+  return affected;
+}
+
+function closeResponseStreamsForErasedAccount(profileKey, clubIds) {
+  const trainingStreams = trainingHistoryStreams.get(profileKey);
+  trainingStreams?.forEach((response) => {
+    removeTrainingHistoryStream(profileKey, response);
+    response.end();
+  });
+
+  const ownerHeartRateStreams = heartRateOwnerLiveStreams.get(profileKey);
+  ownerHeartRateStreams?.forEach((response) => response.end());
+  heartRateOwnerLiveStreams.delete(profileKey);
+  heartRateWatchStatusSnapshots.delete(profileKey);
+
+  for (const clubId of clubIds) {
+    const clubHeartRateStreams = heartRateClubLiveStreams.get(clubId);
+    clubHeartRateStreams?.forEach((response) => response.end());
+    heartRateClubLiveStreams.delete(clubId);
+    clubLiveMonitorPresence.delete(clubId);
+    deleteMemoryRuntimeEntries(clubLiveSessions, (session) => session.clubId === clubId);
+    deleteMemoryRuntimeEntries(clubTabletBikePresenceByDeviceId, (presence) => presence.clubId === clubId);
+  }
+  for (const [selectedProfileKey, access] of clubLiveAccessSelections.entries()) {
+    if (selectedProfileKey !== profileKey && !clubIds.has(access?.clubId)) continue;
+    setClubLiveAccessSelection(selectedProfileKey, null);
+  }
+}
+
+function deleteMemoryRuntimeEntries(store, predicate) {
+  for (const [key, value] of store.entries()) {
+    if (predicate(value, key)) store.delete(key);
+  }
+}
+
+async function deactivateErasedAccountRuntime({ userId, profileKey, clubIds = [] }) {
+  const ownedClubIds = new Set(clubIds);
+  const tabletSessions = [...clubTabletSessionsByTokenHash.values()].filter((session) => (
+    session.profileId === userId
+    || session.ownerProfileKey === profileKey
+    || session.billingOwnerUserId === userId
+    || ownedClubIds.has(session.clubId)
+  ));
+  await Promise.allSettled(tabletSessions.map((session) => (
+    stopClubTabletSession(session, { capacityReason: 'account-deleted' })
+  )));
+  cancelLiveAudioFriendInvitesForProfiles([userId], 'This account was deleted.');
+  liveAudioFriendInviteSendTimes.delete(userId);
+  for (const pairKey of liveAudioFriendInvitePairSendTimes.keys()) {
+    if (String(pairKey).split('\u0000').includes(userId)) {
+      liveAudioFriendInvitePairSendTimes.delete(pairKey);
+    }
+  }
+  const affectedClientIds = new Set(
+    deactivateAuthenticatedClientsForProfile(userId, 'Account deleted')
+      .map((client) => client.id),
+  );
+  deleteMemoryRuntimeEntries(challenges, (challenge) => (
+    affectedClientIds.has(challenge.fromId) || affectedClientIds.has(challenge.toId)
+  ));
+  deleteMemoryRuntimeEntries(matchInvites, (invite) => (
+    affectedClientIds.has(invite.fromId)
+    || invite.targetIds.some((targetId) => affectedClientIds.has(targetId))
+  ));
+  closeFriendEventStreamsForProfile(userId);
+  closeResponseStreamsForErasedAccount(profileKey, ownedClubIds);
+  friendPresenceOnlineProfiles.delete(userId);
+  friendPresenceLastOnlineAt.delete(userId);
 }
 
 function writeFriendEventStream(response, frame) {
@@ -1999,6 +2657,21 @@ function enforceRateLimit(request, response, limiter, limit, scope) {
 
   response.setHeader('Retry-After', String(result.retryAfterSeconds));
   writeJson(response, 429, { error: 'Too many requests. Wait a few minutes and try again.' });
+  return false;
+}
+
+function enforceNoStoreRateLimit(request, response, limiter, limit, scope) {
+  const result = limiter.check(`${scope}:${requestClientIp(request)}`, limit);
+  response.setHeader('RateLimit-Limit', String(result.limit));
+  response.setHeader('RateLimit-Remaining', String(result.remaining));
+  if (result.allowed) return true;
+  response.setHeader('Retry-After', String(result.retryAfterSeconds));
+  writeJson(
+    response,
+    429,
+    { error: 'Too many requests. Wait a few minutes and try again.' },
+    { 'Cache-Control': 'no-store' },
+  );
   return false;
 }
 
@@ -5543,7 +6216,7 @@ async function loadClubEventRequestContext(request, { renewSession = false } = {
       sessionTokenHash: tokenHash(suppliedSessionToken),
     } : null;
   }
-  if (/^Bearer\s+/i.test(String(request.headers.authorization || ''))) {
+  if (nonPersonalBearerCredentialPresented(request)) {
     const device = await loadClubTabletDeviceFromRequest(request, { requireAvailable: true });
     return device ? {
       kind: 'device',
@@ -5777,21 +6450,17 @@ async function loadClubTabletRoster(device) {
 }
 
 async function withClubTabletSessionStartLock(clubId, task) {
-  const key = String(clubId || '');
-  const previous = clubTabletSessionStartLocks.get(key) ?? Promise.resolve();
-  let release;
-  const current = new Promise((resolve) => {
-    release = resolve;
-  });
-  clubTabletSessionStartLocks.set(key, current);
-  await previous.catch(() => {});
   try {
-    return await task();
-  } finally {
-    release();
-    if (clubTabletSessionStartLocks.get(key) === current) {
-      clubTabletSessionStartLocks.delete(key);
+    return await persistence.withClubTabletSessionStartLock(clubId, task);
+  } catch (error) {
+    if (error?.code === 'TRACKLAB_CLUB_EVENT_PERSISTENCE_UNAVAILABLE') {
+      throw new HttpRequestError(
+        503,
+        'Club Tablet session coordination is temporarily unavailable.',
+        error.code,
+      );
     }
+    throw error;
   }
 }
 
@@ -5895,7 +6564,7 @@ function flushClubEventParticipantReleaseOutbox(now = Date.now()) {
   }
 }
 
-async function stopClubTabletSession(session) {
+async function stopClubTabletSession(session, { capacityReason = '' } = {}) {
   if (!session) return { status: 'not-joined', eventId: null };
   if (session._expiryTimer) clearTimeout(session._expiryTimer);
   session._expiryTimer = null;
@@ -5919,8 +6588,24 @@ async function stopClubTabletSession(session) {
         leaveRoom(client, 'club-tablet-session-ended');
       }
       demoteClubLiveClient(client);
-      client.socket?.close(1008, 'Club tablet athlete session ended');
+      client.socket?.close(
+        1008,
+        capacityReason
+          ? 'Club tablet Wattbike capacity changed'
+          : 'Club tablet athlete session ended',
+      );
     }
+  }
+  const billingOwnerUserId = session.billingOwnerUserId
+    || authUserIdFromProfileKey(session.ownerProfileKey);
+  if (billingOwnerUserId) {
+    await persistence.releaseWattbikeConnectionLease({
+      billingOwnerUserId,
+      allocationKey: session.wattbikeCapacityAllocationKey
+        || clubTabletWattbikeAllocationKey(session.deviceId),
+      holderInstanceId: serverInstanceId,
+      holderId: session.tokenHash,
+    });
   }
   return queueClubEventParticipantRelease({
     clubId: session.clubId,
@@ -6005,6 +6690,9 @@ async function loadClubTabletSessionByHash(sessionTokenHash, { renew = false } =
     await stopClubTabletSession(session);
     return null;
   }
+  session.billingOwnerUserId = clubBikeAccess.ownerUserId;
+  session.wattbikeCapacityAllocationKey = session.wattbikeCapacityAllocationKey
+    || clubTabletWattbikeAllocationKey(session.deviceId);
   if (renew) {
     session.expiresAt = Math.min(session.maxExpiresAt, now + clubTabletSessionIdleTtlMs);
     for (const client of clients.values()) {
@@ -6013,6 +6701,36 @@ async function loadClubTabletSessionByHash(sessionTokenHash, { renew = false } =
       }
     }
   }
+  const capacity = await persistence.claimWattbikeConnectionLease({
+    billingOwnerUserId: session.billingOwnerUserId,
+    allocationKey: session.wattbikeCapacityAllocationKey,
+    allocationKind: 'club-tablet',
+    holderInstanceId: serverInstanceId,
+    holderId: session.tokenHash,
+    clubId: session.clubId,
+    studioRiderId: session.studioRiderId,
+    bikeDeviceId: session.bikeDeviceId,
+    // A request routed to an older process must not steal this tablet's
+    // durable allocation from a newer athlete session.
+    protectExistingHolder: true,
+    requestedSeats: 1,
+    seatLimit: clubBikeAccess.bikeSeats,
+    expiresAt: clubTabletWattbikeLeaseExpiresAt(session, now),
+    now,
+  });
+  if (!capacity) {
+    await stopClubTabletSession(session, { capacityReason: 'capacity-service-unavailable' });
+    throw new HttpRequestError(
+      503,
+      'Wattbike connection capacity is temporarily unavailable.',
+      'TRACKLAB_WATTBIKE_CAPACITY_UNAVAILABLE',
+    );
+  }
+  if (capacity.grantedSeats !== 1) {
+    await stopClubTabletSession(session, { capacityReason: 'capacity-full' });
+    return null;
+  }
+  await applyWattbikeCapacitySnapshot(session.billingOwnerUserId, capacity, 'tablet-session-renewed');
   scheduleClubTabletSessionExpiry(session);
   return session;
 }
@@ -7054,29 +7772,75 @@ async function activeClubLiveAccessForState(state, now = Date.now()) {
         clubId: membership.clubId,
         studioRiderId: membership.studioRiderId,
         ownerProfileKey: membership.ownerProfileKey,
+        billingOwnerUserId: clubBikeAccess.ownerUserId,
         expiresAt: now + clubLiveSessionTtlMs,
         bikeSeats: clubBikeAccess.bikeSeats,
+        usesClubSeat: true,
       };
     }
   }
   return null;
 }
 
-async function loadActiveClubLiveAccess(user, now = Date.now()) {
-  if (!user || membershipForAccount(user).tier === 'racer') return null;
-  const profileKey = authProfileKey(user);
-  const selectedAccess = clubLiveAccessSelections.get(profileKey);
-  if (!selectedAccess || selectedAccess.expiresAt <= now) return null;
+async function loadActiveClubLiveAccess(user, authSessionTokenHash, now = Date.now()) {
+  if (
+    !user
+    || membershipForAccount(user).tier === 'racer'
+    || !/^[a-f0-9]{64}$/u.test(String(authSessionTokenHash || ''))
+  ) return null;
   const state = await persistence.loadClubConnectState(authProfileKey(user));
-  const membership = (state?.memberships ?? []).find((candidate) => (
-    candidate.clubId === selectedAccess.clubId
-    && candidate.studioRiderId === selectedAccess.studioRiderId
-  ));
-  if (!membership) {
-    clubLiveAccessSelections.delete(profileKey);
-    return null;
+  for (const membership of state?.memberships ?? []) {
+    const access = await activeClubLiveAccessForState({ memberships: [membership] }, now);
+    if (!access?.billingOwnerUserId) continue;
+    const allocationKey = clubPersonalWattbikeAllocationKey(
+      membership.clubId,
+      authSessionTokenHash,
+    );
+    const leases = await persistence.loadWattbikeConnectionLeases(
+      access.billingOwnerUserId,
+      now,
+    );
+    if (!leases) return null;
+    const lease = leases.find((candidate) => (
+      candidate.allocationKind === 'club-personal'
+      && candidate.allocationKey === allocationKey
+      && candidate.holderId === authSessionTokenHash
+      && candidate.clubId === membership.clubId
+      && candidate.studioRiderId === membership.studioRiderId
+      && candidate.expiresAt > now
+    ));
+    if (!lease) continue;
+    return {
+      ...access,
+      allocationKey,
+      holderId: authSessionTokenHash,
+      expiresAt: Math.min(access.expiresAt, lease.expiresAt),
+    };
   }
-  return activeClubLiveAccessForState({ memberships: [membership] }, now);
+  return null;
+}
+
+async function releaseClubPersonalWattbikeAccesses(
+  authSessionTokenHash,
+  state,
+  { exceptAllocationKey = '' } = {},
+) {
+  if (!/^[a-f0-9]{64}$/u.test(String(authSessionTokenHash || ''))) return;
+  const releases = [];
+  for (const membership of state?.memberships ?? []) {
+    const ownerUserId = authUserIdFromProfileKey(membership.ownerProfileKey);
+    const allocationKey = clubPersonalWattbikeAllocationKey(
+      membership.clubId,
+      authSessionTokenHash,
+    );
+    if (!ownerUserId || allocationKey === exceptAllocationKey) continue;
+    releases.push(persistence.releaseWattbikeConnectionLeaseForHolder({
+      billingOwnerUserId: ownerUserId,
+      allocationKey,
+      holderId: authSessionTokenHash,
+    }));
+  }
+  await Promise.allSettled(releases);
 }
 
 function setClubLiveAccessSelection(profileKey, access) {
@@ -8310,9 +9074,14 @@ function clientHasRacerAccess(client, now = Date.now()) {
 }
 
 function racerSeatLimitForClient(client) {
-  return client?.membershipTier === 'racer'
-    ? Math.min(maxRaceBikeCount, clampBillingBikeSeats(client.membershipBikeSeats))
-    : 1;
+  if (client?.membershipTier !== 'racer') return 1;
+  if (client.wattbikeCapacityRequestedSeats > 0) {
+    return Math.max(0, Math.min(
+      maxRaceBikeCount,
+      Math.round(Number(client.wattbikeCapacityGrantedSeats) || 0),
+    ));
+  }
+  return 1;
 }
 
 function temporaryClubSeatInUseByAnotherClient(client) {
@@ -8328,7 +9097,12 @@ function temporaryClubSeatInUseByAnotherClient(client) {
 }
 
 function clientCanClaimRacerSeat(client) {
-  return clientHasRacerAccess(client) && !temporaryClubSeatInUseByAnotherClient(client);
+  const ownerCapacityAvailable = client?.membershipTier !== 'racer'
+    || client.wattbikeCapacityRequestedSeats <= 0
+    || client.wattbikeCapacityGrantedSeats > 0;
+  return clientHasRacerAccess(client)
+    && ownerCapacityAvailable
+    && !temporaryClubSeatInUseByAnotherClient(client);
 }
 
 function demoteClubLiveClient(client) {
@@ -8363,6 +9137,17 @@ function requireRacerClient(client, message = 'Racer access is required for that
 
 function requireAvailableRacerSeat(client) {
   if (!requireRacerClient(client)) return false;
+  if (
+    client?.membershipTier === 'racer'
+    && client.wattbikeCapacityRequestedSeats > 0
+    && client.wattbikeCapacityGrantedSeats <= 0
+  ) {
+    send(client, {
+      type: 'room-error',
+      message: 'All purchased Wattbike connections are already active on this account.',
+    });
+    return false;
+  }
   if (!temporaryClubSeatInUseByAnotherClient(client)) return true;
   send(client, {
     type: 'room-error',
@@ -8540,10 +9325,9 @@ function notifyTrainingHistoryProfiles(profileKeys, session) {
     const streams = trainingHistoryStreams.get(profileKey);
     streams?.forEach((response) => {
       if (!trainingHistoryEvent(response, 'training-history-updated', payload)) {
-        streams.delete(response);
+        removeTrainingHistoryStream(profileKey, response);
       }
     });
-    if (streams?.size === 0) trainingHistoryStreams.delete(profileKey);
   });
   clients.forEach((client) => {
     if (targets.has(client.guestKey)) send(client, { type: 'training-history-updated', ...payload });
@@ -9729,6 +10513,15 @@ async function handleClientMessage(client, rawMessage) {
     return;
   }
 
+  if (
+    client.websocketScope === 'live-audio'
+    && !liveAudioWebSocketMessageTypes.has(message.type)
+  ) {
+    send(client, { type: 'error', message: 'This connection is authorized only for private live audio.' });
+    client.socket.close(1008, 'Live audio scope violation');
+    return;
+  }
+
   if (client.clubLiveAccess && !clientHasRacerAccess(client)) {
     demoteClubLiveClient(client);
   }
@@ -9758,7 +10551,27 @@ async function handleClientMessage(client, rawMessage) {
 
   if (message.type === 'hello' || message.type === 'presence') {
     client.available = Boolean(message.available);
-    client.bikeCount = Math.max(0, Math.min(maxRaceBikeCount, Number(message.bikeCount) || 0));
+    const requestedBikeCount = Math.max(
+      0,
+      Math.min(maxRaceBikeCount, Math.round(Number(message.bikeCount) || 0)),
+    );
+    if (client.clubTabletSessionTokenHash) {
+      // A selected Club Tablet athlete session already owns exactly one
+      // server-issued connection lease. Client telemetry cannot expand it.
+      client.bikeCount = requestedBikeCount > 0 ? 1 : 0;
+    } else if (client.membershipTier === 'racer') {
+      await queueOwnerWebsocketWattbikeCapacityUpdate(
+        client,
+        requestedBikeCount,
+        message.type === 'hello' ? 'connected' : 'presence-updated',
+      );
+    } else if (clientHasRacerAccess(client)) {
+      // A claimed athlete's short Club Live selection is already counted by
+      // the owner's club assignment guard and can represent only one bike.
+      client.bikeCount = requestedBikeCount > 0 ? 1 : 0;
+    } else {
+      client.bikeCount = 0;
+    }
     client.track = sanitizeTrack(message.track ?? client.track);
     client.lastSeen = Date.now();
     void persistence.upsertProfile(client);
@@ -9925,6 +10738,10 @@ async function handleClientMessage(client, rawMessage) {
     }
     if (room.purpose === 'club-event') {
       send(client, { type: 'room-error', message: 'Club Event rooms require the authorized event join.' });
+      return;
+    }
+    if (client.websocketScope === 'live-audio' && room.purpose !== 'live-audio') {
+      send(client, { type: 'room-error', message: 'This connection can join only its private live audio room.' });
       return;
     }
     const blockedRoomMember = [...room.members]
@@ -10198,6 +11015,91 @@ async function handleClientMessage(client, rawMessage) {
     return;
   }
 
+  if (message.type === 'room-report' || message.type === 'room-block') {
+    if (!client.roomId || !client.authSessionTokenHash || client.clubTabletSessionTokenHash) {
+      send(client, {
+        type: 'room-error',
+        message: 'Room safety actions require a signed-in personal rider account.',
+      });
+      return;
+    }
+    const room = rooms.get(client.roomId);
+    const targetId = sanitizeText(message.targetId, '', 80);
+    const target = targetId ? clients.get(targetId) : null;
+    if (
+      !room
+      || !target
+      || target.id === client.id
+      || !room.members.has(client.id)
+      || !room.members.has(target.id)
+      || !client.profileId
+      || !target.profileId
+      || client.profileId === target.profileId
+    ) {
+      send(client, { type: 'room-error', message: 'That room rider is no longer available.' });
+      return;
+    }
+    const now = Date.now();
+    if (now - Number(client.lastRoomSafetyActionAt || 0) < 2_000) {
+      send(client, { type: 'room-error', message: 'Please wait before sending another safety action.' });
+      return;
+    }
+    client.lastRoomSafetyActionAt = now;
+
+    if (message.type === 'room-report') {
+      const reason = sanitizeText(message.reason, 'harassment', 40).toLowerCase();
+      if (!friendReportReasons.has(reason)) {
+        send(client, { type: 'room-error', message: 'Choose a valid report reason.' });
+        return;
+      }
+      const suppliedDetails = sanitizeText(message.details, '', 500);
+      const report = await persistence.createFriendReport({
+        id: randomUUID(),
+        reporterUserId: client.profileId,
+        reportedUserId: target.profileId,
+        reason,
+        details: sanitizeText(
+          `Submitted from active room ${room.id}.${suppliedDetails ? ` ${suppliedDetails}` : ''}`,
+          'Submitted from an active multiplayer room.',
+          1_000,
+        ),
+      });
+      if (!report) {
+        send(client, { type: 'room-error', message: 'That rider could not be reported.' });
+        return;
+      }
+      send(client, {
+        type: 'room-safety-result',
+        action: 'reported',
+        targetId: target.id,
+        reportId: report.reportId,
+        message: `Report received for ${target.name}. TrackLab will review it.`,
+      });
+      cloudTelemetry.increment('tracklab_room_safety_actions_total', { action: 'reported' });
+      return;
+    }
+
+    const blocked = await persistence.blockAccountProfile(client.profileId, target.profileId);
+    if (!blocked) {
+      send(client, { type: 'room-error', message: 'That rider could not be blocked.' });
+      return;
+    }
+    send(client, {
+      type: 'room-safety-result',
+      action: 'blocked',
+      targetId: target.id,
+      message: `${target.name} is blocked and cannot interact with you.`,
+    });
+    notifyFriendGraphProfiles([client.profileId, target.profileId]);
+    notifyFriendTrackShareProfiles([client.profileId, target.profileId]);
+    await refreshRealtimeBlockState([client.profileId, target.profileId], {
+      addBlockedPair: [client.profileId, target.profileId],
+    });
+    cancelLiveAudioFriendInvitesForPair(client.profileId, target.profileId);
+    cloudTelemetry.increment('tracklab_room_safety_actions_total', { action: 'blocked' });
+    return;
+  }
+
   if (message.type === 'room-chat') {
     if (!client.roomId) {
       return;
@@ -10208,16 +11110,27 @@ async function handleClientMessage(client, rawMessage) {
       return;
     }
 
+    const moderatedText = moderateRoomChatText(sanitizeText(message.text, '', 240));
+    if (!moderatedText.allowed) {
+      send(client, {
+        type: 'room-error',
+        code: moderatedText.code,
+        message: moderatedText.message,
+      });
+      if (moderatedText.code === 'objectionable-content') {
+        cloudTelemetry.increment('tracklab_room_chat_rejected_total', {
+          reason: moderatedText.code,
+        });
+      }
+      return;
+    }
+
     const chatMessage = {
       id: randomId('MSG', 10),
       author: client.name,
-      text: sanitizeText(message.text, '', 240),
+      text: moderatedText.text,
       at: new Date().toISOString(),
     };
-
-    if (!chatMessage.text) {
-      return;
-    }
 
     room.messages = [...room.messages, chatMessage].slice(-40);
     if (room.purpose === 'race') void persistence.saveRoomMessage(room.id, client, chatMessage);
@@ -13557,8 +14470,236 @@ async function handlePushApi(request, response, requestUrl) {
   });
 }
 
+async function handleAppleBillingApi(request, response, requestUrl) {
+  try {
+    if (
+      requestUrl.pathname === '/api/billing/config'
+      || requestUrl.pathname === '/api/billing/apple/config'
+    ) {
+      if (request.method !== 'GET' && request.method !== 'HEAD') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      const body = JSON.stringify(appleBilling.configuration);
+      response.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Content-Length': Buffer.byteLength(body),
+      });
+      response.end(request.method === 'HEAD' ? undefined : body);
+      return;
+    }
+
+    if (requestUrl.pathname === '/api/apple/notifications/v2') {
+      if (request.method !== 'POST') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      if (!enforceRateLimit(
+        request,
+        response,
+        appleNotificationRateLimiter,
+        1_200,
+        'apple-server-notification-v2',
+      )) return;
+      const payload = await readJsonBody(request, 110_000);
+      if (
+        !payload || typeof payload !== 'object' || Array.isArray(payload)
+        || Object.keys(payload).some((key) => key !== 'signedPayload')
+        || typeof payload.signedPayload !== 'string'
+      ) {
+        writeJson(response, 400, { error: 'A signedPayload from Apple is required.' });
+        return;
+      }
+      const notification = await appleBilling.verifyNotification(payload.signedPayload);
+      if (await persistence.appleServerNotificationExists(notification.notificationUUID)) {
+        writeJson(response, 200, { received: true, duplicate: true }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      const reconciliation = notification.transaction
+        ? await appleBilling.reconcileVerifiedTransaction(
+          notification.transaction,
+          notification.signedDate,
+        )
+        : null;
+      const saved = await persistence.saveAppleServerNotification(notification, reconciliation);
+      if (!saved) {
+        writeJson(response, 503, { error: 'Apple notification storage is temporarily unavailable.' });
+        return;
+      }
+      if (saved.user) {
+        authSessionLookups.refreshUser(saved.user);
+        personalAuthSessions.refreshUser(saved.user);
+        await refreshConnectedMembershipForUser(saved.user);
+      }
+      if (!notification.transaction) kickAppleBillingReconciliation(0);
+      writeJson(response, 200, {
+        received: true,
+        duplicate: saved.duplicate,
+        processingState: saved.processingState,
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    const session = await requireAuthSession(request, response);
+    if (!session) return;
+    if (requestUrl.pathname === '/api/billing/apple/status') {
+      if (request.method !== 'GET' && request.method !== 'HEAD') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      if (!enforceRateLimit(request, response, billingRateLimiter, 60, 'apple-subscription-status')) {
+        return;
+      }
+      const lineages = await persistence.loadAppleSubscriptionLineages(session.user.id, 8);
+      if (!lineages) {
+        writeJson(response, 503, { error: 'Subscription status is temporarily unavailable.' });
+        return;
+      }
+      let reconciledUser = session.user;
+      for (const lineage of lineages) {
+        const reconciliation = await appleBilling.reconcileVerifiedTransaction(lineage);
+        const saved = await persistence.saveAppleSubscriptionReconciliation(
+          session.user.id,
+          reconciliation,
+        );
+        if (!saved || saved.status !== 'saved' || !saved.user) {
+          writeJson(response, saved?.status === 'conflict' ? 409 : 503, {
+            error: saved?.status === 'conflict'
+              ? 'This App Store subscription is linked to another TrackLab account.'
+              : 'Subscription status is temporarily unavailable.',
+          });
+          return;
+        }
+        reconciledUser = saved.user;
+      }
+      reconciledUser = await persistence.findEffectiveWattbikeBillingOwnerById(session.user.id);
+      if (!reconciledUser) {
+        writeJson(response, 503, { error: 'Subscription status is temporarily unavailable.' });
+        return;
+      }
+      authSessionLookups.refreshUser(reconciledUser);
+      personalAuthSessions.refreshUser(reconciledUser);
+      await refreshConnectedMembershipForUser(reconciledUser);
+      const status = await persistence.loadAppleBillingStatus(session.user.id);
+      if (!status) {
+        writeJson(response, 503, { error: 'Subscription status is temporarily unavailable.' });
+        return;
+      }
+      const effectiveMembership = membershipForAccount(reconciledUser);
+      const body = JSON.stringify({
+        billing: {
+          ...status,
+          membershipTier: effectiveMembership.tier,
+          bikeSeats: effectiveMembership.bikeSeats,
+        },
+        user: publicAuthUser(reconciledUser),
+      });
+      response.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Content-Length': Buffer.byteLength(body),
+      });
+      response.end(request.method === 'HEAD' ? undefined : body);
+      return;
+    }
+    if (requestUrl.pathname === '/api/billing/apple/transactions') {
+      if (request.method !== 'POST') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      if (!enforceRateLimit(request, response, billingRateLimiter, 60, 'apple-transaction-claim')) {
+        return;
+      }
+      const payload = await readJsonBody(request, 60_000);
+      const allowedKeys = new Set(['signedTransaction', 'signedTransactionInfo', 'restore']);
+      const signedTransaction = payload?.signedTransaction ?? payload?.signedTransactionInfo;
+      if (
+        !payload || typeof payload !== 'object' || Array.isArray(payload)
+        || Object.keys(payload).some((key) => !allowedKeys.has(key))
+        || typeof signedTransaction !== 'string'
+        || (payload.restore != null && typeof payload.restore !== 'boolean')
+      ) {
+        writeJson(response, 400, { error: 'A signed App Store transaction is required.' });
+        return;
+      }
+      const restoreRequested = payload.restore === true;
+      let reconciliation;
+      if (restoreRequested) {
+        reconciliation = await appleBilling.claimRestoredTransaction(signedTransaction);
+      } else {
+        try {
+          reconciliation = await appleBilling.claimTransaction(signedTransaction, session.user.id);
+        } catch (error) {
+          if (!(error instanceof AppleBillingError) || error.code !== 'apple-account-mismatch') throw error;
+          // A lineage already rebound by an explicit Restore keeps Apple's old
+          // appAccountToken. Verify it again without assuming token equality;
+          // normal persistence accepts it only when its one-way binding is
+          // already attached to this account. An unbound deletion tombstone
+          // still returns restore-required and cannot be consumed here.
+          reconciliation = await appleBilling.claimRestoredTransaction(signedTransaction);
+        }
+      }
+      const saved = restoreRequested
+        ? await persistence.restoreDeletedAppleSubscription(session.user.id, reconciliation)
+        : await persistence.saveAppleSubscriptionReconciliation(session.user.id, reconciliation);
+      if (!saved) {
+        writeJson(response, 503, { error: 'Subscription storage is temporarily unavailable.' });
+        return;
+      }
+      if (saved.status === 'conflict') {
+        writeJson(response, 409, { error: 'This App Store subscription is already linked to another TrackLab account.' });
+        return;
+      }
+      if (saved.status === 'restore-required') {
+        writeJson(response, 409, {
+          error: 'This deleted-account subscription can only be restored while Apple reports it as active.',
+        });
+        return;
+      }
+      if (saved.status !== 'saved' || !saved.user) {
+        writeJson(response, 403, { error: 'This App Store subscription cannot be linked to this account.' });
+        return;
+      }
+      authSessionLookups.refreshUser(saved.user);
+      personalAuthSessions.refreshUser(saved.user);
+      await refreshConnectedMembershipForUser(saved.user);
+      writeJson(response, 200, {
+        claimed: true,
+        rebound: saved.rebound === true,
+        user: publicAuthUser(saved.user),
+        billing: await persistence.loadAppleBillingStatus(saved.user.id),
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    writeJson(response, 404, { error: 'Apple billing endpoint not found.' });
+  } catch (error) {
+    if (error instanceof AppleBillingError) {
+      writeJson(response, error.statusCode, { error: error.message, code: error.code }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+    cloudTelemetry.warn('apple_billing.request_failed', {
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+      errorCode: typeof error?.code === 'string' ? error.code.slice(0, 120) : '',
+    });
+    writeJson(response, 503, { error: 'Apple subscription verification is temporarily unavailable.' }, {
+      'Cache-Control': 'no-store',
+    });
+  }
+}
+
 async function serveStatic(request, response) {
   const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host}`);
+  if (
+    requestUrl.pathname === '/api/billing/config'
+    || requestUrl.pathname.startsWith('/api/billing/apple/')
+    || requestUrl.pathname === '/api/apple/notifications/v2'
+  ) {
+    await handleAppleBillingApi(request, response, requestUrl);
+    return;
+  }
   if (
     requestUrl.pathname === '/.well-known/apple-app-site-association'
     || requestUrl.pathname === '/apple-app-site-association'
@@ -13633,12 +14774,23 @@ async function serveStatic(request, response) {
     const pushHealth = pushHealthStatus();
     const push = pushHealth.push;
     const serviceReady = storageReady && pushHealth.startupReady;
+    const billing = {
+      ...appleBilling.configuration,
+      ready: appleBilling.configuration.enabled && appleBilling.configuration.configured,
+      appleOnlyCutover: appleOnlyBillingCutover,
+    };
     const body = JSON.stringify({
       status: serviceReady ? 'ok' : 'unavailable',
       service: 'tracklab-bmx',
       storage,
       push,
-      requirements: { database: databaseRequired, apns: apnsConfiguration.enabled },
+      billing,
+      requirements: {
+        database: databaseRequired,
+        apns: apnsConfiguration.enabled,
+        appleIap: appleBilling.configuration.enabled,
+        appleOnlyCutover: appleOnlyBillingCutover,
+      },
       uptimeSeconds: Math.round(process.uptime()),
       version: String(process.env.RENDER_GIT_COMMIT || 'development').slice(0, 12),
     });
@@ -14352,7 +15504,49 @@ async function serveStatic(request, response) {
 
   if (requestUrl.pathname === '/api/auth/me') {
     const session = await currentAuthSession(request);
-    writeJson(response, 200, { user: publicAuthUser(session?.user ?? null) });
+    writeJson(response, 200, { user: publicAuthUser(session?.user ?? null) }, {
+      'Cache-Control': 'no-store',
+    });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/auth/websocket-ticket') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const session = await requireAuthSession(request, response);
+    if (!session) return;
+    if (!enforceNoStoreRateLimit(
+      request,
+      response,
+      authWebSocketTicketRateLimiter,
+      120,
+      `auth-websocket-ticket:${session.sessionTokenHash}`,
+    )) return;
+    const payload = await readJsonBody(request, 2_000);
+    const scope = sanitizeText(payload?.scope, '', 24);
+    if (
+      !payload || typeof payload !== 'object' || Array.isArray(payload)
+      || Object.keys(payload).some((key) => key !== 'scope')
+      || !authWebSocketTicketScopes.has(scope)
+    ) {
+      writeJson(response, 400, { error: 'Choose a valid live connection scope.' }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+    const ticket = createAuthWebSocketTicket(session.sessionTokenHash, scope);
+    if (!ticket) {
+      writeJson(response, 503, { error: 'Live connection authorization is temporarily unavailable.' }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+    writeJson(response, 201, {
+      ticket: ticket.token,
+      expiresAt: ticket.expiresAt,
+    }, { 'Cache-Control': 'no-store' });
     return;
   }
 
@@ -14487,7 +15681,7 @@ async function serveStatic(request, response) {
       return;
     }
 
-    const token = cookieValue(request, authCookieName);
+    const token = requestAuthSessionToken(request);
     if (token) {
       const hash = tokenHash(token);
       authSessionLookups.forget(hash);
@@ -14495,9 +15689,100 @@ async function serveStatic(request, response) {
       await persistence.deleteAuthSession(hash);
       deactivateAuthenticatedClientsForSession(hash, 'Signed out');
       closeFriendEventStreamsForSession(hash);
+      closeTrainingHistoryStreamsForSession(hash);
     }
-    clearAuthCookie(response, request);
-    writeJson(response, 200, { ok: true });
+    clearBrowserAuthCookie(response, request);
+    writeJson(response, 200, { ok: true }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/auth/account') {
+    if (request.method !== 'DELETE') {
+      writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const session = await requirePersonalAccountSession(request, response);
+    if (!session) return;
+    if (!enforceNoStoreRateLimit(
+      request,
+      response,
+      accountDeletionRateLimiter,
+      5,
+      `auth-account-delete:${session.user.id}`,
+    )) return;
+
+    let payload;
+    try {
+      payload = await readJsonBody(request, 16_000);
+    } catch (error) {
+      if (error instanceof HttpRequestError) {
+        writeJson(response, error.statusCode, {
+          error: error.message,
+          code: error.code || undefined,
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      throw error;
+    }
+    if (payload?.confirmation !== 'DELETE') {
+      writeJson(response, 400, {
+        error: 'Type DELETE exactly to permanently delete this account.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const password = sanitizePassword(payload?.password);
+    if (!password || password.length > 128) {
+      writeJson(response, 400, {
+        error: 'Enter your current password to permanently delete this account.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const currentUser = await persistence.findAuthUserById(session.user.id);
+    if (!currentUser) {
+      authSessionLookups.forgetUser(session.user.id);
+      personalAuthSessions.forgetUser(session.user.id);
+      clearBrowserAuthCookie(response, request);
+      writeJson(response, 401, { error: 'This account is no longer available.' }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+    if (!(await verifyPassword(password, currentUser.passwordHash))) {
+      writeJson(response, 403, { error: 'The current password is incorrect.' }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+
+    const formerFriendIds = await persistence
+      .listAccountFriendPresenceAudience(currentUser.id)
+      .catch(() => []);
+    const erased = await persistence.deleteAuthUserAccount(currentUser.id);
+    if (!erased?.deleted) {
+      writeJson(response, 503, {
+        error: 'The account could not be deleted safely. Nothing was changed; try again.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    // Tombstone both caches before any asynchronous runtime cleanup. An auth
+    // lookup that started before the database transaction cannot resurrect the
+    // deleted user or any of their other sessions.
+    authSessionLookups.forgetUser(currentUser.id);
+    personalAuthSessions.forgetUser(currentUser.id);
+    clearBrowserAuthCookie(response, request);
+    await deactivateErasedAccountRuntime({
+      userId: currentUser.id,
+      profileKey: erased.profileKey || authProfileKey(currentUser),
+      clubIds: erased.clubIds || [],
+    }).catch((error) => {
+      cloudTelemetry.warn('account_deletion.runtime_cleanup_failed', {
+        userId: currentUser.id,
+        error,
+      });
+    });
+    notifyFriendGraphProfiles(formerFriendIds ?? []);
+    writeJson(response, 200, { deleted: true }, { 'Cache-Control': 'no-store' });
     return;
   }
 
@@ -14574,6 +15859,127 @@ async function serveStatic(request, response) {
       return;
     }
     writeJson(response, 405, { error: 'Method not allowed' });
+    return;
+  }
+
+  if (
+    requestUrl.pathname === '/api/admin/moderation/reports'
+    || requestUrl.pathname.startsWith('/api/admin/moderation/reports/')
+  ) {
+    const session = await requireAuthSession(request, response);
+    if (!session) return;
+    if (!session.user.admin && !isAdminEmail(session.user.email)) {
+      writeJson(response, 403, { error: 'Administrator access is required.' }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+
+    if (requestUrl.pathname === '/api/admin/moderation/reports') {
+      if (request.method !== 'GET') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      const page = moderationPageOptions(requestUrl);
+      const reports = await persistence.listFriendReportsForModeration(page);
+      writeJson(response, 200, {
+        ...reports,
+        status: page.status,
+        offset: page.offset,
+        limit: page.limit,
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    const reportMatch = /^\/api\/admin\/moderation\/reports\/([a-zA-Z0-9._-]{6,80})$/.exec(
+      requestUrl.pathname,
+    );
+    if (!reportMatch) {
+      writeJson(response, 404, { error: 'Moderation report not found.' });
+      return;
+    }
+    if (request.method !== 'PATCH') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      friendMutationRateLimiter,
+      120,
+      `moderation-review:${session.user.id}`,
+    )) {
+      return;
+    }
+
+    const reportId = sanitizeModerationReportId(reportMatch[1]);
+    const payload = await readJsonBody(request, 20_000);
+    const status = sanitizeText(payload?.status, '', 16).toLowerCase();
+    const action = sanitizeText(payload?.action, '', 32).toLowerCase();
+    const note = sanitizeText(payload?.note, '', 1_000);
+    const allowedActions = moderationActionsByStatus.get(status);
+    if (!reportId || !allowedActions?.has(action)) {
+      writeJson(response, 400, {
+        error: 'Choose a valid review status and matching moderation action.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (status !== 'reviewing' && note.length < 3) {
+      writeJson(response, 400, {
+        error: 'Add a concise moderation note before closing this report.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    let report = await persistence.reviewFriendReportForModeration({
+      reportId,
+      reviewerUserId: session.user.id,
+      status,
+      action,
+      note,
+    });
+    if (!report) {
+      writeJson(response, 404, { error: 'That moderation report is no longer available.' }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+
+    if (action === 'protect-reporter') {
+      const reporterId = sanitizeAccountProfileId(report.reporter?.profileId);
+      const reportedId = sanitizeAccountProfileId(report.reported?.profileId);
+      const blocked = reporterId && reportedId
+        ? await persistence.blockAccountProfile(reporterId, reportedId)
+        : null;
+      if (!blocked) {
+        const escalationNote = sanitizeText(
+          `${note} Automatic reporter protection failed; manual safety escalation is required.`,
+          'Automatic reporter protection failed; manual safety escalation is required.',
+          1_000,
+        );
+        report = await persistence.reviewFriendReportForModeration({
+          reportId,
+          reviewerUserId: session.user.id,
+          status: 'resolved',
+          action: 'safety-escalated',
+          note: escalationNote,
+        }) ?? report;
+        writeJson(response, 503, {
+          error: 'Reporter protection could not be applied automatically; the report was escalated.',
+          report,
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      notifyFriendGraphProfiles([reporterId, reportedId]);
+      notifyFriendTrackShareProfiles([reporterId, reportedId]);
+      await refreshRealtimeBlockState([reporterId, reportedId], {
+        addBlockedPair: [reporterId, reportedId],
+      });
+      cancelLiveAudioFriendInvitesForPair(reporterId, reportedId);
+    }
+
+    cloudTelemetry.increment('tracklab_moderation_reviews_total', { status, action });
+    writeJson(response, 200, { report }, { 'Cache-Control': 'no-store' });
     return;
   }
 
@@ -15345,52 +16751,6 @@ async function serveStatic(request, response) {
     return;
   }
 
-  if (requestUrl.pathname === '/api/auth/billing-return') {
-    if (request.method !== 'POST') {
-      writeJson(response, 405, { error: 'Method not allowed' });
-      return;
-    }
-
-    const session = await requireAuthSession(request, response);
-    if (!session) {
-      return;
-    }
-
-    const payload = await readJsonBody(request, 32_000);
-    const state = sanitizeGuestKey(payload.billingState, '');
-    if (!state) {
-      writeJson(response, 400, { error: 'Square checkout verification is missing.' });
-      return;
-    }
-
-    const checkout = await persistence.findBillingCheckout(tokenHash(state), session.user.id);
-    if (!checkout || Date.parse(checkout.expiresAt) <= Date.now()) {
-      writeJson(response, 400, { error: 'This Square checkout could not be verified or has expired.' });
-      return;
-    }
-
-    if (checkout.claimedAt) {
-      writeJson(response, 200, { user: publicAuthUser(session.user) });
-      return;
-    }
-
-    const verification = await verifyRacerSubscriptionOrder({
-      orderId: checkout.orderId,
-      expectedAmountCents: checkout.expectedAmountCents,
-    });
-    if (!verification.valid) {
-      writeJson(response, 409, { error: 'Square has not confirmed a completed subscription payment yet.' });
-      return;
-    }
-
-    const nextUser = isAdminEmail(session.user.email)
-      ? await persistence.updateAuthUserAdminAccess(session.user.id, checkout.bikeSeats)
-      : await persistence.updateAuthUserMembership(session.user.id, 'racer', checkout.bikeSeats);
-    await persistence.markBillingCheckoutClaimed(checkout.stateHash, session.user.id);
-    writeJson(response, 200, { user: publicAuthUser(nextUser ?? session.user) });
-    return;
-  }
-
   if (requestUrl.pathname === '/api/public-track-mappings') {
     if (request.method === 'GET') {
       const [trackMappings, customRoutes] = await Promise.all([
@@ -15907,9 +17267,11 @@ async function serveStatic(request, response) {
       // any owner/admin identity from remaining usable on that tablet.
       authSessionLookups.forget(authorizingSessionHash);
       personalAuthSessions.forget(authorizingSessionHash);
+      await persistence.deleteAuthSession(authorizingSessionHash);
       deactivateAuthenticatedClientsForSession(authorizingSessionHash, 'Club Tablet enrolled');
       closeFriendEventStreamsForSession(authorizingSessionHash);
-      clearAuthCookie(response, request);
+      closeTrainingHistoryStreamsForSession(authorizingSessionHash);
+      clearBrowserAuthCookie(response, request);
       writeJson(response, 201, {
         device: publicClubTabletDevice(device),
         deviceToken,
@@ -15933,6 +17295,136 @@ async function serveStatic(request, response) {
     }
 
     writeJson(response, 405, { error: 'Method not allowed' });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/club-tablet/wattbike-capacity') {
+    if (request.method !== 'PUT' && request.method !== 'DELETE') {
+      writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const device = await loadClubTabletDeviceFromRequest(request, { requireAvailable: true });
+    if (!device) {
+      writeJson(response, 401, {
+        error: 'This club tablet is not enrolled or was revoked.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      clubTabletRateLimiter,
+      120,
+      `club-tablet-wattbike-capacity:${device.id}`,
+    )) return;
+
+    const billingOwnerUserId = authUserIdFromProfileKey(device.ownerProfileKey);
+    const allocationKey = clubTabletWattbikeAllocationKey(device.id);
+    const holderId = device.tokenHash;
+    if (!billingOwnerUserId || !holderId) {
+      writeJson(response, 409, {
+        error: 'This club tablet is no longer linked to a Wattbike billing account.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    if (request.method === 'DELETE') {
+      const released = await persistence.releaseWattbikeConnectionLease({
+        billingOwnerUserId,
+        allocationKey,
+        holderInstanceId: serverInstanceId,
+        holderId,
+      });
+      writeJson(response, 200, { released }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    await withClubTabletSessionStartLock(device.clubId, async () => {
+      const now = Date.now();
+      const currentTokenHash = clubTabletSessionTokenHashByDeviceId.get(device.id);
+      const currentSession = currentTokenHash
+        ? clubTabletSessionsByTokenHash.get(currentTokenHash)
+        : null;
+      if (clubTabletSessionIsCurrent(currentSession, now)) {
+        // A device picker grant must never replace the selected athlete's
+        // lease. The shared start lock also closes the race where a late picker
+        // poll and POST /sessions arrive together.
+        writeJson(response, 409, {
+          error: 'End the current athlete session before reopening the Club Tablet picker.',
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (currentSession) await stopClubTabletSession(currentSession);
+
+      const clubBikeAccess = await clubBikeAccessForOwnerProfileKey(device.ownerProfileKey);
+      if (!clubBikeAccess.active || clubBikeAccess.ownerUserId !== billingOwnerUserId) {
+        await persistence.releaseWattbikeConnectionLease({
+          billingOwnerUserId,
+          allocationKey,
+          holderInstanceId: serverInstanceId,
+          holderId,
+        });
+        writeJson(response, 200, {
+          capacity: publicWattbikeCapacityState(
+            unavailableWattbikeCapacityResult(),
+            1,
+            0,
+            'membership-inactive',
+          ),
+          // This is a short-lived verified zero-capacity state, not a lease.
+          // Giving it the normal poll window keeps Bluetooth closed without
+          // making the picker UI flicker while the account remains inactive.
+          expiresAt: now + wattbikeConnectionLeaseRefreshMs,
+          pollAfterMs: wattbikeConnectionLeaseRefreshMs,
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+
+      const expiresAt = now + wattbikeConnectionLeaseTtlMs;
+      const capacity = await persistence.claimWattbikeConnectionLease({
+        billingOwnerUserId,
+        allocationKey,
+        allocationKind: 'club-tablet',
+        holderInstanceId: serverInstanceId,
+        holderId,
+        // The picker may create or renew only its own durable device holder.
+        // A session token already stored by another backend instance wins.
+        protectExistingHolder: true,
+        // The request body is deliberately ignored. An enrolled picker can
+        // reserve exactly its own physical Wattbike and never more than one.
+        requestedSeats: 1,
+        seatLimit: clubBikeAccess.bikeSeats,
+        expiresAt,
+        now,
+      });
+      if (!capacity) {
+        writeJson(response, 503, {
+          error: 'Wattbike connection capacity is temporarily unavailable.',
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (capacity.status === 'holder-conflict') {
+        writeJson(response, 409, {
+          error: 'End the current athlete session before reopening the Club Tablet picker.',
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      await applyWattbikeCapacitySnapshot(
+        billingOwnerUserId,
+        capacity,
+        capacity.grantedSeats === 1 ? 'club-tablet-picker-reserved' : 'capacity-full',
+      );
+      writeJson(response, 200, {
+        capacity: publicWattbikeCapacityState(
+          capacity,
+          1,
+          capacity.grantedSeats,
+          capacity.grantedSeats === 1 ? 'club-tablet-picker-reserved' : 'capacity-full',
+        ),
+        expiresAt,
+        pollAfterMs: wattbikeConnectionLeaseRefreshMs,
+      }, { 'Cache-Control': 'no-store' });
+    });
     return;
   }
 
@@ -16126,6 +17618,8 @@ async function serveStatic(request, response) {
             ? sanitizeAccountProfileId(String(member.athleteProfileKey).slice(5))
             : '',
           bikeDeviceId,
+          billingOwnerUserId: clubBikeAccess.ownerUserId,
+          wattbikeCapacityAllocationKey: clubTabletWattbikeAllocationKey(device.id),
           createdAt: now,
           maxExpiresAt,
           expiresAt: Math.min(maxExpiresAt, now + clubTabletSessionIdleTtlMs),
@@ -16151,11 +17645,54 @@ async function serveStatic(request, response) {
           });
           return;
         }
+        const capacity = await persistence.claimWattbikeConnectionLease({
+          billingOwnerUserId: tabletSession.billingOwnerUserId,
+          allocationKey: tabletSession.wattbikeCapacityAllocationKey,
+          allocationKind: 'club-tablet',
+          holderInstanceId: serverInstanceId,
+          holderId: tabletSession.tokenHash,
+          clubId: tabletSession.clubId,
+          studioRiderId: tabletSession.studioRiderId,
+          bikeDeviceId: tabletSession.bikeDeviceId,
+          // Atomically hand the stable device allocation from the verified
+          // picker holder to this one new athlete session. Concurrent starts
+          // on another backend process cannot replace the winner.
+          protectExistingHolder: true,
+          expectedPreviousHolderId: existingSession?.tokenHash || device.tokenHash,
+          requestedSeats: 1,
+          seatLimit: clubBikeAccess.bikeSeats,
+          expiresAt: clubTabletWattbikeLeaseExpiresAt(tabletSession, now),
+          now,
+        });
+        if (!capacity) {
+          writeJson(response, 503, {
+            error: 'Wattbike connection capacity is temporarily unavailable.',
+          }, { 'Cache-Control': 'no-store' });
+          return;
+        }
+        if (capacity.grantedSeats !== 1) {
+          const assignmentError = capacity.status === 'assignment-conflict'
+            ? (capacity.conflictReason === 'athlete-active'
+              ? 'That athlete is already active on another club tablet.'
+              : 'That Wattbike is already assigned to another active club tablet.')
+            : capacity.status === 'holder-conflict'
+              ? 'This Club Tablet already has an active athlete session.'
+              : `This club is already using all ${clubBikeAccess.bikeSeats} purchased bike ${clubBikeAccess.bikeSeats === 1 ? 'connection' : 'connections'} across its devices.`;
+          writeJson(response, 409, {
+            error: assignmentError,
+          }, { 'Cache-Control': 'no-store' });
+          return;
+        }
         // Keep the current athlete active until the replacement has passed
         // every roster, bike, athlete, capacity, and credential-storage check.
         if (existingSession) await stopClubTabletSession(existingSession);
         clubTabletSessionsByTokenHash.set(sessionTokenHash, tabletSession);
         clubTabletSessionTokenHashByDeviceId.set(device.id, sessionTokenHash);
+        await applyWattbikeCapacitySnapshot(
+          tabletSession.billingOwnerUserId,
+          capacity,
+          'tablet-session-started',
+        );
         scheduleClubTabletSessionExpiry(tabletSession);
         writeJson(response, 201, {
           sessionToken,
@@ -16508,9 +18045,11 @@ async function serveStatic(request, response) {
     pruneClubLiveSessions(now);
     const clubId = sanitizeText(requestUrl.searchParams.get('clubId'), '', 160);
     const profileKey = authProfileKey(session.user);
+    const authSessionTokenHash = session.sessionTokenHash;
     const state = await persistence.loadClubConnectState(profileKey);
     const membership = state.memberships.find((candidate) => candidate.clubId === clubId);
     if (!membership) {
+      await releaseClubPersonalWattbikeAccesses(authSessionTokenHash, state);
       setClubLiveAccessSelection(profileKey, null);
       writeJson(response, 403, {
         error: 'That active Club Connect membership was not found.',
@@ -16530,6 +18069,7 @@ async function serveStatic(request, response) {
           }
         : await activeClubLiveAccessForState({ memberships: [membership] }, now);
       if (!access) {
+        await releaseClubPersonalWattbikeAccesses(authSessionTokenHash, state);
         setClubLiveAccessSelection(profileKey, null);
         writeJson(response, 200, {
           clubId,
@@ -16557,6 +18097,7 @@ async function serveStatic(request, response) {
       const groupAssignments = groupAuthorizations.flatMap((authorization) => authorization.assignments);
       const existingAssignment = assignments.get(membership.studioRiderId);
       if (existingAssignment?.source === 'tablet') {
+        await releaseClubPersonalWattbikeAccesses(authSessionTokenHash, state);
         setClubLiveAccessSelection(profileKey, null);
         writeJson(response, 200, {
           clubId,
@@ -16569,6 +18110,7 @@ async function serveStatic(request, response) {
         return;
       }
       if (monitorAssignments.some((candidate) => candidate.studioRiderId === membership.studioRiderId)) {
+        await releaseClubPersonalWattbikeAccesses(authSessionTokenHash, state);
         setClubLiveAccessSelection(profileKey, null);
         writeJson(response, 200, {
           clubId,
@@ -16581,6 +18123,7 @@ async function serveStatic(request, response) {
         return;
       }
       if (groupAssignments.some((candidate) => candidate.studioRiderId === membership.studioRiderId)) {
+        await releaseClubPersonalWattbikeAccesses(authSessionTokenHash, state);
         setClubLiveAccessSelection(profileKey, null);
         writeJson(response, 200, {
           clubId,
@@ -16598,6 +18141,7 @@ async function serveStatic(request, response) {
         ...groupAssignments.map((candidate) => candidate.studioRiderId),
       ]);
       if (!existingAssignment && assignedRiderIds.size >= access.bikeSeats) {
+        await releaseClubPersonalWattbikeAccesses(authSessionTokenHash, state);
         setClubLiveAccessSelection(profileKey, null);
         writeJson(response, 200, {
           clubId,
@@ -16608,6 +18152,63 @@ async function serveStatic(request, response) {
           pollAfterMs: 1_000,
         }, { 'Cache-Control': 'no-store' });
         return;
+      }
+
+      if (access.usesClubSeat !== false) {
+        const allocationKey = clubPersonalWattbikeAllocationKey(
+          membership.clubId,
+          authSessionTokenHash,
+        );
+        const capacity = await persistence.claimWattbikeConnectionLease({
+          billingOwnerUserId: access.billingOwnerUserId,
+          allocationKey,
+          allocationKind: 'club-personal',
+          holderInstanceId: serverInstanceId,
+          holderId: authSessionTokenHash,
+          clubId: membership.clubId,
+          studioRiderId: membership.studioRiderId,
+          protectExistingHolder: true,
+          requestedSeats: 1,
+          seatLimit: access.bikeSeats,
+          expiresAt: access.expiresAt,
+          now,
+        });
+        if (!capacity) {
+          await releaseClubPersonalWattbikeAccesses(authSessionTokenHash, state);
+          setClubLiveAccessSelection(profileKey, null);
+          writeJson(response, 503, {
+            error: 'Wattbike connection capacity is temporarily unavailable.',
+          }, { 'Cache-Control': 'no-store' });
+          return;
+        }
+        if (capacity.grantedSeats !== 1) {
+          await releaseClubPersonalWattbikeAccesses(authSessionTokenHash, state);
+          setClubLiveAccessSelection(profileKey, null);
+          writeJson(response, 200, {
+            clubId,
+            active: false,
+            expiresAt: null,
+            bikeSeats: access.bikeSeats,
+            reason: capacity.status === 'assignment-conflict'
+              ? 'athlete-active-on-club-tablet'
+              : 'club-bike-seats-full',
+            pollAfterMs: 1_000,
+          }, { 'Cache-Control': 'no-store' });
+          return;
+        }
+        access.allocationKey = allocationKey;
+        access.holderId = authSessionTokenHash;
+        access.expiresAt = Math.min(access.expiresAt, capacity.lease.expiresAt);
+        await releaseClubPersonalWattbikeAccesses(authSessionTokenHash, state, {
+          exceptAllocationKey: allocationKey,
+        });
+        await applyWattbikeCapacitySnapshot(
+          access.billingOwnerUserId,
+          capacity,
+          'club-personal-access-renewed',
+        );
+      } else {
+        await releaseClubPersonalWattbikeAccesses(authSessionTokenHash, state);
       }
 
       setClubLiveAccessSelection(profileKey, access);
@@ -16720,7 +18321,17 @@ async function serveStatic(request, response) {
       writeJson(response, 200, { stopped }, { 'Cache-Control': 'no-store' });
       return;
     }
-    const selectedAccess = clubLiveAccessSelections.get(profileKey);
+    const personalMembership = membershipForAccount(session.user);
+    const selectedAccess = personalMembership.tier === 'racer'
+      ? {
+          clubId: membership.clubId,
+          studioRiderId: membership.studioRiderId,
+          ownerProfileKey: membership.ownerProfileKey,
+          expiresAt: now + clubLiveSessionTtlMs,
+          bikeSeats: clampBillingBikeSeats(personalMembership.bikeSeats),
+          usesClubSeat: false,
+        }
+      : await loadActiveClubLiveAccess(session.user, session.sessionTokenHash, now);
     if (
       !selectedAccess
       || selectedAccess.clubId !== clubId
@@ -16732,6 +18343,7 @@ async function serveStatic(request, response) {
       }, { 'Cache-Control': 'no-store' });
       return;
     }
+    setClubLiveAccessSelection(profileKey, selectedAccess);
     if (selectedAccess.usesClubSeat !== false) {
       const clubBikeAccess = await clubBikeAccessForOwnerProfileKey(membership.ownerProfileKey);
       if (!clubBikeAccess.active) {
@@ -16937,10 +18549,19 @@ async function serveStatic(request, response) {
     const streams = trainingHistoryStreams.get(profileKey) ?? new Set();
     streams.add(response);
     trainingHistoryStreams.set(profileKey, streams);
+    const streamSession = {
+      tokenHash: session.sessionTokenHash,
+      expiresAt: Date.parse(session.expiresAt),
+      cancelExpiry: null,
+    };
+    trainingHistoryStreamSessions.set(response, streamSession);
+    streamSession.cancelExpiry = scheduleDeadline(streamSession.expiresAt, () => {
+      removeTrainingHistoryStream(profileKey, response);
+      response.end();
+    });
     trainingHistoryEvent(response, 'ready', { connectedAt: Date.now() });
     response.once('close', () => {
-      streams.delete(response);
-      if (streams.size === 0) trainingHistoryStreams.delete(profileKey);
+      removeTrainingHistoryStream(profileKey, response);
     });
     return;
   }
@@ -17056,70 +18677,6 @@ async function serveStatic(request, response) {
     }
 
     writeJson(response, 405, { error: 'Method not allowed' });
-    return;
-  }
-
-  if (requestUrl.pathname === '/api/billing/config') {
-    response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
-    response.end(JSON.stringify(squareCheckoutConfigStatus()));
-    return;
-  }
-
-  if (requestUrl.pathname === '/api/billing/checkout') {
-    if (request.method !== 'POST') {
-      response.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8' });
-      response.end(JSON.stringify({ error: 'Method not allowed' }));
-      return;
-    }
-
-    try {
-      const session = await requireAuthSession(request, response);
-      if (!session) {
-        return;
-      }
-
-      if (!enforceRateLimit(request, response, billingRateLimiter, 12, 'billing-checkout')) {
-        return;
-      }
-
-      const payload = await readJsonBody(request, 32_000);
-      const bikeSeats = clampBillingBikeSeats(finiteNumber(payload.bikeSeats, 1));
-      const returnState = createSessionToken();
-      const origin = publicRequestOrigin(request);
-      if (!origin) {
-        writeJson(response, 400, { error: 'Could not determine the TrackLab return address.' });
-        return;
-      }
-
-      const checkout = await createRacerSubscriptionCheckout({ bikeSeats, origin, returnState });
-      const expiresAt = new Date(Date.now() + billingCheckoutMaxAgeMs).toISOString();
-      const saved = await persistence.saveBillingCheckout({
-        stateHash: tokenHash(returnState),
-        userId: session.user.id,
-        orderId: checkout.orderId,
-        paymentLinkId: checkout.paymentLinkId,
-        bikeSeats,
-        expectedAmountCents: checkout.monthlyCents,
-        expiresAt,
-      });
-      if (!saved) {
-        writeJson(response, 503, { error: 'Could not securely record this Square checkout.' });
-        return;
-      }
-
-      writeJson(response, 200, {
-        checkoutUrl: checkout.checkoutUrl,
-        bikeSeats: checkout.bikeSeats,
-        monthlyCents: checkout.monthlyCents,
-        environment: checkout.environment,
-      });
-    } catch (error) {
-      const statusCode = Number(error?.statusCode) || 500;
-      writeJson(response, statusCode, {
-        error: error instanceof Error ? error.message : String(error),
-        config: statusCode === 503 ? squareCheckoutConfigStatus() : undefined,
-      });
-    }
     return;
   }
 
@@ -17252,12 +18809,12 @@ async function serveStatic(request, response) {
       persistence: persistence.persistenceEnabled(),
       websocketPath,
       billing: {
-        configured: squareCheckoutConfigStatus().configured,
-        bikeSeatMonthlyCents: racerMonthlyCents(1),
+        provider: 'apple-app-store',
+        enabled: appleBilling.configuration.enabled,
+        configured: appleBilling.configuration.configured,
+        products: appleBilling.configuration.products,
         maxBillingBikeSeats,
         maxRaceBikeCount,
-        oneBikeMonthlyCents: racerMonthlyCents(1),
-        fourBikeMonthlyCents: racerMonthlyCents(maxRaceBikeCount),
       },
     }));
     return;
@@ -17363,10 +18920,31 @@ async function serveStatic(request, response) {
 const server = createServer((request, response) => {
   const requestId = instrumentHttpRequest(request, response, cloudTelemetry, { service: 'cloud' });
   applySecurityHeaders(request, response);
+  applyNativeAppCors(request, response);
+  const nativePreflight = nativeAppCorsPreflight(request);
+  if (nativePreflight.native) {
+    if (!nativePreflight.allowed) {
+      writeJson(response, 403, { error: 'Native request headers are not allowed.' }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+    response.writeHead(204, { 'Cache-Control': 'no-store' });
+    response.end();
+    return;
+  }
+  const requestPathname = String(request.url || '').split('?', 1)[0];
+  const isAccountDeletionRequest = requestPathname === '/api/auth/account';
   const isApiMutation = String(request.url || '').startsWith('/api/')
     && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method || 'GET');
-  if (isApiMutation && !mutationOriginAllowed(request)) {
-    writeJson(response, 403, { error: 'Cross-site request blocked.' });
+  const isAppleServerNotification = requestPathname === '/api/apple/notifications/v2';
+  if (isApiMutation && !isAppleServerNotification && !mutationOriginAllowed(request)) {
+    writeJson(
+      response,
+      403,
+      { error: 'Cross-site request blocked.' },
+      isAccountDeletionRequest ? { 'Cache-Control': 'no-store' } : {},
+    );
     return;
   }
 
@@ -17385,7 +18963,7 @@ const server = createServer((request, response) => {
         writeJson(response, statusCode, {
           error: error instanceof Error ? error.message : 'Invalid request.',
           code: error.code || undefined,
-        });
+        }, isAccountDeletionRequest ? { 'Cache-Control': 'no-store' } : {});
       } else {
         response.destroy();
       }
@@ -17397,7 +18975,12 @@ const server = createServer((request, response) => {
     });
     cloudTelemetry.error('http.unhandled_error', { requestId, error });
     if (!response.headersSent) {
-      writeJson(response, 500, { error: 'TrackLab could not complete this request.', requestId });
+      writeJson(
+        response,
+        500,
+        { error: 'TrackLab could not complete this request.', requestId },
+        isAccountDeletionRequest ? { 'Cache-Control': 'no-store' } : {},
+      );
     } else {
       response.destroy();
     }
@@ -17427,8 +19010,9 @@ wss.on('connection', (socket, request) => {
       ? authProfileKey(authUser)
       : `club-tablet-session:${tabletSession.tokenHash.slice(0, 24)}`,
     profileId: authUser?.id ?? tabletSession?.profileId ?? '',
-    authSessionTokenHash: authUser ? tokenHash(request.tracklabAuthSession.token) : null,
+    authSessionTokenHash: authUser ? request.tracklabAuthSessionTokenHash : null,
     authSessionExpiresAt: authUser ? Date.parse(request.tracklabAuthSession.expiresAt) : null,
+    websocketScope: authUser ? (request.tracklabWebSocketScope || 'multiplayer') : 'club-tablet',
     presenceActive: Boolean(authUser),
     blockedProfileIds: new Set(request.tracklabBlockedProfileIds ?? []),
     socket,
@@ -17445,6 +19029,11 @@ wss.on('connection', (socket, request) => {
     clubTabletSessionTokenHash: tabletSession?.tokenHash ?? null,
     available: false,
     bikeCount: 0,
+    wattbikeCapacityAllocationKey: '',
+    wattbikeCapacityRequestedSeats: 0,
+    wattbikeCapacityGrantedSeats: 0,
+    wattbikeCapacityUpdateChain: null,
+    wattbikeCapacityClosed: false,
     track: sanitizeTrack(null),
     roomId: null,
     roomRole: null,
@@ -17460,6 +19049,7 @@ wss.on('connection', (socket, request) => {
     ? scheduleDeadline(client.authSessionExpiresAt, () => {
         deactivateAuthenticatedClientsForSession(client.authSessionTokenHash, 'Session expired');
         closeFriendEventStreamsForSession(client.authSessionTokenHash);
+        closeTrainingHistoryStreamsForSession(client.authSessionTokenHash);
       })
     : null;
 
@@ -17516,8 +19106,18 @@ wss.on('connection', (socket, request) => {
       .then((social) => social.friends.map((friend) => friend.guestKey))
       .catch(() => []);
     leaveRoom(client, 'disconnected');
+    client.wattbikeCapacityClosed = true;
     client.presenceActive = false;
     clients.delete(client.id);
+    void (client.wattbikeCapacityUpdateChain ?? Promise.resolve())
+      .catch(() => {})
+      .then(() => releaseOwnerWebsocketWattbikeCapacity(client))
+      .catch((error) => {
+        cloudTelemetry.warn('wattbike_capacity.release_failed', {
+          clientId: client.id,
+          error,
+        });
+      });
     const guestKeyStillOnline = [...clients.values()].some((candidate) => (
       candidate.guestKey === client.guestKey
       && candidate.presenceActive !== false
@@ -17556,8 +19156,14 @@ server.on('upgrade', (request, socket, head) => {
   }
 
   void (async () => {
-    const ticketWasPresented = requestUrl.searchParams.has('clubTabletTicket');
-    if (ticketWasPresented) {
+    const clubTicketWasPresented = requestUrl.searchParams.has('clubTabletTicket');
+    const authTicketWasPresented = requestUrl.searchParams.has('authTicket');
+    if (clubTicketWasPresented && authTicketWasPresented) {
+      socket.write('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    if (clubTicketWasPresented) {
       const presentedTicket = sanitizeText(requestUrl.searchParams.get('clubTabletTicket'), '', 180);
       const presentedTicketHash = presentedTicket.length >= 32 ? tokenHash(presentedTicket) : '';
       const ticket = presentedTicketHash ? clubTabletWsTicketsByHash.get(presentedTicketHash) : null;
@@ -17586,6 +19192,30 @@ server.on('upgrade', (request, socket, head) => {
         }
         request.tracklabBlockedProfileIds = blockedProfileIds;
       }
+    } else if (authTicketWasPresented) {
+      const ticket = consumeAuthWebSocketTicket(requestUrl.searchParams.get('authTicket'));
+      const session = ticket
+        ? await currentAuthSessionByHash(ticket.sessionTokenHash)
+        : null;
+      if (!session?.user) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      request.tracklabClubLiveAccess = await loadActiveClubLiveAccess(
+        session.user,
+        ticket.sessionTokenHash,
+      );
+      request.tracklabAuthSession = session;
+      request.tracklabAuthSessionTokenHash = ticket.sessionTokenHash;
+      request.tracklabWebSocketScope = ticket.scope;
+      const blockedProfileIds = await persistence.loadBlockedAccountProfileIds(session.user.id);
+      if (!Array.isArray(blockedProfileIds)) {
+        socket.write('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      request.tracklabBlockedProfileIds = blockedProfileIds;
     } else {
       const session = await currentAuthSession(request);
       if (!session?.user) {
@@ -17593,8 +19223,13 @@ server.on('upgrade', (request, socket, head) => {
         socket.destroy();
         return;
       }
-      request.tracklabClubLiveAccess = await loadActiveClubLiveAccess(session.user);
+      request.tracklabClubLiveAccess = await loadActiveClubLiveAccess(
+        session.user,
+        session.sessionTokenHash,
+      );
       request.tracklabAuthSession = session;
+      request.tracklabAuthSessionTokenHash = session.sessionTokenHash;
+      request.tracklabWebSocketScope = 'multiplayer';
       const blockedProfileIds = await persistence.loadBlockedAccountProfileIds(session.user.id);
       if (!Array.isArray(blockedProfileIds)) {
         socket.write('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
@@ -17625,6 +19260,7 @@ const websocketHeartbeat = setInterval(() => {
   expiredSessionHashes.forEach((hash) => {
     deactivateAuthenticatedClientsForSession(hash, 'Session expired');
     closeFriendEventStreamsForSession(hash);
+    closeTrainingHistoryStreamsForSession(hash);
   });
   wss.clients.forEach((socket) => {
     if (socket.readyState !== WebSocket.OPEN) return;
@@ -17640,11 +19276,19 @@ const websocketHeartbeat = setInterval(() => {
 websocketHeartbeat.unref();
 
 const trainingHistoryStreamHeartbeat = setInterval(() => {
+  const now = Date.now();
   trainingHistoryStreams.forEach((streams, profileKey) => {
     streams.forEach((response) => {
-      if (!trainingHistoryEvent(response, 'heartbeat', { at: Date.now() })) streams.delete(response);
+      const metadata = trainingHistoryStreamSessions.get(response);
+      if (!Number.isFinite(metadata?.expiresAt) || metadata.expiresAt <= now) {
+        removeTrainingHistoryStream(profileKey, response);
+        response.end();
+        return;
+      }
+      if (!trainingHistoryEvent(response, 'heartbeat', { at: now })) {
+        removeTrainingHistoryStream(profileKey, response);
+      }
     });
-    if (streams.size === 0) trainingHistoryStreams.delete(profileKey);
   });
 }, 20_000);
 trainingHistoryStreamHeartbeat.unref();
@@ -17690,6 +19334,14 @@ liveAudioInviteMaintenance.unref();
 const pushOutboxMaintenance = setInterval(kickPushWorker, 5_000);
 pushOutboxMaintenance.unref();
 
+const appleBillingReconciliationMaintenance = appleBilling.enabled
+  ? setInterval(
+    () => void reconcileAppleBillingLineages('scheduled'),
+    appleReconciliationIntervalMs,
+  )
+  : null;
+appleBillingReconciliationMaintenance?.unref();
+
 const heartRateLiveStreamHeartbeat = setInterval(() => {
   [heartRateOwnerLiveStreams, heartRateClubLiveStreams].forEach((streamsByKey) => {
     streamsByKey.forEach((streams, key) => {
@@ -17710,6 +19362,124 @@ const clubLiveAccessMaintenance = setInterval(
   Math.max(100, Math.min(1_000, Math.floor(clubLiveSessionTtlMs / 3))),
 );
 clubLiveAccessMaintenance.unref();
+
+let wattbikeCapacityMaintenanceRunning = false;
+async function maintainWattbikeConnectionCapacity() {
+  if (wattbikeCapacityMaintenanceRunning) return;
+  wattbikeCapacityMaintenanceRunning = true;
+  try {
+    const now = Date.now();
+    const ownerUserIds = new Set();
+    for (const client of clients.values()) {
+      if (client.profileId && client.wattbikeCapacityRequestedSeats > 0) {
+        ownerUserIds.add(client.profileId);
+      }
+    }
+    for (const session of clubTabletSessionsByTokenHash.values()) {
+      const ownerUserId = session.billingOwnerUserId
+        || authUserIdFromProfileKey(session.ownerProfileKey);
+      if (ownerUserId) ownerUserIds.add(ownerUserId);
+    }
+    const effectiveUserById = new Map();
+    for (const ownerUserId of ownerUserIds) {
+      const user = await persistence.findEffectiveWattbikeBillingOwnerById(ownerUserId);
+      if (user) {
+        effectiveUserById.set(ownerUserId, user);
+        await reconcileAccountWattbikeCapacity(user, 'periodic-entitlement-check');
+      } else {
+        await applyWattbikeCapacitySnapshot(
+          ownerUserId,
+          unavailableWattbikeCapacityResult(),
+          'account-unavailable',
+        );
+      }
+    }
+
+    // Tablet athlete sessions are longer-lived than connection leases. Renew
+    // the lease while this server still owns a current session; after a crash,
+    // no process renews it and account capacity returns within the short TTL.
+    const tabletSessionByAllocation = new Map();
+    for (const session of clubTabletSessionsByTokenHash.values()) {
+      if (!clubTabletSessionIsCurrent(session, now)) continue;
+      const ownerUserId = session.billingOwnerUserId
+        || authUserIdFromProfileKey(session.ownerProfileKey);
+      const allocationKey = session.wattbikeCapacityAllocationKey
+        || clubTabletWattbikeAllocationKey(session.deviceId);
+      const key = `${ownerUserId}\u0000${allocationKey}`;
+      const current = tabletSessionByAllocation.get(key);
+      if (!current || session.createdAt > current.createdAt) {
+        tabletSessionByAllocation.set(key, session);
+      }
+    }
+    for (const session of tabletSessionByAllocation.values()) {
+      const ownerUserId = session.billingOwnerUserId
+        || authUserIdFromProfileKey(session.ownerProfileKey);
+      const user = effectiveUserById.get(ownerUserId);
+      if (!user) continue;
+      const capacity = await persistence.claimWattbikeConnectionLease({
+        billingOwnerUserId: ownerUserId,
+        allocationKey: session.wattbikeCapacityAllocationKey
+          || clubTabletWattbikeAllocationKey(session.deviceId),
+        allocationKind: 'club-tablet',
+        holderInstanceId: serverInstanceId,
+        holderId: session.tokenHash,
+        clubId: session.clubId,
+        studioRiderId: session.studioRiderId,
+        bikeDeviceId: session.bikeDeviceId,
+        protectExistingHolder: true,
+        requestedSeats: 1,
+        seatLimit: wattbikeConnectionSeatLimitForUser(user),
+        expiresAt: clubTabletWattbikeLeaseExpiresAt(session, now),
+        now,
+      });
+      if (!capacity || capacity.grantedSeats !== 1) {
+        await stopClubTabletSession(session, {
+          capacityReason: capacity ? 'capacity-full' : 'capacity-service-unavailable',
+        });
+        continue;
+      }
+      await applyWattbikeCapacitySnapshot(ownerUserId, capacity, 'lease-renewed');
+    }
+
+    const preferredClientByAllocation = new Map();
+    for (const client of clients.values()) {
+      if (
+        client.wattbikeCapacityClosed
+        || client.wattbikeCapacityRequestedSeats <= 0
+        || !client.wattbikeCapacityAllocationKey
+      ) continue;
+      const key = `${client.profileId}\u0000${client.wattbikeCapacityAllocationKey}`;
+      const current = preferredClientByAllocation.get(key);
+      if (
+        !current
+        || client.wattbikeCapacityGrantedSeats > current.wattbikeCapacityGrantedSeats
+        || (
+          client.wattbikeCapacityGrantedSeats === current.wattbikeCapacityGrantedSeats
+          && client.lastSeen > current.lastSeen
+        )
+      ) {
+        preferredClientByAllocation.set(key, client);
+      }
+    }
+    await Promise.allSettled([...preferredClientByAllocation.values()].map((client) => (
+      queueOwnerWebsocketWattbikeCapacityUpdate(
+        client,
+        client.wattbikeCapacityRequestedSeats,
+        'lease-renewed',
+      )
+    )));
+  } catch (error) {
+    cloudTelemetry.warn('wattbike_capacity.maintenance_failed', { error });
+  } finally {
+    wattbikeCapacityMaintenanceRunning = false;
+  }
+}
+
+const wattbikeCapacityMaintenance = setInterval(
+  () => void maintainWattbikeConnectionCapacity(),
+  wattbikeConnectionLeaseRefreshMs,
+);
+wattbikeCapacityMaintenance.unref();
 
 const clubEventParticipantReleaseMaintenance = setInterval(
   () => flushClubEventParticipantReleaseOutbox(Date.now()),
@@ -17736,16 +19506,28 @@ async function shutdown(signal) {
   clearInterval(friendEventStreamHeartbeat);
   clearInterval(liveAudioInviteMaintenance);
   clearInterval(pushOutboxMaintenance);
+  if (appleBillingReconciliationMaintenance) {
+    clearInterval(appleBillingReconciliationMaintenance);
+  }
+  if (appleBillingReconciliationKickTimer) {
+    clearTimeout(appleBillingReconciliationKickTimer);
+    appleBillingReconciliationKickTimer = null;
+  }
   if (pushWorkerKickTimer) clearTimeout(pushWorkerKickTimer);
   pushWorkerKickTimer = null;
   clearInterval(heartRateLiveStreamHeartbeat);
   clearInterval(clubLiveAccessMaintenance);
+  clearInterval(wattbikeCapacityMaintenance);
   clearInterval(clubEventParticipantReleaseMaintenance);
   clearInterval(persistenceMaintenance);
   voteTimers.forEach(clearTimeout);
   routeSelectTimers.forEach(clearTimeout);
   voteTimers.clear();
   routeSelectTimers.clear();
+  authWebSocketTicketsByHash.forEach((ticket) => {
+    if (ticket._expiryTimer) clearTimeout(ticket._expiryTimer);
+  });
+  authWebSocketTicketsByHash.clear();
 
   trainingHistoryStreams.forEach((streams) => streams.forEach((response) => response.end()));
   trainingHistoryStreams.clear();
@@ -17786,5 +19568,8 @@ server.listen(port, () => {
     websocketPath,
     version: String(process.env.RENDER_GIT_COMMIT || 'development').slice(0, 12),
   });
-  void persistence.initPersistence().finally(kickPushWorker);
+  void persistence.initPersistence().finally(() => {
+    kickPushWorker();
+    kickAppleBillingReconciliation(0);
+  });
 });

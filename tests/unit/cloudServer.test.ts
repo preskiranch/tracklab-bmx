@@ -291,7 +291,7 @@ beforeAll(async () => {
       ...process.env,
       PORT: String(port),
       DATABASE_URL: '',
-      TRACKLAB_ADMIN_EMAILS: 'admin-only@tracklab.test,usage-admin@tracklab.test,global-view-admin@tracklab.test,club-owner-admin@tracklab.test,overlay-only-admin@tracklab.test',
+      TRACKLAB_ADMIN_EMAILS: 'admin-only@tracklab.test,usage-admin@tracklab.test,global-view-admin@tracklab.test,club-owner-admin@tracklab.test,overlay-only-admin@tracklab.test,capacity-admin@tracklab.test,tablet-capacity-admin@tracklab.test',
       TRACKLAB_ALLOW_RACER_MAP_PUBLISH: '0',
       TRACKLAB_METRICS_TOKEN: 'test-metrics-token',
       TRACKLAB_3D_FREE_LOAD_CAP: '5000',
@@ -349,7 +349,369 @@ describe('cloud API trust boundaries', () => {
     await expect(response.json()).resolves.toMatchObject({
       status: 'ok',
       storage: { mode: 'memory', configured: false, ready: true },
+      billing: {
+        provider: 'apple-app-store',
+        enabled: false,
+        configured: false,
+        ready: false,
+        appleOnlyCutover: false,
+      },
+      requirements: { appleIap: false, appleOnlyCutover: false },
     });
+  });
+
+  it('enforces one account-wide Wattbike allocation across reconnects and auth sessions', async () => {
+    const originalCookie = cookie;
+    const registration = await api('/api/auth/register', {
+      method: 'POST',
+      headers: { 'X-Forwarded-For': '192.0.2.44' },
+      body: JSON.stringify({
+        name: 'Capacity Admin',
+        email: 'capacity-admin@tracklab.test',
+        password: 'capacity-correct-horse-battery-staple',
+      }),
+    });
+    expect(registration.status).toBe(201);
+    const firstSessionCookie = String(registration.headers.get('set-cookie')).split(';')[0];
+    const secondLogin = await api('/api/auth/login', {
+      method: 'POST',
+      headers: { 'X-Forwarded-For': '192.0.2.44' },
+      body: JSON.stringify({
+        email: 'capacity-admin@tracklab.test',
+        password: 'capacity-correct-horse-battery-staple',
+      }),
+    });
+    expect(secondLogin.status).toBe(200);
+    const secondSessionCookie = String(secondLogin.headers.get('set-cookie')).split(';')[0];
+
+    const first = await openTestSocket(firstSessionCookie);
+    first.socket.send(JSON.stringify({ type: 'hello', available: true, bikeCount: 4 }));
+    await waitForSocketMessage(first, (message) => (
+      message.type === 'wattbike-capacity' && message.grantedConnections === 4
+    ));
+    await waitForSocketMessage(first, (message) => message.type === 'welcome');
+
+    const firstReplacementIndex = first.messages.length;
+    const reconnect = await openTestSocket(firstSessionCookie);
+    reconnect.socket.send(JSON.stringify({ type: 'hello', available: true, bikeCount: 4 }));
+    await waitForSocketMessage(reconnect, (message) => (
+      message.type === 'wattbike-capacity'
+      && message.requestedConnections === 4
+      && message.grantedConnections === 4
+      && message.accountConnectionsInUse === 4
+    ));
+    await waitForSocketMessage(first, (message) => (
+      message.type === 'wattbike-capacity'
+      && message.grantedConnections === 0
+      && message.action === 'disconnect-excess'
+    ), firstReplacementIndex);
+
+    const independentSession = await openTestSocket(secondSessionCookie);
+    independentSession.socket.send(JSON.stringify({ type: 'hello', available: true, bikeCount: 1 }));
+    await waitForSocketMessage(independentSession, (message) => (
+      message.type === 'wattbike-capacity'
+      && message.requestedConnections === 1
+      && message.grantedConnections === 0
+      && message.connectionLimit === 4
+      && message.action === 'disconnect-excess'
+    ));
+
+    reconnect.socket.close();
+    await new Promise<void>((resolve) => reconnect.socket.once('close', () => resolve()));
+    // Socket close waits for the WebSocket handshake, while lease release is a
+    // separately serialized persistence operation on the server.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const retryIndex = independentSession.messages.length;
+    independentSession.socket.send(JSON.stringify({ type: 'presence', available: true, bikeCount: 1 }));
+    await waitForSocketMessage(independentSession, (message) => (
+      message.type === 'wattbike-capacity'
+      && message.grantedConnections === 1
+      && message.accountConnectionsInUse === 1
+    ), retryIndex);
+
+    first.socket.close();
+    independentSession.socket.close();
+    cookie = originalCookie;
+  });
+
+  it('reserves one device-authenticated picker connection and atomically hands it to the athlete session', async () => {
+    const originalCookie = cookie;
+    const email = 'tablet-capacity-admin@tracklab.test';
+    const password = 'tablet-capacity-correct-horse-battery-staple';
+    const riderId = `tablet-capacity-rider-${Date.now()}`;
+    const registration = await api('/api/auth/register', {
+      method: 'POST',
+      headers: { 'X-Forwarded-For': '192.0.2.45' },
+      body: JSON.stringify({ name: 'Tablet Capacity Admin', email, password }),
+    });
+    expect(registration.status).toBe(201);
+    const authorizingCookie = String(registration.headers.get('set-cookie')).split(';')[0];
+    cookie = authorizingCookie;
+    expect((await api('/api/user-data', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        studioRiders: [{
+          id: riderId,
+          name: 'Picker Rider',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        }],
+      }),
+    })).status).toBe(200);
+
+    const independentLogin = await api('/api/auth/login', {
+      method: 'POST',
+      headers: { 'X-Forwarded-For': '192.0.2.46' },
+      body: JSON.stringify({ email, password }),
+    });
+    expect(independentLogin.status).toBe(200);
+    const independentCookie = String(independentLogin.headers.get('set-cookie')).split(';')[0];
+
+    const enrollment = await api('/api/club-tablet/devices', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'Capacity Picker iPad' }),
+    });
+    expect(enrollment.status).toBe(201);
+    const enrolled = await enrollment.json() as {
+      device: { id: string };
+      deviceToken: string;
+    };
+    const deviceHeaders: HeadersInit = {
+      Authorization: `Bearer ${enrolled.deviceToken}`,
+    };
+    cookie = '';
+
+    expect((await api('/api/club-tablet/wattbike-capacity', {
+      method: 'PUT',
+    })).status).toBe(401);
+
+    const ownerSocket = await openTestSocket(independentCookie);
+    ownerSocket.socket.send(JSON.stringify({ type: 'hello', available: true, bikeCount: 4 }));
+    await waitForSocketMessage(ownerSocket, (message) => (
+      message.type === 'wattbike-capacity'
+      && message.grantedConnections === 4
+      && message.accountConnectionsInUse === 4
+    ));
+
+    const denied = await api('/api/club-tablet/wattbike-capacity', {
+      method: 'PUT',
+      headers: deviceHeaders,
+      body: JSON.stringify({ requestedConnections: 4 }),
+    });
+    expect(denied.status).toBe(200);
+    await expect(denied.json()).resolves.toMatchObject({
+      capacity: {
+        requestedConnections: 1,
+        grantedConnections: 0,
+        connectionLimit: 4,
+        accountConnectionsInUse: 4,
+        action: 'disconnect-excess',
+        reason: 'capacity-full',
+      },
+      expiresAt: expect.any(Number),
+      pollAfterMs: expect.any(Number),
+    });
+
+    const ownerReductionIndex = ownerSocket.messages.length;
+    ownerSocket.socket.send(JSON.stringify({ type: 'presence', available: true, bikeCount: 3 }));
+    await waitForSocketMessage(ownerSocket, (message) => (
+      message.type === 'wattbike-capacity'
+      && message.requestedConnections === 3
+      && message.grantedConnections === 3
+      && message.accountConnectionsInUse === 3
+    ), ownerReductionIndex);
+
+    const reserved = await api('/api/club-tablet/wattbike-capacity', {
+      method: 'PUT',
+      headers: deviceHeaders,
+      // The server must ignore any attempt by a picker to request more seats.
+      body: JSON.stringify({ requestedConnections: 4 }),
+    });
+    expect(reserved.status).toBe(200);
+    const reservedPayload = await reserved.json();
+    expect(reservedPayload).toMatchObject({
+      capacity: {
+        requestedConnections: 1,
+        grantedConnections: 1,
+        connectionLimit: 4,
+        accountConnectionsInUse: 4,
+        action: 'none',
+        reason: 'club-tablet-picker-reserved',
+      },
+    });
+
+    const renewed = await api('/api/club-tablet/wattbike-capacity', {
+      method: 'PUT',
+      headers: deviceHeaders,
+    });
+    await expect(renewed.json()).resolves.toMatchObject({
+      capacity: { grantedConnections: 1, accountConnectionsInUse: 4 },
+    });
+
+    const started = await api('/api/club-tablet/sessions', {
+      method: 'POST',
+      headers: deviceHeaders,
+      body: JSON.stringify({ studioRiderId: riderId, bikeDeviceId: 'picker-bike-1' }),
+    });
+    expect(started.status).toBe(201);
+    const startedPayload = await started.json() as { sessionToken: string };
+
+    // Picker cleanup carries the old device holder. The stable allocation key
+    // now belongs to the athlete session, so this stale release is harmless.
+    const staleRelease = await api('/api/club-tablet/wattbike-capacity', {
+      method: 'DELETE',
+      headers: deviceHeaders,
+    });
+    await expect(staleRelease.json()).resolves.toEqual({ released: false });
+    const stillSelected = await api('/api/club-tablet/sessions/current', {
+      headers: { 'X-TrackLab-Club-Tablet-Session': startedPayload.sessionToken },
+    });
+    expect(stillSelected.status).toBe(200);
+
+    const latePickerPoll = await api('/api/club-tablet/wattbike-capacity', {
+      method: 'PUT',
+      headers: deviceHeaders,
+    });
+    expect(latePickerPoll.status).toBe(409);
+    expect((await api('/api/club-tablet/sessions/current', {
+      headers: { 'X-TrackLab-Club-Tablet-Session': startedPayload.sessionToken },
+    })).status).toBe(200);
+
+    expect((await api('/api/club-tablet/sessions', {
+      method: 'DELETE',
+      headers: { 'X-TrackLab-Club-Tablet-Session': startedPayload.sessionToken },
+    })).status).toBe(200);
+    ownerSocket.socket.close();
+    cookie = originalCookie;
+  });
+
+  it('requires reauthentication and permanently erases account sessions and private history', async () => {
+    const originalCookie = cookie;
+    const email = `delete-me-${Date.now()}@tracklab.test`;
+    const password = 'delete-correct-horse-battery-staple';
+    const requestIp = `198.51.100.${20 + Math.floor(Math.random() * 100)}`;
+    const registration = await api('/api/auth/register', {
+      method: 'POST',
+      headers: { 'X-Forwarded-For': requestIp },
+      body: JSON.stringify({ name: 'Delete Me Rider', email, password }),
+    });
+    expect(registration.status).toBe(201);
+    const deletionCookie = String(registration.headers.get('set-cookie')).split(';')[0];
+    cookie = deletionCookie;
+
+    const secondLogin = await api('/api/auth/login', {
+      method: 'POST',
+      headers: { 'X-Forwarded-For': requestIp },
+      body: JSON.stringify({ email, password }),
+    });
+    expect(secondLogin.status).toBe(200);
+    const secondCookie = String(secondLogin.headers.get('set-cookie')).split(';')[0];
+
+    expect((await api('/api/user-data', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        accountProfile: { photoUrl: 'data:image/png;base64,REVNTw==', updatedAt: Date.now() },
+        exploreRoutes: [exploreRoute(`DELETE-ROUTE-${Date.now()}`)],
+      }),
+    })).status).toBe(200);
+    const startedAt = Date.now() - 10_000;
+    expect((await api('/api/training-sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        session: {
+          id: `delete-training-${startedAt}`,
+          activityType: 'straight-sprint',
+          title: 'Private deletion sprint',
+          startedAt,
+          endedAt: startedAt + 8_000,
+          durationMs: 8_000,
+          distanceMeters: 100,
+          trackId: 'delete-private-track',
+          trackName: 'Delete Private Track',
+          details: { riderName: 'Delete Me Rider', peakWatts: 999 },
+        },
+      }),
+    })).status).toBe(201);
+
+    const bearerAttempt = await api('/api/auth/account', {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer club-tablet-credential' },
+      body: JSON.stringify({ password, confirmation: 'DELETE' }),
+    });
+    expect(bearerAttempt.status).toBe(403);
+    expect(bearerAttempt.headers.get('cache-control')).toBe('no-store');
+
+    const malformed = await api('/api/auth/account', {
+      method: 'DELETE',
+      headers: { 'X-Forwarded-For': requestIp },
+      body: '{',
+    });
+    expect(malformed.status).toBe(400);
+    expect(malformed.headers.get('cache-control')).toBe('no-store');
+
+    const badConfirmation = await api('/api/auth/account', {
+      method: 'DELETE',
+      headers: { 'X-Forwarded-For': requestIp },
+      body: JSON.stringify({ password, confirmation: 'delete' }),
+    });
+    expect(badConfirmation.status).toBe(400);
+    expect(badConfirmation.headers.get('cache-control')).toBe('no-store');
+
+    const wrongPassword = await api('/api/auth/account', {
+      method: 'DELETE',
+      headers: { 'X-Forwarded-For': requestIp },
+      body: JSON.stringify({ password: 'definitely-not-the-password', confirmation: 'DELETE' }),
+    });
+    expect(wrongPassword.status).toBe(403);
+    expect(wrongPassword.headers.get('cache-control')).toBe('no-store');
+
+    const erased = await api('/api/auth/account', {
+      method: 'DELETE',
+      headers: { 'X-Forwarded-For': requestIp },
+      body: JSON.stringify({ password, confirmation: 'DELETE' }),
+    });
+    expect(erased.status).toBe(200);
+    expect(erased.headers.get('cache-control')).toBe('no-store');
+    expect(erased.headers.get('set-cookie')).toContain('Max-Age=0');
+    await expect(erased.json()).resolves.toEqual({ deleted: true });
+
+    const staleSession = await fetch(`${baseUrl}/api/auth/me`, {
+      headers: { Cookie: secondCookie, Origin: baseUrl },
+    });
+    await expect(staleSession.json()).resolves.toEqual({ user: null });
+    const oldLogin = await api('/api/auth/login', {
+      method: 'POST',
+      headers: { 'X-Forwarded-For': requestIp },
+      body: JSON.stringify({ email, password }),
+    });
+    expect(oldLogin.status).toBe(401);
+
+    // Reusing the email creates a clean identity; no profile, route, or
+    // training history from the erased UUID may reappear.
+    cookie = '';
+    const cleanRegistration = await api('/api/auth/register', {
+      method: 'POST',
+      headers: { 'X-Forwarded-For': '203.0.113.201' },
+      body: JSON.stringify({ name: 'Fresh Rider', email, password }),
+    });
+    expect(cleanRegistration.status).toBe(201);
+    cookie = String(cleanRegistration.headers.get('set-cookie')).split(';')[0];
+    const cleanUserData = await api('/api/user-data');
+    await expect(cleanUserData.json()).resolves.toMatchObject({
+      accountProfile: {},
+    });
+    const cleanExploreRoutes = await api('/api/explore/recent-routes');
+    await expect(cleanExploreRoutes.json()).resolves.toEqual({ routes: [] });
+    const cleanTraining = await api('/api/training-sessions');
+    await expect(cleanTraining.json()).resolves.toMatchObject({ sessions: [] });
+
+    const cleanup = await api('/api/auth/account', {
+      method: 'DELETE',
+      headers: { 'X-Forwarded-For': '203.0.113.201' },
+      body: JSON.stringify({ password, confirmation: 'DELETE' }),
+    });
+    expect(cleanup.status).toBe(200);
+    cookie = originalCookie;
   });
 
   it('reports commentary capability without exposing a server key', async () => {
@@ -4036,7 +4398,7 @@ describe('cloud API trust boundaries', () => {
     });
   });
 
-  it('blocks spectator publication and forged billing completion', async () => {
+  it('blocks spectator publication and exposes no legacy external-payment completion route', async () => {
     const publishing = await api('/api/public-track-mappings', {
       method: 'POST',
       body: JSON.stringify({ trackMappings: {} }),
@@ -4047,7 +4409,19 @@ describe('cloud API trust boundaries', () => {
       method: 'POST',
       body: JSON.stringify({ billingState: 'forged-checkout-state' }),
     });
-    expect(billing.status).toBe(400);
+    expect(billing.status).toBe(404);
+    const checkout = await api('/api/billing/checkout', {
+      method: 'POST',
+      body: JSON.stringify({ bikeSeats: 4 }),
+    });
+    expect(checkout.status).toBe(404);
+    const config = await api('/api/billing/config');
+    expect(config.status).toBe(200);
+    await expect(config.json()).resolves.toMatchObject({
+      provider: 'apple-app-store',
+      enabled: false,
+      configured: false,
+    });
   });
 
   it('records idempotent 3D scene loads and restricts usage totals to administrators', async () => {

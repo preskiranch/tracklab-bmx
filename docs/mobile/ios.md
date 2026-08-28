@@ -1,9 +1,11 @@
 # TrackLab BMX for iPhone and iPad
 
-TrackLab BMX uses Capacitor for its native iOS shell. The shell loads the live
-TrackLab service so account, club, rider, race, sprint, and Explore the World
-data remain shared with the web dashboard. Native Bluetooth support is added
-inside the shell because iPhone and iPad browsers do not expose Web Bluetooth.
+TrackLab BMX uses Capacitor for its native iOS shell. Release builds load the
+audited web bundle packaged inside the app; they are not a wrapper around the
+hosted website. An explicit HTTPS service transport keeps account, club, rider,
+race, sprint, and Explore the World data synchronized with the web dashboard.
+Native Bluetooth support is added inside the shell because iPhone and iPad
+browsers do not expose Web Bluetooth.
 
 ## App identity
 
@@ -70,12 +72,19 @@ to be awake.
 
 ## Release architecture decision
 
-The current native shell intentionally loads the live HTTPS TrackLab service so
-web, iOS, account, club, and training data stay on the same deployed version.
-Before App Store submission, this remote-shell design needs an explicit security,
-native-version compatibility, outage, and App Review decision. A future bundled
-asset release would need a stable, explicit API origin before removing the live
-server URL; changing it prematurely would break the app's relative API calls.
+The release architecture is bundled-native. `capacitor.config.ts` has no remote
+`server.url`; `dist` is copied into the signed application. Only relative
+`/api/` calls are routed to the fixed TrackLab HTTPS service. Packaged `/data/`
+and audio assets and loopback Wattbike connector URLs remain local.
+
+On iOS, the server returns a 256-bit opaque session only to the exact
+`capacitor://localhost` origin. The app stores it in a non-synchronizing,
+device-only Keychain item and sends it as an HTTPS Bearer credential. Browser
+sessions retain the HttpOnly, SameSite cookie contract. WebSocket connections
+use a scoped, one-use, short-lived ticket, because browser WebSocket APIs cannot
+set Authorization. Friends, training history, and live heart-rate updates use
+authenticated fetch streaming instead of placing credentials in EventSource
+URLs. The bundled offline view is available even when the service cannot load.
 
 ## App Store Connect checklist
 
@@ -83,19 +92,18 @@ The repository includes public App Store URL shells at `/privacy` and
 `/support`. See [`app-store-public-pages.md`](./app-store-public-pages.md) for
 the deployed URLs, implementation scope, and the required legal-review steps.
 
-Do not submit the current native shell for public App Review until these product
-and policy items are resolved:
+Do not submit for public App Review until these release items are resolved:
 
-- provide an in-app account-deletion workflow with defined club ownership,
-  club-session retention/anonymization, and paid-subscription cancellation rules;
-- replace or supplement Square-only digital membership checkout with an Apple
-  StoreKit-compliant purchase path for every intended storefront;
-- add reporting, blocking, objectionable-content filtering, and a moderation
-  response workflow for room text and voice features, or omit those features
-  from the submitted build;
-- resolve the live remote-shell release architecture described above; and
+- finish App Store Connect metadata and sandbox acceptance for the implemented
+  StoreKit Wattbike-connection subscriptions;
 - complete the physical one-to-four Wattbike acceptance matrix on iPhone and
   iPad hardware.
+
+Room text now has server-side pre-persistence filtering, and rider reporting,
+blocking, voice mute/end controls, and an authenticated administrator review
+queue are implemented. Run the complete
+[`community-safety.md`](../operations/community-safety.md) verification and
+confirm the 24-hour moderation process before every App Store submission.
 
 After those blockers are cleared:
 
