@@ -317,10 +317,15 @@ describe('club event tablet selection and launch state', () => {
     expect(clubEventMultiplayerRoomReady(null, undefined)).toBe(true);
   });
 
-  it('provides actionable first-load and later-refresh polling errors', () => {
-    expect(clubTabletEventPollingMessage(false)).toContain('Could not load');
-    expect(clubTabletEventPollingMessage(false)).toContain('connection');
-    expect(clubTabletEventPollingMessage(true)).toContain('Could not refresh');
+  it('reports polling failures only after this tablet joined the loaded coach event', () => {
+    const joinedEvent = normalizedEvent();
+    const otherTabletEvent = normalizedEvent({
+      slots: [eventPayload().slots[0]],
+    });
+
+    expect(clubTabletEventPollingMessage(null, 'tablet-1')).toBeNull();
+    expect(clubTabletEventPollingMessage(otherTabletEvent, 'tablet-1')).toBeNull();
+    expect(clubTabletEventPollingMessage(joinedEvent, 'tablet-1')).toContain('Could not refresh');
   });
 });
 

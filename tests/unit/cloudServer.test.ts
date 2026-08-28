@@ -473,12 +473,22 @@ describe('cloud API trust boundaries', () => {
     });
     expect(enrollment.status).toBe(201);
     const enrolled = await enrollment.json() as {
-      device: { id: string };
+      device: {
+        id: string;
+        recoveryState: 'complete';
+        recoveryCompleted: true;
+      };
       deviceToken: string;
     };
-    const deviceHeaders: HeadersInit = {
-      Authorization: `Bearer ${enrolled.deviceToken}`,
-    };
+    expect(enrolled.device).toMatchObject({
+      recoveryState: 'complete',
+      recoveryCompleted: true,
+    });
+    expect(enrolled.device).not.toHaveProperty('pairedBike');
+    let currentDeviceToken = enrolled.deviceToken;
+    const currentDeviceHeaders = (): HeadersInit => ({
+      Authorization: `Bearer ${currentDeviceToken}`,
+    });
     cookie = '';
 
     expect((await api('/api/club-tablet/wattbike-capacity', {
@@ -495,7 +505,7 @@ describe('cloud API trust boundaries', () => {
 
     const denied = await api('/api/club-tablet/wattbike-capacity', {
       method: 'PUT',
-      headers: deviceHeaders,
+      headers: currentDeviceHeaders(),
       body: JSON.stringify({ requestedConnections: 4 }),
     });
     expect(denied.status).toBe(200);
@@ -523,7 +533,7 @@ describe('cloud API trust boundaries', () => {
 
     const reserved = await api('/api/club-tablet/wattbike-capacity', {
       method: 'PUT',
-      headers: deviceHeaders,
+      headers: currentDeviceHeaders(),
       // The server must ignore any attempt by a picker to request more seats.
       body: JSON.stringify({ requestedConnections: 4 }),
     });
@@ -542,7 +552,7 @@ describe('cloud API trust boundaries', () => {
 
     const renewed = await api('/api/club-tablet/wattbike-capacity', {
       method: 'PUT',
-      headers: deviceHeaders,
+      headers: currentDeviceHeaders(),
     });
     await expect(renewed.json()).resolves.toMatchObject({
       capacity: { grantedConnections: 1, accountConnectionsInUse: 4 },
@@ -550,7 +560,7 @@ describe('cloud API trust boundaries', () => {
 
     const started = await api('/api/club-tablet/sessions', {
       method: 'POST',
-      headers: deviceHeaders,
+      headers: currentDeviceHeaders(),
       body: JSON.stringify({ studioRiderId: riderId, bikeDeviceId: 'picker-bike-1' }),
     });
     expect(started.status).toBe(201);
@@ -560,7 +570,7 @@ describe('cloud API trust boundaries', () => {
     // now belongs to the athlete session, so this stale release is harmless.
     const staleRelease = await api('/api/club-tablet/wattbike-capacity', {
       method: 'DELETE',
-      headers: deviceHeaders,
+      headers: currentDeviceHeaders(),
     });
     await expect(staleRelease.json()).resolves.toEqual({ released: false });
     const stillSelected = await api('/api/club-tablet/sessions/current', {
@@ -570,17 +580,95 @@ describe('cloud API trust boundaries', () => {
 
     const latePickerPoll = await api('/api/club-tablet/wattbike-capacity', {
       method: 'PUT',
-      headers: deviceHeaders,
+      headers: currentDeviceHeaders(),
     });
     expect(latePickerPoll.status).toBe(409);
     expect((await api('/api/club-tablet/sessions/current', {
       headers: { 'X-TrackLab-Club-Tablet-Session': startedPayload.sessionToken },
     })).status).toBe(200);
 
+    const connectedBeforeRecovery = await api('/api/club-tablet/bike-presence', {
+      method: 'PUT',
+      headers: currentDeviceHeaders(),
+      body: JSON.stringify({
+        bikeDeviceId: 25_058_701,
+        bikeLabel: 'WattbikePM25058701',
+      }),
+    });
+    expect(connectedBeforeRecovery.status).toBe(200);
+    const connectedBeforeRecoveryPayload = await connectedBeforeRecovery.json();
+    expect(connectedBeforeRecoveryPayload).toMatchObject({
+      pairedBike: {
+        deviceId: 25_058_701,
+        label: 'WattbikePM25058701',
+        updatedAt: expect.any(Number),
+      },
+    });
+    const repeatedHeartbeat = await api('/api/club-tablet/bike-presence', {
+      method: 'PUT',
+      headers: currentDeviceHeaders(),
+      body: JSON.stringify({
+        bikeDeviceId: 25_058_701,
+        bikeLabel: 'WattbikePM25058701',
+      }),
+    });
+    expect(repeatedHeartbeat.status).toBe(200);
+    await expect(repeatedHeartbeat.json()).resolves.toMatchObject({
+      pairedBike: {
+        deviceId: 25_058_701,
+        label: 'WattbikePM25058701',
+        updatedAt: connectedBeforeRecoveryPayload.pairedBike.updatedAt,
+      },
+    });
+    cookie = independentCookie;
+    const recoveryTrack = customSprintTrack(`tablet-recovery-${Date.now()}`);
+    const recoveryEventResponse = await api('/api/club-events', {
+      method: 'POST',
+      body: JSON.stringify({
+        activityType: 'straight-sprint',
+        configuration: {
+          trackId: recoveryTrack.id,
+          trackName: recoveryTrack.name,
+          distanceFeet: 300,
+          airSetting: 1,
+          trackRecord: recoveryTrack,
+        },
+      }),
+    });
+    expect(recoveryEventResponse.status).toBe(201);
+    const recoveryEventId = (await recoveryEventResponse.json()).event.id;
+    cookie = '';
+    const recoveryEventJoin = await api('/api/club-events/current/join', {
+      method: 'POST',
+      headers: { 'X-TrackLab-Club-Tablet-Session': startedPayload.sessionToken },
+      body: JSON.stringify({ eventId: recoveryEventId }),
+    });
+    expect(recoveryEventJoin.status).toBe(200);
+    await expect(recoveryEventJoin.json()).resolves.toMatchObject({
+      event: {
+        id: recoveryEventId,
+        slots: expect.arrayContaining([
+          expect.objectContaining({
+            deviceId: enrolled.device.id,
+            status: 'ready',
+            athlete: expect.objectContaining({ studioRiderId: riderId }),
+          }),
+        ]),
+      },
+    });
+    // A process restart or a long app update loses live presence. Explicitly
+    // ending the heartbeat simulates that boundary while the paired-bike
+    // identity must remain durable on the logical tablet row.
+    expect((await api('/api/club-tablet/bike-presence', {
+      method: 'DELETE',
+      headers: currentDeviceHeaders(),
+    })).status).toBe(200);
+
     // An app update can strand the web-view copy of the tablet bearer while
     // the owner still sees the existing device in the club list. Recover that
     // exact row instead of enrolling a duplicate. Recovery consumes only this
-    // fresh authorizing login and ends the old athlete/capacity identity.
+    // fresh authorizing login, rotates the old device bearer, and retires the
+    // transient athlete/event authority attached to the old installation.
     const recoveryLogin = await api('/api/auth/login', {
       method: 'POST',
       headers: { 'X-Forwarded-For': '192.0.2.47' },
@@ -597,16 +685,46 @@ describe('cloud API trust boundaries', () => {
     expect(recoveredResponse.headers.get('cache-control')).toBe('no-store');
     expect(recoveredResponse.headers.get('set-cookie')).toContain('Max-Age=0');
     const recovered = await recoveredResponse.json() as {
-      device: { id: string; name: string };
+      device: {
+        id: string;
+        name: string;
+        recoveryState: 'restored';
+        recoveryCompleted: true;
+        pairedBike?: { deviceId: number; label: string; updatedAt: number };
+        connectedBike?: { deviceId: number; label: string };
+      };
       deviceToken: string;
     };
     expect(recovered.device).toMatchObject({
       id: enrolled.device.id,
       name: 'Capacity Picker iPad',
+      recoveryState: 'restored',
+      recoveryCompleted: true,
+      pairedBike: {
+        deviceId: 25_058_701,
+        label: 'WattbikePM25058701',
+      },
     });
+    expect(recovered.device).not.toHaveProperty('connectedBike');
     expect(recovered.deviceToken).toHaveLength(43);
     expect(recovered.deviceToken).not.toBe(enrolled.deviceToken);
     expect(JSON.stringify(recovered)).not.toContain('tokenHash');
+
+    cookie = independentCookie;
+    const eventAfterRecovery = await api('/api/club-events/current');
+    expect(eventAfterRecovery.status).toBe(200);
+    await expect(eventAfterRecovery.json()).resolves.toMatchObject({
+      event: {
+        id: recoveryEventId,
+        slots: expect.arrayContaining([
+          expect.objectContaining({
+            deviceId: enrolled.device.id,
+            status: 'available',
+            athlete: null,
+          }),
+        ]),
+      },
+    });
 
     const retiredRecoveryIdentity = await fetch(`${baseUrl}/api/auth/me`, {
       headers: { Origin: baseUrl, Cookie: recoveryCookie },
@@ -616,18 +734,35 @@ describe('cloud API trust boundaries', () => {
 
     cookie = '';
     expect((await api('/api/club-tablet/roster', {
-      headers: deviceHeaders,
+      headers: currentDeviceHeaders(),
     })).status).toBe(401);
+    // Recovery keeps the physical-bike assignment but ends the temporary
+    // athlete identity so the replaced installation cannot retain a rider.
     expect((await api('/api/club-tablet/sessions/current', {
       headers: { 'X-TrackLab-Club-Tablet-Session': startedPayload.sessionToken },
     })).status).toBe(401);
     const recoveredHeaders = { Authorization: `Bearer ${recovered.deviceToken}` };
-    expect((await api('/api/club-tablet/roster', {
+    currentDeviceToken = recovered.deviceToken;
+    const recoveredRoster = await api('/api/club-tablet/roster', {
       headers: recoveredHeaders,
-    })).status).toBe(200);
+    });
+    expect(recoveredRoster.status).toBe(200);
+    await expect(recoveredRoster.json()).resolves.toMatchObject({
+      device: {
+        id: enrolled.device.id,
+        name: 'Capacity Picker iPad',
+        recoveryState: 'restored',
+        recoveryCompleted: true,
+        pairedBike: {
+          deviceId: 25_058_701,
+          label: 'WattbikePM25058701',
+        },
+      },
+    });
 
-    // The active athlete lease was released by recovery, so this same logical
-    // tablet can reserve its one picker seat with the replacement credential.
+    // With transient athlete state released, the recovered credential can
+    // immediately reuse that exact device allocation without affecting
+    // another tablet.
     const recoveredCapacity = await api('/api/club-tablet/wattbike-capacity', {
       method: 'PUT',
       headers: recoveredHeaders,
@@ -640,10 +775,52 @@ describe('cloud API trust boundaries', () => {
         reason: 'club-tablet-picker-reserved',
       },
     });
+    // Recover once more while the picker owns the seat. Its durable lease is
+    // rebound from the old bearer hash to the new one, so the same allocation
+    // renews instead of conflicting or consuming a duplicate seat.
+    const pickerRecoveryLogin = await api('/api/auth/login', {
+      method: 'POST',
+      headers: { 'X-Forwarded-For': '192.0.2.48' },
+      body: JSON.stringify({ email, password }),
+    });
+    expect(pickerRecoveryLogin.status).toBe(200);
+    cookie = String(pickerRecoveryLogin.headers.get('set-cookie')).split(';')[0];
+    const pickerRecoveredResponse = await api(
+      `/api/club-tablet/devices/${encodeURIComponent(enrolled.device.id)}/recover`,
+      { method: 'POST' },
+    );
+    expect(pickerRecoveredResponse.status).toBe(200);
+    const pickerRecovered = await pickerRecoveredResponse.json() as {
+      device: { id: string; name: string; recoveryState: string };
+      deviceToken: string;
+    };
+    expect(pickerRecovered.device).toMatchObject({
+      id: enrolled.device.id,
+      name: 'Capacity Picker iPad',
+      recoveryState: 'restored',
+    });
+    expect((await api('/api/club-tablet/wattbike-capacity', {
+      method: 'PUT',
+      headers: recoveredHeaders,
+    })).status).toBe(401);
+    const pickerRecoveredHeaders = { Authorization: `Bearer ${pickerRecovered.deviceToken}` };
+    const renewedAfterPickerRecovery = await api('/api/club-tablet/wattbike-capacity', {
+      method: 'PUT',
+      headers: pickerRecoveredHeaders,
+    });
+    expect(renewedAfterPickerRecovery.status).toBe(200);
+    await expect(renewedAfterPickerRecovery.json()).resolves.toMatchObject({
+      capacity: {
+        grantedConnections: 1,
+        accountConnectionsInUse: 4,
+        reason: 'club-tablet-picker-reserved',
+      },
+    });
     expect((await api('/api/club-tablet/wattbike-capacity', {
       method: 'DELETE',
-      headers: recoveredHeaders,
+      headers: pickerRecoveredHeaders,
     })).status).toBe(200);
+    currentDeviceToken = pickerRecovered.deviceToken;
 
     // The independent monitor login survives; the recovered device appears
     // exactly once and no bearer or hash is exposed by the owner list.
@@ -654,7 +831,22 @@ describe('cloud API trust boundaries', () => {
     expect(listedAfterRecoveryPayload.devices.filter(
       (device: { id: string }) => device.id === enrolled.device.id,
     )).toHaveLength(1);
-    expect(JSON.stringify(listedAfterRecoveryPayload)).not.toContain(recovered.deviceToken);
+    expect(listedAfterRecoveryPayload.devices.find(
+      (device: { id: string }) => device.id === enrolled.device.id,
+    )).toMatchObject({
+      id: enrolled.device.id,
+      name: 'Capacity Picker iPad',
+      recoveryState: 'restored',
+      recoveryCompleted: true,
+      pairedBike: {
+        deviceId: 25_058_701,
+        label: 'WattbikePM25058701',
+      },
+    });
+    expect(listedAfterRecoveryPayload.devices.find(
+      (device: { id: string }) => device.id === enrolled.device.id,
+    )).not.toHaveProperty('connectedBike');
+    expect(JSON.stringify(listedAfterRecoveryPayload)).not.toContain(pickerRecovered.deviceToken);
     expect(JSON.stringify(listedAfterRecoveryPayload)).not.toContain('tokenHash');
 
     ownerSocket.socket.close();
@@ -2906,6 +3098,11 @@ describe('cloud API trust boundaries', () => {
         updatedAt: expect.any(Number),
         expiresAt: expect.any(Number),
       },
+      pairedBike: {
+        deviceId: 43_950,
+        label: 'WattbikePM25043950',
+        updatedAt: expect.any(Number),
+      },
       heartbeatTtlMs: 12_000,
     });
     cookie = monitorCookie;
@@ -2916,6 +3113,10 @@ describe('cloud API trust boundaries', () => {
     expect(firstDeviceWithPresence).toMatchObject({
       id: firstDevice.device.id,
       connectedBike: {
+        deviceId: 43_950,
+        label: 'WattbikePM25043950',
+      },
+      pairedBike: {
         deviceId: 43_950,
         label: 'WattbikePM25043950',
       },
@@ -2946,6 +3147,12 @@ describe('cloud API trust boundaries', () => {
       (device: { id: string }) => device.id === firstDevice.device.id,
     );
     expect(clearedPresenceDevice).not.toHaveProperty('connectedBike');
+    expect(clearedPresenceDevice).toMatchObject({
+      pairedBike: {
+        deviceId: 43_950,
+        label: 'WattbikePM25043950',
+      },
+    });
 
     const roster = await api('/api/club-tablet/roster', {
       headers: deviceHeaders(firstDevice.deviceToken),

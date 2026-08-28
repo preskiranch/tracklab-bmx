@@ -5,10 +5,13 @@ import Security
 private enum NativeSessionError: LocalizedError {
     case invalidToken
     case invalidClubTabletCredential
+    case invalidBluetoothDeviceId
     case readFailed(OSStatus)
     case writeFailed(OSStatus)
     case clubTabletReadFailed(OSStatus)
     case clubTabletWriteFailed(OSStatus)
+    case bluetoothReadFailed(OSStatus)
+    case bluetoothWriteFailed(OSStatus)
 
     var errorDescription: String? {
         switch self {
@@ -16,6 +19,8 @@ private enum NativeSessionError: LocalizedError {
             return "TrackLab received an invalid sign-in session."
         case .invalidClubTabletCredential:
             return "TrackLab received an invalid club tablet authorization."
+        case .invalidBluetoothDeviceId:
+            return "TrackLab received an invalid saved Wattbike identifier."
         case .readFailed:
             return "The device could not read its TrackLab sign-in."
         case .writeFailed:
@@ -24,6 +29,10 @@ private enum NativeSessionError: LocalizedError {
             return "The device could not read its club tablet authorization."
         case .clubTabletWriteFailed:
             return "The device could not securely save its club tablet authorization."
+        case .bluetoothReadFailed:
+            return "The device could not read its saved Wattbike pairing."
+        case .bluetoothWriteFailed:
+            return "The device could not securely save its Wattbike pairing."
         }
     }
 }
@@ -98,9 +107,56 @@ private struct StoredClubTabletCredential: Codable {
     }
 }
 
-/// Stores the server-issued personal session and Club Tablet authorization in
-/// separate, device-only Keychain items. Neither item synchronizes through
-/// iCloud Keychain or backups, and clearing one identity cannot erase the other.
+private struct StoredBluetoothDeviceIds: Codable {
+    static let currentVersion = 1
+    static let maximumDeviceCount = 4
+
+    let version: Int
+    let deviceIds: [String]
+
+    init(deviceIds: [String]) {
+        self.version = Self.currentVersion
+        self.deviceIds = Self.normalizedDeviceIds(deviceIds)
+    }
+
+    var wireValue: JSObject {
+        [
+            "version": version,
+            "deviceIds": deviceIds,
+        ]
+    }
+
+    var valid: Bool {
+        version == Self.currentVersion
+            && !deviceIds.isEmpty
+            && Self.normalizedDeviceIds(deviceIds) == deviceIds
+    }
+
+    static func normalizedDeviceId(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty,
+              normalized.count <= 240,
+              normalized.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else {
+            return nil
+        }
+        return normalized
+    }
+
+    private static func normalizedDeviceIds(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        return Array(
+            values.compactMap(normalizedDeviceId)
+                .filter { seen.insert($0).inserted }
+                .suffix(maximumDeviceCount)
+        )
+    }
+}
+
+/// Stores the server-issued personal session, Club Tablet authorization, and
+/// remembered CoreBluetooth peripherals in separate, device-only Keychain
+/// items. None synchronize through iCloud Keychain or backups, and clearing
+/// one identity cannot erase the other durable device state.
 @objc(NativeSessionPlugin)
 public final class NativeSessionPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "NativeSessionPlugin"
@@ -112,12 +168,16 @@ public final class NativeSessionPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "loadClubTabletCredential", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "saveClubTabletCredential", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "clearClubTabletCredential", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "loadSavedBluetoothDevices", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "saveBluetoothDevice", returnType: CAPPluginReturnPromise),
     ]
 
     private static let service = "com.preskilranch.tracklabbmx.native-session"
     private static let account = "server-session-v1"
     private static let clubTabletService = "com.preskilranch.tracklabbmx.club-tablet"
     private static let clubTabletAccount = "device-credential-v1"
+    private static let bluetoothService = "com.preskilranch.tracklabbmx.bluetooth"
+    private static let bluetoothAccount = "peripheral-ids-v1"
     private let queue = DispatchQueue(label: "com.preskilranch.tracklabbmx.native-session")
 
     @objc public func loadSession(_ call: CAPPluginCall) {
@@ -200,6 +260,39 @@ public final class NativeSessionPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    @objc public func loadSavedBluetoothDevices(_ call: CAPPluginCall) {
+        queue.async {
+            do {
+                if let savedDevices = try Self.loadSavedBluetoothDevices() {
+                    call.resolve(savedDevices.wireValue)
+                } else {
+                    call.resolve(["version": StoredBluetoothDeviceIds.currentVersion, "deviceIds": []])
+                }
+            } catch {
+                call.reject(error.localizedDescription)
+            }
+        }
+    }
+
+    @objc public func saveBluetoothDevice(_ call: CAPPluginCall) {
+        guard let deviceId = StoredBluetoothDeviceIds.normalizedDeviceId(call.getString("deviceId")) else {
+            call.reject(NativeSessionError.invalidBluetoothDeviceId.localizedDescription)
+            return
+        }
+        queue.async {
+            do {
+                let existing = try Self.loadSavedBluetoothDevices()?.deviceIds ?? []
+                let savedDevices = StoredBluetoothDeviceIds(
+                    deviceIds: existing.filter { $0 != deviceId } + [deviceId]
+                )
+                try Self.storeSavedBluetoothDevices(savedDevices)
+                call.resolve(["saved": true, "deviceIds": savedDevices.deviceIds])
+            } catch {
+                call.reject(error.localizedDescription)
+            }
+        }
+    }
+
     private static func query() -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
@@ -213,6 +306,14 @@ public final class NativeSessionPlugin: CAPPlugin, CAPBridgedPlugin {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: clubTabletService,
             kSecAttrAccount as String: clubTabletAccount,
+        ]
+    }
+
+    private static func bluetoothQuery() -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: bluetoothService,
+            kSecAttrAccount as String: bluetoothAccount,
         ]
     }
 
@@ -302,6 +403,50 @@ public final class NativeSessionPlugin: CAPPlugin, CAPBridgedPlugin {
         let addStatus = SecItemAdd(insertion as CFDictionary, nil)
         guard addStatus == errSecSuccess else {
             throw NativeSessionError.clubTabletWriteFailed(addStatus)
+        }
+    }
+
+    private static func loadSavedBluetoothDevices() throws -> StoredBluetoothDeviceIds? {
+        var request = bluetoothQuery()
+        request[kSecReturnData as String] = true
+        request[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(request as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else {
+            throw NativeSessionError.bluetoothReadFailed(status)
+        }
+        guard let data = result as? Data,
+              let savedDevices = try? JSONDecoder().decode(StoredBluetoothDeviceIds.self, from: data),
+              savedDevices.valid else {
+            _ = SecItemDelete(bluetoothQuery() as CFDictionary)
+            return nil
+        }
+        return savedDevices
+    }
+
+    private static func storeSavedBluetoothDevices(_ savedDevices: StoredBluetoothDeviceIds) throws {
+        let encoded: Data
+        do {
+            encoded = try JSONEncoder().encode(savedDevices)
+        } catch {
+            throw NativeSessionError.invalidBluetoothDeviceId
+        }
+        let updateStatus = SecItemUpdate(
+            bluetoothQuery() as CFDictionary,
+            [kSecValueData as String: encoded] as CFDictionary
+        )
+        if updateStatus == errSecSuccess { return }
+        guard updateStatus == errSecItemNotFound else {
+            throw NativeSessionError.bluetoothWriteFailed(updateStatus)
+        }
+        var insertion = bluetoothQuery()
+        insertion[kSecValueData as String] = encoded
+        insertion[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        insertion[kSecAttrSynchronizable as String] = false
+        let addStatus = SecItemAdd(insertion as CFDictionary, nil)
+        guard addStatus == errSecSuccess else {
+            throw NativeSessionError.bluetoothWriteFailed(addStatus)
         }
     }
 }

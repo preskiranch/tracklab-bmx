@@ -471,9 +471,13 @@ export async function revokeClubTabletDevice(deviceId: string) {
   }
 }
 
-export async function loadClubTabletRoster(credential = readStoredClubTabletDevice()) {
+export async function loadClubTabletRoster(
+  credential = readStoredClubTabletDevice(),
+  options: { signal?: AbortSignal } = {},
+) {
   if (!credential) throw new Error('This tablet has not been authorized by the club owner.');
   const roster = normalizeClubTabletRoster(await tabletFetch('/api/club-tablet/roster', {
+    signal: options.signal,
     headers: { Authorization: `Bearer ${credential.deviceToken}` },
   }));
   if (!roster || roster.device.id !== credential.device.id) {

@@ -84,10 +84,18 @@ function countdownLabel(startAt: number, now: number) {
   return `Starts in ${Math.ceil(remainingMs / 1_000)}s`;
 }
 
-export function clubTabletEventPollingMessage(hasLoadedEvent: boolean) {
-  return hasLoadedEvent
+export function clubTabletEventPollingMessage(
+  lastLoadedEvent: ClubEventSnapshot | null | undefined,
+  deviceId: string,
+) {
+  // Polling is passive discovery until this tablet actually occupies a lane.
+  // An ordinary tablet restore must stay silent when there is no coach event,
+  // or when the current event belongs only to other tablets. Once a server
+  // snapshot confirms this device joined, a later refresh failure is useful
+  // because the rider may otherwise miss a synchronized start or cancellation.
+  return lastLoadedEvent && clubEventSlotForDevice(lastLoadedEvent, deviceId)
     ? 'Could not refresh the coach event. TrackLab will keep trying.'
-    : 'Could not load the coach event. Check this tablet’s connection; TrackLab will keep trying.';
+    : null;
 }
 
 function isClubTabletEventPollingMessage(message: string | null) {
@@ -152,9 +160,15 @@ export default function ClubTabletEventCard({
           const empty = { event: null, pollAfterMs: 5_000 } satisfies ClubEventEnvelope;
           envelopeRef.current = empty;
           setEnvelope(empty);
+          setMessage((current) => isClubTabletEventPollingMessage(current) ? null : current);
           nextPollAfterMs = 5_000;
         } else {
-          setMessage(clubTabletEventPollingMessage(Boolean(envelopeRef.current?.event)));
+          const pollingMessage = clubTabletEventPollingMessage(
+            envelopeRef.current?.event,
+            device.device.id,
+          );
+          setMessage((current) => pollingMessage
+            ?? (isClubTabletEventPollingMessage(current) ? null : current));
         }
       } finally {
         if (!disposed) timer = window.setTimeout(() => void poll(), nextPollAfterMs);

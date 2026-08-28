@@ -1,9 +1,17 @@
 import { BleClient, type BleDevice, type BleService } from '@capacitor-community/bluetooth-le';
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import type { BluetoothRequestDeviceOptions } from './bluetoothDiscovery';
 
 const savedNativeDeviceIdsKey = 'tracklab.native-bluetooth-device-ids.v1';
 const bluetoothServiceBase = '-0000-1000-8000-00805f9b34fb';
+const nativeSessionPluginName = 'TrackLabNativeSession';
+
+type NativeBluetoothDeviceStorePlugin = {
+  loadSavedBluetoothDevices: () => Promise<{ version?: unknown; deviceIds?: unknown }>;
+  saveBluetoothDevice: (options: { deviceId: string }) => Promise<{ saved?: unknown; deviceIds?: unknown }>;
+};
+
+const nativeDeviceStore = registerPlugin<NativeBluetoothDeviceStorePlugin>(nativeSessionPluginName);
 
 let initialized = false;
 let initializationPromise: Promise<void> | null = null;
@@ -19,23 +27,73 @@ function normalizeUuid(value: string) {
   return normalized;
 }
 
-function readSavedNativeDeviceIds() {
+function normalizedSavedDeviceIds(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.flatMap((deviceId) => {
+    if (typeof deviceId !== 'string') return [];
+    const normalized = deviceId.trim();
+    return normalized && normalized.length <= 240 ? [normalized] : [];
+  }))].slice(-4);
+}
+
+function readLocallySavedNativeDeviceIds() {
   try {
     const value = JSON.parse(window.localStorage.getItem(savedNativeDeviceIdsKey) ?? '[]');
-    return Array.isArray(value)
-      ? value.filter((deviceId): deviceId is string => typeof deviceId === 'string' && deviceId.length > 0).slice(0, 4)
-      : [];
+    return normalizedSavedDeviceIds(value);
   } catch {
     return [];
   }
 }
 
-function saveNativeDeviceId(deviceId: string) {
+function writeLocallySavedNativeDeviceIds(deviceIds: readonly string[]) {
   try {
-    const current = readSavedNativeDeviceIds().filter((savedId) => savedId !== deviceId);
-    window.localStorage.setItem(savedNativeDeviceIdsKey, JSON.stringify([...current, deviceId].slice(-4)));
+    window.localStorage.setItem(savedNativeDeviceIdsKey, JSON.stringify(normalizedSavedDeviceIds(deviceIds)));
   } catch {
     // Pairing remains usable if storage is unavailable.
+  }
+}
+
+function nativeDeviceStoreAvailable() {
+  try {
+    return Capacitor.isNativePlatform()
+      && Capacitor.isPluginAvailable(nativeSessionPluginName);
+  } catch {
+    return false;
+  }
+}
+
+async function readSavedNativeDeviceIds() {
+  const localDeviceIds = readLocallySavedNativeDeviceIds();
+  if (!nativeDeviceStoreAvailable()) return localDeviceIds;
+  try {
+    const result = await nativeDeviceStore.loadSavedBluetoothDevices();
+    const nativeDeviceIds = result?.version === 1
+      ? normalizedSavedDeviceIds(result.deviceIds)
+      : [];
+    // Keep the native item authoritative while migrating any valid pairing
+    // that still exists in this WebView origin. This makes ordinary releases
+    // and future origin changes transparent to the studio tablet.
+    const mergedDeviceIds = normalizedSavedDeviceIds([...nativeDeviceIds, ...localDeviceIds]);
+    const missingNativeDeviceIds = localDeviceIds.filter((deviceId) => !nativeDeviceIds.includes(deviceId));
+    for (const deviceId of missingNativeDeviceIds) {
+      await nativeDeviceStore.saveBluetoothDevice({ deviceId });
+    }
+    writeLocallySavedNativeDeviceIds(mergedDeviceIds);
+    return mergedDeviceIds;
+  } catch {
+    // CoreBluetooth permission and the local mirror remain independently
+    // useful if protected Keychain data is temporarily unavailable.
+    return localDeviceIds;
+  }
+}
+
+async function saveNativeDeviceId(deviceId: string) {
+  const normalized = normalizedSavedDeviceIds([deviceId])[0];
+  if (!normalized) return;
+  const current = readLocallySavedNativeDeviceIds().filter((savedId) => savedId !== normalized);
+  writeLocallySavedNativeDeviceIds([...current, normalized].slice(-4));
+  if (nativeDeviceStoreAvailable()) {
+    await nativeDeviceStore.saveBluetoothDevice({ deviceId: normalized }).catch(() => undefined);
   }
 }
 
@@ -233,7 +291,7 @@ export async function installCapacitorBluetoothBridge({ nativeShell = false }: {
 
   const bluetooth = {
     getDevices: async () => {
-      const deviceIds = readSavedNativeDeviceIds();
+      const deviceIds = await readSavedNativeDeviceIds();
       if (deviceIds.length === 0) {
         return [];
       }
@@ -250,7 +308,7 @@ export async function installCapacitorBluetoothBridge({ nativeShell = false }: {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`Native Wattbike scan did not complete. ${message}`);
       }
-      saveNativeDeviceId(device.deviceId);
+      await saveNativeDeviceId(device.deviceId);
       return new NativeBluetoothDevice(device);
     },
   };

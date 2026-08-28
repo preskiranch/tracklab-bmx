@@ -40,9 +40,13 @@ import {
 import {
   clubTabletBikeAccessReady,
   clubTabletFreshHeartRateReading,
+  clubTabletRestoreCandidates,
   clubTabletShouldAutoStartSelection,
 } from '../../src/components/ClubTabletMode';
-import { expireClubTabletSessionLocallyFirst } from '../../src/components/ClubTabletRuntime';
+import {
+  clubTabletAuthorizationTimeoutMs,
+  expireClubTabletSessionLocallyFirst,
+} from '../../src/components/ClubTabletRuntime';
 import { safelyReleaseCompletedClubTabletSession } from '../../src/lib/clubTabletExerciseCompletion';
 import type { HeartRateLiveEvent } from '../../src/lib/heartRateCloud';
 import { clubTabletRaceStartAllowed } from '../../src/lib/clubTabletRaceStart';
@@ -81,6 +85,8 @@ const deviceCredential: ClubTabletDeviceCredential = {
     name: 'Front desk iPad',
     clubId: 'club-1',
     clubName: 'Preski Ranch',
+    recoveryState: 'pending',
+    recoveryCompleted: false,
   },
   deviceToken: 'device-token',
 };
@@ -247,6 +253,38 @@ describe('Club Tablet client state', () => {
     expect(clubTabletBikeAccessReady('active', true)).toBe(true);
   });
 
+  it('removes a consumed recovery row from stale and current device lists', () => {
+    const devices = [
+      deviceCredential.device,
+      { ...deviceCredential.device, id: 'tablet-2', name: 'Bike 2 iPad' },
+    ];
+    expect(clubTabletRestoreCandidates(
+      devices,
+      new Set([deviceCredential.device.id]),
+    )).toEqual([devices[1]]);
+    expect(clubTabletRestoreCandidates([
+      { ...devices[1], recoveryState: 'complete', recoveryCompleted: true },
+      { ...devices[1], id: 'tablet-3', recoveryState: 'restored', recoveryCompleted: true },
+    ], new Set())).toEqual([]);
+    expect(clubTabletAuthorizationTimeoutMs).toBe(15_000);
+  });
+
+  it('commits a recovered credential before best-effort notification cleanup', () => {
+    const modeSource = readFileSync(
+      new URL('../../src/components/ClubTabletMode.tsx', import.meta.url),
+      'utf8',
+    );
+    const restoreStart = modeSource.indexOf('const restoreDevice = async (device: ClubTabletDevice) =>');
+    const restoreEnd = modeSource.indexOf('const refreshRoster = async', restoreStart);
+    const restoreSource = modeSource.slice(restoreStart, restoreEnd);
+    expect(restoreStart).toBeGreaterThanOrEqual(0);
+    expect(restoreEnd).toBeGreaterThan(restoreStart);
+    expect(restoreSource.indexOf('onDeviceChange(credential)'))
+      .toBeLessThan(restoreSource.indexOf("import('./NativeNotificationsCoordinator')"));
+    expect(restoreSource).toContain('consumedRestoreDeviceIdsRef.current.add(device.id)');
+    expect(restoreSource).not.toContain('Verifying authorization');
+  });
+
   it('automatically starts once a late saved-bike reconnect completes both selections', () => {
     const base = {
       hasActiveSession: false,
@@ -313,6 +351,40 @@ describe('Club Tablet client state', () => {
         },
       },
     })?.device).not.toHaveProperty('connectedBike');
+    expect(normalizeClubTabletDeviceCredential({
+      ...deviceCredential,
+      device: {
+        ...deviceCredential.device,
+        recoveryState: 'restored',
+        recoveryCompleted: true,
+        pairedBike: {
+          deviceId: 733_112,
+          label: 'WattbikePM250733112',
+          updatedAt: presenceNow,
+        },
+      },
+    })).toMatchObject({
+      device: {
+        recoveryState: 'restored',
+        recoveryCompleted: true,
+        pairedBike: {
+          deviceId: 733_112,
+          label: 'WattbikePM250733112',
+          updatedAt: presenceNow,
+        },
+      },
+    });
+    expect(normalizeClubTabletDeviceCredential({
+      ...deviceCredential,
+      device: {
+        ...deviceCredential.device,
+        pairedBike: {
+          deviceId: 733_112,
+          label: '',
+          updatedAt: presenceNow,
+        },
+      },
+    })?.device).not.toHaveProperty('pairedBike');
 
     const normalizedRoster = normalizeClubTabletRoster({
       device: deviceCredential.device,
