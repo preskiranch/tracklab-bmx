@@ -40,6 +40,7 @@ Render must use Node.js 22 or newer and contain these server-side values:
 | `TRACKLAB_PUSH_TOKEN_KEY_VERSION` | Current positive encryption-key version. Start at `1`. |
 | `TRACKLAB_PUSH_TOKEN_PREVIOUS_ENCRYPTION_KEYS` | Optional JSON map of at most four prior versions to 32-byte standard-base64 keys during staged rotation. |
 | `VITE_GOOGLE_MAPS_API_KEY` | Browser-restricted Google Maps JavaScript API key. |
+| `TRACKLAB_GOOGLE_MAPS_JS_API_KEY` | Client Google Maps JavaScript key delivered at runtime only to the exact bundled Capacitor request contract. Falls back to `VITE_GOOGLE_MAPS_API_KEY` when omitted. |
 | `OPENAI_API_KEY` | Optional server-only key for source-backed track research, pre-race reports, natural race wording, and speech. Without it, TrackLab uses verified catalog facts and the browser voice fallback. |
 | `TRACKLAB_APPLE_IAP_ENABLED` | Set to `1` only after all Apple products, server credentials, and notification URLs are configured. Startup fails closed if an enabled configuration is incomplete. |
 | `TRACKLAB_APPLE_ONLY_CUTOVER` | Keep `0` through staging and migration. Set to `1` only after production StoreKit lifecycle tests pass and legacy Square renewals/paid obligations are resolved. |
@@ -60,8 +61,10 @@ non-tracking Purchase History and User ID data used to verify Wattbike
 subscriptions. Those answers must match `ios/App/App/PrivacyInfo.xcprivacy`.
 
 Keep `TRACKLAB_LOG_HTTP=0` during normal operation. Enable it only for a short
-diagnostic window. Restrict Google Maps HTTP referrers to the production and
-approved development origins.
+diagnostic window. Restrict the Google Maps client key to the production and
+approved development origins plus TrackLab's exact bundled origin,
+`capacitor://localhost/*`. Confirm a signed iPhone and iPad can load both 2D
+satellite and 3D Maps views after every client-key restriction change.
 
 The Friends migration binds the already-provisioned `preskiranch@gmail.com`
 and `rasheen25@gmail.com` rows to immutable Official identities. If either row

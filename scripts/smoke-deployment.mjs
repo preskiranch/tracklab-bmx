@@ -96,6 +96,43 @@ if (expectAppleOnlyCutover) {
 }
 results.push(['health', healthRequest.durationMs]);
 
+const nativeRuntimeRequest = await request('/api/native/runtime-config', {
+  headers: {
+    Accept: 'application/json',
+    Origin: 'capacitor://localhost',
+    'X-TrackLab-Native-Session': '1',
+  },
+});
+assert(
+  nativeRuntimeRequest.response.ok,
+  `/api/native/runtime-config returned ${nativeRuntimeRequest.response.status}.`,
+);
+assert(
+  nativeRuntimeRequest.response.headers.get('cache-control') === 'no-store',
+  'Native runtime configuration must be no-store.',
+);
+assert(
+  nativeRuntimeRequest.response.headers.get('access-control-allow-origin') === 'capacitor://localhost',
+  'Native runtime configuration did not preserve the exact Capacitor CORS origin.',
+);
+const nativeRuntime = await nativeRuntimeRequest.response.json();
+assert(
+  nativeRuntime.version === 1
+    && nativeRuntime.googleMaps?.configured === true
+    && /^AIza[0-9A-Za-z_-]{35}$/u.test(nativeRuntime.googleMaps?.apiKey || ''),
+  'Native runtime configuration does not contain a valid Maps JavaScript client key.',
+);
+results.push(['native satellite configuration', nativeRuntimeRequest.durationMs]);
+
+const publicRuntimeRequest = await request('/api/native/runtime-config', {
+  headers: { Accept: 'application/json' },
+});
+assert(
+  publicRuntimeRequest.response.status === 403,
+  'Native runtime configuration was exposed outside the native request contract.',
+);
+results.push(['native configuration boundary', publicRuntimeRequest.durationMs]);
+
 const rootRequest = await request('/', { headers: { Accept: 'text/html' } });
 assert(rootRequest.response.ok, `/ returned ${rootRequest.response.status}.`);
 assert(rootRequest.response.headers.get('content-type')?.includes('text/html'), 'Root response is not HTML.');

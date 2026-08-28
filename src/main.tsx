@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { bootstrapNativeBluetooth } from './lib/nativeBluetoothBootstrap';
+import { loadNativeRuntimeConfig } from './lib/nativeRuntimeConfig';
 import { resolvePublicPage } from './lib/publicPages';
 import { isTrackLabNativeShell } from './lib/serviceOrigins';
 import { installTrackLabServiceTransport } from './lib/serviceTransport';
@@ -29,6 +30,11 @@ async function bootstrap() {
       );
       return;
     }
+    // The signed native bundle cannot receive Vite environment variables at
+    // runtime. Load its public client configuration before App imports any map
+    // modules; an unavailable config must not prevent the rest of TrackLab from
+    // opening.
+    await loadNativeRuntimeConfig({ native: true });
   }
   const publicPage = resolvePublicPage(window.location.pathname);
   let pageContent;

@@ -75,6 +75,7 @@ import {
   staticCacheControl,
   trackLabCapacitorOrigin,
 } from './httpSecurity.mjs';
+import { nativeRuntimeConfigPayload } from './nativeRuntimeConfig.mjs';
 import { fetchExploreElevationProfile } from './exploreElevation.mjs';
 import { generateSmartExplorePlan } from './exploreSmartRoute.mjs';
 import { createAuthSessionCache } from './authSessionCache.mjs';
@@ -267,6 +268,7 @@ const accountDeletionRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 
 const billingRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const authWebSocketTicketRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const appleNotificationRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
+const nativeRuntimeConfigRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const map3DLoadRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const exploreRouteRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const smartExploreRouteRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
@@ -14692,6 +14694,32 @@ async function handleAppleBillingApi(request, response, requestUrl) {
 
 async function serveStatic(request, response) {
   const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host}`);
+  if (requestUrl.pathname === '/api/native/runtime-config') {
+    if (!requestIsNativeApp(request)) {
+      writeJson(response, 403, { error: 'Native app request required.' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (!enforceNoStoreRateLimit(
+      request,
+      response,
+      nativeRuntimeConfigRateLimiter,
+      240,
+      'native-runtime-config',
+    )) return;
+
+    const body = JSON.stringify(nativeRuntimeConfigPayload());
+    response.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Content-Length': Buffer.byteLength(body),
+    });
+    response.end(request.method === 'HEAD' ? undefined : body);
+    return;
+  }
   if (
     requestUrl.pathname === '/api/billing/config'
     || requestUrl.pathname.startsWith('/api/billing/apple/')

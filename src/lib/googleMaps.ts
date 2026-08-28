@@ -9,6 +9,7 @@ import {
   type SplitBranchSelection,
 } from './trackMapping';
 import type { TrackPoint, TrackRecord, TrackZone } from '../types';
+import { getRuntimeGoogleMapsApiKey } from './nativeRuntimeConfig';
 
 type LatLngLiteral = {
   lat: number;
@@ -344,7 +345,9 @@ declare global {
 }
 
 export function getGoogleMapsApiKey() {
-  return import.meta.env.VITE_GOOGLE_MAPS_API_KEY?.trim() ?? '';
+  return getRuntimeGoogleMapsApiKey()
+    || import.meta.env.VITE_GOOGLE_MAPS_API_KEY?.trim()
+    || '';
 }
 
 export function hasGoogleMapsApiKey() {

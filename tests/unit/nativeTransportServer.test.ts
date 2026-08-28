@@ -4,6 +4,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 
 const capacitorOrigin = 'capacitor://localhost';
+const nativeGoogleMapsKey = `AIza${'N'.repeat(35)}`;
+const fallbackGoogleMapsKey = `AIza${'F'.repeat(35)}`;
+const serverOnlyRoutesKey = 'server-routes-key-must-not-leave-the-server';
 let child: ChildProcess;
 let baseUrl = '';
 let childError = '';
@@ -84,6 +87,9 @@ beforeAll(async () => {
       PORT: String(port),
       DATABASE_URL: '',
       TRACKLAB_AUTH_WS_TICKET_TTL_MS: '2000',
+      TRACKLAB_GOOGLE_MAPS_JS_API_KEY: nativeGoogleMapsKey,
+      VITE_GOOGLE_MAPS_API_KEY: fallbackGoogleMapsKey,
+      GOOGLE_ROUTES_API_KEY: serverOnlyRoutesKey,
       OPENAI_API_KEY: '',
     },
     stdio: ['ignore', 'ignore', 'pipe'],
@@ -109,6 +115,57 @@ afterAll(async () => {
 });
 
 describe('bundled native service boundary', () => {
+  it('returns only the preferred client Maps key to the exact native request contract', async () => {
+    const response = await fetch(`${baseUrl}/api/native/runtime-config`, {
+      headers: nativeHeaders(),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('access-control-allow-origin')).toBe(capacitorOrigin);
+    await expect(response.json()).resolves.toEqual({
+      version: 1,
+      googleMaps: {
+        configured: true,
+        apiKey: nativeGoogleMapsKey,
+      },
+    });
+
+    const head = await fetch(`${baseUrl}/api/native/runtime-config`, {
+      method: 'HEAD',
+      headers: nativeHeaders(),
+    });
+    expect(head.status).toBe(200);
+    expect(head.headers.get('cache-control')).toBe('no-store');
+    expect(Number(head.headers.get('content-length'))).toBeGreaterThan(0);
+    await expect(head.text()).resolves.toBe('');
+
+    const serialized = JSON.stringify(await (await fetch(`${baseUrl}/api/native/runtime-config`, {
+      headers: nativeHeaders(),
+    })).json());
+    expect(serialized).not.toContain(fallbackGoogleMapsKey);
+    expect(serialized).not.toContain(serverOnlyRoutesKey);
+  });
+
+  it('rejects runtime configuration requests that are not exact native requests', async () => {
+    const missingMarker = await fetch(`${baseUrl}/api/native/runtime-config`, {
+      headers: { Origin: capacitorOrigin },
+    });
+    expect(missingMarker.status).toBe(403);
+    expect(missingMarker.headers.get('cache-control')).toBe('no-store');
+
+    const wrongOrigin = await fetch(`${baseUrl}/api/native/runtime-config`, {
+      headers: { Origin: baseUrl, 'X-TrackLab-Native-Session': '1' },
+    });
+    expect(wrongOrigin.status).toBe(403);
+
+    const wrongMethod = await fetch(`${baseUrl}/api/native/runtime-config`, {
+      method: 'POST',
+      headers: nativeHeaders(),
+    });
+    expect(wrongMethod.status).toBe(405);
+    expect(wrongMethod.headers.get('cache-control')).toBe('no-store');
+  });
+
   it('allows only the exact Capacitor CORS preflight contract', async () => {
     const response = await fetch(`${baseUrl}/api/auth/login`, {
       method: 'OPTIONS',
