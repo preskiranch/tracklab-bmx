@@ -577,10 +577,86 @@ describe('cloud API trust boundaries', () => {
       headers: { 'X-TrackLab-Club-Tablet-Session': startedPayload.sessionToken },
     })).status).toBe(200);
 
-    expect((await api('/api/club-tablet/sessions', {
-      method: 'DELETE',
+    // An app update can strand the web-view copy of the tablet bearer while
+    // the owner still sees the existing device in the club list. Recover that
+    // exact row instead of enrolling a duplicate. Recovery consumes only this
+    // fresh authorizing login and ends the old athlete/capacity identity.
+    const recoveryLogin = await api('/api/auth/login', {
+      method: 'POST',
+      headers: { 'X-Forwarded-For': '192.0.2.47' },
+      body: JSON.stringify({ email, password }),
+    });
+    expect(recoveryLogin.status).toBe(200);
+    const recoveryCookie = String(recoveryLogin.headers.get('set-cookie')).split(';')[0];
+    cookie = recoveryCookie;
+    const recoveredResponse = await api(
+      `/api/club-tablet/devices/${encodeURIComponent(enrolled.device.id)}/recover`,
+      { method: 'POST' },
+    );
+    expect(recoveredResponse.status).toBe(200);
+    expect(recoveredResponse.headers.get('cache-control')).toBe('no-store');
+    expect(recoveredResponse.headers.get('set-cookie')).toContain('Max-Age=0');
+    const recovered = await recoveredResponse.json() as {
+      device: { id: string; name: string };
+      deviceToken: string;
+    };
+    expect(recovered.device).toMatchObject({
+      id: enrolled.device.id,
+      name: 'Capacity Picker iPad',
+    });
+    expect(recovered.deviceToken).toHaveLength(43);
+    expect(recovered.deviceToken).not.toBe(enrolled.deviceToken);
+    expect(JSON.stringify(recovered)).not.toContain('tokenHash');
+
+    const retiredRecoveryIdentity = await fetch(`${baseUrl}/api/auth/me`, {
+      headers: { Origin: baseUrl, Cookie: recoveryCookie },
+    });
+    expect(retiredRecoveryIdentity.status).toBe(200);
+    await expect(retiredRecoveryIdentity.json()).resolves.toEqual({ user: null });
+
+    cookie = '';
+    expect((await api('/api/club-tablet/roster', {
+      headers: deviceHeaders,
+    })).status).toBe(401);
+    expect((await api('/api/club-tablet/sessions/current', {
       headers: { 'X-TrackLab-Club-Tablet-Session': startedPayload.sessionToken },
+    })).status).toBe(401);
+    const recoveredHeaders = { Authorization: `Bearer ${recovered.deviceToken}` };
+    expect((await api('/api/club-tablet/roster', {
+      headers: recoveredHeaders,
     })).status).toBe(200);
+
+    // The active athlete lease was released by recovery, so this same logical
+    // tablet can reserve its one picker seat with the replacement credential.
+    const recoveredCapacity = await api('/api/club-tablet/wattbike-capacity', {
+      method: 'PUT',
+      headers: recoveredHeaders,
+    });
+    expect(recoveredCapacity.status).toBe(200);
+    await expect(recoveredCapacity.json()).resolves.toMatchObject({
+      capacity: {
+        grantedConnections: 1,
+        accountConnectionsInUse: 4,
+        reason: 'club-tablet-picker-reserved',
+      },
+    });
+    expect((await api('/api/club-tablet/wattbike-capacity', {
+      method: 'DELETE',
+      headers: recoveredHeaders,
+    })).status).toBe(200);
+
+    // The independent monitor login survives; the recovered device appears
+    // exactly once and no bearer or hash is exposed by the owner list.
+    cookie = independentCookie;
+    const listedAfterRecovery = await api('/api/club-tablet/devices');
+    expect(listedAfterRecovery.status).toBe(200);
+    const listedAfterRecoveryPayload = await listedAfterRecovery.json();
+    expect(listedAfterRecoveryPayload.devices.filter(
+      (device: { id: string }) => device.id === enrolled.device.id,
+    )).toHaveLength(1);
+    expect(JSON.stringify(listedAfterRecoveryPayload)).not.toContain(recovered.deviceToken);
+    expect(JSON.stringify(listedAfterRecoveryPayload)).not.toContain('tokenHash');
+
     ownerSocket.socket.close();
     cookie = originalCookie;
   });

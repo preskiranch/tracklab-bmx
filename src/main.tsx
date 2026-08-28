@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { bootstrapNativeBluetooth } from './lib/nativeBluetoothBootstrap';
+import { restoreNativeClubTabletCredential } from './lib/nativeClubTabletCredential';
 import { loadNativeRuntimeConfig } from './lib/nativeRuntimeConfig';
 import { resolvePublicPage } from './lib/publicPages';
 import { isTrackLabNativeShell } from './lib/serviceOrigins';
@@ -35,6 +36,11 @@ async function bootstrap() {
     // modules; an unavailable config must not prevent the rest of TrackLab from
     // opening.
     await loadNativeRuntimeConfig({ native: true });
+    // Club Tablet authorization is device identity, not account identity.
+    // Restore its device-only Keychain record before App synchronously chooses
+    // its initial kiosk mode. This also migrates the first bundled-native
+    // build's capacitor-origin localStorage credential.
+    await restoreNativeClubTabletCredential();
   }
   const publicPage = resolvePublicPage(window.location.pathname);
   let pageContent;

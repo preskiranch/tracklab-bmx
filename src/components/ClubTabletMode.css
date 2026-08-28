@@ -43,7 +43,9 @@
 .club-tablet-device-list strong,
 .club-tablet-device-list small { display: block; }
 .club-tablet-device-list small { margin-top: 3px; color: #71806d; }
+.club-tablet-device-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .club-tablet-device-list button { display: inline-flex; min-height: 38px; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid #efb0a8; border-radius: 9px; background: #fff; color: #a52d20; font-weight: 850; }
+.club-tablet-device-list button.restore { border-color: #9fca8d; color: #286b16; }
 .club-tablet-setup-card label { display: grid; gap: 7px; font-weight: 850; }
 .club-tablet-setup-card input,
 .club-tablet-search { min-height: 48px; border: 1px solid #c6d0c1; border-radius: 12px; background: #fff; }
@@ -178,4 +180,7 @@
   .club-tablet-demo-control { grid-template-columns: 1fr; }
   .club-tablet-demo-mark { width: fit-content; }
   .club-tablet-demo-control > button { width: 100%; }
+  .club-tablet-device-list article { grid-template-columns: auto minmax(0, 1fr); }
+  .club-tablet-device-actions { grid-column: 1 / -1; justify-content: stretch; }
+  .club-tablet-device-actions button { flex: 1 1 180px; justify-content: center; }
 }

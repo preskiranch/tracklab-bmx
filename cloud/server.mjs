@@ -17246,6 +17246,95 @@ async function serveStatic(request, response) {
     return;
   }
 
+  const clubTabletRecoveryMatch = requestUrl.pathname.match(
+    /^\/api\/club-tablet\/devices\/([^/]+)\/recover$/u,
+  );
+  if (clubTabletRecoveryMatch) {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const authSession = await requireAuthSession(request, response);
+    if (!authSession) return;
+    if (!canManageClubConnect(authSession.user)) {
+      writeJson(response, 403, { error: 'Only the TrackLab club owner can recover shared club tablets.' });
+      return;
+    }
+    const ownerProfileKey = authProfileKey(authSession.user);
+    const deviceId = sanitizeText(clubTabletRecoveryMatch[1], '', 160);
+    if (!deviceId) {
+      writeJson(response, 404, { error: 'That enrolled club tablet was not found.' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      clubTabletRateLimiter,
+      30,
+      `club-tablet-recover:${ownerProfileKey}:${deviceId}`,
+    )) return;
+
+    const deviceToken = createSessionToken();
+    const authorizingSessionHash = tokenHash(authSession.token);
+    const recovered = await persistence.recoverClubTabletDevice({
+      deviceId,
+      ownerProfileKey,
+      ownerUserId: authSession.user.id,
+      tokenHash: tokenHash(deviceToken),
+      authSessionTokenHash: authorizingSessionHash,
+    });
+    if (recovered.status !== 'recovered' || !recovered.device) {
+      if (recovered.status === 'unauthorized') {
+        clearBrowserAuthCookie(response, request);
+        writeJson(response, 401, { error: 'Sign in again before recovering this club tablet.' });
+        return;
+      }
+      if (recovered.status === 'not-found') {
+        writeJson(response, 404, { error: 'That enrolled club tablet was not found.' });
+        return;
+      }
+      writeJson(response, recovered.status === 'conflict' ? 409 : 503, {
+        error: recovered.status === 'conflict'
+          ? 'The replacement tablet credential is already in use.'
+          : 'Club Tablet recovery could not be completed.',
+      });
+      return;
+    }
+
+    // Credential rotation is a kiosk identity boundary. Remove every
+    // process-local capability held by the previous credential before the new
+    // token is returned. Durable event participation and Wattbike leases were
+    // already removed in the same persistence transaction as the rotation.
+    const activeSessionHash = clubTabletSessionTokenHashByDeviceId.get(deviceId);
+    const activeSession = activeSessionHash
+      ? clubTabletSessionsByTokenHash.get(activeSessionHash)
+      : null;
+    if (activeSession) {
+      await stopClubTabletSession(activeSession).catch((error) => {
+        cloudTelemetry.warn('club_tablet.recovery_session_cleanup_failed', {
+          deviceId,
+          error,
+        });
+      });
+    }
+    clubTabletBikePresenceByDeviceId.delete(deviceId);
+
+    // Match first enrollment exactly: this app installation is now a shared
+    // kiosk, not an authenticated administrator device.
+    authSessionLookups.forget(authorizingSessionHash);
+    personalAuthSessions.forget(authorizingSessionHash);
+    await persistence.deleteAuthSession(authorizingSessionHash);
+    deactivateAuthenticatedClientsForSession(authorizingSessionHash, 'Club Tablet recovered');
+    closeFriendEventStreamsForSession(authorizingSessionHash);
+    closeTrainingHistoryStreamsForSession(authorizingSessionHash);
+    clearBrowserAuthCookie(response, request);
+    writeJson(response, 200, {
+      device: publicClubTabletDevice(recovered.device),
+      deviceToken,
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
   if (requestUrl.pathname === '/api/club-tablet/devices') {
     const authSession = await requireAuthSession(request, response);
     if (!authSession) return;

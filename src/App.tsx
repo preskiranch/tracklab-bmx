@@ -286,6 +286,7 @@ import type {
   ClubLiveActivityState,
   ClubLiveExploreState,
 } from './components/ClubLiveAthleteBridge';
+import { clearNativeClubTabletCredential } from './lib/nativeClubTabletCredential';
 import { authenticatedRacerBikeSeatLimit, shouldStopAdvancedConnector } from './lib/advancedConnectorPolicy';
 import {
   loginAuthUser,
@@ -10082,6 +10083,7 @@ export default function App() {
       setBikeConnectionSource('bluetooth');
       clearStoredClubTabletSession();
       clearStoredClubTabletDevice();
+      void clearNativeClubTabletCredential().catch(() => undefined);
       setClubTabletSession(null);
       setClubTabletRoster(null);
       setClubTabletDevice(null);

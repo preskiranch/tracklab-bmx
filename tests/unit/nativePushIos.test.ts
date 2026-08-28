@@ -53,11 +53,11 @@ describe('native iOS push integration', () => {
     expect(installation).toContain('deadline: .now() + 1.0');
   });
 
-  it('enables app push, preserves Watch capability scope, and ships build 19', () => {
+  it('enables app push, preserves Watch capability scope, and ships build 20', () => {
     expect(entitlements).toContain('<key>aps-environment</key>');
     expect(project).toContain('com.apple.Push');
-    expect(project.match(/CURRENT_PROJECT_VERSION = 19;/gu)).toHaveLength(4);
-    expect(project).not.toContain('CURRENT_PROJECT_VERSION = 18;');
+    expect(project.match(/CURRENT_PROJECT_VERSION = 20;/gu)).toHaveLength(4);
+    expect(project).not.toContain('CURRENT_PROJECT_VERSION = 19;');
     expect(unsignedBuild).toContain("node_modules/@capacitor/push-notifications/Package.swift");
     expect(unsignedBuild).toContain('binaryArtifactIsValid');
     expect(unsignedBuild).toContain("'ios-arm64'");
