@@ -7911,7 +7911,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
     }
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ devices: [] }),
+      body: JSON.stringify({ devices: [tabletDevice] }),
     });
   });
   await page.route('**/api/club-tablet/roster', async (route) => {
@@ -8019,6 +8019,14 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   await openSignedInAppIfNeeded(page);
   await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'Club Tablets', exact: true }).click();
+
+  await expect(page.getByLabel('Authorized club tablets')).toContainText(
+    'Updated or reinstalled this iPad?',
+  );
+  await expect(page.getByRole('button', {
+    name: `Restore ${tabletDevice.name} on this iPad`,
+    exact: true,
+  })).toBeVisible();
 
   await page.getByLabel('Tablet name').fill(tabletDevice.name);
   // Count only the explicit pre-enrollment flush below. Any earlier account

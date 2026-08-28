@@ -23,6 +23,7 @@ import {
   enrollClubTablet,
   loadClubTabletDevices,
   loadClubTabletRoster,
+  recoverClubTabletDevice,
   revokeClubTabletDevice,
   startClubTabletSession,
   type ClubTabletAthlete,
@@ -235,6 +236,7 @@ export default function ClubTabletMode({
   const [busy, setBusy] = useState<'idle' | 'authorizing' | 'roster' | 'starting' | 'ending'>('idle');
   const [managedDevices, setManagedDevices] = useState<ClubTabletDevice[]>([]);
   const [deviceManagementBusy, setDeviceManagementBusy] = useState(false);
+  const [recoveringDeviceId, setRecoveringDeviceId] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [watchStatus, setWatchStatus] = useState<ClubTabletWatchConnectStatus | null>(null);
   const [watchClock, setWatchClock] = useState(Date.now());
@@ -338,6 +340,29 @@ export default function ClubTabletMode({
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not revoke this tablet.');
     } finally {
+      setDeviceManagementBusy(false);
+    }
+  };
+
+  const restoreDevice = async (device: ClubTabletDevice) => {
+    if (!window.confirm(
+      `Restore ${device.name} on this iPad? Continue only if this is the same physical tablet; its previous authorization will stop working.`,
+    )) return;
+    setDeviceManagementBusy(true);
+    setRecoveringDeviceId(device.id);
+    setMessage(null);
+    try {
+      await onBeforeAuthorize?.();
+      const credential = await recoverClubTabletDevice(device.id);
+      await import('./NativeNotificationsCoordinator')
+        .then(({ clearNativePushAccountBoundary }) => clearNativePushAccountBoundary())
+        .catch(() => undefined);
+      onDeviceChange(credential);
+      setMessage(`${device.name} restored on this iPad. Verifying authorization…`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not restore this tablet.');
+    } finally {
+      setRecoveringDeviceId('');
       setDeviceManagementBusy(false);
     }
   };
@@ -739,7 +764,7 @@ export default function ClubTabletMode({
             <div>
               <span className="eyebrow">Owner controls</span>
               <h3>Authorized club tablets</h3>
-              <p>Revoke a lost, sold, or retired tablet here. Revocation ends its active athlete session and Club Live feed.</p>
+              <p>Updated or reinstalled this iPad? Restore its existing authorization here. Revoke only a lost, sold, or retired tablet.</p>
             </div>
             <div className="club-tablet-device-list">
               {managedDevices.map((device) => (
@@ -749,14 +774,26 @@ export default function ClubTabletMode({
                     <strong>{device.name}</strong>
                     <small>{device.lastSeenAt ? `Last seen ${new Date(device.lastSeenAt).toLocaleString()}` : 'Not used yet'}</small>
                   </span>
-                  <button
-                    type="button"
-                    disabled={deviceManagementBusy}
-                    onClick={() => void revokeDevice(device)}
-                    aria-label={`Revoke ${device.name}`}
-                  >
-                    <Trash2 size={17} /> Revoke
-                  </button>
+                  <div className="club-tablet-device-actions">
+                    <button
+                      className="restore"
+                      type="button"
+                      disabled={deviceManagementBusy}
+                      onClick={() => void restoreDevice(device)}
+                      aria-label={`Restore ${device.name} on this iPad`}
+                    >
+                      <RefreshCw className={recoveringDeviceId === device.id ? 'club-tablet-spin' : ''} size={17} />
+                      {recoveringDeviceId === device.id ? 'Restoring…' : 'Restore on this iPad'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={deviceManagementBusy}
+                      onClick={() => void revokeDevice(device)}
+                      aria-label={`Revoke ${device.name}`}
+                    >
+                      <Trash2 size={17} /> Revoke
+                    </button>
+                  </div>
                 </article>
               ))}
               {!deviceManagementBusy && managedDevices.length === 0 && <p>No authorized tablets yet.</p>}

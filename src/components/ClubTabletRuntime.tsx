@@ -17,6 +17,7 @@ import {
   type ClubTabletRoster,
   type ClubTabletSessionCredential,
 } from '../lib/clubTablet';
+import { clearNativeClubTabletCredential } from '../lib/nativeClubTabletCredential';
 import {
   loadLatestStudioTabletHeartRate,
   mergeLiveHeartRateEvent,
@@ -181,6 +182,7 @@ export default function ClubTabletRuntime({
         if (authorizationEnded(error)) {
           clearStoredClubTabletSession();
           clearStoredClubTabletDevice();
+          void clearNativeClubTabletCredential().catch(() => undefined);
           onDeviceRevoked();
           return;
         }

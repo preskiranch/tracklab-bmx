@@ -10710,6 +10710,161 @@ export async function enrollClubTabletDevice({
   }
 }
 
+/**
+ * Replaces the bearer credential for one existing, non-revoked Club Tablet.
+ *
+ * Recovery deliberately consumes the exact owner session that authorized the
+ * operation, just like first-time enrollment. The caller can therefore turn a
+ * signed-in app installation back into the same shared kiosk without leaving
+ * an administrator session usable on that tablet. The previous token hash is
+ * returned only to the trusted server caller so it can finish in-memory
+ * cleanup; it must never be serialized to a client.
+ */
+export async function recoverClubTabletDevice({
+  deviceId,
+  ownerProfileKey,
+  ownerUserId,
+  tokenHash,
+  authSessionTokenHash,
+}) {
+  const now = Date.now();
+  if (!pool) {
+    return withMemoryAuthSessionLock(authSessionTokenHash, async () => {
+      const clubId = memoryClubIdByOwner.get(ownerProfileKey);
+      const authSession = memoryAuthSessionsByToken.get(authSessionTokenHash);
+      const device = memoryClubTabletDevicesById.get(deviceId);
+      if (!clubId || !device || device.clubId !== clubId || device.revokedAt) {
+        return { status: 'not-found', device: null, previousTokenHash: '' };
+      }
+      if (
+        !authSession
+        || authSession.userId !== ownerUserId
+        || Date.parse(authSession.expiresAt) <= now
+      ) {
+        return { status: 'unauthorized', device: null, previousTokenHash: '' };
+      }
+      const tokenOwnerId = memoryClubTabletDeviceIdByTokenHash.get(tokenHash);
+      if (tokenOwnerId && tokenOwnerId !== deviceId) {
+        return { status: 'conflict', device: null, previousTokenHash: '' };
+      }
+
+      const previousTokenHash = device.tokenHash;
+      // Retire the personal session before publishing the replacement kiosk
+      // credential. The per-session lock prevents a replayed owner credential
+      // from rotating more than one tablet.
+      memoryAuthSessionsByToken.delete(authSessionTokenHash);
+      await removeMemoryPushInstallationsForSession(authSessionTokenHash);
+      memoryClubTabletDeviceIdByTokenHash.delete(previousTokenHash);
+      device.tokenHash = tokenHash;
+      device.lastSeenAt = now;
+      device.updatedAt = now;
+      memoryClubTabletDeviceIdByTokenHash.set(tokenHash, deviceId);
+
+      // Recovery is also an identity boundary. Release any stale athlete or
+      // picker allocation and remove this tablet from a current Club Event;
+      // completed-result authorizations remain bound to the same logical
+      // device so a durable outbox can still finish uploading.
+      memoryWattbikeConnectionLeases.delete(
+        wattbikeConnectionLeaseKey(ownerUserId, `club-tablet:${deviceId}`),
+      );
+      const eventId = memoryCurrentClubEventIdByClubId.get(clubId);
+      const participants = eventId ? memoryClubEventParticipantsByEventId.get(eventId) : null;
+      if (participants?.delete(deviceId)) {
+        const event = memoryClubEventsById.get(eventId);
+        if (event) event.updatedAt = now;
+      }
+
+      return {
+        status: 'recovered',
+        device: cloneJson(enrichMemoryClubTabletDevice(device), device),
+        previousTokenHash,
+      };
+    });
+  }
+
+  const ready = await initPersistence();
+  if (!ready || !pool) {
+    return { status: 'unavailable', device: null, previousTokenHash: '' };
+  }
+  let client = null;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+    // Consume and lock the exact owner session. If the selected tablet is not
+    // recoverable, rolling the transaction back also restores this session so
+    // the owner can choose the correct device instead of being signed out.
+    const retiredSession = await client.query(
+      `DELETE FROM ${schema}.auth_sessions
+       WHERE token_hash = $1 AND user_id = $2 AND expires_at > now()
+       RETURNING id`,
+      [authSessionTokenHash, ownerUserId],
+    );
+    if (!retiredSession.rows?.[0]) {
+      await client.query('ROLLBACK');
+      return { status: 'unauthorized', device: null, previousTokenHash: '' };
+    }
+    const selectedDevice = await client.query(
+      `SELECT devices.*, clubs.name AS club_name, clubs.owner_profile_key
+       FROM ${schema}.club_tablet_devices AS devices
+       JOIN ${schema}.clubs AS clubs ON clubs.id = devices.club_id
+       WHERE devices.id = $1
+         AND clubs.owner_profile_key = $2
+         AND devices.revoked_at IS NULL
+       FOR UPDATE OF devices`,
+      [deviceId, ownerProfileKey],
+    );
+    const selectedRow = selectedDevice.rows?.[0];
+    if (!selectedRow) {
+      await client.query('ROLLBACK');
+      return { status: 'not-found', device: null, previousTokenHash: '' };
+    }
+    const previousTokenHash = selectedRow.token_hash;
+    const deviceResult = await client.query(
+      `UPDATE ${schema}.club_tablet_devices AS devices
+       SET token_hash = $2, last_seen_at = now(), updated_at = now()
+       WHERE devices.id = $1
+       RETURNING devices.*`,
+      [deviceId, tokenHash],
+    );
+    if (!deviceResult.rows?.[0]) {
+      throw new Error('Club Tablet recovery lost the selected device row.');
+    }
+    const row = {
+      ...deviceResult.rows[0],
+      club_name: selectedRow.club_name,
+      owner_profile_key: selectedRow.owner_profile_key,
+    };
+    await client.query(
+      `DELETE FROM ${schema}.wattbike_connection_leases
+       WHERE billing_owner_user_id = $1 AND allocation_key = $2`,
+      [ownerUserId, `club-tablet:${deviceId}`],
+    );
+    await client.query(
+      `DELETE FROM ${schema}.club_event_participants AS participants
+       USING ${schema}.club_events AS events
+       WHERE participants.event_id = events.id
+         AND participants.device_id = $1
+         AND events.club_id = $2
+         AND events.status IN ('lobby', 'active')`,
+      [deviceId, row.club_id],
+    );
+    await client.query('COMMIT');
+    cloudTelemetry.increment('tracklab_club_tablet_recoveries_total', { outcome: 'success' });
+    return {
+      status: 'recovered',
+      device: clubTabletDeviceFromRow(row),
+      previousTokenHash,
+    };
+  } catch (error) {
+    await client?.query('ROLLBACK').catch(() => {});
+    cloudTelemetry.increment('tracklab_club_tablet_recoveries_total', { outcome: 'error' });
+    cloudTelemetry.warn('persistence.club_tablet_recovery_failed', { error });
+    return { status: 'unavailable', device: null, previousTokenHash: '' };
+  } finally {
+    client?.release();
+  }
+}
+
 export async function loadClubTabletDeviceByTokenHash(
   deviceTokenHash,
   { requireAvailable = false } = {},

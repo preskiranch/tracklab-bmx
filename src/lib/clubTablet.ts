@@ -24,6 +24,10 @@ import {
 import { recordedBikeMetricsAreAccepted } from './bikeSampleSanity';
 import { clearNativeAuthToken } from './nativeAuthSession';
 import {
+  clearNativeClubTabletCredential,
+  saveNativeClubTabletCredential,
+} from './nativeClubTabletCredential';
+import {
   normalizeWattbikeCapacityMessage,
   type WattbikeCapacityState,
 } from './wattbikeCapacity';
@@ -339,8 +343,30 @@ export async function enrollClubTablet(name: string) {
   const credential = normalizeClubTabletDeviceCredential(payload);
   if (!credential) throw new Error('TrackLab returned an invalid tablet authorization.');
   storeClubTabletDevice(credential);
+  // WKWebView data is origin-scoped and can be replaced when a native release
+  // moves from hosted content to the packaged app. Keep the opaque enrollment
+  // in the device-only native store as the durable source for future updates.
+  await saveNativeClubTabletCredential(credential).catch(() => undefined);
   // Enrollment atomically retires the owner's cloud session. Mirror that
   // boundary in the device-only Keychain before any kiosk request can reuse it.
+  await clearNativeAuthToken();
+  return credential;
+}
+
+export async function recoverClubTabletDevice(deviceId: string) {
+  const safeDeviceId = text(deviceId, 120);
+  if (!safeDeviceId) throw new Error('Choose the authorized tablet to restore.');
+  const payload = await tabletFetch(`/api/club-tablet/devices/${encodeURIComponent(safeDeviceId)}/recover`, {
+    method: 'POST',
+  });
+  const credential = normalizeClubTabletDeviceCredential(payload);
+  if (!credential || credential.device.id !== safeDeviceId) {
+    throw new Error('TrackLab returned an invalid tablet recovery.');
+  }
+  storeClubTabletDevice(credential);
+  await saveNativeClubTabletCredential(credential).catch(() => undefined);
+  // Recovery, like first enrollment, converts the signed-in owner browser
+  // into the shared kiosk. Never retain the administrator Keychain session.
   await clearNativeAuthToken();
   return credential;
 }
@@ -441,6 +467,7 @@ export async function revokeClubTabletDevice(deviceId: string) {
   if (current?.device.id === deviceId) {
     clearStoredClubTabletSession();
     clearStoredClubTabletDevice();
+    await clearNativeClubTabletCredential().catch(() => undefined);
   }
 }
 

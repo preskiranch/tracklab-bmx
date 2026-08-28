@@ -1,5 +1,16 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const nativeClubTabletCredentialMocks = vi.hoisted(() => ({
+  clear: vi.fn(async () => true),
+  save: vi.fn(async () => true),
+}));
+
+vi.mock('../../src/lib/nativeClubTabletCredential', () => ({
+  clearNativeClubTabletCredential: nativeClubTabletCredentialMocks.clear,
+  saveNativeClubTabletCredential: nativeClubTabletCredentialMocks.save,
+}));
+
 import {
   claimClubTabletPickerWattbikeCapacity,
   clearClubTabletBikePresence,
@@ -7,6 +18,7 @@ import {
   clubTabletOutboxStorageKey,
   clubTabletResultUploadHeader,
   endClubTabletSession,
+  enrollClubTablet,
   flushClubTabletOutbox,
   normalizeClubTabletDeviceCredential,
   normalizeClubTabletRoster,
@@ -14,7 +26,9 @@ import {
   publishClubTabletBikePresence,
   readStoredClubTabletDevice,
   readStoredClubTabletSession,
+  recoverClubTabletDevice,
   releaseClubTabletPickerWattbikeCapacity,
+  revokeClubTabletDevice,
   saveClubTabletRaceResult,
   startClubTabletSession,
   storeClubTabletDevice,
@@ -94,6 +108,8 @@ const durableSessionCredential: ClubTabletSessionCredential = {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  nativeClubTabletCredentialMocks.clear.mockClear();
+  nativeClubTabletCredentialMocks.save.mockClear();
 });
 
 describe('Club Tablet client state', () => {
@@ -401,6 +417,66 @@ describe('Club Tablet client state', () => {
       },
       riderOverlayUpdatedAtByTrack: { 'overlay-only-track': 810 },
     });
+  });
+
+  it('stores enrollment in both browser and durable native device storage', async () => {
+    const localStorage = new MemoryStorage();
+    const sessionStorage = new MemoryStorage();
+    vi.stubGlobal('window', { localStorage, sessionStorage });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(deviceCredential), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(enrollClubTablet('Front desk iPad')).resolves.toEqual(deviceCredential);
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/club-tablet/devices', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ name: 'Front desk iPad' }),
+    }));
+    expect(readStoredClubTabletDevice()).toEqual(deviceCredential);
+    expect(nativeClubTabletCredentialMocks.save).toHaveBeenCalledWith(deviceCredential);
+  });
+
+  it('restores an existing authorized tablet without creating a duplicate enrollment', async () => {
+    const localStorage = new MemoryStorage();
+    const sessionStorage = new MemoryStorage();
+    vi.stubGlobal('window', { localStorage, sessionStorage });
+    const recoveredCredential = {
+      ...deviceCredential,
+      deviceToken: 'rotated-device-token',
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(recoveredCredential), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(recoverClubTabletDevice('tablet-1')).resolves.toEqual(recoveredCredential);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/club-tablet/devices/tablet-1/recover',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(readStoredClubTabletDevice()).toEqual(recoveredCredential);
+    expect(nativeClubTabletCredentialMocks.save).toHaveBeenCalledWith(recoveredCredential);
+  });
+
+  it('clears the durable native credential when the current tablet is revoked', async () => {
+    const localStorage = new MemoryStorage();
+    const sessionStorage = new MemoryStorage();
+    vi.stubGlobal('window', { localStorage, sessionStorage });
+    storeClubTabletDevice(deviceCredential);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ revoked: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+
+    await revokeClubTabletDevice(deviceCredential.device.id);
+
+    expect(readStoredClubTabletDevice()).toBeNull();
+    expect(nativeClubTabletCredentialMocks.clear).toHaveBeenCalledOnce();
   });
 
   it('publishes and clears connected-bike presence with only the enrolled tablet credential', async () => {

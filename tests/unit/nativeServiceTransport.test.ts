@@ -69,6 +69,8 @@ describe('bundled native service transport', () => {
     const capacitor = readFileSync('capacitor.config.ts', 'utf8');
     const nativePlugin = readFileSync('ios/App/App/NativeSessionPlugin.swift', 'utf8');
     const nativeAuth = readFileSync('src/lib/nativeAuthSession.ts', 'utf8');
+    const nativeClubTablet = readFileSync('src/lib/nativeClubTabletCredential.ts', 'utf8');
+    const main = readFileSync('src/main.tsx', 'utf8');
     const clientSources = [
       readFileSync('src/lib/friends.ts', 'utf8'),
       readFileSync('src/lib/heartRateCloud.ts', 'utf8'),
@@ -78,6 +80,28 @@ describe('bundled native service transport', () => {
     expect(capacitor).toContain("webDir: 'dist'");
     expect(nativePlugin).toContain('kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly');
     expect(nativePlugin).toMatch(/kSecAttrSynchronizable as String\]\s*=\s*false/u);
+    expect(nativePlugin).toContain('loadClubTabletCredential');
+    expect(nativePlugin).toContain('saveClubTabletCredential');
+    expect(nativePlugin).toContain('clearClubTabletCredential');
+    expect(nativePlugin).toContain('com.preskilranch.tracklabbmx.club-tablet');
+    expect(nativePlugin).toContain('device-credential-v1');
+    expect(nativePlugin.match(/kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly/gu)).toHaveLength(2);
+    expect(nativePlugin.match(/kSecAttrSynchronizable as String\]\s*=\s*false/gu)).toHaveLength(2);
+    const personalClear = nativePlugin.slice(
+      nativePlugin.indexOf('@objc public func clearSession'),
+      nativePlugin.indexOf('@objc public func loadClubTabletCredential'),
+    );
+    const clubClear = nativePlugin.slice(
+      nativePlugin.indexOf('@objc public func clearClubTabletCredential'),
+      nativePlugin.indexOf('private static func query()'),
+    );
+    expect(personalClear).toContain('Self.query()');
+    expect(personalClear).not.toContain('clubTabletQuery');
+    expect(clubClear).toContain('Self.clubTabletQuery()');
+    expect(clubClear).not.toContain('Self.query()');
+    expect(nativeClubTablet).toContain('restoreNativeClubTabletCredential');
+    expect(main.indexOf('await restoreNativeClubTabletCredential()'))
+      .toBeLessThan(main.indexOf("await import('./App')"));
     expect(nativeAuth).not.toContain('localStorage');
     expect(clientSources).not.toContain('new EventSource(');
   });
