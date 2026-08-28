@@ -24,10 +24,19 @@ The privacy draft describes behavior implemented in the repository, including:
 - TrackLab account, rider-profile, club, and profile-photo data;
 - Wattbike identifiers, telemetry, mapped-track data, training results, ghosts,
   Explore routes, multiplayer rooms, and optional microphone audio;
-- Google mapping services, optional OpenAI commentary, Square checkout, and
+- Google mapping services, optional OpenAI commentary, Apple in-app purchases, and
   hosted application/database infrastructure;
-- current user controls, session exports, local storage, authentication, and the
-  present lack of one self-service deletion flow or unified retention schedule.
+- current user controls, in-app account deletion, session exports, local storage,
+  authentication, and the documented retention behavior.
+
+The in-app deletion flow also distinguishes deleting a TrackLab account from
+canceling an Apple subscription. It recommends **Manage Apple Subscription**
+first and explains that Apple billing can continue after deletion. The old
+profile ID, email, and name are removed; only a one-way pseudonymous Apple
+transaction-lineage proof remains. A user can deliberately reattach that same
+active subscription to a clean replacement account through **Restore
+Purchases**, after fresh Apple signature and status verification. Cancellation
+is not a prerequisite for deletion.
 
 The support page covers Wattbike pairing, iPhone and iPad limitations, map and
 route troubleshooting, race audio, account sync, and Club Connect. Its service

@@ -46,6 +46,13 @@ function resolveDeveloperDirectory() {
     return process.env.DEVELOPER_DIR
   }
 
+  const isFullXcodeDeveloperDirectory = (candidate) => (
+    Boolean(candidate)
+    && fs.existsSync(path.join(candidate, 'usr/bin/xcodebuild'))
+    && fs.existsSync(path.join(candidate, 'Platforms/iPhoneOS.platform'))
+    && fs.existsSync(path.join(candidate, 'Platforms/iPhoneSimulator.platform'))
+  )
+
   const result = spawnSync('/usr/bin/xcode-select', ['-p'], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'inherit'],
@@ -53,14 +60,13 @@ function resolveDeveloperDirectory() {
   const selectedPath = result.stdout?.trim()
   if (
     result.status === 0
-    && selectedPath
-    && fs.existsSync(path.join(selectedPath, 'usr/bin/xcodebuild'))
+    && isFullXcodeDeveloperDirectory(selectedPath)
   ) {
     return selectedPath
   }
 
   const standardXcodePath = '/Applications/Xcode.app/Contents/Developer'
-  if (fs.existsSync(path.join(standardXcodePath, 'usr/bin/xcodebuild'))) {
+  if (isFullXcodeDeveloperDirectory(standardXcodePath)) {
     return standardXcodePath
   }
 

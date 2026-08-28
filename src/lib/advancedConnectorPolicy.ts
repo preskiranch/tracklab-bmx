@@ -17,11 +17,13 @@ export function authenticatedRacerBikeSeatLimit(
 }
 
 export function shouldStopAdvancedConnector(input: {
+  authStatus: 'loading' | 'signed-out' | 'signed-in';
   authenticatedRacerAccess: boolean;
   clubMonitorOpen: boolean;
   sourceState: string;
 }) {
-  return (!input.authenticatedRacerAccess || input.clubMonitorOpen)
+  return input.authStatus !== 'loading'
+    && (!input.authenticatedRacerAccess || input.clubMonitorOpen)
     && input.sourceState !== 'idle'
     && input.sourceState !== 'stopping';
 }

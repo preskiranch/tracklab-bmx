@@ -4,6 +4,7 @@ import type {
   PrivateHeartRateZoneSummary,
 } from '../types';
 import { clubTabletSessionHeader } from './clubTabletStorage';
+import { subscribeToAuthenticatedEventStream } from './authenticatedEventStream';
 
 export type HeartRateActivityType =
   | 'bmx-race'
@@ -1592,9 +1593,6 @@ export function subscribeToHeartRateLive(
 ) {
   const params = new URLSearchParams();
   if (options.clubId) params.set('clubId', options.clubId);
-  const source = typeof EventSource === 'undefined'
-    ? null
-    : new EventSource(`/api/heart-rate/live${params.size ? `?${params}` : ''}`);
   let closed = false;
   let snapshotInFlight: Promise<void> | null = null;
   let snapshotErrorNotified = false;
@@ -1606,9 +1604,9 @@ export function subscribeToHeartRateLive(
     deliveredByRider = next;
     listener(next[normalized.riderId]);
   };
-  const receive = (event: MessageEvent) => {
+  const receive = (data: string) => {
     try {
-      const normalized = normalizeHeartRateLiveEvent(JSON.parse(event.data));
+      const normalized = normalizeHeartRateLiveEvent(JSON.parse(data));
       if (normalized) deliver(normalized);
     } catch {
       // A malformed health event is ignored rather than shown under the wrong rider.
@@ -1637,10 +1635,16 @@ export function subscribeToHeartRateLive(
       });
     return snapshotInFlight;
   };
-  const ready = () => { void refreshSnapshot(); };
-  source?.addEventListener('heart-rate', receive as EventListener);
-  source?.addEventListener('ready', ready as EventListener);
-  if (options.onError) source?.addEventListener('error', options.onError);
+  const closeStream = subscribeToAuthenticatedEventStream(
+    `/api/heart-rate/live${params.size ? `?${params}` : ''}`,
+    {
+      onEvent: (event) => {
+        if (event.type === 'heart-rate') receive(event.data);
+        else if (event.type === 'ready') void refreshSnapshot();
+      },
+      onError: options.onError,
+    },
+  );
   if (!options.clubId) void refreshSnapshot();
   const pollTimer = options.clubId
     ? null
@@ -1660,9 +1664,6 @@ export function subscribeToHeartRateLive(
     if (!options.clubId && typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', visibilityChanged);
     }
-    source?.removeEventListener('heart-rate', receive as EventListener);
-    source?.removeEventListener('ready', ready as EventListener);
-    if (options.onError) source?.removeEventListener('error', options.onError);
-    source?.close();
+    closeStream();
   };
 }

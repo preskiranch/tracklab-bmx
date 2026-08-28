@@ -8,6 +8,7 @@ import type {
   MultiplayerVoiceSignal,
   MultiplayerVoiceSignalPayload,
 } from '../types';
+import { authenticatedWebSocketUrl, requestWebSocketTicket } from '../lib/webSocketTicket';
 
 export type LiveFriendAudioPendingCommand = { type: 'create-live-audio-invite'; targetProfileId: string }
   | { type: 'join-room'; roomId: string };
@@ -98,12 +99,6 @@ export function liveFriendAudioTerminalStatus(
   };
 }
 
-function socketUrl() {
-  const configured = import.meta.env.VITE_TRACKLAB_MULTIPLAYER_URL?.trim();
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return new URL(configured || `${protocol}//${window.location.host}/multiplayer`, window.location.href).toString();
-}
-
 function liveRoom(value: unknown): MultiplayerRoom | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const room = value as MultiplayerRoom;
@@ -121,6 +116,7 @@ export function useLiveFriendAudioConnection(accountId: string) {
   const leaveRequestedRef = useRef(false);
   const activityRef = useRef<LiveFriendAudioConnectionActivity>('idle');
   const welcomeTimeoutRef = useRef<{ socket: WebSocket; cancel: () => void } | null>(null);
+  const connectionAttemptRef = useRef(0);
   const [clientId, setClientId] = useState<string | null>(null);
   const [currentRoom, setCurrentRoom] = useState<MultiplayerRoom | null>(null);
   const [inviteStatus, setInviteStatus] = useState<LiveFriendAudioInviteStatus | null>(null);
@@ -153,16 +149,22 @@ export function useLiveFriendAudioConnection(accountId: string) {
     return true;
   }, []);
 
-  const connect = useCallback(() => {
+  const connect = useCallback(async () => {
     const existing = socketRef.current;
     setConnectionError(null);
     if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) return;
     intentionalCloseRef.current = false;
     welcomedRef.current = false;
     setConnectionMessage('Connecting live audio…');
+    const connectionAttempt = ++connectionAttemptRef.current;
     let socket: WebSocket;
     try {
-      socket = new WebSocket(socketUrl());
+      const authorization = await requestWebSocketTicket('live-audio');
+      if (
+        connectionAttemptRef.current !== connectionAttempt
+        || accountIdRef.current !== accountId
+      ) return;
+      socket = new WebSocket(authenticatedWebSocketUrl({ authTicket: authorization.ticket }));
     } catch {
       commandsRef.current = clearLiveFriendAudioPendingCommands();
       reportTerminalError('Live audio could not connect.');
@@ -280,7 +282,7 @@ export function useLiveFriendAudioConnection(accountId: string) {
     setConnectionError(null);
     if (!send(command)) {
       commandsRef.current = mergeLiveFriendAudioPendingCommand(commandsRef.current, command);
-      connect();
+      void connect();
     }
     return true;
   }, [connect, send]);
@@ -351,6 +353,7 @@ export function useLiveFriendAudioConnection(accountId: string) {
   }, [clearWelcomeTimeout]);
 
   useEffect(() => () => {
+    connectionAttemptRef.current += 1;
     clearWelcomeTimeout();
     intentionalCloseRef.current = true;
     commandsRef.current = clearLiveFriendAudioPendingCommands();

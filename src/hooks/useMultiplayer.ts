@@ -19,6 +19,14 @@ import type {
 } from '../types';
 import { safeSetLocalStorage } from '../lib/browserStorage';
 import type { ClubTabletSessionCredential } from '../lib/clubTabletStorage';
+import {
+  clubTabletWattbikeCapacityGrant,
+  normalizeWattbikeCapacityMessage,
+  wattbikeCapacityClientGrantTtlMs,
+  type WattbikeCapacityState,
+} from '../lib/wattbikeCapacity';
+import { authenticatedWebSocketUrl, requestWebSocketTicket } from '../lib/webSocketTicket';
+import { trackLabPublicOrigin } from '../lib/serviceOrigins';
 
 type ConnectionState = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
 
@@ -43,11 +51,15 @@ export type MultiplayerIdentityOverride = {
 
 type UseMultiplayerOptions = {
   enabled: boolean;
+  /** Keeps only the authenticated capacity transport online outside multiplayer. */
+  capacityChannelEnabled?: boolean;
   track: TrackRecord;
   bikeCount: number;
+  wattbikeConnectionCount?: number;
   identityOverride?: MultiplayerIdentityOverride | null;
   clubTabletSession?: ClubTabletSessionCredential | null;
   onFriendNetworkChange?: () => void;
+  onWattbikeCapacityChange?: (capacity: WattbikeCapacityState | null) => void;
 };
 
 type IncomingChallenge = {
@@ -187,17 +199,6 @@ function writeProfile(profile: MultiplayerProfile) {
   safeSetLocalStorage(profileStorageKey, JSON.stringify(profile));
 }
 
-function multiplayerUrl(clubTabletTicket = '') {
-  const configured = import.meta.env.VITE_TRACKLAB_MULTIPLAYER_URL?.trim();
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const url = new URL(
-    configured || `${protocol}//${window.location.host}/multiplayer`,
-    window.location.href,
-  );
-  if (clubTabletTicket) url.searchParams.set('clubTabletTicket', clubTabletTicket);
-  return url.toString();
-}
-
 function trackSummary(track: TrackRecord): MultiplayerTrackSummary {
   return {
     id: track.id,
@@ -229,22 +230,31 @@ function latencyQualityForMs(value: number | null): MultiplayerLatencySnapshot['
 
 export function useMultiplayer({
   enabled,
+  capacityChannelEnabled = false,
   track,
   bikeCount,
+  wattbikeConnectionCount = bikeCount,
   identityOverride = null,
   clubTabletSession = null,
   onFriendNetworkChange,
+  onWattbikeCapacityChange,
 }: UseMultiplayerOptions) {
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const pingTimerRef = useRef<number | null>(null);
+  const capacityHeartbeatTimerRef = useRef<number | null>(null);
+  const capacityGrantExpiryTimerRef = useRef<number | null>(null);
   const pendingPingRef = useRef<Map<string, number>>(new Map());
   const pendingInviteRoomRef = useRef<string | null>(null);
   const identityScopeRef = useRef('');
+  const identityOverrideActiveRef = useRef(Boolean(identityOverride));
+  const latestClubTabletSessionRef = useRef(clubTabletSession);
   const latestProfileRef = useRef<MultiplayerProfile | null>(null);
-  const latestBikeCountRef = useRef(bikeCount);
+  const latestWattbikeConnectionCountRef = useRef(wattbikeConnectionCount);
   const latestTrackRef = useRef<MultiplayerTrackSummary | null>(null);
   const onFriendNetworkChangeRef = useRef(onFriendNetworkChange);
+  const onWattbikeCapacityChangeRef = useRef(onWattbikeCapacityChange);
+  const sendPresenceRef = useRef<(nextProfile?: MultiplayerProfile) => boolean>(() => false);
   const [storedProfile, setStoredProfile] = useState<MultiplayerProfile>(readProfile);
   const profile = useMemo(
     () => resolveMultiplayerProfile(storedProfile, identityOverride),
@@ -252,6 +262,8 @@ export function useMultiplayer({
   );
   const profileReadOnly = Boolean(identityOverride);
   const identityScopeKey = identityOverride?.scopeKey ?? `owner:${storedProfile.guestKey}`;
+  const clubTabletSessionToken = clubTabletSession?.sessionToken ?? '';
+  const transportEnabled = enabled || capacityChannelEnabled;
   const [connection, setConnection] = useState<ConnectionState>('idle');
   const [clientId, setClientId] = useState<string | null>(null);
   const [onlineRiders, setOnlineRiders] = useState<MultiplayerRider[]>([]);
@@ -290,15 +302,44 @@ export function useMultiplayer({
 
   const currentTrack = useMemo(() => trackSummary(track), [track.country, track.id, track.name, track.state]);
 
+  // Session renewal replaces the credential object every few seconds without
+  // changing its identity token. Keep the live value available to transport
+  // callbacks without reconnecting (and momentarily dropping the BLE grant).
+  identityOverrideActiveRef.current = Boolean(identityOverride);
+  latestClubTabletSessionRef.current = clubTabletSession;
+
   useEffect(() => {
     latestProfileRef.current = profile;
-    latestBikeCountRef.current = bikeCount;
+    latestWattbikeConnectionCountRef.current = wattbikeConnectionCount;
     latestTrackRef.current = currentTrack;
-  }, [bikeCount, currentTrack, profile]);
+  }, [currentTrack, profile, wattbikeConnectionCount]);
 
   useEffect(() => {
     onFriendNetworkChangeRef.current = onFriendNetworkChange;
   }, [onFriendNetworkChange]);
+
+  useEffect(() => {
+    onWattbikeCapacityChangeRef.current = onWattbikeCapacityChange;
+  }, [onWattbikeCapacityChange]);
+
+  const clearWattbikeCapacityGrant = useCallback(() => {
+    if (capacityGrantExpiryTimerRef.current != null) {
+      window.clearTimeout(capacityGrantExpiryTimerRef.current);
+      capacityGrantExpiryTimerRef.current = null;
+    }
+    onWattbikeCapacityChangeRef.current?.(null);
+  }, []);
+
+  const publishWattbikeCapacityGrant = useCallback((capacity: WattbikeCapacityState) => {
+    if (capacityGrantExpiryTimerRef.current != null) {
+      window.clearTimeout(capacityGrantExpiryTimerRef.current);
+    }
+    onWattbikeCapacityChangeRef.current?.(capacity);
+    capacityGrantExpiryTimerRef.current = window.setTimeout(() => {
+      capacityGrantExpiryTimerRef.current = null;
+      onWattbikeCapacityChangeRef.current?.(null);
+    }, wattbikeCapacityClientGrantTtlMs);
+  }, []);
 
   const send = useCallback((payload: Record<string, unknown>) => {
     const socket = socketRef.current;
@@ -329,12 +370,18 @@ export function useMultiplayer({
       guestKey: nextProfile.guestKey,
       name: nextProfile.name,
       email: nextProfile.email,
-      available: nextProfile.available,
+      // Capacity-only sockets must not advertise a local rider as available or
+      // alter multiplayer discovery while the activity remains in local mode.
+      available: enabled ? nextProfile.available : false,
       membershipTier: nextProfile.membershipTier,
-      bikeCount,
+      bikeCount: wattbikeConnectionCount,
       track: currentTrack,
     });
-  }, [bikeCount, currentTrack, profile, send]);
+  }, [currentTrack, enabled, profile, send, wattbikeConnectionCount]);
+
+  useEffect(() => {
+    sendPresenceRef.current = sendPresence;
+  }, [sendPresence]);
 
   const setProfile = useCallback((patch: Partial<Pick<MultiplayerProfile, 'guestKey' | 'name' | 'email' | 'available' | 'membershipTier'>>) => {
     if (profileReadOnly) return;
@@ -364,8 +411,10 @@ export function useMultiplayer({
     const previousScope = identityScopeRef.current;
     const scopeChanged = Boolean(previousScope && previousScope !== identityScopeKey);
     identityScopeRef.current = identityScopeKey;
-    if (!identityOverride && !scopeChanged) {
-      pendingInviteRoomRef.current = new URLSearchParams(window.location.search).get('room');
+    if (!scopeChanged) {
+      if (!identityOverride) {
+        pendingInviteRoomRef.current = new URLSearchParams(window.location.search).get('room');
+      }
       return;
     }
 
@@ -373,18 +422,28 @@ export function useMultiplayer({
     // between the owner's browser identity and a selected shared-tablet athlete.
     pendingInviteRoomRef.current = null;
     resetTransientMultiplayerState();
+    clearWattbikeCapacityGrant();
     const url = new URL(window.location.href);
     if (url.searchParams.has('room')) {
       url.searchParams.delete('room');
       window.history.replaceState(null, '', url);
     }
-  }, [identityOverride, identityScopeKey, resetTransientMultiplayerState]);
+  }, [clearWattbikeCapacityGrant, identityOverride, identityScopeKey, resetTransientMultiplayerState]);
 
   useEffect(() => {
-    if (!enabled) {
+    if (enabled) return;
+    // The capacity channel is transport-only. Leaving multiplayer closes any
+    // server room through the socket reconnect below and immediately removes
+    // local room/social state so local race behavior remains independent.
+    resetTransientMultiplayerState();
+  }, [enabled, resetTransientMultiplayerState]);
+
+  useEffect(() => {
+    if (!transportEnabled) {
       setConnection('idle');
       socketRef.current?.close();
       socketRef.current = null;
+      clearWattbikeCapacityGrant();
       resetTransientMultiplayerState();
       return;
     }
@@ -407,11 +466,14 @@ export function useMultiplayer({
       setConnection('connecting');
       setStatus('Connecting to TrackLab multiplayer.');
       let ticket = '';
+      let ownerTicket = '';
       // Never infer a kiosk identity from ambient browser storage. The caller
       // must provide the exact in-memory athlete session that also produced
       // identityOverride, preventing an abandoned token from authorizing the
       // owner's multiplayer connection.
-      const tabletSession = identityOverride ? clubTabletSession : null;
+      const tabletSession = identityOverrideActiveRef.current
+        ? latestClubTabletSessionRef.current
+        : null;
       if (tabletSession) {
         try {
           const authorization = await import('../lib/clubTablet').then(
@@ -427,41 +489,112 @@ export function useMultiplayer({
           scheduleReconnect();
           return;
         }
+      } else {
+        try {
+          const authorization = await requestWebSocketTicket('multiplayer');
+          if (cancelled) return;
+          ownerTicket = authorization.ticket;
+        } catch (error) {
+          if (cancelled || (error as Error).name === 'AbortError') return;
+          setConnection('error');
+          setStatus(error instanceof Error ? error.message : 'TrackLab multiplayer authorization is unavailable.');
+          clearWattbikeCapacityGrant();
+          scheduleReconnect();
+          return;
+        }
       }
-      const socket = new WebSocket(multiplayerUrl(ticket));
+      const socket = new WebSocket(authenticatedWebSocketUrl({
+        authTicket: ownerTicket,
+        clubTabletTicket: ticket,
+      }));
       socketRef.current = socket;
+      const connectionIdentityScopeKey = identityScopeKey;
 
       socket.addEventListener('open', () => {
         if (socketRef.current !== socket) return;
         const latestProfile = latestProfileRef.current ?? profile;
         setConnection('open');
-        setStatus('Multiplayer online.');
+        setStatus(enabled ? 'Multiplayer online.' : 'Wattbike authorization online.');
         socket.send(JSON.stringify({
           type: 'hello',
           guestKey: latestProfile.guestKey,
           name: latestProfile.name,
           email: latestProfile.email,
-          available: latestProfile.available,
+          available: enabled ? latestProfile.available : false,
           membershipTier: latestProfile.membershipTier,
-          bikeCount: latestBikeCountRef.current,
+          bikeCount: latestWattbikeConnectionCountRef.current,
           track: latestTrackRef.current ?? currentTrack,
         }));
+        if (tabletSession) {
+          // Issuing the one-time ticket revalidated the athlete session and its
+          // reserved Wattbike lease. Socket closure/rejection clears this grant.
+          publishWattbikeCapacityGrant(clubTabletWattbikeCapacityGrant());
+        }
         sendLatencyPing();
         if (pingTimerRef.current != null) {
           window.clearInterval(pingTimerRef.current);
         }
         pingTimerRef.current = window.setInterval(sendLatencyPing, 4000);
+        if (capacityHeartbeatTimerRef.current != null) {
+          window.clearInterval(capacityHeartbeatTimerRef.current);
+        }
+        if (capacityChannelEnabled) {
+          // Zero-bike owners are not part of the server lease-renewal loop, so
+          // repeat authenticated presence to receive a fresh zero-seat capacity
+          // snapshot before the short client grant expires.
+          let tabletCapacityValidationInFlight = false;
+          capacityHeartbeatTimerRef.current = window.setInterval(() => {
+            if (!tabletSession) {
+              void sendPresenceRef.current();
+              return;
+            }
+            if (tabletCapacityValidationInFlight) return;
+            tabletCapacityValidationInFlight = true;
+            void import('../lib/clubTablet')
+              .then(({ validateClubTabletSessionCapacity }) => (
+                validateClubTabletSessionCapacity(tabletSession)
+              ))
+              .then((valid) => {
+                if (
+                  !valid
+                  || cancelled
+                  || socketRef.current !== socket
+                  || identityScopeRef.current !== connectionIdentityScopeKey
+                ) return;
+                publishWattbikeCapacityGrant(clubTabletWattbikeCapacityGrant());
+              })
+              .catch(() => {
+                if (cancelled || socketRef.current !== socket) return;
+                clearWattbikeCapacityGrant();
+                socket.close(1008, 'Club tablet Wattbike authorization expired');
+              })
+              .finally(() => {
+                tabletCapacityValidationInFlight = false;
+              });
+          }, 10_000);
+        }
       });
 
       socket.addEventListener('message', (event) => {
-        if (socketRef.current !== socket) return;
+        if (
+          socketRef.current !== socket
+          || identityScopeRef.current !== connectionIdentityScopeKey
+        ) return;
         const message = JSON.parse(event.data as string);
+
+        if (message.type === 'wattbike-capacity') {
+          const capacity = normalizeWattbikeCapacityMessage(message);
+          if (capacity) {
+            publishWattbikeCapacityGrant(capacity);
+          }
+        }
 
         if (message.type === 'connected') {
           setClientId(message.clientId ?? null);
         }
 
         if (message.type === 'welcome') {
+          if (!enabled) return;
           setClientId(message.clientId ?? null);
           setOnlineRiders(Array.isArray(message.riders) ? message.riders : []);
           setRooms(Array.isArray(message.rooms) ? message.rooms : []);
@@ -473,11 +606,13 @@ export function useMultiplayer({
         }
 
         if (message.type === 'lobby-state') {
+          if (!enabled) return;
           setOnlineRiders(Array.isArray(message.riders) ? message.riders : []);
           setRooms(Array.isArray(message.rooms) ? message.rooms : []);
         }
 
         if (message.type === 'social-state' && message.social) {
+          if (!enabled) return;
           setSocial({
             friends: Array.isArray(message.social.friends) ? message.social.friends : [],
             incomingFriendRequests: Array.isArray(message.social.incomingFriendRequests) ? message.social.incomingFriendRequests : [],
@@ -488,10 +623,11 @@ export function useMultiplayer({
         }
 
         if (message.type === 'friend-event') {
-          onFriendNetworkChangeRef.current?.();
+          if (enabled) onFriendNetworkChangeRef.current?.();
         }
 
         if (message.type === 'room-state') {
+          if (!enabled) return;
           setCurrentRoom(message.room ?? null);
           setRoomMessages(formatRoomMessages(Array.isArray(message.messages) ? message.messages : []));
           setRoomRaceStates(Array.isArray(message.raceStates) ? message.raceStates : []);
@@ -504,6 +640,7 @@ export function useMultiplayer({
         }
 
         if (message.type === 'room-left') {
+          if (!enabled) return;
           setRoomExit((current) => ({
             sequence: current.sequence + 1,
             roomId: typeof message.roomId === 'string' ? message.roomId : null,
@@ -520,7 +657,14 @@ export function useMultiplayer({
         }
 
         if (message.type === 'room-chat') {
+          if (!enabled) return;
           setRoomMessages(formatRoomMessages(Array.isArray(message.messages) ? message.messages : []));
+        }
+
+        if (message.type === 'room-safety-result') {
+          if (!enabled) return;
+          setStatus(message.message ?? 'Room safety action completed.');
+          onFriendNetworkChangeRef.current?.();
         }
 
         if (message.type === 'pong') {
@@ -548,6 +692,7 @@ export function useMultiplayer({
         }
 
         if (message.type === 'race-sync' && message.state) {
+          if (!enabled) return;
           const nextState = {
             ...(message.state as MultiplayerRaceState),
             receivedAt: Date.now(),
@@ -559,6 +704,7 @@ export function useMultiplayer({
         }
 
         if (message.type === 'explore-sync' && message.state) {
+          if (!enabled) return;
           const nextState = message.state as MultiplayerExploreState;
           setRoomExploreStates((current) => [
             ...current.filter((state) => state.clientId !== nextState.clientId),
@@ -567,6 +713,7 @@ export function useMultiplayer({
         }
 
         if (message.type === 'voice-signal' && message.signal) {
+          if (!enabled) return;
           setVoiceSignals((current) => [
             ...current,
             message.signal as MultiplayerVoiceSignal,
@@ -578,6 +725,7 @@ export function useMultiplayer({
         }
 
         if (message.type === 'challenge-incoming') {
+          if (!enabled) return;
           setIncomingChallenges((current) => [
             ...current.filter((item) => item.challenge.id !== message.challenge?.id),
             { challenge: message.challenge, from: message.from },
@@ -586,6 +734,7 @@ export function useMultiplayer({
         }
 
         if (message.type === 'match-invite') {
+          if (!enabled) return;
           setIncomingMatchInvites((current) => [
             ...current.filter((item) => item.invite.id !== message.invite?.id),
             { invite: message.invite, from: message.from },
@@ -599,6 +748,7 @@ export function useMultiplayer({
         setConnection('closed');
         setStatus('Multiplayer disconnected. Reconnecting...');
         socketRef.current = null;
+        clearWattbikeCapacityGrant();
         setCurrentRoom(null);
         setIncomingMatchInvites([]);
         setRoomExploreStates([]);
@@ -608,10 +758,15 @@ export function useMultiplayer({
           window.clearInterval(pingTimerRef.current);
           pingTimerRef.current = null;
         }
+        if (capacityHeartbeatTimerRef.current != null) {
+          window.clearInterval(capacityHeartbeatTimerRef.current);
+          capacityHeartbeatTimerRef.current = null;
+        }
         scheduleReconnect();
       });
 
       socket.addEventListener('error', () => {
+        clearWattbikeCapacityGrant();
         setConnection('error');
         setStatus('Could not reach TrackLab multiplayer.');
       });
@@ -628,17 +783,32 @@ export function useMultiplayer({
         window.clearInterval(pingTimerRef.current);
         pingTimerRef.current = null;
       }
+      if (capacityHeartbeatTimerRef.current != null) {
+        window.clearInterval(capacityHeartbeatTimerRef.current);
+        capacityHeartbeatTimerRef.current = null;
+      }
       pendingPingRef.current.clear();
+      clearWattbikeCapacityGrant();
       socketRef.current?.close();
       socketRef.current = null;
     };
-  }, [clubTabletSession, enabled, identityOverride, identityScopeKey, resetTransientMultiplayerState, sendLatencyPing]);
+  }, [
+    capacityChannelEnabled,
+    clearWattbikeCapacityGrant,
+    clubTabletSessionToken,
+    enabled,
+    identityScopeKey,
+    publishWattbikeCapacityGrant,
+    resetTransientMultiplayerState,
+    sendLatencyPing,
+    transportEnabled,
+  ]);
 
   useEffect(() => {
-    if (enabled && connection === 'open') {
+    if (transportEnabled && connection === 'open') {
       void sendPresence();
     }
-  }, [connection, enabled, sendPresence]);
+  }, [connection, sendPresence, transportEnabled]);
 
   const createPrivateRoom = useCallback(() => {
     setStatus('Opening private room.');
@@ -696,6 +866,16 @@ export function useMultiplayer({
 
   const sendRoomChat = useCallback((text: string) => {
     return send({ type: 'room-chat', text });
+  }, [send]);
+
+  const reportRoomMember = useCallback((targetId: string) => {
+    setStatus('Sending room safety report.');
+    return send({ type: 'room-report', targetId, reason: 'harassment' });
+  }, [send]);
+
+  const blockRoomMember = useCallback((targetId: string) => {
+    setStatus('Blocking room rider.');
+    return send({ type: 'room-block', targetId });
   }, [send]);
 
   const startTrackVote = useCallback((candidates: MultiplayerTrackVoteCandidate[]) => {
@@ -799,12 +979,13 @@ export function useMultiplayer({
       return '';
     }
 
-    const url = new URL(window.location.href);
+    const url = new URL(trackLabPublicOrigin);
     url.searchParams.set('room', currentRoom.id);
     return url.toString();
   }, [currentRoom]);
 
   return {
+    blockRoomMember,
     challengeRider,
     chooseRoomRoute,
     clientId,
@@ -827,6 +1008,7 @@ export function useMultiplayer({
     profile,
     profileReadOnly,
     quickMatch,
+    reportRoomMember,
     respondToChallenge,
     roomMessages,
     roomExit,

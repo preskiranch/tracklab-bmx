@@ -18,6 +18,7 @@ import {
   Wifi,
 } from 'lucide-react';
 import type { PublicPageKind } from '../lib/publicPages';
+import { trackLabPublicUrl } from '../lib/serviceOrigins';
 import './PublicInfoPage.css';
 
 type PublicInfoPageProps = {
@@ -102,7 +103,7 @@ function PrivacyPage() {
           This notice describes the current TrackLab BMX web and iPhone/iPad app behavior. TrackLab combines
           Wattbike telemetry, mapped tracks, training history, multiplayer rooms, and optional AI commentary.
         </p>
-        <span className="public-info-updated">Last updated August 25, 2026</span>
+        <span className="public-info-updated">Last updated August 27, 2026</span>
       </section>
 
       <section className="public-info-summary" aria-label="Privacy summary">
@@ -317,9 +318,10 @@ function PrivacyPage() {
                   rider display names and live race facts—can be sent to generate commentary and speech.
                 </li>
                 <li>
-                  <strong>Square:</strong> paid membership checkout opens Square. Payment details are entered with
-                  Square; TrackLab&apos;s current backend stores checkout or order identifiers and membership status,
-                  rather than raw payment-card numbers.
+                  <strong>Apple App Store:</strong> Wattbike connection subscriptions in the iPhone and iPad app are
+                  purchased through Apple. Apple processes payment details; TrackLab receives signed transaction and
+                  entitlement information needed to verify the subscription and unlock its connection capacity across
+                  devices. TrackLab does not receive raw payment-card numbers from Apple.
                 </li>
                 <li>
                   <strong>Hosting and database providers:</strong> TrackLab uses hosted application and database
@@ -371,15 +373,19 @@ function PrivacyPage() {
                   and is deliberately excluded from generic session JSON/CSV, the standard selected-day workbook, and
                   public or club exports. A signed-in rider can deliberately download a separate private Numbers/Excel
                   workbook containing heart-rate summaries alongside their session and zone metrics; that workbook does
-                  not include raw heart-rate samples. Contact support for a separate verified raw health-data export or
-                  deletion request while self-service controls remain unavailable.
+                  not include raw heart-rate samples. Deleting the TrackLab account also deletes its saved heart-rate
+                  records. Contact support for a separate verified raw health-data export or a heart-rate-only deletion.
                 </li>
                 <li>You can sign out to end the current browser or app session.</li>
               </ul>
               <p>
-                The current product does not provide a self-service account-deletion button. Contact support to
-                request access, correction, or deletion. TrackLab may need enough information to verify the account
-                before acting on a request.
+                A signed-in user can open My Profile, choose Delete Account, reenter the current password, and confirm
+                permanent deletion in the app. Deleting a TrackLab account does not cancel an Apple subscription; manage
+                or cancel that subscription with Apple first if you do not want it to renew. TrackLab retains only a
+                one-way pseudonymous Apple transaction-lineage proof after deletion, without the deleted profile ID,
+                email, or name. A user with the same active Apple subscription may deliberately use Restore Purchases
+                after creating a new TrackLab account. Contact support to request access, correction, a partial deletion,
+                or help with an account-specific request.
               </p>
             </div>
           </section>
@@ -395,11 +401,11 @@ function PrivacyPage() {
                 salted password-hashing function.
               </p>
               <p>
-                TrackLab currently keeps account and training records so they remain available across devices and
-                sessions. Temporary records, expired authentication sessions, and local data can have different
-                lifetimes. The current product does not expose one automatic retention schedule for every record type;
-                contact support for an account-specific deletion request. No internet service or storage method can
-                guarantee absolute security.
+                TrackLab keeps account and training records so they remain available across devices and sessions until
+                the account is deleted. Temporary records, expired authentication sessions, and local data can have
+                different lifetimes. TrackLab may retain limited records when required for safety, security, fraud
+                prevention, dispute resolution, or legal obligations. No internet service or storage method can guarantee
+                absolute security.
               </p>
               <p>
                 Saved heart-rate samples are stored in the authenticated rider&apos;s private heart-rate stream. TrackLab
@@ -407,9 +413,10 @@ function PrivacyPage() {
                 between short studio efforts remain private to the rider and are not included in the club&apos;s saved-session
                 view. Heart-rate records currently follow the general account-retention policy above rather than a separate
                 automatic deletion schedule. They are transmitted over encrypted connections, and TrackLab does not store
-                personal health information in iCloud. Until session and account deletion are available in the app, a rider
-                may contact support to export or request deletion of saved heart-rate data. Ending an Apple Watch workout or
-                revoking Apple Health permission does not by itself delete a previously synchronized TrackLab record.
+                personal health information in iCloud. Deleting the TrackLab account also deletes its saved heart-rate
+                records. A rider may contact support for an export or a heart-rate-only deletion request. Ending an Apple
+                Watch workout or revoking Apple Health permission does not by itself delete a previously synchronized
+                TrackLab record.
               </p>
               <p>
                 The app keeps its random notification installation identifier and credential in the iOS Keychain using
@@ -494,7 +501,7 @@ function SupportPage() {
           <a className="primary" href={`mailto:${supportEmail}?subject=TrackLab%20BMX%20Support`}>
             <Mail aria-hidden="true" size={16} /> Email support
           </a>
-          <a href="/api/health" rel="noreferrer" target="_blank">
+          <a href={trackLabPublicUrl('/api/health')} rel="noreferrer" target="_blank">
             <Wifi aria-hidden="true" size={16} /> Service status
           </a>
         </div>

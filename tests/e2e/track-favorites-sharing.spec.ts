@@ -159,7 +159,7 @@ test('favorites, friend sharing, and canonical track links stay exact and respon
   await expect(locator.getByText('No tracks match those filters.')).toBeVisible();
   await locator.getByLabel('Search tracks').fill('');
 
-  const expectedTrackLink = new URL('/', page.url());
+  const expectedTrackLink = new URL('/', 'https://tracklab-bmx.onrender.com');
   expectedTrackLink.searchParams.set('locator', favoriteTrack.id);
   expectedTrackLink.hash = 'track-locator';
   await locator.getByRole('button', { name: 'Copy link' }).click();

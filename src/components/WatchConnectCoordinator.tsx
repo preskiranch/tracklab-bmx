@@ -52,6 +52,7 @@ import { WatchConnectCard } from './WatchConnectCard';
 import { WatchConnectIndicator } from './WatchConnectIndicator';
 import { OwnerStudioWatchConnectSettings } from './OwnerStudioWatchConnectSettings';
 import { watchAppNeedsInstall } from './watchAppInstall';
+import { trackLabServiceOrigin } from '../lib/serviceOrigins';
 
 export const watchConnectSettingsAnchorId = 'watch';
 export const watchConnectSettingsSlotId = 'watch-connect-settings-slot';
@@ -1167,7 +1168,7 @@ export function WatchConnectCoordinator({
       );
       const started = await startWatchConnectAction({
         scope,
-        baseUrl: window.location.origin,
+        baseUrl: trackLabServiceOrigin,
         ...(clubId ? { clubId } : {}),
         ...(enrollment ? { existingEnrollment: enrollment } : {}),
         ...(scope === 'studio' ? {

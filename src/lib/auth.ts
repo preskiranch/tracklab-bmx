@@ -1,4 +1,5 @@
 import { clampBillingBikeSeats, type MembershipState, type MembershipTier } from './membership';
+import { clearNativeAuthToken, saveNativeAuthToken } from './nativeAuthSession';
 
 export type AuthUser = {
   id: string;
@@ -13,6 +14,12 @@ export type AuthMode = 'register' | 'login';
 
 type AuthResponse = {
   user: AuthUser | null;
+  nativeSessionToken?: string;
+  error?: string;
+};
+
+type DeleteAccountResponse = {
+  deleted?: boolean;
   error?: string;
 };
 
@@ -67,7 +74,12 @@ async function authFetch(path: string, options: RequestInit = {}) {
     throw new Error(`Authentication returned ${response.status}. Refresh the page and try again.`);
   }
 
-  return normalizeAuthUser(payload.user);
+  if (payload.nativeSessionToken) {
+    await saveNativeAuthToken(payload.nativeSessionToken);
+  }
+  const user = normalizeAuthUser(payload.user);
+  if (path === '/api/auth/me' && !user) await clearNativeAuthToken();
+  return user;
 }
 
 export async function readCurrentAuthUser() {
@@ -89,12 +101,36 @@ export async function loginAuthUser(email: string, password: string) {
 }
 
 export async function logoutAuthUser() {
-  await authFetch('/api/auth/logout', { method: 'POST' });
+  try {
+    await authFetch('/api/auth/logout', { method: 'POST' });
+  } finally {
+    await clearNativeAuthToken();
+  }
 }
 
-export async function claimBillingReturn(billingState: string) {
-  return authFetch('/api/auth/billing-return', {
-    method: 'POST',
-    body: JSON.stringify({ billingState }),
+/**
+ * Permanently deletes the currently authenticated TrackLab account.
+ *
+ * The server reauthenticates with the current password and independently
+ * requires the literal confirmation value. Keeping both values in the JSON
+ * contract makes an accidental one-click deletion impossible.
+ */
+export async function deleteAuthAccount(password: string, confirmation: 'DELETE') {
+  const response = await fetch('/api/auth/account', {
+    method: 'DELETE',
+    credentials: 'same-origin',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ password, confirmation }),
   });
+  const payload = await response.json().catch(() => ({})) as DeleteAccountResponse;
+  if (!response.ok) {
+    throw new Error(payload.error || `Account deletion returned ${response.status}. Try again.`);
+  }
+  if (payload.deleted !== true) {
+    throw new Error('TrackLab could not confirm that the account was deleted. Try again.');
+  }
+  await clearNativeAuthToken();
 }

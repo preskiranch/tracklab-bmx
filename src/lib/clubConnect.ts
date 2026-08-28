@@ -1,6 +1,7 @@
 import type { AccountProfile } from '../types';
 import type { AuthUser } from './auth';
 import { normalizeRiderPhotoDataUrl } from './riderPhotos';
+import { trackLabPublicOrigin } from './serviceOrigins';
 
 export type ClubConnectMember = {
   studioRiderId: string;
@@ -152,7 +153,7 @@ export function clearClubInviteFromUrl() {
 }
 
 export function clubInviteUrl(token: string) {
-  const url = new URL(window.location.origin);
+  const url = new URL(trackLabPublicOrigin);
   url.hash = new URLSearchParams({ clubInvite: token }).toString();
   return url.toString();
 }

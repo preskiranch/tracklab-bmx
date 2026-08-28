@@ -61,10 +61,44 @@ function signedInUser(id: string, name: string) {
 }
 
 async function routeSignedInShell(page: Page, user: ReturnType<typeof signedInUser>) {
+  await page.route('**/api/health', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true }),
+  }));
   await page.route('**/api/auth/me', (route) => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ user }),
   }));
+  await page.route('**/api/auth/websocket-ticket', (route) => route.fulfill({
+    status: 201,
+    contentType: 'application/json',
+    body: JSON.stringify({ ticket: 'w'.repeat(43), expiresAt: Date.now() + 60_000 }),
+  }));
+  await page.routeWebSocket(/\/multiplayer(?:\?|$)/, (socket) => {
+    socket.onMessage((rawMessage) => {
+      let message: { type?: string; bikeCount?: number };
+      try {
+        message = JSON.parse(String(rawMessage)) as { type?: string; bikeCount?: number };
+      } catch {
+        return;
+      }
+      if (message.type === 'hello') {
+        socket.send(JSON.stringify({ type: 'connected', clientId: 'watch-capacity-test' }));
+      }
+      if (message.type !== 'hello' && message.type !== 'presence') return;
+      const requestedConnections = Math.max(0, Math.min(4, Math.round(Number(message.bikeCount) || 0)));
+      const grantedConnections = Math.min(requestedConnections, 1);
+      socket.send(JSON.stringify({
+        type: 'wattbike-capacity',
+        requestedConnections,
+        grantedConnections,
+        connectionLimit: 1,
+        accountConnectionsInUse: grantedConnections,
+        action: requestedConnections > grantedConnections ? 'disconnect-excess' : 'none',
+        reason: 'playwright-watch-capacity',
+      }));
+    });
+  });
   await page.route('**/api/user-data*', (route) => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({

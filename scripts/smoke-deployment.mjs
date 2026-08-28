@@ -24,6 +24,8 @@ const timeoutMs = Number(process.env.TRACKLAB_SMOKE_TIMEOUT_MS) || defaultTimeou
 const expectPostgres = process.env.TRACKLAB_EXPECT_POSTGRES === '1';
 const expectFriends = process.env.TRACKLAB_EXPECT_FRIENDS === '1';
 const expectApns = process.env.TRACKLAB_EXPECT_APNS === '1';
+const expectAppleIap = process.env.TRACKLAB_EXPECT_APPLE_IAP === '1';
+const expectAppleOnlyCutover = process.env.TRACKLAB_EXPECT_APPLE_ONLY_CUTOVER === '1';
 
 async function request(pathname, init = {}) {
   const startedAt = performance.now();
@@ -73,6 +75,23 @@ if (expectApns) {
       && health.push?.ready === true
       && health.push?.degraded === false,
     `Production smoke expected operational APNs, but push health is ${health.push?.reason || 'unavailable'}.`,
+  );
+}
+if (expectAppleIap || expectAppleOnlyCutover) {
+  assert(
+    health.requirements?.appleIap === true
+      && health.billing?.provider === 'apple-app-store'
+      && health.billing?.enabled === true
+      && health.billing?.configured === true
+      && health.billing?.ready === true,
+    'Deployment smoke expected configured Apple in-app purchases, but billing is not ready.',
+  );
+}
+if (expectAppleOnlyCutover) {
+  assert(
+    health.requirements?.appleOnlyCutover === true
+      && health.billing?.appleOnlyCutover === true,
+    'Deployment smoke expected Apple-only Wattbike billing, but final cutover is not active.',
   );
 }
 results.push(['health', healthRequest.durationMs]);

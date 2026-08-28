@@ -5,6 +5,7 @@
 }
 
 .account-profile-hero,
+.account-deletion-panel,
 .club-connect-panel,
 .training-calendar {
   border: 1px solid #dce3e8;
@@ -49,6 +50,81 @@
   padding-top: 12px;
   border-top: 1px solid #edf0f2;
 }
+
+.account-deletion-panel {
+  display: grid;
+  gap: 14px;
+  padding: 20px 22px;
+}
+
+.account-deletion-summary,
+.account-deletion-summary-actions,
+.account-manage-subscription,
+.account-delete-open,
+.account-delete-warning,
+.account-delete-actions {
+  display: flex;
+  align-items: center;
+}
+
+.account-deletion-summary {
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.account-deletion-summary h2 { margin: 2px 0 0; }
+.account-deletion-summary p { margin: 4px 0 0; color: #667085; }
+.account-deletion-summary-actions { justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+
+.account-manage-subscription,
+.account-delete-open,
+.account-delete-actions button {
+  justify-content: center;
+  gap: 6px;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid #cbd5dc;
+  border-radius: 9px;
+  background: #fff;
+  color: #17202e;
+  font: inherit;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.account-delete-open { border-color: #f0b6b2; color: #b42318; }
+
+.account-delete-confirmation {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 13px;
+  padding: 16px;
+  border: 1px solid #f0b6b2;
+  border-radius: 12px;
+  background: #fff7f6;
+}
+
+.account-delete-confirmation[hidden] { display: none; }
+.account-delete-warning,
+.account-delete-subscription-warning,
+.account-delete-acknowledgement,
+.account-delete-actions,
+.account-deletion-message { grid-column: 1 / -1; }
+.account-delete-warning { align-items: flex-start; gap: 10px; color: #7a271a; }
+.account-delete-warning > svg { flex: 0 0 auto; }
+.account-delete-warning p { margin: 4px 0 0; color: #912018; }
+.account-delete-subscription-warning { margin: 0; padding: 11px; border-radius: 8px; background: #ffebe9; color: #7a271a; }
+.account-delete-confirmation > label:not(.account-delete-acknowledgement) { display: grid; gap: 6px; color: #344054; font-size: 13px; font-weight: 850; }
+.account-delete-confirmation input[type='text'],
+.account-delete-confirmation input[type='password'] { min-width: 0; min-height: 44px; padding: 9px 11px; border: 1px solid #cdd6dc; border-radius: 9px; background: #fff; color: #17202e; font: inherit; }
+.account-delete-confirmation input:focus { border-color: #c4322a; outline: 3px solid rgb(196 50 42 / 16%); }
+.account-delete-acknowledgement { display: flex; align-items: flex-start; gap: 9px; color: #7a271a; font-size: 13px; font-weight: 750; }
+.account-delete-acknowledgement input { width: 20px; height: 20px; flex: 0 0 20px; margin: 0; accent-color: #b42318; }
+.account-delete-actions { justify-content: flex-end; gap: 8px; }
+.account-delete-actions button.danger { border-color: #b42318; background: #b42318; color: #fff; }
+.account-delete-actions button:disabled { opacity: 0.48; cursor: not-allowed; }
+.account-deletion-message { margin: 0; color: #52606d; font-size: 13px; }
+.account-deletion-message.error { color: #b42318; }
 
 .club-connect-panel {
   display: grid;
@@ -297,6 +373,16 @@
   .account-profile-view { padding: 10px; }
   .account-profile-hero { grid-template-columns: 1fr; }
   .account-profile-photo-note { grid-column: auto; }
+  .account-deletion-summary { align-items: flex-start; flex-direction: column; }
+  .account-deletion-summary-actions { width: 100%; justify-content: stretch; }
+  .account-deletion-summary-actions > * { flex: 1 1 180px; }
+  .account-delete-confirmation { grid-template-columns: 1fr; }
+  .account-delete-warning,
+  .account-delete-subscription-warning,
+  .account-delete-acknowledgement,
+  .account-delete-actions,
+  .account-deletion-message { grid-column: auto; }
+  .account-delete-actions { align-items: stretch; flex-direction: column-reverse; }
   .account-profile-summary { grid-template-columns: 1fr 1fr; }
   .training-calendar > header { align-items: flex-start; flex-direction: column; }
   .training-calendar-controls { width: 100%; justify-content: space-between; }

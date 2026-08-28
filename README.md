@@ -172,61 +172,31 @@ Bluetooth. To stay connected, leave the local bridge running and keep the
 Wattbike monitor awake. If a monitor goes idle, start pedaling again and the
 same remembered device ID will be matched when it broadcasts.
 
-## Membership And Square Billing
+## Membership And Apple In-App Purchases
 
 TrackLab now opens with a membership page before the race dashboard. Free
 spectator membership can view live rooms and run demo mode on the benchmark
 track. Racer membership unlocks live Wattbike connection, private race rooms,
 challenges, and race analytics.
 
-Racer pricing is:
+The iPhone and iPad app offers four monthly auto-renewable subscription levels:
+one, two, three, or four simultaneous Wattbike connections. All levels belong
+to the single **Wattbike Connections** subscription group. Prices are configured
+in App Store Connect and are always rendered from StoreKit's localized product
+metadata; the web application never hard-codes or collects a payment amount.
 
-- 1 Wattbike: `$9.99/month`
-- 2 Wattbikes: `$14.98/month`
-- 3 Wattbikes: `$19.97/month`
-- 4 Wattbikes: `$24.96/month`
+Purchases and restores happen only inside the signed iOS app. The web version
+can display an Apple-backed entitlement but does not show another checkout or
+an external purchase link. A verified purchase is bound to the signed-in
+TrackLab billing account with StoreKit's `appAccountToken`, then the server
+projects the purchased connection limit to every tablet signed into that
+account. A temporary Club Tablet athlete session never owns the subscription.
 
-Square Checkout is server-side only. The browser posts the selected bike count
-to `/api/billing/checkout`, the Render server creates a Square hosted checkout
-link, and the browser redirects to Square. Do not put Square access tokens in
-Vite/frontend environment variables.
-
-Square setup:
-
-1. Create or copy a Square access token. Use sandbox first if you want a test
-   checkout, then production when the account is ready to charge customers.
-2. Run the TrackLab setup helper. It creates/reuses one monthly per-Wattbike-seat
-   subscription plan variation, then prints the exact Render variables. Checkout
-   multiplies that $9.99 seat price by the club's selected seat count:
-
-```bash
-SQUARE_ACCESS_TOKEN=... npm run billing:square:setup -- --production --write-env-local
-```
-
-Use `--sandbox` instead of `--production` for Square sandbox testing.
-
-3. Add these server-only Render environment variables:
-
-```text
-SQUARE_ENVIRONMENT=production
-SQUARE_VERSION=2025-10-16
-SQUARE_ACCESS_TOKEN=...
-SQUARE_LOCATION_ID=...
-SQUARE_RACER_PLAN_VARIATION_ID=...
-```
-
-If you have a Render API key, the helper can sync the values from `.env.local`
-to the TrackLab Render service and trigger a deploy:
-
-```bash
-RENDER_API_KEY=... npm run billing:square:sync-render -- --deploy
-```
-
-Use `SQUARE_ENVIRONMENT=sandbox` and Square sandbox plan variation IDs while
-testing. The server verifies the completed Square order before assigning the
-purchased Wattbike seat count to the account. Square webhooks should remain the
-authoritative follow-up for cancellations, failed renewals, and other
-subscription-status changes.
+The server verifies StoreKit transaction JWS data, records transaction history,
+and receives App Store Server Notifications V2 for renewals, expirations,
+refunds, revocations, billing retry, and grace periods. See
+[`docs/mobile/apple-iap.md`](docs/mobile/apple-iap.md) for product identifiers,
+App Store Connect setup, Render secrets, testing, and cutover instructions.
 
 ## Wattbike Monitor Control
 

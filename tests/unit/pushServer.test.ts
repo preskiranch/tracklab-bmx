@@ -265,7 +265,9 @@ describe('required APNs health configuration', () => {
       source.indexOf('async function dispatchPushOutbox'),
       source.indexOf('function rememberRaceResultKey'),
     );
-    expect(source).toContain('persistence.initPersistence().finally(kickPushWorker)');
+    expect(source).toContain('persistence.initPersistence().finally(() => {');
+    expect(source).toContain('kickPushWorker();');
+    expect(source).toContain('kickAppleBillingReconciliation(0);');
     expect(source).toContain('setInterval(kickPushWorker, 5_000)');
     expect(worker).toContain('moreWorkLikely ||= events.length >= 20');
     expect(worker).toContain('moreWorkLikely ||= deliveries.length >= 12');

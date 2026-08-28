@@ -33,8 +33,6 @@
     "tracks:build": "node scripts/build-track-database.mjs && node scripts/validate-track-database.mjs",
     "tracks:validate": "node scripts/validate-track-database.mjs",
     "tracks:social:audit": "node scripts/audit-track-social-links.mjs",
-    "billing:square:setup": "node scripts/setup-square-billing.mjs",
-    "billing:square:sync-render": "node scripts/sync-render-square-env.mjs",
     "commentary:research:usabmx": "python3 scripts/analyze-usabmx-commentary.py --years 2024 2025 2026 --playlist-end 900 --output data/commentary/usabmx-national-analysis.json",
     "typecheck": "tsc -b --pretty false",
     "build": "npm run tracks:build && npm run typecheck && vite build && node scripts/compress-dist-assets.mjs && node scripts/check-bundle-budget.mjs",
@@ -53,6 +51,7 @@
     "ios:build": "npm run mobile:sync && node scripts/build-ios-unsigned.mjs"
   },
   "dependencies": {
+    "@apple/app-store-server-library": "^3.1.0",
     "@capacitor-community/bluetooth-le": "^8.3.0",
     "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.5.0",

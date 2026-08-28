@@ -246,7 +246,7 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
     setLinkedTrackId(null);
     setInvalidLinkedTrack(false);
     setSelectedTrackId(track.id);
-    const href = trackLocatorShareUrl(track.id);
+    const href = trackLocatorShareUrl(track.id, window.location.origin);
     if (href) window.history.replaceState(window.history.state, '', href);
   };
 

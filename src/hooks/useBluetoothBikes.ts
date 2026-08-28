@@ -127,6 +127,30 @@ export function bluetoothPairingMayOpen(
   return enabled && (didConnect || browserDeviceStillConnected);
 }
 
+export type ActiveBluetoothConnection = Readonly<{
+  browserDeviceId: string;
+  deviceId: number;
+  label: string;
+}>;
+
+/**
+ * Keeps the lowest stable TrackLab bike IDs when a server grant shrinks.
+ * Browser discovery order and asynchronous GATT timing therefore cannot
+ * change which excess physical bikes are stopped.
+ */
+export function bluetoothConnectionsToDisconnect(
+  activeConnections: readonly ActiveBluetoothConnection[],
+  maxDevices: number,
+) {
+  const allowedCount = normalizeBluetoothMaxDevices(maxDevices);
+  return [...activeConnections]
+    .sort((left, right) => (
+      left.deviceId - right.deviceId
+      || left.browserDeviceId.localeCompare(right.browserDeviceId)
+    ))
+    .slice(allowedCount);
+}
+
 function hasBytes(view: DataView, offset: number, byteCount: number) {
   return offset + byteCount <= view.byteLength;
 }
@@ -774,8 +798,15 @@ export function useBluetoothBikes({
 
   useEffect(() => {
     const allowedCount = normalizeBluetoothMaxDevices(maxDevices);
-    const overflow = [...activeServersRef.current.entries()].slice(allowedCount);
-    overflow.forEach(([browserDeviceId, { deviceId, label }]) => {
+    const overflow = bluetoothConnectionsToDisconnect(
+      [...activeServersRef.current.entries()].map(([browserDeviceId, connection]) => ({
+        browserDeviceId,
+        deviceId: connection.deviceId,
+        label: connection.label,
+      })),
+      allowedCount,
+    );
+    overflow.forEach(({ browserDeviceId, deviceId, label }) => {
       disconnectBluetoothDevice(browserDeviceId, deviceId, label);
     });
     setAuthorizedCount((current) => Math.min(current, allowedCount));
@@ -790,6 +821,17 @@ export function useBluetoothBikes({
     if (!bluetooth) {
       setConnection('unsupported');
       setError(unsupportedBluetoothMessage());
+      return false;
+    }
+    if (!bluetoothConnectionAllowed(
+      enabledRef.current,
+      'tracklab-new-bike',
+      connectedBrowserDeviceIdsRef.current,
+      connectingBrowserDeviceIdsRef.current,
+      maxDevicesRef.current,
+    )) {
+      setConnection(connectedBrowserDeviceIdsRef.current.size > 0 ? 'open' : 'idle');
+      setError(`This device has reached its ${maxDevicesRef.current}-Wattbike connection grant.`);
       return false;
     }
 

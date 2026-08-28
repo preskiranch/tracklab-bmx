@@ -2,11 +2,14 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { bridgeCorsOrigin, bridgeOriginAllowed } from '../../bridge/originPolicy.mjs';
 import {
+  applyNativeAppCors,
   createRateLimiter,
   mutationOriginAllowed,
+  nativeAppCorsPreflight,
   pathIsInside,
   publicRequestOrigin,
   staticCacheControl,
+  trackLabCapacitorOrigin,
 } from '../../cloud/httpSecurity.mjs';
 
 function request(headers: Record<string, string>) {
@@ -28,6 +31,54 @@ describe('HTTP security policy', () => {
       'x-forwarded-proto': 'https',
       'sec-fetch-site': 'cross-site',
     }))).toBe(false);
+  });
+
+  it('allows only the exact Capacitor origin and a fixed native CORS contract', () => {
+    const nativeRequest = request({
+      host: 'tracklab.example',
+      origin: trackLabCapacitorOrigin,
+      'x-forwarded-proto': 'https',
+      'sec-fetch-site': 'cross-site',
+    });
+    expect(mutationOriginAllowed(nativeRequest)).toBe(true);
+    expect(mutationOriginAllowed(request({
+      host: 'tracklab.example',
+      origin: 'capacitor://attacker',
+      'x-forwarded-proto': 'https',
+    }))).toBe(false);
+
+    const allowed = {
+      ...nativeRequest,
+      method: 'OPTIONS',
+      url: '/api/auth/me',
+      headers: {
+        ...nativeRequest.headers,
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'authorization, content-type, x-tracklab-native-session',
+      },
+    };
+    expect(nativeAppCorsPreflight(allowed)).toEqual({ native: true, allowed: true });
+    expect(nativeAppCorsPreflight({
+      ...allowed,
+      headers: { ...allowed.headers, 'access-control-request-headers': 'x-evil-secret' },
+    })).toEqual({ native: true, allowed: false });
+    expect(nativeAppCorsPreflight({
+      ...allowed,
+      headers: {
+        ...allowed.headers,
+        'access-control-request-headers': 'authorization, x-evil-secret',
+      },
+    })).toEqual({ native: true, allowed: false });
+
+    const responseHeaders = new Map<string, string>();
+    expect(applyNativeAppCors(allowed, {
+      setHeader: (name: string, value: string) => responseHeaders.set(name, value),
+    })).toBe(true);
+    expect(responseHeaders.get('Access-Control-Allow-Origin')).toBe(trackLabCapacitorOrigin);
+    expect(responseHeaders.has('Access-Control-Allow-Credentials')).toBe(false);
+    expect(applyNativeAppCors({ ...allowed, url: '/support' }, {
+      setHeader: () => undefined,
+    })).toBe(false);
   });
 
   it('only marks fingerprinted assets immutable', () => {

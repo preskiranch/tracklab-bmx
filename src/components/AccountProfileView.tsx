@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   Activity,
   Bike,
@@ -8,11 +8,14 @@ import {
   Compass,
   Copy,
   Download,
+  ExternalLink,
   HeartPulse,
   Link2,
   RefreshCw,
   ShieldCheck,
+  ShieldAlert,
   Timer,
+  Trash2,
   UserPlus,
   X,
 } from 'lucide-react';
@@ -39,7 +42,9 @@ import {
   trainingSessionZoneResults,
   type TrainingHistoryResponse,
 } from '../lib/trainingHistory';
-import type { AuthUser } from '../lib/auth';
+import { deleteAuthAccount, type AuthUser } from '../lib/auth';
+import { nativeInAppPurchases } from '../lib/nativeInAppPurchases';
+import { subscribeToAuthenticatedEventStream } from '../lib/authenticatedEventStream';
 import {
   loadClubHeartRateSummaryHistory,
   type ClubHeartRateHistoryItem,
@@ -500,6 +505,200 @@ function completedAccountName(fullName: string, nickname: string) {
   return cleanNickname ? `${cleanName} (${cleanNickname})` : cleanName;
 }
 
+export const appleSubscriptionManagementUrl = 'https://apps.apple.com/account/subscriptions';
+
+export function accountDeletionReady({
+  password,
+  confirmation,
+  acknowledged,
+}: {
+  password: string;
+  confirmation: string;
+  acknowledged: boolean;
+}) {
+  return password.length > 0 && confirmation === 'DELETE' && acknowledged;
+}
+
+export function AccountDeletionPanel({
+  email,
+  onAccountDeleted,
+}: {
+  email: string;
+  onAccountDeleted?: () => void | Promise<void>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [password, setPassword] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [deletionStatus, setDeletionStatus] = useState<'idle' | 'deleting' | 'error'>('idle');
+  const [deletionMessage, setDeletionMessage] = useState('');
+  const nativeSubscriptionManagement = nativeInAppPurchases.isAvailable();
+  const ready = accountDeletionReady({ password, confirmation, acknowledged });
+
+  const reset = useCallback(() => {
+    setExpanded(false);
+    setPassword('');
+    setConfirmation('');
+    setAcknowledged(false);
+    setDeletionStatus('idle');
+    setDeletionMessage('');
+  }, []);
+
+  const openNativeSubscriptionManagement = useCallback(async () => {
+    setDeletionMessage('Opening Apple subscription management…');
+    try {
+      await nativeInAppPurchases.manageSubscriptions();
+      setDeletionMessage('Apple subscription management opened.');
+    } catch (error) {
+      setDeletionMessage(error instanceof Error
+        ? error.message
+        : 'Apple subscription management could not open.');
+    }
+  }, []);
+
+  const submitDeletion = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!ready || deletionStatus === 'deleting') return;
+    setDeletionStatus('deleting');
+    setDeletionMessage('Permanently deleting your TrackLab account…');
+    try {
+      await deleteAuthAccount(password, 'DELETE');
+      setDeletionMessage('Your TrackLab account was deleted.');
+      if (onAccountDeleted) {
+        await onAccountDeleted();
+      } else if (typeof window !== 'undefined') {
+        window.location.replace('/');
+      }
+    } catch (error) {
+      setDeletionStatus('error');
+      setDeletionMessage(error instanceof Error ? error.message : 'Your account could not be deleted.');
+    }
+  }, [deletionStatus, onAccountDeleted, password, ready]);
+
+  return (
+    <section className="account-deletion-panel" aria-labelledby="account-controls-title">
+      <div className="account-deletion-summary">
+        <div>
+          <span className="eyebrow">Account controls</span>
+          <h2 id="account-controls-title">Manage or delete your account</h2>
+          <p>Signed in as {email}</p>
+        </div>
+        <div className="account-deletion-summary-actions">
+          {nativeSubscriptionManagement ? (
+            <button
+              type="button"
+              className="account-manage-subscription"
+              onClick={() => { void openNativeSubscriptionManagement(); }}
+            >
+              Manage Apple Subscription
+            </button>
+          ) : (
+            <a
+              className="account-manage-subscription"
+              href={appleSubscriptionManagementUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Manage Apple Subscription <ExternalLink size={15} aria-hidden="true" />
+            </a>
+          )}
+          <button
+            type="button"
+            className="account-delete-open"
+            aria-controls="account-delete-confirmation"
+            aria-expanded={expanded}
+            onClick={() => {
+              if (expanded) reset();
+              else setExpanded(true);
+            }}
+          >
+            <Trash2 size={16} aria-hidden="true" /> Delete Account
+          </button>
+        </div>
+      </div>
+      {!expanded && deletionMessage && (
+        <p className="account-deletion-message" role="status">{deletionMessage}</p>
+      )}
+
+      <form
+        id="account-delete-confirmation"
+        className="account-delete-confirmation"
+        hidden={!expanded}
+        onSubmit={(event) => { void submitDeletion(event); }}
+      >
+        <div className="account-delete-warning">
+          <ShieldAlert size={24} aria-hidden="true" />
+          <div>
+            <strong>This permanently deletes your TrackLab account and data.</strong>
+            <p>
+              Your profile, saved training history, private heart-rate records, friendships, and club data tied to this
+              account will no longer be available. This cannot be undone.
+            </p>
+          </div>
+        </div>
+        <p className="account-delete-subscription-warning">
+          <strong>Deleting TrackLab does not cancel an Apple subscription.</strong> If you do not want Apple billing to
+          renew, use <strong>Manage Apple Subscription</strong> above and cancel it before deleting. Apple, not TrackLab,
+          controls that billing. TrackLab deletes your account identifier and personal data, but retains a one-way,
+          pseudonymous Apple transaction-lineage proof with no email or name. If the same Apple Account still has an
+          active subscription, you can create a new TrackLab account and deliberately choose <strong>Restore Purchases</strong>{' '}
+          in the iOS app to reattach it after Apple verifies the signed transaction. Cancellation is recommended first if
+          you do not want renewal, but it is not required to delete your account.
+        </p>
+        <label>
+          <span>Current password</span>
+          <input
+            type="password"
+            autoComplete="current-password"
+            disabled={deletionStatus === 'deleting'}
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Type DELETE to confirm</span>
+          <input
+            type="text"
+            autoCapitalize="characters"
+            autoComplete="off"
+            disabled={deletionStatus === 'deleting'}
+            spellCheck={false}
+            value={confirmation}
+            onChange={(event) => setConfirmation(event.target.value)}
+          />
+        </label>
+        <label className="account-delete-acknowledgement">
+          <input
+            type="checkbox"
+            checked={acknowledged}
+            disabled={deletionStatus === 'deleting'}
+            onChange={(event) => setAcknowledged(event.target.checked)}
+          />
+          <span>
+            I understand that Apple billing continues unless I cancel it, and restoring it to a new TrackLab account
+            requires the same Apple Account, an active subscription, and a deliberate Restore Purchases request.
+          </span>
+        </label>
+        <div className="account-delete-actions">
+          <button type="button" disabled={deletionStatus === 'deleting'} onClick={reset}>Keep My Account</button>
+          <button className="danger" type="submit" disabled={!ready || deletionStatus === 'deleting'}>
+            <Trash2 size={16} aria-hidden="true" />
+            {deletionStatus === 'deleting' ? 'Deleting Account…' : 'Permanently Delete Account'}
+          </button>
+        </div>
+        {deletionMessage && (
+          <p
+            className={`account-deletion-message ${deletionStatus}`}
+            role={deletionStatus === 'error' ? 'alert' : 'status'}
+          >
+            {deletionMessage}
+          </p>
+        )}
+      </form>
+    </section>
+  );
+}
+
 export function AccountProfileView({
   name,
   email,
@@ -575,14 +774,11 @@ export function AccountProfileView({
   useEffect(() => refresh(), [historyRevision, refresh]);
 
   useEffect(() => {
-    if (typeof EventSource === 'undefined') return undefined;
-    const stream = new EventSource('/api/training-sessions/stream');
-    const handleUpdate = () => refreshQuietly();
-    stream.addEventListener('training-history-updated', handleUpdate);
-    return () => {
-      stream.removeEventListener('training-history-updated', handleUpdate);
-      stream.close();
-    };
+    return subscribeToAuthenticatedEventStream('/api/training-sessions/stream', {
+      onEvent: (event) => {
+        if (event.type === 'training-history-updated') refreshQuietly();
+      },
+    });
   }, [refreshQuietly]);
 
   useEffect(() => {
@@ -928,6 +1124,8 @@ export function AccountProfileView({
           This is your account rider photo. It follows your profile across devices and is available in race entry, rider cards, results, and saved sessions.
         </p>
       </section>
+
+      <AccountDeletionPanel email={email} />
 
       {(clubInviteToken
         || clubState.memberships.length > 0

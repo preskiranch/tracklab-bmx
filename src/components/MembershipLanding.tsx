@@ -1,25 +1,47 @@
 import { useRef } from 'react';
-import { Activity, Bike, CreditCard, Globe2, Lock, LogIn, MapPinned, Play, Radio, Users } from 'lucide-react';
+import {
+  Activity,
+  Bike,
+  ExternalLink,
+  Globe2,
+  Lock,
+  LogIn,
+  MapPinned,
+  Play,
+  Radio,
+  RefreshCcw,
+  Smartphone,
+  Users,
+} from 'lucide-react';
 import type { AuthMode } from '../lib/auth';
 import {
-  bikeSeatMonthlyCents,
-  clampBillingBikeSeats,
-  formatUsd,
-  maxBillingBikeSeats,
-  racerMonthlyCents,
+  clampAppleWattbikeConnections,
+  maxAppleWattbikeConnections,
   type MembershipState,
 } from '../lib/membership';
 import type { TrackRecord } from '../types';
 import { PublicTrackLocator } from './PublicTrackLocator';
 import './PublicTrackLocator.css';
+import './MembershipLanding.css';
 
-type CheckoutStatus = 'idle' | 'loading' | 'error';
+export type AppleBillingStatus = 'idle' | 'loading' | 'error' | 'success';
+export type AppleBillingAction = 'products' | 'purchase' | 'restore' | 'manage' | null;
+export type AppleSubscriptionOffer = {
+  productId: string;
+  bikeSeats: number;
+  displayName: string;
+  displayPrice: string;
+};
 
 type MembershipLandingProps = {
   membership: MembershipState;
   bikeSeats: number;
-  checkoutStatus: CheckoutStatus;
-  checkoutMessage: string | null;
+  appleStoreAvailable: boolean | null;
+  appleBillingServerReady: boolean | null;
+  appleProducts: AppleSubscriptionOffer[];
+  billingStatus: AppleBillingStatus;
+  billingAction: AppleBillingAction;
+  billingMessage: string | null;
   authMode: AuthMode;
   authLoading: boolean;
   profileName: string;
@@ -42,14 +64,20 @@ type MembershipLandingProps = {
   onEnterApp: () => void;
   onStartDemo: () => void;
   onBikeSeatsChange: (count: number) => void;
-  onCheckout: () => void;
+  onPurchase: () => void;
+  onRestorePurchases: () => void;
+  onManageSubscription: () => void;
 };
 
 export function MembershipLanding({
   membership,
   bikeSeats,
-  checkoutStatus,
-  checkoutMessage,
+  appleStoreAvailable,
+  appleBillingServerReady,
+  appleProducts,
+  billingStatus,
+  billingAction,
+  billingMessage,
   authMode,
   authLoading,
   profileName,
@@ -72,11 +100,21 @@ export function MembershipLanding({
   onEnterApp,
   onStartDemo,
   onBikeSeatsChange,
-  onCheckout,
+  onPurchase,
+  onRestorePurchases,
+  onManageSubscription,
 }: MembershipLandingProps) {
-  const monthlyCents = racerMonthlyCents(bikeSeats);
   const isMember = membership.tier !== 'visitor';
   const creatingAccount = authMode === 'register';
+  const selectedOffer = appleProducts.find((product) => product.bikeSeats === bikeSeats);
+  const productPriceAvailable = Boolean(selectedOffer?.displayPrice.trim());
+  const selectedPlanIsCurrent = !isAdminProfile
+    && membership.tier === 'racer'
+    && membership.bikeSeats === bikeSeats;
+  const changingPlan = !isAdminProfile
+    && membership.tier === 'racer'
+    && membership.bikeSeats !== bikeSeats;
+  const billingBusy = billingStatus === 'loading';
   const profileSubmitPendingRef = useRef(false);
   const consumeLocator = () => {
     const url = new URL(window.location.href);
@@ -283,35 +321,118 @@ export function MembershipLanding({
 
         <article className="membership-card pricing-card">
           <div className="card-icon accent">
-            <CreditCard size={20} />
+            <Smartphone size={20} />
           </div>
-          <span className="eyebrow">Racer</span>
-          <h3>{formatUsd(monthlyCents)} / month</h3>
+          <span className="eyebrow">Racer · Apple subscription</span>
+          <h3>{appleStoreAvailable == null
+            ? 'Checking App Store...'
+            : selectedOffer?.displayName?.trim() || 'App Store plan unavailable'}</h3>
+          {productPriceAvailable && (
+            <p className="apple-plan-price">{selectedOffer?.displayPrice} / month</p>
+          )}
           <p>
-            Every connected Wattbike seat is {formatUsd(bikeSeatMonthlyCents)} per month.
-            Clubs can purchase 20 or more seats, while each race remains limited to four riders.
+            Choose a fixed plan for one to four simultaneous Wattbike connections. Every plan includes live Wattbike
+            telemetry, cloud training records, club monitoring, and multiplayer racing.
           </p>
-          <div className="seat-selector" aria-label="Wattbike seats">
-            <button type="button" aria-label="Remove one Wattbike seat" disabled={bikeSeats <= 1} onClick={() => onBikeSeatsChange(bikeSeats - 1)}>−</button>
-            <input
-              aria-label="Wattbike seats"
-              title="Wattbike seats"
-              type="number"
-              min="1"
-              max={maxBillingBikeSeats}
-              inputMode="numeric"
-              value={bikeSeats}
-              onChange={(event) => onBikeSeatsChange(clampBillingBikeSeats(Number(event.target.value) || 1))}
-            />
-            <button type="button" aria-label="Add one Wattbike seat" disabled={bikeSeats >= maxBillingBikeSeats} onClick={() => onBikeSeatsChange(bikeSeats + 1)}>+</button>
+          {membership.tier === 'racer' && (
+            <p className="apple-current-access">
+              Current account access: up to {membership.bikeSeats} Wattbike {membership.bikeSeats === 1 ? 'connection' : 'connections'}.
+              This access is based on the latest subscription entitlement verified with Apple.
+            </p>
+          )}
+          <div className="apple-tier-selector" role="radiogroup" aria-label="Monthly Wattbike connection plan">
+            {Array.from({ length: maxAppleWattbikeConnections }, (_, index) => index + 1).map((connectionCount) => {
+              const offer = appleProducts.find((product) => product.bikeSeats === connectionCount);
+              const selected = bikeSeats === connectionCount;
+              return (
+                <button
+                  aria-checked={selected}
+                  className={selected ? 'active' : ''}
+                  key={connectionCount}
+                  onClick={() => onBikeSeatsChange(clampAppleWattbikeConnections(connectionCount))}
+                  role="radio"
+                  type="button"
+                >
+                  <strong>{connectionCount}</strong>
+                  <span>{connectionCount === 1 ? 'connection' : 'connections'}</span>
+                  <small>{appleStoreAvailable == null
+                    ? 'Loading price...'
+                    : offer?.displayPrice?.trim() || 'Price unavailable'}</small>
+                </button>
+              );
+            })}
           </div>
-          <button className="primary-button full-width" type="button" onClick={onCheckout} disabled={!profileComplete || checkoutStatus === 'loading'}>
-            <CreditCard size={17} />
-            {!profileComplete ? 'Sign In First' : checkoutStatus === 'loading' ? 'Opening Square...' : 'Upgrade with Square'}
+          <p className="apple-subscription-disclosure">
+            This is an auto-renewing monthly subscription for exactly {bikeSeats} simultaneous Wattbike {bikeSeats === 1 ? 'connection' : 'connections'}.
+            Payment is charged to your Apple Account and renews automatically unless canceled at least 24 hours before
+            the end of the current period. Manage or cancel it in your App Store subscriptions. See the{' '}
+            <a href="/privacy">Privacy Policy</a> and{' '}
+            <a href="https://www.apple.com/legal/internet-services/itunes/dev/stdeula/" target="_blank" rel="noreferrer">
+              Terms of Use <ExternalLink aria-hidden="true" size={12} />
+            </a>.
+          </p>
+          <button
+            className="primary-button full-width"
+            type="button"
+            onClick={onPurchase}
+            disabled={!profileComplete || appleStoreAvailable !== true || appleBillingServerReady !== true || !productPriceAvailable || billingBusy || selectedPlanIsCurrent}
+          >
+            <Smartphone size={17} />
+            {!profileComplete
+              ? 'Sign In First'
+              : appleStoreAvailable == null
+                ? 'Checking App Store...'
+                : !appleStoreAvailable
+                  ? 'Subscribe in the iPhone or iPad app'
+                  : appleBillingServerReady == null
+                    ? 'Checking subscription service...'
+                    : !appleBillingServerReady
+                      ? 'Apple billing is being configured'
+                      : billingAction === 'products'
+                        ? 'Loading App Store price...'
+                        : !productPriceAvailable
+                          ? 'App Store price unavailable'
+                          : billingAction === 'purchase'
+                            ? 'Completing Apple purchase...'
+                            : selectedPlanIsCurrent
+                              ? 'Current Apple plan'
+                              : `${changingPlan ? 'Change plan' : 'Subscribe'} · ${selectedOffer?.displayPrice} / month`}
           </button>
-          {checkoutMessage && (
-            <p className={`checkout-message ${checkoutStatus === 'error' ? 'error' : ''}`}>
-              {checkoutMessage}
+          <div className="apple-subscription-actions">
+            <button
+              className="secondary-button"
+              disabled={!profileComplete || appleStoreAvailable !== true || appleBillingServerReady !== true || billingBusy}
+              onClick={onRestorePurchases}
+              type="button"
+            >
+              <RefreshCcw size={15} />
+              {billingAction === 'restore' ? 'Restoring...' : 'Restore Purchases'}
+            </button>
+            <button
+              className="secondary-button"
+              disabled={appleStoreAvailable !== true || billingBusy}
+              onClick={onManageSubscription}
+              type="button"
+            >
+              <ExternalLink size={15} />
+              Manage Subscription
+            </button>
+          </div>
+          {appleStoreAvailable === false && (
+            <p className="checkout-message">
+              Subscriptions are purchased and managed in the TrackLab BMX app on an iPhone or iPad. Sign in with this
+              same TrackLab account on any device to use its verified Wattbike connection capacity.
+            </p>
+          )}
+          {appleStoreAvailable === true && appleBillingServerReady === false && (
+            <p className="checkout-message error">
+              Apple billing is being configured. Purchase and Restore will become available after TrackLab can verify
+              transactions. You can still manage or cancel an existing subscription.
+            </p>
+          )}
+          {billingMessage && (
+            <p className={`checkout-message ${billingStatus === 'error' ? 'error' : ''}`}>
+              {billingMessage}
             </p>
           )}
         </article>

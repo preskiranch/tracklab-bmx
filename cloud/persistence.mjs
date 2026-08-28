@@ -1,6 +1,8 @@
 import pg from 'pg';
+import { createHash } from 'node:crypto';
 import { runDatabaseMigrations } from './migrations.mjs';
 import { cloudTelemetry } from './telemetry.mjs';
+import { appleAppAccountTokenLineageHash } from './appleBilling.mjs';
 import {
   maximumAcceptedTrainingSpeedKph,
   maximumAcceptedTrainingSpeedMph,
@@ -18,7 +20,7 @@ export class ClubEventPersistenceUnavailableError extends Error {
 }
 
 const schema = 'tracklab';
-const maxBillingBikeSeats = 1000;
+const maxBillingBikeSeats = 4;
 // A completion credential can finish uploading a session for one day after the
 // reservation lease expires. This does not reactivate seats or permit a new
 // start: every assignment must already have been activated, and every result
@@ -47,8 +49,13 @@ const publicCustomRoutesFallback = new Map();
 const memoryUserDataByGuestKey = new Map();
 const memoryAuthUsersById = new Map();
 const memoryAuthUserIdByEmail = new Map();
+const memoryErasedAuthUserIdHashes = new Set();
 const memoryAuthSessionsByToken = new Map();
-const memoryBillingCheckoutsByState = new Map();
+const memoryAppleSubscriptionsByOriginalTransactionId = new Map();
+const memoryAppleTransactionsById = new Map();
+const memoryAppleNotificationsByUuid = new Map();
+const memoryAppleLineageTokenBindings = new Map();
+const memoryWattbikeConnectionLeases = new Map();
 const memoryMap3DLoadEvents = new Map();
 const memoryTrackBriefings = new Map();
 const memoryLocalRaceResults = new Map();
@@ -380,6 +387,9 @@ function userDataUpsertStatement() {
 }
 
 export const persistenceTestHooks = Object.freeze({
+  appleDate,
+  appleLineageBindings: () => [...memoryAppleLineageTokenBindings.values()]
+    .map((binding) => ({ ...binding })),
   accountFriendsPageStatement,
   accountFriendPresenceAudienceStatement,
   accountFriendRequestsPageStatement,
@@ -406,6 +416,12 @@ function newestMappingBySavedAt(preferred, candidate) {
 
 function authEmailKey(email) {
   return String(email || '').trim().toLowerCase();
+}
+
+function erasedAuthUserIdHash(userId) {
+  return createHash('sha256')
+    .update(`tracklab-erased-auth-user-v1\u0000${String(userId || '').trim()}`)
+    .digest('hex');
 }
 
 function accountPair(userIdA, userIdB) {
@@ -504,6 +520,38 @@ async function withPersistenceLock(lockKey, operation) {
   }
 }
 
+/**
+ * Serializes Club Tablet picker/session transitions across every backend
+ * process. PostgreSQL owns the production lock, so a rolling deployment cannot
+ * rely on process-local promises for correctness. Memory mode keeps the same
+ * ordering contract for unit tests and local development.
+ */
+export async function withClubTabletSessionStartLock(clubId, operation) {
+  const normalizedClubId = String(clubId || '').trim();
+  if (
+    normalizedClubId.length < 8
+    || normalizedClubId.length > 160
+    || typeof operation !== 'function'
+  ) {
+    throw new ClubEventPersistenceUnavailableError(
+      'Club Tablet session coordination is unavailable.',
+    );
+  }
+  const lockKey = `club-tablet-session-start:${normalizedClubId}`;
+  if (!pool) return withMemoryPersistenceLock(lockKey, operation);
+
+  const wrapped = await withPersistenceLock(lockKey, async () => ({
+    completed: true,
+    value: await operation(),
+  }));
+  if (!wrapped?.completed) {
+    throw new ClubEventPersistenceUnavailableError(
+      'Club Tablet session coordination is temporarily unavailable.',
+    );
+  }
+  return wrapped.value;
+}
+
 async function withAccountPairTransaction(userIdA, userIdB, operation) {
   return withPersistenceLock(`friend-pair:${accountPair(userIdA, userIdB).join(':')}`, operation);
 }
@@ -574,6 +622,14 @@ function authUserFromRow(row) {
     return null;
   }
 
+  const appleBillingManaged = row.apple_billing_managed === true;
+  // Apple-managed rows fail closed unless the query explicitly joined a
+  // currently active, unexpired verified entitlement.
+  const appleEntitlementActive = appleBillingManaged
+    && Boolean(row.effective_apple_original_transaction_id);
+  const effectiveBikeSeats = appleEntitlementActive
+    ? Math.max(1, Math.min(maxBillingBikeSeats, Number(row.effective_apple_bike_seats) || 1))
+    : 1;
   return {
     id: row.id,
     studioInvitationId: row.studio_invitation_id ?? null,
@@ -583,27 +639,47 @@ function authUserFromRow(row) {
     friendDiscoverable: row.friend_discoverable === true,
     officialFriendKind: row.official_friend_kind ?? null,
     passwordHash: row.password_hash,
-    membershipTier: row.membership_tier,
-    bikeSeats: Number(row.bike_seats) || 1,
+    membershipTier: appleBillingManaged
+      ? (appleEntitlementActive ? 'racer' : 'spectator')
+      : row.membership_tier,
+    bikeSeats: appleBillingManaged ? effectiveBikeSeats : Number(row.bike_seats) || 1,
+    legacyMembershipTier: row.legacy_membership_tier ?? row.membership_tier,
+    legacyBikeSeats: Number(row.legacy_bike_seats ?? row.bike_seats) || 1,
+    appleBillingManaged,
+    appleEntitlementActive,
     admin: Boolean(row.admin),
-    squareCustomerId: row.square_customer_id ?? '',
-    squareSubscriptionId: row.square_subscription_id ?? '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastLogin: row.last_login,
   };
 }
 
+function effectiveMemoryAuthUser(userId) {
+  const user = memoryAuthUsersById.get(userId);
+  if (!user) return null;
+  if (user.appleBillingManaged === true) return memoryAppleProjection(userId).user;
+  return { ...cloneAuthUser(user), appleEntitlementActive: false };
+}
+
 export async function findAuthUserByEmail(email) {
   if (!pool) {
     const id = memoryAuthUserIdByEmail.get(authEmailKey(email));
-    return cloneAuthUser(id ? memoryAuthUsersById.get(id) : null);
+    return id ? effectiveMemoryAuthUser(id) : null;
   }
 
   const result = await query(
-    `SELECT users.*, official.kind AS official_friend_kind
+    `SELECT users.*, official.kind AS official_friend_kind,
+       active_subscription.original_transaction_id AS effective_apple_original_transaction_id,
+       active_subscription.bike_seats AS effective_apple_bike_seats
      FROM ${schema}.auth_users AS users
      LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = users.id
+     LEFT JOIN LATERAL (
+       SELECT original_transaction_id, bike_seats
+       FROM ${schema}.apple_iap_subscriptions
+       WHERE user_id = users.id AND active = true AND entitlement_expires_at > now()
+       ORDER BY signed_at DESC, bike_seats DESC, original_transaction_id
+       LIMIT 1
+     ) AS active_subscription ON true
      WHERE users.email = $1 LIMIT 1`,
     [email],
   );
@@ -612,14 +688,55 @@ export async function findAuthUserByEmail(email) {
 
 export async function findAuthUserById(id) {
   if (!pool) {
-    return cloneAuthUser(memoryAuthUsersById.get(id));
+    return effectiveMemoryAuthUser(id);
   }
 
   const result = await query(
-    `SELECT users.*, official.kind AS official_friend_kind
+    `SELECT users.*, official.kind AS official_friend_kind,
+       active_subscription.original_transaction_id AS effective_apple_original_transaction_id,
+       active_subscription.bike_seats AS effective_apple_bike_seats
      FROM ${schema}.auth_users AS users
      LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = users.id
+     LEFT JOIN LATERAL (
+       SELECT original_transaction_id, bike_seats
+       FROM ${schema}.apple_iap_subscriptions
+       WHERE user_id = users.id AND active = true AND entitlement_expires_at > now()
+       ORDER BY signed_at DESC, bike_seats DESC, original_transaction_id
+       LIMIT 1
+     ) AS active_subscription ON true
      WHERE users.id = $1 LIMIT 1`,
+    [id],
+  );
+  return authUserFromRow(result?.rows?.[0]);
+}
+
+/**
+ * Returns the billing owner's effective entitlement at query time. Apple-managed
+ * accounts deliberately ignore the denormalized auth_users racer columns when
+ * no verified subscription remains inside its entitlement window, so a missed
+ * notification cannot leave connection leases active after expiry.
+ */
+export async function findEffectiveWattbikeBillingOwnerById(id) {
+  if (!pool) {
+    return effectiveMemoryAuthUser(id);
+  }
+
+  const result = await query(
+    `SELECT users.*,
+       active_subscription.original_transaction_id AS effective_apple_original_transaction_id,
+       active_subscription.bike_seats AS effective_apple_bike_seats
+     FROM ${schema}.auth_users AS users
+     LEFT JOIN LATERAL (
+       SELECT original_transaction_id, bike_seats
+       FROM ${schema}.apple_iap_subscriptions
+       WHERE user_id = users.id
+         AND active = true
+         AND entitlement_expires_at > now()
+       ORDER BY signed_at DESC, bike_seats DESC, original_transaction_id
+       LIMIT 1
+     ) AS active_subscription ON true
+     WHERE users.id = $1
+     LIMIT 1`,
     [id],
   );
   return authUserFromRow(result?.rows?.[0]);
@@ -627,6 +744,7 @@ export async function findAuthUserById(id) {
 
 export async function createAuthUser(user) {
   if (!pool) {
+    if (memoryErasedAuthUserIdHashes.has(erasedAuthUserIdHash(user.id))) return null;
     const now = new Date().toISOString();
     const memoryUser = {
       id: user.id,
@@ -638,9 +756,10 @@ export async function createAuthUser(user) {
       passwordHash: user.passwordHash,
       membershipTier: user.membershipTier,
       bikeSeats: Number(user.bikeSeats) || 1,
+      legacyMembershipTier: user.membershipTier,
+      legacyBikeSeats: Number(user.bikeSeats) || 1,
+      appleBillingManaged: false,
       admin: Boolean(user.admin),
-      squareCustomerId: '',
-      squareSubscriptionId: '',
       createdAt: now,
       updatedAt: now,
       lastLogin: now,
@@ -655,8 +774,12 @@ export async function createAuthUser(user) {
 
   const result = await query(
     `WITH created AS (
-       INSERT INTO ${schema}.auth_users (id, email, display_name, username, friend_discoverable, password_hash, membership_tier, bike_seats, admin, last_login)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+       INSERT INTO ${schema}.auth_users (
+         id, email, display_name, username, friend_discoverable, password_hash,
+         membership_tier, bike_seats, legacy_membership_tier, legacy_bike_seats,
+         admin, last_login
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $7, $8, $9, now())
        RETURNING *
      ), bound AS (
        INSERT INTO ${schema}.official_friend_accounts (kind, user_id)
@@ -692,14 +815,14 @@ export async function touchAuthUserLogin(userId) {
     const now = new Date().toISOString();
     memoryUser.lastLogin = now;
     memoryUser.updatedAt = now;
-    return cloneAuthUser(memoryUser);
+    return effectiveMemoryAuthUser(userId);
   }
 
   const result = await query(
     `UPDATE ${schema}.auth_users SET last_login = now(), updated_at = now() WHERE id = $1 RETURNING *`,
     [userId],
   );
-  return authUserFromRow(result?.rows?.[0]);
+  return result?.rows?.[0] ? findEffectiveWattbikeBillingOwnerById(userId) : null;
 }
 
 export async function updateAuthUserDisplayName(userId, displayName) {
@@ -710,7 +833,7 @@ export async function updateAuthUserDisplayName(userId, displayName) {
     }
     memoryUser.displayName = displayName;
     memoryUser.updatedAt = new Date().toISOString();
-    return cloneAuthUser(memoryUser);
+    return effectiveMemoryAuthUser(userId);
   }
 
   const result = await query(
@@ -720,7 +843,7 @@ export async function updateAuthUserDisplayName(userId, displayName) {
      RETURNING *`,
     [userId, displayName],
   );
-  return authUserFromRow(result?.rows?.[0]);
+  return result?.rows?.[0] ? findEffectiveWattbikeBillingOwnerById(userId) : null;
 }
 
 export async function updateFriendDiscoverability(userId, discoverable) {
@@ -731,7 +854,7 @@ export async function updateFriendDiscoverability(userId, discoverable) {
     }
     user.friendDiscoverable = Boolean(discoverable);
     user.updatedAt = new Date().toISOString();
-    return cloneAuthUser(user);
+    return effectiveMemoryAuthUser(userId);
   }
   const result = await query(
     `UPDATE ${schema}.auth_users
@@ -740,7 +863,7 @@ export async function updateFriendDiscoverability(userId, discoverable) {
      RETURNING *`,
     [userId, Boolean(discoverable)],
   );
-  return authUserFromRow(result?.rows?.[0]);
+  return result?.rows?.[0] ? findEffectiveWattbikeBillingOwnerById(userId) : null;
 }
 
 export async function updateAuthUserMembership(userId, membershipTier, bikeSeats) {
@@ -749,20 +872,28 @@ export async function updateAuthUserMembership(userId, membershipTier, bikeSeats
     if (!memoryUser) {
       return null;
     }
-    memoryUser.membershipTier = membershipTier;
-    memoryUser.bikeSeats = Number(bikeSeats) || 1;
+    memoryUser.legacyMembershipTier = membershipTier;
+    memoryUser.legacyBikeSeats = Number(bikeSeats) || 1;
+    if (!memoryUser.appleBillingManaged) {
+      memoryUser.membershipTier = membershipTier;
+      memoryUser.bikeSeats = Number(bikeSeats) || 1;
+    }
     memoryUser.updatedAt = new Date().toISOString();
-    return cloneAuthUser(memoryUser);
+    return effectiveMemoryAuthUser(userId);
   }
 
   const result = await query(
     `UPDATE ${schema}.auth_users
-     SET membership_tier = $2, bike_seats = $3, updated_at = now()
+     SET legacy_membership_tier = $2,
+       legacy_bike_seats = $3,
+       membership_tier = CASE WHEN apple_billing_managed THEN membership_tier ELSE $2 END,
+       bike_seats = CASE WHEN apple_billing_managed THEN bike_seats ELSE $3 END,
+       updated_at = now()
      WHERE id = $1
      RETURNING *`,
     [userId, membershipTier, bikeSeats],
   );
-  return authUserFromRow(result?.rows?.[0]);
+  return result?.rows?.[0] ? findEffectiveWattbikeBillingOwnerById(userId) : null;
 }
 
 export async function updateAuthUserAdminAccess(userId, bikeSeats) {
@@ -771,28 +902,35 @@ export async function updateAuthUserAdminAccess(userId, bikeSeats) {
     if (!memoryUser) {
       return null;
     }
-    memoryUser.membershipTier = 'racer';
-    memoryUser.bikeSeats = Number(bikeSeats) || 1;
+    memoryUser.legacyMembershipTier = 'racer';
+    memoryUser.legacyBikeSeats = Number(bikeSeats) || 1;
+    if (!memoryUser.appleBillingManaged) {
+      memoryUser.membershipTier = 'racer';
+      memoryUser.bikeSeats = Number(bikeSeats) || 1;
+    }
     memoryUser.admin = true;
     memoryUser.updatedAt = new Date().toISOString();
-    return cloneAuthUser(memoryUser);
+    return effectiveMemoryAuthUser(userId);
   }
 
   const result = await query(
     `UPDATE ${schema}.auth_users
-     SET membership_tier = 'racer',
-       bike_seats = $2,
+     SET legacy_membership_tier = 'racer',
+       legacy_bike_seats = $2,
+       membership_tier = CASE WHEN apple_billing_managed THEN membership_tier ELSE 'racer' END,
+       bike_seats = CASE WHEN apple_billing_managed THEN bike_seats ELSE $2 END,
        admin = true,
        updated_at = now()
      WHERE id = $1
      RETURNING *`,
     [userId, bikeSeats],
   );
-  return authUserFromRow(result?.rows?.[0]);
+  return result?.rows?.[0] ? findEffectiveWattbikeBillingOwnerById(userId) : null;
 }
 
 export async function createAuthSession(session) {
   if (!pool) {
+    if (memoryErasedAuthUserIdHashes.has(erasedAuthUserIdHash(session.userId))) return false;
     memoryAuthSessionsByToken.set(session.tokenHash, {
       id: session.id,
       userId: session.userId,
@@ -829,7 +967,7 @@ export async function findAuthSession(tokenHash) {
       return null;
     }
 
-    const user = cloneAuthUser(memoryAuthUsersById.get(session.userId));
+    const user = effectiveMemoryAuthUser(session.userId);
     if (!user) {
       return null;
     }
@@ -848,10 +986,19 @@ export async function findAuthSession(tokenHash) {
        session.expires_at,
        session.last_seen,
        users.*,
-       official.kind AS official_friend_kind
+       official.kind AS official_friend_kind,
+       active_subscription.original_transaction_id AS effective_apple_original_transaction_id,
+       active_subscription.bike_seats AS effective_apple_bike_seats
      FROM ${schema}.auth_sessions AS session
      JOIN ${schema}.auth_users AS users ON users.id = session.user_id
      LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = users.id
+     LEFT JOIN LATERAL (
+       SELECT original_transaction_id, bike_seats
+       FROM ${schema}.apple_iap_subscriptions
+       WHERE user_id = users.id AND active = true AND entitlement_expires_at > now()
+       ORDER BY signed_at DESC, bike_seats DESC, original_transaction_id
+       LIMIT 1
+     ) AS active_subscription ON true
      WHERE session.token_hash = $1 AND session.expires_at > now()
      LIMIT 1`,
     [tokenHash],
@@ -919,97 +1066,2021 @@ export async function deleteAuthSession(tokenHash) {
   );
 }
 
-export async function saveBillingCheckout(checkout) {
-  const record = {
-    stateHash: checkout.stateHash,
-    userId: checkout.userId,
-    orderId: checkout.orderId,
-    paymentLinkId: checkout.paymentLinkId || '',
-    bikeSeats: Math.max(1, Math.min(maxBillingBikeSeats, Math.round(Number(checkout.bikeSeats) || 1))),
-    expectedAmountCents: Math.max(0, Math.round(Number(checkout.expectedAmountCents) || 0)),
-    expiresAt: checkout.expiresAt,
-    claimedAt: null,
-    createdAt: new Date().toISOString(),
-  };
-
-  if (!pool) {
-    memoryBillingCheckoutsByState.set(record.stateHash, record);
-    return { ...record };
+function deleteMemoryEntries(store, predicate) {
+  for (const [key, value] of store.entries()) {
+    if (predicate(value, key)) store.delete(key);
   }
+}
 
-  const result = await query(
-    `INSERT INTO ${schema}.billing_checkouts (
-       state_hash, user_id, order_id, payment_link_id, bike_seats, expected_amount_cents, expires_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-     ON CONFLICT (state_hash) DO NOTHING
+function deleteMemoryHeartRatePairing(pairingId) {
+  const pairing = memoryHeartRatePairings.get(pairingId);
+  if (!pairing) return;
+  const streamId = memoryHeartRateStreamIdByPairingId.get(pairingId);
+  if (streamId) {
+    memoryHeartRateStreams.delete(streamId);
+    memoryHeartRateSamplesByStreamId.delete(streamId);
+    memoryHeartRateStreamIdByPairingId.delete(pairingId);
+    deleteMemoryEntries(
+      memoryHeartRateTrainingSegments,
+      (segment) => segment.streamId === streamId || segment.pairingId === pairingId,
+    );
+  }
+  deleteMemoryEntries(memoryHeartRateWatchConnections, (connection) => (
+    connection.pairingId === pairingId
+  ));
+  memoryHeartRatePairings.delete(pairingId);
+  memoryHeartRatePairingIdByCodeHash.delete(pairing.pairCodeHash);
+  if (pairing.ingestTokenHash) {
+    memoryHeartRatePairingIdByTokenHash.delete(pairing.ingestTokenHash);
+  }
+}
+
+function detachMemoryClubFromAthleteHistory(clubId) {
+  for (const session of memoryTrainingSessions.values()) {
+    if (session._clubId !== clubId) continue;
+    delete session._clubId;
+    delete session._clubName;
+    delete session._studioRiderId;
+    delete session._clubRiderName;
+  }
+  for (const pairing of memoryHeartRatePairings.values()) {
+    if (pairing.clubId !== clubId) continue;
+    pairing.clubId = null;
+    pairing.studioRiderId = null;
+    pairing.studioInvitationId = null;
+    pairing.liveStudioConsent = false;
+    pairing.sessionStudioConsent = false;
+  }
+  for (const stream of memoryHeartRateStreams.values()) {
+    if (stream.clubId !== clubId) continue;
+    stream.clubId = null;
+    stream.studioRiderId = null;
+    stream.liveStudioConsent = false;
+    stream.sessionStudioConsent = false;
+  }
+}
+
+function deleteMemoryOwnedClub(clubId) {
+  detachMemoryClubFromAthleteHistory(clubId);
+  const deviceIds = new Set(
+    [...memoryClubTabletDevicesById.values()]
+      .filter((device) => device.clubId === clubId)
+      .map((device) => device.id),
+  );
+  for (const deviceId of deviceIds) {
+    const device = memoryClubTabletDevicesById.get(deviceId);
+    if (device?.tokenHash) memoryClubTabletDeviceIdByTokenHash.delete(device.tokenHash);
+    memoryClubTabletDevicesById.delete(deviceId);
+  }
+  deleteMemoryEntries(memoryClubTabletResultAuthorizationsByTokenHash, (entry) => (
+    entry.clubId === clubId || deviceIds.has(entry.deviceId)
+  ));
+  deleteMemoryEntries(memoryClubMembers, (member) => member.clubId === clubId);
+  deleteMemoryEntries(memoryClubInvitesByHash, (invite) => invite.clubId === clubId);
+  deleteMemoryEntries(memoryHeartRateStudioInvitations, (invite) => {
+    if (invite.clubId !== clubId) return false;
+    memoryHeartRateStudioInvitationIdByCodeHash.delete(invite.inviteCodeHash);
+    return true;
+  });
+  deleteMemoryEntries(memoryHeartRateWatchEnrollments, (enrollment) => enrollment.clubId === clubId);
+  deleteMemoryEntries(memoryHeartRateWatchConnections, (connection) => connection.clubId === clubId);
+  deleteMemoryEntries(memoryClubMonitorSprintAuthorizations, (authorization) => {
+    if (authorization.clubId !== clubId) return false;
+    memoryClubMonitorSprintAuthorizationIdByTokenHash.delete(authorization.tokenHash);
+    return true;
+  });
+  deleteMemoryEntries(memoryClubGroupTrainingAuthorizations, (authorization) => {
+    if (authorization.clubId !== clubId) return false;
+    memoryClubGroupTrainingAuthorizationIdByTokenHash.delete(authorization.tokenHash);
+    return true;
+  });
+  for (const [eventId, event] of memoryClubEventsById.entries()) {
+    if (event.clubId !== clubId) continue;
+    memoryClubEventsById.delete(eventId);
+    memoryClubEventParticipantsByEventId.delete(eventId);
+  }
+  memoryCurrentClubEventIdByClubId.delete(clubId);
+  memoryClubsById.delete(clubId);
+}
+
+async function deleteMemoryAuthUserAccount(userId) {
+  return withMemoryPersistenceLock(`account-delete:${userId}`, async () => {
+    const user = memoryAuthUsersById.get(userId);
+    if (!user) return { deleted: false, profileKey: `user:${userId}`, clubIds: [] };
+    const profileKey = `user:${userId}`;
+    const ownedClubIds = [...memoryClubsById.values()]
+      .filter((club) => club.ownerProfileKey === profileKey)
+      .map((club) => club.id);
+    const externalMemberships = [...memoryClubMembers.values()]
+      .filter((member) => (
+        member.athleteProfileKey === profileKey && !ownedClubIds.includes(member.clubId)
+      ))
+      .map((member) => ({ clubId: member.clubId, studioRiderId: member.studioRiderId }));
+    const authSessionTokenHashes = [...memoryAuthSessionsByToken.entries()]
+      .filter(([, session]) => session.userId === userId)
+      .map(([hash]) => hash);
+    const pushRemovalPromises = [];
+    // UUID account IDs are never reused. Keep only a one-way race-prevention
+    // hash in memory so an already-started write cannot resurrect the erased
+    // identity while bounded push dispatches drain.
+    memoryErasedAuthUserIdHashes.add(erasedAuthUserIdHash(userId));
+
+    const deletedAt = Date.now();
+    const appleSubscriptions = [...memoryAppleSubscriptionsByOriginalTransactionId.values()]
+      .filter((subscription) => subscription.userId === userId);
+    const appleOriginalTransactionIds = new Set(
+      appleSubscriptions.map((subscription) => subscription.originalTransactionId),
+    );
+    for (const subscription of appleSubscriptions) {
+      const bindingHash = appleAppAccountTokenLineageHash(
+        subscription.appAccountToken,
+        subscription.originalTransactionId,
+        subscription.environment,
+      );
+      if (bindingHash) {
+        const key = appleLineageTokenBindingKey(
+          subscription.environment,
+          subscription.originalTransactionId,
+          bindingHash,
+        );
+        if (!memoryAppleLineageTokenBindings.has(key)) {
+          memoryAppleLineageTokenBindings.set(key, {
+            environment: subscription.environment,
+            originalTransactionId: subscription.originalTransactionId,
+            appAccountTokenHash: bindingHash,
+            boundUserId: userId,
+            deletedAt: null,
+            reboundAt: null,
+            createdAt: deletedAt,
+            updatedAt: deletedAt,
+          });
+        }
+      }
+      for (const binding of memoryAppleLineageTokenBindings.values()) {
+        if (
+          binding.environment !== subscription.environment
+          || binding.originalTransactionId !== subscription.originalTransactionId
+          || binding.boundUserId !== userId
+        ) continue;
+        binding.boundUserId = null;
+        binding.deletedAt = deletedAt;
+        binding.updatedAt = deletedAt;
+      }
+    }
+    deleteMemoryEntries(
+      memoryAppleSubscriptionsByOriginalTransactionId,
+      (subscription) => subscription.userId === userId,
+    );
+    deleteMemoryEntries(memoryAppleTransactionsById, (transaction) => transaction.userId === userId);
+    for (const notification of memoryAppleNotificationsByUuid.values()) {
+      if (
+        notification.userId !== userId
+        && !appleOriginalTransactionIds.has(notification.originalTransactionId)
+      ) continue;
+      notification.userId = null;
+      notification.originalTransactionId = null;
+    }
+
+    for (const token of authSessionTokenHashes) {
+      memoryAuthSessionsByToken.delete(token);
+      pushRemovalPromises.push(removeMemoryPushInstallationsForSession(token));
+    }
+    deleteMemoryEntries(
+      memoryWattbikeConnectionLeases,
+      (lease) => lease.billingOwnerUserId === userId,
+    );
+    deleteMemoryEntries(memoryMap3DLoadEvents, (event) => event.userId === userId);
+    memoryUserDataByGuestKey.delete(profileKey);
+    deleteMemoryEntries(memoryLocalRaceResults, (result) => result.guestKey === profileKey);
+    deleteMemoryEntries(memoryGhostLaps, (ghost) => ghost.ownerKey === profileKey);
+    deleteMemoryEntries(memoryTrainingSessions, (session, key) => (
+      session._profileKey === profileKey || String(key).startsWith(`${profileKey}:`)
+    ));
+
+    deleteMemoryEntries(memoryHeartRateStudioInvitations, (invitation) => {
+      const matches = invitation.ownerProfileKey === profileKey
+        || invitation.athleteProfileKey === profileKey
+        || invitation.claimedByProfileKey === profileKey;
+      if (matches) {
+        memoryHeartRateStudioInvitationIdByCodeHash.delete(invitation.inviteCodeHash);
+      }
+      return matches;
+    });
+    const ownedPairingIds = [...memoryHeartRatePairings.values()]
+      .filter((pairing) => pairing.ownerProfileKey === profileKey)
+      .map((pairing) => pairing.id);
+    ownedPairingIds.forEach(deleteMemoryHeartRatePairing);
+    deleteMemoryEntries(
+      memoryHeartRateTrainingSegments,
+      (segment) => segment.ownerProfileKey === profileKey,
+    );
+    deleteMemoryEntries(
+      memoryHeartRateTrainingSegmentBindings,
+      (binding) => binding.athleteProfileKey === profileKey,
+    );
+    deleteMemoryEntries(memoryHeartRateWatchEnrollments, (enrollment) => (
+      enrollment.ownerProfileKey === profileKey
+    ));
+    deleteMemoryEntries(memoryHeartRateWatchConnections, (connection) => (
+      connection.ownerProfileKey === profileKey
+    ));
+    memoryRecoveryAlertPreferences.delete(profileKey);
+    deleteMemoryEntries(memoryRecoveryAlertEpisodes, (episode) => (
+      episode.ownerProfileKey === profileKey || episode.ownerUserId === userId
+    ));
+    deleteMemoryEntries(memoryClubMonitorSprintAuthorizations, (authorization) => {
+      const matches = authorization.ownerProfileKey === profileKey
+        || authorization.athleteProfileKey === profileKey;
+      if (matches) memoryClubMonitorSprintAuthorizationIdByTokenHash.delete(authorization.tokenHash);
+      return matches;
+    });
+    deleteMemoryEntries(memoryClubGroupTrainingAuthorizations, (authorization) => {
+      const matches = authorization.ownerProfileKey === profileKey
+        || authorization.assignments.some((assignment) => assignment.athleteProfileKey === profileKey);
+      if (matches) memoryClubGroupTrainingAuthorizationIdByTokenHash.delete(authorization.tokenHash);
+      return matches;
+    });
+    deleteMemoryEntries(memoryClubInvitesByHash, (invite) => (
+      invite.claimedByProfileKey === profileKey
+    ));
+
+    const externalMembershipKeys = new Set(externalMemberships.map((membership) => (
+      clubMemberKey(membership.clubId, membership.studioRiderId)
+    )));
+    deleteMemoryEntries(memoryClubTabletResultAuthorizationsByTokenHash, (authorization) => (
+      externalMembershipKeys.has(clubMemberKey(authorization.clubId, authorization.studioRiderId))
+    ));
+    for (const participants of memoryClubEventParticipantsByEventId.values()) {
+      for (const [deviceId, participant] of participants.entries()) {
+        const event = memoryClubEventsById.get(participant.eventId);
+        if (event && externalMembershipKeys.has(clubMemberKey(event.clubId, participant.studioRiderId))) {
+          participants.delete(deviceId);
+        }
+      }
+    }
+    for (const membership of externalMemberships) {
+      const key = clubMemberKey(membership.clubId, membership.studioRiderId);
+      const member = memoryClubMembers.get(key);
+      if (member) {
+        Object.assign(member, {
+          athleteProfileKey: null,
+          athleteName: null,
+          status: 'unclaimed',
+          claimedAt: null,
+          revokedAt: null,
+          updatedAt: Date.now(),
+        });
+      }
+    }
+    for (const clubId of ownedClubIds) {
+      memoryClubIdByOwner.delete(profileKey);
+      deleteMemoryOwnedClub(clubId);
+    }
+
+    deleteMemoryEntries(memoryAccountFriendships, (friendship) => (
+      friendship.userIdA === userId || friendship.userIdB === userId
+    ));
+    deleteMemoryEntries(memoryAccountFriendRequests, (request) => (
+      request.fromUserId === userId || request.toUserId === userId
+    ));
+    deleteMemoryEntries(memoryFriendshipSuppressions, (suppression) => (
+      suppression.userIdA === userId || suppression.userIdB === userId
+    ));
+    deleteMemoryEntries(memoryFriendBlocks, (block) => (
+      block.blockerUserId === userId || block.blockedUserId === userId
+    ));
+    deleteMemoryEntries(memoryFriendReports, (report) => (
+      report.reporterUserId === userId || report.reportedUserId === userId
+    ));
+    deleteMemoryEntries(memoryFriendInvitesByHash, (invite) => (
+      invite.inviterUserId === userId || invite.claimedByUserId === userId
+    ));
+    deleteMemoryEntries(
+      memoryAccountTrackFavorites,
+      (favorite) => favorite.userId === userId,
+    );
+    deleteMemoryEntries(memoryAccountTrackShares, (share) => (
+      share.senderUserId === userId || share.recipientUserId === userId
+    ));
+    deleteMemoryEntries(
+      memoryAccountTrackShareIdByParticipantsAndTrack,
+      (shareId) => !memoryAccountTrackShares.has(shareId),
+    );
+    deleteMemoryEntries(memoryPushInstallations, (installation) => installation.userId === userId);
+    memoryPushPreferences.delete(userId);
+    deleteMemoryEntries(memoryPushEvents, (event) => (
+      event.recipientUserId === userId || event.actorUserId === userId
+    ));
+    deleteMemoryEntries(memoryLiveAudioFriendInvites, (invite) => (
+      invite.senderUserId === userId || invite.targetUserId === userId
+    ));
+    deleteMemoryEntries(memoryPushDeliveries, (delivery) => (
+      !memoryPushEvents.has(delivery.eventId) || !memoryPushInstallations.has(delivery.installationId)
+    ));
+    for (const [idempotencyKey, eventId] of memoryPushEventIdByIdempotencyKey.entries()) {
+      if (!memoryPushEvents.has(eventId)) memoryPushEventIdByIdempotencyKey.delete(idempotencyKey);
+    }
+    for (const [fingerprint, installationId] of memoryPushInstallationIdByFingerprint.entries()) {
+      if (!memoryPushInstallations.has(installationId)) {
+        memoryPushInstallationIdByFingerprint.delete(fingerprint);
+      }
+    }
+
+    const ownedGroupIds = new Set(
+      [...memoryGroupsById.values()]
+        .filter((group) => group.ownerGuestKey === profileKey)
+        .map((group) => group.id),
+    );
+    deleteMemoryEntries(memoryGroupsById, (group) => ownedGroupIds.has(group.id));
+    deleteMemoryEntries(memoryGroupMembersByKey, (member) => (
+      member.guestKey === profileKey || ownedGroupIds.has(member.groupId)
+    ));
+    deleteMemoryEntries(memoryGroupInvitesById, (invite) => (
+      invite.fromGuestKey === profileKey
+      || invite.toGuestKey === profileKey
+      || ownedGroupIds.has(invite.groupId)
+    ));
+
+    memoryOfficialFriendKindByUserId.delete(userId);
+    memoryReconciledOfficialFriendUserIds.delete(userId);
+    memoryAuthUserIdByEmail.delete(authEmailKey(user.email));
+    memoryAuthUsersById.delete(userId);
+    // Installation removal waits behind any already-linearized APNs dispatch.
+    // All account/session maps are gone before yielding, so no new account
+    // mutation can enter memory persistence while those bounded sends finish.
+    await Promise.all(pushRemovalPromises);
+    return {
+      deleted: true,
+      profileKey,
+      clubIds: ownedClubIds,
+      authSessionTokenHashes,
+    };
+  });
+}
+
+async function deletePostgresAuthUserAccount(userId) {
+  return withPersistenceLock(`account-delete:${userId}`, async (client) => {
+    const userResult = await client.query(
+      `SELECT id, email FROM ${schema}.auth_users WHERE id = $1 FOR UPDATE`,
+      [userId],
+    );
+    if (!userResult.rows[0]) {
+      return { deleted: false, profileKey: `user:${userId}`, clubIds: [] };
+    }
+    const profileKey = `user:${userId}`;
+    const sessionResult = await client.query(
+      `SELECT token_hash FROM ${schema}.auth_sessions WHERE user_id = $1 FOR UPDATE`,
+      [userId],
+    );
+    const clubResult = await client.query(
+      `SELECT id FROM ${schema}.clubs WHERE owner_profile_key = $1 FOR UPDATE`,
+      [profileKey],
+    );
+    const clubIds = clubResult.rows.map((row) => row.id);
+
+    // Preserve only the one-way StoreKit lineage proof required for an
+    // explicit future Restore Purchases action. The Apple subscription and
+    // transaction rows still cascade with auth_users, so no former TrackLab
+    // UUID, email, display name, or entitlement snapshot survives deletion.
+    const appleLineages = await client.query(
+      `SELECT original_transaction_id, environment, app_account_token
+       FROM ${schema}.apple_iap_subscriptions
+       WHERE user_id = $1
+       FOR UPDATE`,
+      [userId],
+    );
+    for (const lineage of appleLineages.rows) {
+      const existingBindings = await client.query(
+        `SELECT bound_user_id
+         FROM ${schema}.apple_iap_lineage_token_bindings
+         WHERE environment = $1 AND original_transaction_id = $2
+         FOR UPDATE`,
+        [lineage.environment, lineage.original_transaction_id],
+      );
+      if (existingBindings.rows.some((binding) => (
+        binding.bound_user_id != null && binding.bound_user_id !== userId
+      ))) {
+        throw new Error('Apple lineage is bound to another TrackLab account.');
+      }
+      const tokenHash = appleAppAccountTokenLineageHash(
+        lineage.app_account_token,
+        lineage.original_transaction_id,
+        lineage.environment,
+      );
+      if (!tokenHash) throw new Error('Apple lineage token could not be protected.');
+      await client.query(
+        `INSERT INTO ${schema}.apple_iap_lineage_token_bindings (
+           environment, original_transaction_id, app_account_token_sha256,
+           bound_user_id, deleted_at
+         ) VALUES ($1, $2, $3, $4, NULL)
+         ON CONFLICT (environment, original_transaction_id, app_account_token_sha256)
+         DO UPDATE SET bound_user_id = EXCLUDED.bound_user_id,
+           deleted_at = NULL, updated_at = now()`,
+        [lineage.environment, lineage.original_transaction_id, tokenHash, userId],
+      );
+      await client.query(
+        `UPDATE ${schema}.apple_iap_lineage_token_bindings
+         SET bound_user_id = NULL, deleted_at = now(), updated_at = now()
+         WHERE environment = $1 AND original_transaction_id = $2
+           AND (bound_user_id = $3 OR bound_user_id IS NULL)`,
+        [lineage.environment, lineage.original_transaction_id, userId],
+      );
+    }
+
+    // Keep other athletes' personal training/Watch history when its studio is
+    // erased, but remove the now-invalid club attribution and sharing consent.
+    if (clubIds.length > 0) {
+      await client.query(
+        `UPDATE ${schema}.training_sessions
+         SET club_id = NULL, studio_rider_id = NULL, updated_at = now()
+         WHERE club_id = ANY($1::text[]) AND profile_key <> $2`,
+        [clubIds, profileKey],
+      );
+      await client.query(
+        `UPDATE ${schema}.heart_rate_pairings
+         SET studio_invitation_id = NULL, club_id = NULL, studio_rider_id = NULL,
+           live_studio_consent = false, session_studio_consent = false, updated_at = now()
+         WHERE club_id = ANY($1::text[]) AND owner_profile_key <> $2`,
+        [clubIds, profileKey],
+      );
+      await client.query(
+        `UPDATE ${schema}.heart_rate_streams
+         SET club_id = NULL, studio_rider_id = NULL,
+           live_studio_consent = false, session_studio_consent = false, updated_at = now()
+         WHERE club_id = ANY($1::text[]) AND owner_profile_key <> $2`,
+        [clubIds, profileKey],
+      );
+    }
+
+    // Remove temporary club work that identifies this athlete before the
+    // roster row is intentionally reset to an unclaimed studio profile.
+    await client.query(
+      `DELETE FROM ${schema}.club_event_participants AS participants
+       USING ${schema}.club_events AS events, ${schema}.club_members AS members
+       WHERE participants.event_id = events.id
+         AND members.club_id = events.club_id
+         AND members.studio_rider_id = participants.studio_rider_id
+         AND members.athlete_profile_key = $1`,
+      [profileKey],
+    );
+    await client.query(
+      `DELETE FROM ${schema}.club_tablet_result_authorizations AS authorizations
+       USING ${schema}.club_members AS members
+       WHERE authorizations.club_id = members.club_id
+         AND authorizations.studio_rider_id = members.studio_rider_id
+         AND members.athlete_profile_key = $1`,
+      [profileKey],
+    );
+    await client.query(
+      `DELETE FROM ${schema}.club_group_training_authorizations AS authorizations
+       WHERE authorizations.owner_profile_key = $1
+          OR EXISTS (
+            SELECT 1 FROM ${schema}.club_group_training_assignments AS assignments
+            WHERE assignments.authorization_id = authorizations.id
+              AND assignments.athlete_profile_key = $1
+          )`,
+      [profileKey],
+    );
+    await client.query(
+      `DELETE FROM ${schema}.club_monitor_sprint_authorizations
+       WHERE owner_profile_key = $1 OR athlete_profile_key = $1`,
+      [profileKey],
+    );
+    await client.query(
+      `DELETE FROM ${schema}.heart_rate_watch_enrollments WHERE owner_profile_key = $1`,
+      [profileKey],
+    );
+    await client.query(
+      `DELETE FROM ${schema}.heart_rate_pairings WHERE owner_profile_key = $1`,
+      [profileKey],
+    );
+    await client.query(
+      `DELETE FROM ${schema}.heart_rate_studio_invitations
+       WHERE owner_profile_key = $1 OR athlete_profile_key = $1 OR claimed_by_profile_key = $1`,
+      [profileKey],
+    );
+    await client.query(
+      `DELETE FROM ${schema}.heart_rate_training_segment_bindings
+       WHERE training_profile_key = $1`,
+      [profileKey],
+    );
+    await client.query(
+      `DELETE FROM ${schema}.heart_rate_training_segments
+       WHERE owner_profile_key = $1 OR training_profile_key = $1`,
+      [profileKey],
+    );
+    await client.query(
+      `DELETE FROM ${schema}.recovery_alert_preferences
+       WHERE owner_profile_key = $1 OR owner_user_id = $2`,
+      [profileKey, userId],
+    );
+    await client.query(
+      `DELETE FROM ${schema}.recovery_alert_episodes
+       WHERE owner_profile_key = $1 OR owner_user_id = $2`,
+      [profileKey, userId],
+    );
+    await client.query(
+      `DELETE FROM ${schema}.club_invites WHERE claimed_by_profile_key = $1`,
+      [profileKey],
+    );
+    await client.query(
+      `UPDATE ${schema}.club_members
+       SET athlete_profile_key = NULL, status = 'unclaimed', claimed_at = NULL,
+         revoked_at = NULL, updated_at = now()
+       WHERE athlete_profile_key = $1`,
+      [profileKey],
+    );
+
+    await client.query(`DELETE FROM ${schema}.clubs WHERE owner_profile_key = $1`, [profileKey]);
+    await client.query(`DELETE FROM ${schema}.training_sessions WHERE profile_key = $1`, [profileKey]);
+    await client.query(`DELETE FROM ${schema}.ghost_laps WHERE owner_key = $1`, [profileKey]);
+    await client.query(`DELETE FROM ${schema}.race_results WHERE guest_key = $1`, [profileKey]);
+    await client.query(`DELETE FROM ${schema}.user_data WHERE guest_key = $1`, [profileKey]);
+    await client.query(`DELETE FROM ${schema}.map_3d_load_events WHERE user_id = $1`, [userId]);
+    await client.query(
+      `UPDATE ${schema}.public_track_mappings SET published_by = NULL WHERE published_by = $1`,
+      [profileKey],
+    );
+    await client.query(
+      `UPDATE ${schema}.public_custom_routes SET published_by = NULL WHERE published_by = $1`,
+      [profileKey],
+    );
+    await client.query(
+      `DELETE FROM ${schema}.friend_invites
+       WHERE inviter_user_id = $1 OR claimed_by_user_id = $1`,
+      [userId],
+    );
+
+    await client.query(`DELETE FROM ${schema}.room_messages WHERE author_guest_key = $1`, [profileKey]);
+    await client.query(`DELETE FROM ${schema}.room_members WHERE guest_key = $1`, [profileKey]);
+    await client.query(`DELETE FROM ${schema}.rooms WHERE host_guest_key = $1`, [profileKey]);
+    await client.query(
+      `DELETE FROM ${schema}.challenges WHERE from_guest_key = $1 OR to_guest_key = $1`,
+      [profileKey],
+    );
+    await client.query(
+      `DELETE FROM ${schema}.friend_requests WHERE from_guest_key = $1 OR to_guest_key = $1`,
+      [profileKey],
+    );
+    await client.query(
+      `DELETE FROM ${schema}.friendships WHERE guest_key_a = $1 OR guest_key_b = $1`,
+      [profileKey],
+    );
+    await client.query(
+      `DELETE FROM ${schema}.group_invites WHERE from_guest_key = $1 OR to_guest_key = $1`,
+      [profileKey],
+    );
+    await client.query(`DELETE FROM ${schema}.group_members WHERE guest_key = $1`, [profileKey]);
+    await client.query(`DELETE FROM ${schema}.groups WHERE owner_guest_key = $1`, [profileKey]);
+    await client.query(`DELETE FROM ${schema}.profiles WHERE guest_key = $1`, [profileKey]);
+
+    // official_friend_accounts is deliberately RESTRICT so an operator identity
+    // cannot be deleted accidentally through a generic cascade.
+    await client.query(`DELETE FROM ${schema}.official_friend_accounts WHERE user_id = $1`, [userId]);
+    const deleted = await client.query(
+      `DELETE FROM ${schema}.auth_users WHERE id = $1 RETURNING id`,
+      [userId],
+    );
+    return {
+      deleted: Boolean(deleted.rows[0]),
+      profileKey,
+      clubIds,
+      authSessionTokenHashes: sessionResult.rows.map((row) => row.token_hash),
+    };
+  });
+}
+
+/**
+ * Permanently erases one authenticated account and every private record owned
+ * by its user/profile identity. The operation is serialized and transactional
+ * on PostgreSQL; memory mode uses the same account-scoped lock.
+ */
+export async function deleteAuthUserAccount(userId) {
+  if (!userId) return null;
+  return pool
+    ? deletePostgresAuthUserAccount(userId)
+    : deleteMemoryAuthUserAccount(userId);
+}
+
+function appleDate(value) {
+  if (value == null) return null;
+  const timestamp = Number(value);
+  if (!Number.isSafeInteger(timestamp) || timestamp < 0) return null;
+  return new Date(timestamp).toISOString();
+}
+
+function appleLifecycleSignedDate(transaction) {
+  const lifecycleSignedDate = Number(transaction?.lifecycleSignedDate);
+  return Number.isSafeInteger(lifecycleSignedDate) && lifecycleSignedDate >= 0
+    ? lifecycleSignedDate
+    : Number(transaction?.signedDate);
+}
+
+function appleLifecycleStateIncomingWins(existing, incoming) {
+  if (!existing) return true;
+  if (incoming.signedDate !== existing.signedDate) {
+    return incoming.signedDate > existing.signedDate;
+  }
+  if (existing.active === true && incoming.active !== true) return true;
+  if (existing.active !== incoming.active) return false;
+  const existingAccessEnd = Number(existing.entitlementExpiresDate) || 0;
+  const incomingAccessEnd = Number(incoming.entitlementExpiresDate) || 0;
+  const existingSeats = Math.max(1, Number(existing.bikeSeats) || 1);
+  const incomingSeats = Math.max(1, Number(incoming.bikeSeats) || 1);
+  return incomingAccessEnd <= existingAccessEnd
+    && incomingSeats <= existingSeats
+    && (incomingAccessEnd < existingAccessEnd || incomingSeats < existingSeats);
+}
+
+function appleSubscriptionFromRow(row) {
+  if (!row) return null;
+  return {
+    originalTransactionId: row.original_transaction_id,
+    userId: row.user_id,
+    appAccountToken: row.app_account_token,
+    productId: row.product_id,
+    environment: row.environment,
+    status: row.status,
+    bikeSeats: Number(row.bike_seats) || 1,
+    active: row.active === true,
+    latestTransactionId: row.latest_transaction_id,
+    purchaseDate: Date.parse(row.purchased_at),
+    expiresDate: Date.parse(row.expires_at),
+    entitlementExpiresDate: Date.parse(row.entitlement_expires_at),
+    signedDate: Date.parse(row.signed_at),
+    revocationDate: row.revoked_at ? Date.parse(row.revoked_at) : null,
+    reconciledAt: Date.parse(row.reconciled_at),
+  };
+}
+
+function appleLineageTokenBindingKey(environment, originalTransactionId, tokenHash) {
+  return `${environment}\u0000${originalTransactionId}\u0000${tokenHash}`;
+}
+
+function appleReconciliationTokenHash(reconciliation) {
+  return appleAppAccountTokenLineageHash(
+    reconciliation?.appAccountToken,
+    reconciliation?.originalTransactionId,
+    reconciliation?.environment,
+  );
+}
+
+function memoryAppleLineageBindings(environment, originalTransactionId) {
+  return [...memoryAppleLineageTokenBindings.values()].filter((binding) => (
+    binding.environment === environment
+    && binding.originalTransactionId === originalTransactionId
+  ));
+}
+
+function authorizeMemoryAppleLineage(userId, reconciliation, { allowDeletedRebind = false } = {}) {
+  const tokenHash = appleReconciliationTokenHash(reconciliation);
+  if (!tokenHash) return { status: 'conflict' };
+  const now = Date.now();
+  const bindings = memoryAppleLineageBindings(
+    reconciliation.environment,
+    reconciliation.originalTransactionId,
+  );
+  if (bindings.some((binding) => binding.boundUserId != null && binding.boundUserId !== userId)) {
+    return { status: 'conflict' };
+  }
+  const matching = bindings.find((binding) => binding.appAccountTokenHash === tokenHash);
+  const hasDeletedBinding = bindings.some((binding) => binding.boundUserId == null);
+  if (hasDeletedBinding) {
+    if (
+      !allowDeletedRebind
+      || !matching
+      || matching.boundUserId != null
+      || reconciliation.entitlement?.active !== true
+      || Number(reconciliation.entitlement?.entitlementExpiresDate) <= now
+    ) return { status: 'restore-required' };
+    for (const binding of bindings) {
+      if (binding.boundUserId != null && binding.boundUserId !== userId) return { status: 'conflict' };
+      binding.boundUserId = userId;
+      binding.deletedAt = null;
+      binding.reboundAt = now;
+      binding.updatedAt = now;
+    }
+    return { status: 'authorized', rebound: true };
+  }
+  if (bindings.length === 0 && reconciliation.appAccountToken !== userId) {
+    return { status: 'conflict' };
+  }
+  if (!matching) {
+    if (reconciliation.appAccountToken !== userId) return { status: 'conflict' };
+    memoryAppleLineageTokenBindings.set(
+      appleLineageTokenBindingKey(
+        reconciliation.environment,
+        reconciliation.originalTransactionId,
+        tokenHash,
+      ),
+      {
+        environment: reconciliation.environment,
+        originalTransactionId: reconciliation.originalTransactionId,
+        appAccountTokenHash: tokenHash,
+        boundUserId: userId,
+        deletedAt: null,
+        reboundAt: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    );
+  }
+  return { status: 'authorized', rebound: false };
+}
+
+function memoryAppleProjection(userId) {
+  const now = Date.now();
+  const subscriptions = [...memoryAppleSubscriptionsByOriginalTransactionId.values()]
+    .filter((subscription) => subscription.userId === userId)
+    .sort((left, right) => (
+      Number(right.active && right.entitlementExpiresDate > now)
+        - Number(left.active && left.entitlementExpiresDate > now)
+      || right.signedDate - left.signedDate
+      || right.bikeSeats - left.bikeSeats
+    ));
+  const entitlement = subscriptions.find((subscription) => (
+    subscription.active && subscription.entitlementExpiresDate > now
+  )) ?? null;
+  const user = memoryAuthUsersById.get(userId);
+  if (user?.appleBillingManaged === true) {
+    // Keep the legacy columns fail-closed so a rollback to a pre-IAP build
+    // cannot turn a previously active Apple subscription into perpetual access.
+    user.membershipTier = 'spectator';
+    user.bikeSeats = 1;
+    user.updatedAt = new Date().toISOString();
+  }
+  const projectedUser = cloneAuthUser(user);
+  if (projectedUser && user?.appleBillingManaged === true) {
+    projectedUser.membershipTier = entitlement ? 'racer' : 'spectator';
+    projectedUser.bikeSeats = entitlement ? entitlement.bikeSeats : 1;
+    projectedUser.appleEntitlementActive = Boolean(entitlement);
+  } else if (projectedUser) {
+    projectedUser.appleEntitlementActive = false;
+  }
+  return { entitlement, user: projectedUser, subscriptions };
+}
+
+function persistMemoryAppleReconciliation(
+  userId,
+  reconciliation,
+  { allowDeletedRebind = false } = {},
+) {
+  const user = memoryAuthUsersById.get(userId);
+  if (!user) return { status: 'user-not-found', user: null, subscription: null };
+  const existing = memoryAppleSubscriptionsByOriginalTransactionId.get(
+    reconciliation.originalTransactionId,
+  );
+  if (existing && (
+    existing.userId !== userId
+    || existing.environment !== reconciliation.environment
+  )) {
+    return { status: 'conflict', user: cloneAuthUser(user), subscription: { ...existing } };
+  }
+  const lineageAuthorization = authorizeMemoryAppleLineage(
+    userId,
+    reconciliation,
+    { allowDeletedRebind },
+  );
+  if (lineageAuthorization.status !== 'authorized') {
+    return { status: lineageAuthorization.status, user: cloneAuthUser(user), subscription: null };
+  }
+  for (const transaction of reconciliation.transactions) {
+    const storedTransaction = memoryAppleTransactionsById.get(transaction.transactionId);
+    if (storedTransaction && (
+      storedTransaction.originalTransactionId !== reconciliation.originalTransactionId
+      || storedTransaction.userId !== userId
+    )) {
+      return { status: 'conflict', user: cloneAuthUser(user), subscription: existing ? { ...existing } : null };
+    }
+  }
+  const entitlement = reconciliation.entitlement;
+  const subscription = {
+    originalTransactionId: reconciliation.originalTransactionId,
+    userId,
+    // This is the current TrackLab binding, never a deleted account's raw
+    // StoreKit token. The signed-token proof lives only as a one-way hash.
+    appAccountToken: userId,
+    productId: entitlement.productId,
+    environment: reconciliation.environment,
+    status: entitlement.status,
+    bikeSeats: entitlement.bikeSeats,
+    active: entitlement.active === true,
+    latestTransactionId: entitlement.transactionId,
+    purchaseDate: entitlement.purchaseDate,
+    expiresDate: entitlement.expiresDate,
+    entitlementExpiresDate: entitlement.entitlementExpiresDate,
+    signedDate: appleLifecycleSignedDate(entitlement),
+    revocationDate: entitlement.revocationDate,
+    reconciledAt: reconciliation.reconciledAt,
+  };
+  const incomingWins = appleLifecycleStateIncomingWins(existing, subscription);
+  if (incomingWins) {
+    subscription.reconciledAt = Math.max(
+      Number(existing?.reconciledAt) || 0,
+      Number(subscription.reconciledAt) || 0,
+    );
+    memoryAppleSubscriptionsByOriginalTransactionId.set(subscription.originalTransactionId, subscription);
+  } else if (existing) {
+    // This is only a polling timestamp. It must never participate in deciding
+    // which Apple lifecycle state is authoritative.
+    existing.reconciledAt = Math.max(
+      Number(existing.reconciledAt) || 0,
+      Number(reconciliation.reconciledAt) || 0,
+    );
+  }
+  for (const transaction of reconciliation.transactions) {
+    const storedTransaction = memoryAppleTransactionsById.get(transaction.transactionId);
+    const transactionRecord = {
+      ...transaction,
+      signedDate: appleLifecycleSignedDate(transaction),
+      userId,
+      appAccountToken: userId,
+      reconciledAt: reconciliation.reconciledAt,
+    };
+    if (appleLifecycleStateIncomingWins(storedTransaction, transactionRecord)) {
+      transactionRecord.reconciledAt = Math.max(
+        Number(storedTransaction?.reconciledAt) || 0,
+        Number(transactionRecord.reconciledAt) || 0,
+      );
+      memoryAppleTransactionsById.set(transaction.transactionId, transactionRecord);
+    } else {
+      storedTransaction.reconciledAt = Math.max(
+        Number(storedTransaction.reconciledAt) || 0,
+        Number(reconciliation.reconciledAt) || 0,
+      );
+    }
+  }
+  user.appleBillingManaged = true;
+  const projection = memoryAppleProjection(userId);
+  return {
+    status: 'saved',
+    user: projection.user,
+    subscription: {
+      ...(memoryAppleSubscriptionsByOriginalTransactionId.get(subscription.originalTransactionId) ?? subscription),
+    },
+    entitlement: projection.entitlement ? { ...projection.entitlement } : null,
+    rebound: lineageAuthorization.rebound === true,
+  };
+}
+
+async function authorizePostgresAppleLineage(
+  client,
+  userId,
+  reconciliation,
+  { allowDeletedRebind = false } = {},
+) {
+  const tokenHash = appleReconciliationTokenHash(reconciliation);
+  if (!tokenHash) return { status: 'conflict' };
+  const bindingsResult = await client.query(
+    `SELECT app_account_token_sha256, bound_user_id
+     FROM ${schema}.apple_iap_lineage_token_bindings
+     WHERE environment = $1 AND original_transaction_id = $2
+     FOR UPDATE`,
+    [reconciliation.environment, reconciliation.originalTransactionId],
+  );
+  const bindings = bindingsResult.rows;
+  if (bindings.some((binding) => (
+    binding.bound_user_id != null && binding.bound_user_id !== userId
+  ))) return { status: 'conflict' };
+  const matching = bindings.find((binding) => binding.app_account_token_sha256 === tokenHash);
+  const hasDeletedBinding = bindings.some((binding) => binding.bound_user_id == null);
+  if (hasDeletedBinding) {
+    if (
+      !allowDeletedRebind
+      || !matching
+      || matching.bound_user_id != null
+      || reconciliation.entitlement?.active !== true
+      || Number(reconciliation.entitlement?.entitlementExpiresDate) <= Date.now()
+    ) return { status: 'restore-required' };
+    await client.query(
+      `UPDATE ${schema}.apple_iap_lineage_token_bindings
+       SET bound_user_id = $3, deleted_at = NULL, rebound_at = now(), updated_at = now()
+       WHERE environment = $1 AND original_transaction_id = $2
+         AND bound_user_id IS NULL`,
+      [reconciliation.environment, reconciliation.originalTransactionId, userId],
+    );
+    return { status: 'authorized', rebound: true };
+  }
+  if (bindings.length === 0 && reconciliation.appAccountToken !== userId) {
+    return { status: 'conflict' };
+  }
+  if (!matching) {
+    if (reconciliation.appAccountToken !== userId) return { status: 'conflict' };
+    await client.query(
+      `INSERT INTO ${schema}.apple_iap_lineage_token_bindings (
+         environment, original_transaction_id, app_account_token_sha256, bound_user_id
+       ) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (environment, original_transaction_id, app_account_token_sha256)
+       DO NOTHING`,
+      [reconciliation.environment, reconciliation.originalTransactionId, tokenHash, userId],
+    );
+  }
+  return { status: 'authorized', rebound: false };
+}
+
+async function persistPostgresAppleReconciliation(
+  client,
+  userId,
+  reconciliation,
+  { allowDeletedRebind = false } = {},
+) {
+  const userResult = await client.query(
+    `SELECT * FROM ${schema}.auth_users WHERE id = $1 FOR UPDATE`,
+    [userId],
+  );
+  if (!userResult.rows[0]) return { status: 'user-not-found', user: null, subscription: null };
+  const existingResult = await client.query(
+    `SELECT * FROM ${schema}.apple_iap_subscriptions
+     WHERE original_transaction_id = $1 FOR UPDATE`,
+    [reconciliation.originalTransactionId],
+  );
+  const existing = existingResult.rows[0];
+  if (existing && (
+    existing.user_id !== userId
+    || existing.environment !== reconciliation.environment
+  )) {
+    return {
+      status: 'conflict',
+      user: authUserFromRow(userResult.rows[0]),
+      subscription: appleSubscriptionFromRow(existing),
+    };
+  }
+  const lineageAuthorization = await authorizePostgresAppleLineage(
+    client,
+    userId,
+    reconciliation,
+    { allowDeletedRebind },
+  );
+  if (lineageAuthorization.status !== 'authorized') {
+    return {
+      status: lineageAuthorization.status,
+      user: authUserFromRow(userResult.rows[0]),
+      subscription: null,
+    };
+  }
+  const transactionIds = reconciliation.transactions.map((transaction) => transaction.transactionId);
+  if (transactionIds.length > 0) {
+    const transactionResult = await client.query(
+      `SELECT transaction_id, original_transaction_id, user_id
+       FROM ${schema}.apple_iap_transactions
+       WHERE transaction_id = ANY($1::text[])
+       FOR UPDATE`,
+      [transactionIds],
+    );
+    if (transactionResult.rows.some((row) => (
+      row.original_transaction_id !== reconciliation.originalTransactionId || row.user_id !== userId
+    ))) {
+      return {
+        status: 'conflict',
+        user: authUserFromRow(userResult.rows[0]),
+        subscription: appleSubscriptionFromRow(existing),
+      };
+    }
+  }
+  const entitlement = reconciliation.entitlement;
+  const subscriptionResult = await client.query(
+    `INSERT INTO ${schema}.apple_iap_subscriptions (
+       original_transaction_id, user_id, app_account_token, product_id, environment,
+       status, bike_seats, active, latest_transaction_id, purchased_at, expires_at,
+       entitlement_expires_at, signed_at, revoked_at, reconciled_at
+     ) VALUES (
+       $1, $2, $3, $4, $5, $6, $7, $8, $9,
+       $10::timestamptz, $11::timestamptz, $12::timestamptz,
+       $13::timestamptz, $14::timestamptz, $15::timestamptz
+     )
+     ON CONFLICT (original_transaction_id) DO UPDATE SET
+       product_id = EXCLUDED.product_id,
+       status = EXCLUDED.status,
+       bike_seats = EXCLUDED.bike_seats,
+       active = EXCLUDED.active,
+       latest_transaction_id = EXCLUDED.latest_transaction_id,
+       purchased_at = EXCLUDED.purchased_at,
+       expires_at = EXCLUDED.expires_at,
+       entitlement_expires_at = EXCLUDED.entitlement_expires_at,
+       signed_at = EXCLUDED.signed_at,
+       revoked_at = EXCLUDED.revoked_at,
+       reconciled_at = GREATEST(
+         ${schema}.apple_iap_subscriptions.reconciled_at,
+         EXCLUDED.reconciled_at
+       ),
+       updated_at = now()
+     WHERE EXCLUDED.signed_at > ${schema}.apple_iap_subscriptions.signed_at
+       OR (
+         EXCLUDED.signed_at = ${schema}.apple_iap_subscriptions.signed_at
+         AND (
+           (${schema}.apple_iap_subscriptions.active = true AND EXCLUDED.active = false)
+           OR (
+             ${schema}.apple_iap_subscriptions.active = EXCLUDED.active
+             AND EXCLUDED.entitlement_expires_at
+               <= ${schema}.apple_iap_subscriptions.entitlement_expires_at
+             AND EXCLUDED.bike_seats <= ${schema}.apple_iap_subscriptions.bike_seats
+             AND (
+               EXCLUDED.entitlement_expires_at
+                 < ${schema}.apple_iap_subscriptions.entitlement_expires_at
+               OR EXCLUDED.bike_seats < ${schema}.apple_iap_subscriptions.bike_seats
+             )
+           )
+         )
+       )
      RETURNING *`,
     [
-      record.stateHash,
-      record.userId,
-      record.orderId,
-      record.paymentLinkId || null,
-      record.bikeSeats,
-      record.expectedAmountCents,
-      record.expiresAt,
+      reconciliation.originalTransactionId,
+      userId,
+      userId,
+      entitlement.productId,
+      reconciliation.environment,
+      entitlement.status,
+      entitlement.bikeSeats,
+      entitlement.active === true,
+      entitlement.transactionId,
+      appleDate(entitlement.purchaseDate),
+      appleDate(entitlement.expiresDate),
+      appleDate(entitlement.entitlementExpiresDate),
+      appleDate(appleLifecycleSignedDate(entitlement)),
+      appleDate(entitlement.revocationDate),
+      appleDate(reconciliation.reconciledAt),
     ],
   );
-  return billingCheckoutFromRow(result?.rows?.[0]);
-}
-
-function billingCheckoutFromRow(row) {
-  if (!row) {
-    return null;
+  let winningSubscription = subscriptionResult.rows[0] ?? null;
+  if (!winningSubscription) {
+    const winnerResult = await client.query(
+      `SELECT * FROM ${schema}.apple_iap_subscriptions
+       WHERE original_transaction_id = $1`,
+      [reconciliation.originalTransactionId],
+    );
+    winningSubscription = winnerResult.rows[0] ?? null;
   }
-
+  await client.query(
+    `UPDATE ${schema}.apple_iap_subscriptions
+     SET reconciled_at = GREATEST(reconciled_at, $2::timestamptz)
+     WHERE original_transaction_id = $1`,
+    [reconciliation.originalTransactionId, appleDate(reconciliation.reconciledAt)],
+  );
+  for (const transaction of reconciliation.transactions) {
+    await client.query(
+      `INSERT INTO ${schema}.apple_iap_transactions (
+         transaction_id, original_transaction_id, user_id, app_account_token,
+         product_id, environment, status, bike_seats, active, purchased_at,
+         expires_at, entitlement_expires_at, signed_at, revoked_at,
+         revocation_reason, is_upgraded, reconciled_at
+       ) VALUES (
+         $1, $2, $3, $4, $5, $6, $7, $8, $9,
+         $10::timestamptz, $11::timestamptz, $12::timestamptz,
+         $13::timestamptz, $14::timestamptz, $15, $16, $17::timestamptz
+       )
+       ON CONFLICT (transaction_id) DO UPDATE SET
+         status = EXCLUDED.status,
+         active = EXCLUDED.active,
+         entitlement_expires_at = EXCLUDED.entitlement_expires_at,
+         signed_at = EXCLUDED.signed_at,
+         revoked_at = EXCLUDED.revoked_at,
+         revocation_reason = EXCLUDED.revocation_reason,
+         is_upgraded = EXCLUDED.is_upgraded,
+         reconciled_at = GREATEST(
+           ${schema}.apple_iap_transactions.reconciled_at,
+           EXCLUDED.reconciled_at
+         ),
+         updated_at = now()
+       WHERE EXCLUDED.signed_at > ${schema}.apple_iap_transactions.signed_at
+         OR (
+           EXCLUDED.signed_at = ${schema}.apple_iap_transactions.signed_at
+           AND (
+             (${schema}.apple_iap_transactions.active = true AND EXCLUDED.active = false)
+             OR (
+               ${schema}.apple_iap_transactions.active = EXCLUDED.active
+               AND EXCLUDED.entitlement_expires_at
+                 <= ${schema}.apple_iap_transactions.entitlement_expires_at
+               AND EXCLUDED.bike_seats <= ${schema}.apple_iap_transactions.bike_seats
+               AND (
+                 EXCLUDED.entitlement_expires_at
+                   < ${schema}.apple_iap_transactions.entitlement_expires_at
+                 OR EXCLUDED.bike_seats < ${schema}.apple_iap_transactions.bike_seats
+               )
+             )
+           )
+         )`,
+      [
+        transaction.transactionId,
+        reconciliation.originalTransactionId,
+        userId,
+        userId,
+        transaction.productId,
+        reconciliation.environment,
+        transaction.status,
+        transaction.bikeSeats,
+        transaction.active === true,
+        appleDate(transaction.purchaseDate),
+        appleDate(transaction.expiresDate),
+        appleDate(transaction.entitlementExpiresDate),
+        appleDate(appleLifecycleSignedDate(transaction)),
+        appleDate(transaction.revocationDate),
+        transaction.revocationReason,
+        transaction.isUpgraded === true,
+        appleDate(reconciliation.reconciledAt),
+      ],
+    );
+    await client.query(
+      `UPDATE ${schema}.apple_iap_transactions
+       SET reconciled_at = GREATEST(reconciled_at, $2::timestamptz)
+       WHERE transaction_id = $1`,
+      [transaction.transactionId, appleDate(reconciliation.reconciledAt)],
+    );
+  }
+  const activeResult = await client.query(
+    `SELECT * FROM ${schema}.apple_iap_subscriptions
+     WHERE user_id = $1 AND active = true AND entitlement_expires_at > now()
+     ORDER BY signed_at DESC, bike_seats DESC, original_transaction_id
+     LIMIT 1`,
+    [userId],
+  );
+  const activeSubscription = activeResult.rows[0] ?? null;
+  const updatedUser = await client.query(
+    `UPDATE ${schema}.auth_users
+     SET apple_billing_managed = true,
+       -- These legacy columns remain deliberately fail-closed. Current builds
+       -- derive access from the verified, unexpired Apple subscription join;
+       -- pre-IAP rollback builds therefore cannot overgrant after expiry.
+       membership_tier = 'spectator',
+       bike_seats = 1,
+       updated_at = now()
+     WHERE id = $1
+     RETURNING *`,
+    [userId],
+  );
   return {
-    stateHash: row.state_hash,
-    userId: row.user_id,
-    orderId: row.order_id,
-    paymentLinkId: row.payment_link_id ?? '',
-    bikeSeats: Number(row.bike_seats) || 1,
-    expectedAmountCents: Number(row.expected_amount_cents) || 0,
-    expiresAt: row.expires_at,
-    claimedAt: row.claimed_at,
-    createdAt: row.created_at,
+    status: 'saved',
+    user: authUserFromRow({
+      ...updatedUser.rows[0],
+      effective_apple_original_transaction_id:
+        activeSubscription?.original_transaction_id ?? null,
+      effective_apple_bike_seats: activeSubscription?.bike_seats ?? null,
+    }),
+    subscription: appleSubscriptionFromRow(winningSubscription),
+    entitlement: appleSubscriptionFromRow(activeSubscription),
+    rebound: lineageAuthorization.rebound === true,
   };
 }
 
-export async function findBillingCheckout(stateHash, userId) {
+export async function saveAppleSubscriptionReconciliation(userId, reconciliation) {
   if (!pool) {
-    const record = memoryBillingCheckoutsByState.get(stateHash);
-    if (!record || record.userId !== userId) {
-      return null;
-    }
-    return { ...record };
+    return withMemoryPersistenceLock(
+      `apple-original:${reconciliation.originalTransactionId}`,
+      () => persistMemoryAppleReconciliation(userId, reconciliation),
+    );
   }
-
-  const result = await query(
-    `SELECT * FROM ${schema}.billing_checkouts
-     WHERE state_hash = $1 AND user_id = $2
-     LIMIT 1`,
-    [stateHash, userId],
-  );
-  return billingCheckoutFromRow(result?.rows?.[0]);
+  return withPersistenceLock(`apple-original:${reconciliation.originalTransactionId}`, (client) => (
+    persistPostgresAppleReconciliation(client, userId, reconciliation)
+  ));
 }
 
-export async function markBillingCheckoutClaimed(stateHash, userId) {
+/**
+ * Rebinds a deleted-account Apple lineage only after the caller has freshly
+ * verified a signed StoreKit transaction and current active Apple status. A
+ * normal background claim can never consume an unbound deletion tombstone.
+ */
+export async function restoreDeletedAppleSubscription(userId, reconciliation) {
   if (!pool) {
-    const record = memoryBillingCheckoutsByState.get(stateHash);
-    if (!record || record.userId !== userId) {
-      return null;
+    return withMemoryPersistenceLock(
+      `apple-original:${reconciliation.originalTransactionId}`,
+      () => persistMemoryAppleReconciliation(
+        userId,
+        reconciliation,
+        { allowDeletedRebind: true },
+      ),
+    );
+  }
+  return withPersistenceLock(`apple-original:${reconciliation.originalTransactionId}`, (client) => (
+    persistPostgresAppleReconciliation(
+      client,
+      userId,
+      reconciliation,
+      { allowDeletedRebind: true },
+    )
+  ));
+}
+
+export async function loadAppleBillingStatus(userId) {
+  if (!pool) {
+    const user = memoryAuthUsersById.get(userId);
+    if (!user) return null;
+    const projection = memoryAppleProjection(userId);
+    return {
+      managed: user.appleBillingManaged === true,
+      membershipTier: projection.user?.membershipTier ?? user.membershipTier,
+      bikeSeats: projection.user?.bikeSeats ?? user.bikeSeats,
+      appAccountToken: userId,
+      entitlement: projection.entitlement ? { ...projection.entitlement } : null,
+    };
+  }
+  const result = await query(
+    `SELECT users.*,
+       subscriptions.original_transaction_id AS apple_original_transaction_id,
+       subscriptions.product_id AS apple_product_id,
+       subscriptions.environment AS apple_environment,
+       subscriptions.status AS apple_status,
+       subscriptions.bike_seats AS apple_bike_seats,
+       subscriptions.active AS apple_active,
+       subscriptions.entitlement_expires_at AS apple_entitlement_expires_at
+     FROM ${schema}.auth_users AS users
+     LEFT JOIN LATERAL (
+       SELECT * FROM ${schema}.apple_iap_subscriptions
+       WHERE user_id = users.id AND active = true AND entitlement_expires_at > now()
+       ORDER BY signed_at DESC, bike_seats DESC, original_transaction_id
+       LIMIT 1
+     ) AS subscriptions ON true
+     WHERE users.id = $1
+     LIMIT 1`,
+    [userId],
+  );
+  const row = result?.rows?.[0];
+  if (!row) return null;
+  const managed = row.apple_billing_managed === true;
+  const hasActiveEntitlement = Boolean(row.apple_original_transaction_id);
+  return {
+    managed,
+    membershipTier: managed
+      ? (hasActiveEntitlement ? 'racer' : 'spectator')
+      : row.membership_tier,
+    bikeSeats: managed
+      ? (hasActiveEntitlement
+        ? Math.max(1, Math.min(maxBillingBikeSeats, Number(row.apple_bike_seats) || 1))
+        : 1)
+      : Number(row.bike_seats) || 1,
+    appAccountToken: userId,
+    entitlement: row.apple_original_transaction_id ? {
+      originalTransactionId: row.apple_original_transaction_id,
+      productId: row.apple_product_id,
+      environment: row.apple_environment,
+      status: row.apple_status,
+      bikeSeats: Number(row.apple_bike_seats) || 1,
+      active: row.apple_active === true,
+      entitlementExpiresDate: Date.parse(row.apple_entitlement_expires_at),
+    } : null,
+  };
+}
+
+export async function loadAppleSubscriptionLineages(userId, limit = 8) {
+  const safeLimit = Math.max(1, Math.min(8, Math.round(Number(limit) || 8)));
+  if (!pool) {
+    return [...memoryAppleSubscriptionsByOriginalTransactionId.values()]
+      .filter((subscription) => subscription.userId === userId)
+      .sort((left, right) => right.signedDate - left.signedDate)
+      .slice(0, safeLimit)
+      .map((subscription) => ({
+        originalTransactionId: subscription.originalTransactionId,
+        appAccountToken: subscription.appAccountToken,
+        appAccountTokenHashes: memoryAppleLineageBindings(
+          subscription.environment,
+          subscription.originalTransactionId,
+        ).filter((binding) => binding.boundUserId === userId)
+          .map((binding) => binding.appAccountTokenHash),
+        environment: subscription.environment,
+      }));
+  }
+  const result = await query(
+    `SELECT subscriptions.original_transaction_id, subscriptions.app_account_token,
+       subscriptions.environment,
+       ARRAY(
+         SELECT bindings.app_account_token_sha256
+         FROM ${schema}.apple_iap_lineage_token_bindings AS bindings
+         WHERE bindings.environment = subscriptions.environment
+           AND bindings.original_transaction_id = subscriptions.original_transaction_id
+           AND bindings.bound_user_id = subscriptions.user_id
+         ORDER BY bindings.app_account_token_sha256
+       ) AS app_account_token_hashes
+     FROM ${schema}.apple_iap_subscriptions AS subscriptions
+     WHERE subscriptions.user_id = $1
+     ORDER BY signed_at DESC, original_transaction_id
+     LIMIT $2`,
+    [userId, safeLimit],
+  );
+  if (!result) return null;
+  return result.rows.map((row) => ({
+    originalTransactionId: row.original_transaction_id,
+    appAccountToken: row.app_account_token,
+    appAccountTokenHashes: Array.isArray(row.app_account_token_hashes)
+      ? row.app_account_token_hashes
+      : [],
+    environment: row.environment,
+  }));
+}
+
+export async function loadAppleSubscriptionLineagesForReconciliation(limit = 100) {
+  const safeLimit = Math.max(1, Math.min(200, Math.round(Number(limit) || 100)));
+  if (!pool) {
+    return [...memoryAppleSubscriptionsByOriginalTransactionId.values()]
+      .sort((left, right) => (
+        (Number(left.reconciledAt) || 0) - (Number(right.reconciledAt) || 0)
+        || left.signedDate - right.signedDate
+        || left.originalTransactionId.localeCompare(right.originalTransactionId)
+      ))
+      .slice(0, safeLimit)
+      .map((subscription) => ({
+        userId: subscription.userId,
+        originalTransactionId: subscription.originalTransactionId,
+        appAccountToken: subscription.appAccountToken,
+        appAccountTokenHashes: memoryAppleLineageBindings(
+          subscription.environment,
+          subscription.originalTransactionId,
+        ).filter((binding) => binding.boundUserId === subscription.userId)
+          .map((binding) => binding.appAccountTokenHash),
+        environment: subscription.environment,
+      }));
+  }
+  const result = await query(
+    `SELECT subscriptions.user_id, subscriptions.original_transaction_id,
+       subscriptions.app_account_token, subscriptions.environment,
+       ARRAY(
+         SELECT bindings.app_account_token_sha256
+         FROM ${schema}.apple_iap_lineage_token_bindings AS bindings
+         WHERE bindings.environment = subscriptions.environment
+           AND bindings.original_transaction_id = subscriptions.original_transaction_id
+           AND bindings.bound_user_id = subscriptions.user_id
+         ORDER BY bindings.app_account_token_sha256
+       ) AS app_account_token_hashes
+     FROM ${schema}.apple_iap_subscriptions AS subscriptions
+     ORDER BY reconciled_at, original_transaction_id
+     LIMIT $1`,
+    [safeLimit],
+  );
+  if (!result) return null;
+  return result.rows.map((row) => ({
+    userId: row.user_id,
+    originalTransactionId: row.original_transaction_id,
+    appAccountToken: row.app_account_token,
+    appAccountTokenHashes: Array.isArray(row.app_account_token_hashes)
+      ? row.app_account_token_hashes
+      : [],
+    environment: row.environment,
+  }));
+}
+
+export async function touchAppleSubscriptionReconciliationAttempt(
+  originalTransactionId,
+  attemptedAt = Date.now(),
+) {
+  const originalId = String(originalTransactionId || '').trim();
+  const timestamp = Math.max(0, Math.round(Number(attemptedAt) || Date.now()));
+  if (!/^[1-9][0-9]{1,30}$/u.test(originalId)) return false;
+  if (!pool) {
+    const subscription = memoryAppleSubscriptionsByOriginalTransactionId.get(originalId);
+    if (!subscription) return false;
+    subscription.reconciledAt = Math.max(Number(subscription.reconciledAt) || 0, timestamp);
+    return true;
+  }
+  const result = await query(
+    `UPDATE ${schema}.apple_iap_subscriptions
+     SET reconciled_at = GREATEST(reconciled_at, $2::timestamptz)
+     WHERE original_transaction_id = $1
+     RETURNING original_transaction_id`,
+    [originalId, new Date(timestamp).toISOString()],
+  );
+  return Boolean(result?.rows?.[0]);
+}
+
+const wattbikeConnectionLeaseKinds = new Set([
+  'owner-websocket',
+  'club-tablet',
+  'club-personal',
+]);
+const maxWattbikeConnectionLeaseSeats = 4;
+
+function wattbikeConnectionLeaseKey(billingOwnerUserId, allocationKey) {
+  return `${billingOwnerUserId}\u0000${allocationKey}`;
+}
+
+function wattbikeConnectionLeaseFromRow(row) {
+  if (!row) return null;
+  return {
+    billingOwnerUserId: row.billing_owner_user_id,
+    allocationKey: row.allocation_key,
+    allocationKind: row.allocation_kind,
+    holderInstanceId: row.holder_instance_id,
+    holderId: row.holder_id,
+    clubId: row.club_id ?? null,
+    studioRiderId: row.studio_rider_id ?? null,
+    bikeDeviceId: row.bike_device_id ?? null,
+    seatCount: Math.max(1, Math.min(
+      maxWattbikeConnectionLeaseSeats,
+      Math.round(Number(row.seat_count) || 1),
+    )),
+    expiresAt: Date.parse(row.expires_at),
+    createdAt: Date.parse(row.created_at),
+    updatedAt: Date.parse(row.updated_at),
+  };
+}
+
+function validateWattbikeConnectionLeaseInput(value, { allowZeroSeats = false } = {}) {
+  const billingOwnerUserId = String(value?.billingOwnerUserId || '').trim();
+  const allocationKey = String(value?.allocationKey || '').trim();
+  const allocationKind = String(value?.allocationKind || '').trim();
+  const holderInstanceId = String(value?.holderInstanceId || '').trim();
+  const holderId = String(value?.holderId || '').trim();
+  const clubId = String(value?.clubId || '').trim();
+  const studioRiderId = String(value?.studioRiderId || '').trim();
+  const bikeDeviceId = String(value?.bikeDeviceId || '').trim();
+  const expectedPreviousHolderId = String(value?.expectedPreviousHolderId || '').trim();
+  const protectExistingHolder = value?.protectExistingHolder === true;
+  const requireExistingHolder = value?.requireExistingHolder === true;
+  const now = Math.max(0, Math.round(Number(value?.now) || Date.now()));
+  const expiresAt = Math.round(Number(value?.expiresAt));
+  const requestedSeats = Math.round(Number(value?.requestedSeats));
+  const seatLimit = Math.max(0, Math.min(
+    maxBillingBikeSeats,
+    Math.round(Number(value?.seatLimit) || 0),
+  ));
+  const hasAnyClubAssignment = Boolean(clubId || studioRiderId || bikeDeviceId);
+  const hasTabletAssignment = Boolean(clubId && studioRiderId && bikeDeviceId);
+  const hasPersonalClubAssignment = Boolean(clubId && studioRiderId && !bikeDeviceId);
+  if (
+    billingOwnerUserId.length < 8 || billingOwnerUserId.length > 160
+    || allocationKey.length < 8 || allocationKey.length > 220
+    || !wattbikeConnectionLeaseKinds.has(allocationKind)
+    || holderInstanceId.length < 8 || holderInstanceId.length > 120
+    || holderId.length < 8 || holderId.length > 220
+    || (expectedPreviousHolderId
+      && (expectedPreviousHolderId.length < 8 || expectedPreviousHolderId.length > 220))
+    || (requireExistingHolder && !protectExistingHolder)
+    || (
+      allocationKind === 'owner-websocket'
+        ? hasAnyClubAssignment
+        : allocationKind === 'club-tablet'
+          ? (hasAnyClubAssignment && !hasTabletAssignment)
+          : !hasPersonalClubAssignment
+    )
+    || (clubId && (clubId.length < 8 || clubId.length > 160))
+    || studioRiderId.length > 160
+    || bikeDeviceId.length > 160
+    || !Number.isFinite(expiresAt) || expiresAt <= now
+    || !Number.isFinite(requestedSeats)
+    || requestedSeats < (allowZeroSeats ? 0 : 1)
+    || requestedSeats > maxWattbikeConnectionLeaseSeats
+  ) {
+    return null;
+  }
+  return {
+    billingOwnerUserId,
+    allocationKey,
+    allocationKind,
+    holderInstanceId,
+    holderId,
+    clubId: clubId || null,
+    studioRiderId: studioRiderId || null,
+    bikeDeviceId: bikeDeviceId || null,
+    expectedPreviousHolderId,
+    protectExistingHolder,
+    requireExistingHolder,
+    requestedSeats,
+    seatLimit,
+    now,
+    expiresAt,
+  };
+}
+
+function wattbikeLeaseOrder(left, right) {
+  return left.createdAt - right.createdAt
+    || left.allocationKind.localeCompare(right.allocationKind)
+    || left.allocationKey.localeCompare(right.allocationKey);
+}
+
+function planWattbikeCapacityEnforcement(records, seatLimit, now) {
+  let seatsInUse = 0;
+  const active = [];
+  const revoked = [];
+  [...records]
+    .filter((record) => {
+      if (record.expiresAt > now) return true;
+      revoked.push({ ...record, grantedSeats: 0, reason: 'expired' });
+      return false;
+    })
+    .sort(wattbikeLeaseOrder)
+    .forEach((record) => {
+      const grantedSeats = Math.max(0, Math.min(record.seatCount, seatLimit - seatsInUse));
+      if (grantedSeats <= 0) {
+        revoked.push({ ...record, grantedSeats: 0, reason: 'capacity-reduced' });
+        return;
+      }
+      const kept = grantedSeats === record.seatCount
+        ? { ...record }
+        : { ...record, seatCount: grantedSeats, updatedAt: now };
+      active.push(kept);
+      seatsInUse += grantedSeats;
+      if (grantedSeats !== record.seatCount) {
+        revoked.push({
+          ...record,
+          grantedSeats,
+          reason: 'capacity-reduced',
+        });
+      }
+    });
+  return { active, revoked, seatsInUse };
+}
+
+function publicWattbikeCapacityResult(plan, seatLimit, extra = {}) {
+  return {
+    seatLimit,
+    seatsInUse: plan.active.reduce((total, lease) => total + lease.seatCount, 0),
+    leases: plan.active.map((lease) => ({ ...lease })),
+    revoked: plan.revoked.map((lease) => ({ ...lease })),
+    ...extra,
+  };
+}
+
+function memoryWattbikeLeasesForOwner(billingOwnerUserId) {
+  return [...memoryWattbikeConnectionLeases.values()]
+    .filter((lease) => lease.billingOwnerUserId === billingOwnerUserId)
+    .map((lease) => ({ ...lease }));
+}
+
+function applyMemoryWattbikeCapacityPlan(billingOwnerUserId, plan) {
+  const activeByKey = new Map(plan.active.map((lease) => [lease.allocationKey, lease]));
+  for (const lease of memoryWattbikeLeasesForOwner(billingOwnerUserId)) {
+    const active = activeByKey.get(lease.allocationKey);
+    const key = wattbikeConnectionLeaseKey(billingOwnerUserId, lease.allocationKey);
+    if (active) memoryWattbikeConnectionLeases.set(key, { ...active });
+    else memoryWattbikeConnectionLeases.delete(key);
+  }
+}
+
+async function loadPostgresWattbikeLeasesForUpdate(client, billingOwnerUserId, now) {
+  await client.query(
+    `DELETE FROM ${schema}.wattbike_connection_leases
+     WHERE billing_owner_user_id = $1 AND expires_at <= $2::timestamptz`,
+    [billingOwnerUserId, new Date(now)],
+  );
+  const result = await client.query(
+    `SELECT * FROM ${schema}.wattbike_connection_leases
+     WHERE billing_owner_user_id = $1 AND expires_at > $2::timestamptz
+     ORDER BY created_at, allocation_kind, allocation_key
+     FOR UPDATE`,
+    [billingOwnerUserId, new Date(now)],
+  );
+  return result.rows.map(wattbikeConnectionLeaseFromRow).filter(Boolean);
+}
+
+async function applyPostgresWattbikeCapacityPlan(client, billingOwnerUserId, previous, plan) {
+  const activeByKey = new Map(plan.active.map((lease) => [lease.allocationKey, lease]));
+  for (const lease of previous) {
+    const active = activeByKey.get(lease.allocationKey);
+    if (!active) {
+      await client.query(
+        `DELETE FROM ${schema}.wattbike_connection_leases
+         WHERE billing_owner_user_id = $1 AND allocation_key = $2`,
+        [billingOwnerUserId, lease.allocationKey],
+      );
+    } else if (active.seatCount !== lease.seatCount) {
+      await client.query(
+        `UPDATE ${schema}.wattbike_connection_leases
+         SET seat_count = $3, updated_at = $4::timestamptz
+         WHERE billing_owner_user_id = $1 AND allocation_key = $2`,
+        [billingOwnerUserId, lease.allocationKey, active.seatCount, new Date(active.updatedAt)],
+      );
     }
-    record.claimedAt = new Date().toISOString();
-    return { ...record };
+  }
+}
+
+/**
+ * Atomically grants at most the remaining account-wide Wattbike capacity.
+ * `allocationKey` is stable across a reconnect (auth session or tablet device),
+ * while `holderId` identifies the one current socket/athlete session allowed to
+ * use that allocation. A stale holder therefore cannot release its replacement.
+ */
+export async function claimWattbikeConnectionLease(value) {
+  const input = validateWattbikeConnectionLeaseInput(value, { allowZeroSeats: true });
+  if (!input) return null;
+  const operation = async (load, apply, upsert, remove) => {
+    const previous = await load();
+    const enforced = planWattbikeCapacityEnforcement(previous, input.seatLimit, input.now);
+    await apply(previous, enforced);
+    const existing = enforced.active.find((lease) => lease.allocationKey === input.allocationKey) ?? null;
+    const existingHolderCanBeReplaced = !existing
+      || existing.holderId === input.holderId
+      || (input.expectedPreviousHolderId
+        && existing.holderId === input.expectedPreviousHolderId);
+    if (
+      input.protectExistingHolder
+      && (
+        (input.requireExistingHolder && !existing)
+        || !existingHolderCanBeReplaced
+      )
+    ) {
+      // The durable lease row is the cross-instance picker/session handoff.
+      // Never let a late picker poll, concurrent start, or stale process steal
+      // the stable tablet allocation from the holder that won the advisory-
+      // locked transaction first.
+      return publicWattbikeCapacityResult(enforced, input.seatLimit, {
+        status: 'holder-conflict',
+        grantedSeats: 0,
+        lease: null,
+      });
+    }
+    if (input.clubId) {
+      const conflictingAssignment = enforced.active.find((lease) => (
+        lease.allocationKey !== input.allocationKey
+        && lease.clubId === input.clubId
+        && (
+          lease.studioRiderId === input.studioRiderId
+          || (input.bikeDeviceId && lease.bikeDeviceId === input.bikeDeviceId)
+        )
+      ));
+      if (conflictingAssignment) {
+        return publicWattbikeCapacityResult(enforced, input.seatLimit, {
+          status: 'assignment-conflict',
+          conflictReason: conflictingAssignment.studioRiderId === input.studioRiderId
+            ? 'athlete-active'
+            : 'bike-active',
+          grantedSeats: 0,
+          lease: null,
+        });
+      }
+    }
+    const seatsUsedByOthers = enforced.active.reduce(
+      (total, lease) => total + (lease.allocationKey === input.allocationKey ? 0 : lease.seatCount),
+      0,
+    );
+    const grantedSeats = Math.max(0, Math.min(
+      input.requestedSeats,
+      input.seatLimit - seatsUsedByOthers,
+    ));
+    const revoked = [...enforced.revoked];
+    if (existing && (
+      existing.holderInstanceId !== input.holderInstanceId
+      || existing.holderId !== input.holderId
+    )) {
+      revoked.push({ ...existing, grantedSeats: 0, reason: 'replaced' });
+    }
+    if (grantedSeats <= 0) {
+      if (existing) {
+        await remove();
+        if (!revoked.some((lease) => (
+          lease.allocationKey === existing.allocationKey
+          && lease.holderInstanceId === existing.holderInstanceId
+          && lease.holderId === existing.holderId
+        ))) {
+          revoked.push({ ...existing, grantedSeats: 0, reason: 'capacity-full' });
+        }
+      }
+      const leases = enforced.active.filter((lease) => lease.allocationKey !== input.allocationKey);
+      return publicWattbikeCapacityResult(
+        { active: leases, revoked },
+        input.seatLimit,
+        { status: 'denied', grantedSeats: 0, lease: null },
+      );
+    }
+    const lease = {
+      billingOwnerUserId: input.billingOwnerUserId,
+      allocationKey: input.allocationKey,
+      allocationKind: input.allocationKind,
+      holderInstanceId: input.holderInstanceId,
+      holderId: input.holderId,
+      clubId: input.clubId,
+      studioRiderId: input.studioRiderId,
+      bikeDeviceId: input.bikeDeviceId,
+      seatCount: grantedSeats,
+      expiresAt: input.expiresAt,
+      createdAt: existing?.createdAt ?? input.now,
+      updatedAt: input.now,
+    };
+    await upsert(lease);
+    const leases = enforced.active
+      .filter((candidate) => candidate.allocationKey !== input.allocationKey)
+      .concat(lease)
+      .sort(wattbikeLeaseOrder);
+    return publicWattbikeCapacityResult(
+      { active: leases, revoked },
+      input.seatLimit,
+      { status: 'granted', grantedSeats, lease: { ...lease } },
+    );
+  };
+
+  if (!pool) {
+    return withMemoryPersistenceLock(`wattbike-capacity:${input.billingOwnerUserId}`, () => operation(
+      async () => memoryWattbikeLeasesForOwner(input.billingOwnerUserId),
+      async (_previous, plan) => applyMemoryWattbikeCapacityPlan(input.billingOwnerUserId, plan),
+      async (lease) => memoryWattbikeConnectionLeases.set(
+        wattbikeConnectionLeaseKey(input.billingOwnerUserId, input.allocationKey),
+        { ...lease },
+      ),
+      async () => memoryWattbikeConnectionLeases.delete(
+        wattbikeConnectionLeaseKey(input.billingOwnerUserId, input.allocationKey),
+      ),
+    ));
   }
 
+  return withPersistenceLock(`wattbike-capacity:${input.billingOwnerUserId}`, (client) => operation(
+    () => loadPostgresWattbikeLeasesForUpdate(client, input.billingOwnerUserId, input.now),
+    (previous, plan) => applyPostgresWattbikeCapacityPlan(
+      client,
+      input.billingOwnerUserId,
+      previous,
+      plan,
+    ),
+    async (lease) => {
+      await client.query(
+        `INSERT INTO ${schema}.wattbike_connection_leases (
+           billing_owner_user_id, allocation_key, allocation_kind,
+           holder_instance_id, holder_id, club_id, studio_rider_id,
+           bike_device_id, seat_count, expires_at, created_at, updated_at
+         ) VALUES (
+           $1, $2, $3, $4, $5, $6, $7, $8, $9,
+           $10::timestamptz, $11::timestamptz, $12::timestamptz
+         )
+         ON CONFLICT (billing_owner_user_id, allocation_key) DO UPDATE SET
+           allocation_kind = EXCLUDED.allocation_kind,
+           holder_instance_id = EXCLUDED.holder_instance_id,
+           holder_id = EXCLUDED.holder_id,
+           club_id = EXCLUDED.club_id,
+           studio_rider_id = EXCLUDED.studio_rider_id,
+           bike_device_id = EXCLUDED.bike_device_id,
+           seat_count = EXCLUDED.seat_count,
+           expires_at = EXCLUDED.expires_at,
+           updated_at = EXCLUDED.updated_at`,
+        [
+          lease.billingOwnerUserId,
+          lease.allocationKey,
+          lease.allocationKind,
+          lease.holderInstanceId,
+          lease.holderId,
+          lease.clubId,
+          lease.studioRiderId,
+          lease.bikeDeviceId,
+          lease.seatCount,
+          new Date(lease.expiresAt),
+          new Date(lease.createdAt),
+          new Date(lease.updatedAt),
+        ],
+      );
+    },
+    async () => {
+      await client.query(
+        `DELETE FROM ${schema}.wattbike_connection_leases
+         WHERE billing_owner_user_id = $1 AND allocation_key = $2`,
+        [input.billingOwnerUserId, input.allocationKey],
+      );
+    },
+  ));
+}
+
+export async function enforceWattbikeConnectionCapacity(
+  billingOwnerUserId,
+  seatLimit,
+  now = Date.now(),
+) {
+  const normalizedOwnerId = String(billingOwnerUserId || '').trim();
+  const normalizedNow = Math.max(0, Math.round(Number(now) || Date.now()));
+  const normalizedLimit = Math.max(0, Math.min(
+    maxBillingBikeSeats,
+    Math.round(Number(seatLimit) || 0),
+  ));
+  if (normalizedOwnerId.length < 8 || normalizedOwnerId.length > 160) return null;
+  const operation = async (load, apply) => {
+    const previous = await load();
+    const plan = planWattbikeCapacityEnforcement(previous, normalizedLimit, normalizedNow);
+    await apply(previous, plan);
+    return publicWattbikeCapacityResult(plan, normalizedLimit, { status: 'enforced' });
+  };
+  if (!pool) {
+    return withMemoryPersistenceLock(`wattbike-capacity:${normalizedOwnerId}`, () => operation(
+      async () => memoryWattbikeLeasesForOwner(normalizedOwnerId),
+      async (_previous, plan) => applyMemoryWattbikeCapacityPlan(normalizedOwnerId, plan),
+    ));
+  }
+  return withPersistenceLock(`wattbike-capacity:${normalizedOwnerId}`, (client) => operation(
+    () => loadPostgresWattbikeLeasesForUpdate(client, normalizedOwnerId, normalizedNow),
+    (previous, plan) => applyPostgresWattbikeCapacityPlan(client, normalizedOwnerId, previous, plan),
+  ));
+}
+
+export async function releaseWattbikeConnectionLease({
+  billingOwnerUserId,
+  allocationKey,
+  holderInstanceId,
+  holderId,
+}) {
+  const ownerId = String(billingOwnerUserId || '').trim();
+  const key = String(allocationKey || '').trim();
+  const instanceId = String(holderInstanceId || '').trim();
+  const currentHolderId = String(holderId || '').trim();
+  if (
+    ownerId.length < 8 || ownerId.length > 160
+    || key.length < 8 || key.length > 220
+    || instanceId.length < 8 || instanceId.length > 120
+    || currentHolderId.length < 8 || currentHolderId.length > 220
+  ) return false;
+  if (!pool) {
+    return withMemoryPersistenceLock(`wattbike-capacity:${ownerId}`, async () => {
+      const memoryKey = wattbikeConnectionLeaseKey(ownerId, key);
+      const lease = memoryWattbikeConnectionLeases.get(memoryKey);
+      if (
+        !lease
+        || lease.holderInstanceId !== instanceId
+        || lease.holderId !== currentHolderId
+      ) return false;
+      memoryWattbikeConnectionLeases.delete(memoryKey);
+      return true;
+    });
+  }
   const result = await query(
-    `UPDATE ${schema}.billing_checkouts
-     SET claimed_at = COALESCE(claimed_at, now())
-     WHERE state_hash = $1 AND user_id = $2
-     RETURNING *`,
-    [stateHash, userId],
+    `DELETE FROM ${schema}.wattbike_connection_leases
+     WHERE billing_owner_user_id = $1
+       AND allocation_key = $2
+       AND holder_instance_id = $3
+       AND holder_id = $4
+     RETURNING allocation_key`,
+    [ownerId, key, instanceId, currentHolderId],
   );
-  return billingCheckoutFromRow(result?.rows?.[0]);
+  return Boolean(result?.rows?.[0]);
+}
+
+/**
+ * Releases a durable allocation owned by the same authenticated holder even
+ * when a rolling deployment routed the cleanup request to another instance.
+ * A replaced login/session has a different holder id and cannot clear the
+ * winner.
+ */
+export async function releaseWattbikeConnectionLeaseForHolder({
+  billingOwnerUserId,
+  allocationKey,
+  holderId,
+}) {
+  const ownerId = String(billingOwnerUserId || '').trim();
+  const key = String(allocationKey || '').trim();
+  const currentHolderId = String(holderId || '').trim();
+  if (
+    ownerId.length < 8 || ownerId.length > 160
+    || key.length < 8 || key.length > 220
+    || currentHolderId.length < 8 || currentHolderId.length > 220
+  ) return false;
+  if (!pool) {
+    return withMemoryPersistenceLock(`wattbike-capacity:${ownerId}`, async () => {
+      const memoryKey = wattbikeConnectionLeaseKey(ownerId, key);
+      const lease = memoryWattbikeConnectionLeases.get(memoryKey);
+      if (!lease || lease.holderId !== currentHolderId) return false;
+      memoryWattbikeConnectionLeases.delete(memoryKey);
+      return true;
+    });
+  }
+  const result = await query(
+    `DELETE FROM ${schema}.wattbike_connection_leases
+     WHERE billing_owner_user_id = $1
+       AND allocation_key = $2
+       AND holder_id = $3
+     RETURNING allocation_key`,
+    [ownerId, key, currentHolderId],
+  );
+  return Boolean(result?.rows?.[0]);
+}
+
+export async function loadWattbikeConnectionLeases(billingOwnerUserId, now = Date.now()) {
+  const ownerId = String(billingOwnerUserId || '').trim();
+  const normalizedNow = Math.max(0, Math.round(Number(now) || Date.now()));
+  if (ownerId.length < 8 || ownerId.length > 160) return null;
+  if (!pool) {
+    return withMemoryPersistenceLock(`wattbike-capacity:${ownerId}`, async () => {
+      const records = memoryWattbikeLeasesForOwner(ownerId);
+      const plan = planWattbikeCapacityEnforcement(records, maxBillingBikeSeats, normalizedNow);
+      applyMemoryWattbikeCapacityPlan(ownerId, plan);
+      return plan.active.map((lease) => ({ ...lease }));
+    });
+  }
+  const result = await query(
+    `SELECT * FROM ${schema}.wattbike_connection_leases
+     WHERE billing_owner_user_id = $1 AND expires_at > $2::timestamptz
+     ORDER BY created_at, allocation_kind, allocation_key`,
+    [ownerId, new Date(normalizedNow)],
+  );
+  return result ? result.rows.map(wattbikeConnectionLeaseFromRow).filter(Boolean) : null;
+}
+
+export async function appleServerNotificationExists(notificationUUID) {
+  if (!pool) return memoryAppleNotificationsByUuid.has(notificationUUID);
+  const result = await query(
+    `SELECT 1 FROM ${schema}.apple_iap_notifications WHERE notification_uuid = $1 LIMIT 1`,
+    [notificationUUID],
+  );
+  return Boolean(result?.rows?.[0]);
+}
+
+function memoryAppleBillingUserForReconciliation(reconciliation) {
+  const tokenHash = appleReconciliationTokenHash(reconciliation);
+  if (!tokenHash) return null;
+  const binding = memoryAppleLineageTokenBindings.get(appleLineageTokenBindingKey(
+    reconciliation.environment,
+    reconciliation.originalTransactionId,
+    tokenHash,
+  ));
+  if (binding?.boundUserId && memoryAuthUsersById.has(binding.boundUserId)) {
+    return binding.boundUserId;
+  }
+  return memoryAuthUsersById.has(reconciliation.appAccountToken)
+    ? reconciliation.appAccountToken
+    : null;
+}
+
+async function postgresAppleBillingUserForReconciliation(client, reconciliation) {
+  const tokenHash = appleReconciliationTokenHash(reconciliation);
+  if (!tokenHash) return null;
+  const binding = await client.query(
+    `SELECT bound_user_id
+     FROM ${schema}.apple_iap_lineage_token_bindings
+     WHERE environment = $1 AND original_transaction_id = $2
+       AND app_account_token_sha256 = $3
+       AND bound_user_id IS NOT NULL
+     LIMIT 1`,
+    [reconciliation.environment, reconciliation.originalTransactionId, tokenHash],
+  );
+  if (binding.rows[0]?.bound_user_id) return binding.rows[0].bound_user_id;
+  const direct = await client.query(
+    `SELECT id FROM ${schema}.auth_users WHERE id = $1 LIMIT 1`,
+    [reconciliation.appAccountToken],
+  );
+  return direct.rows[0]?.id ?? null;
+}
+
+export async function saveAppleServerNotification(notification, reconciliation = null) {
+  if (!pool) {
+    return withMemoryPersistenceLock(`apple-notification:${notification.notificationUUID}`, async () => {
+      const existing = memoryAppleNotificationsByUuid.get(notification.notificationUUID);
+      if (existing) {
+        return { duplicate: true, processingState: existing.processingState, user: null };
+      }
+      let reconciliationResult = null;
+      let billingUserId = null;
+      if (reconciliation) {
+        billingUserId = memoryAppleBillingUserForReconciliation(reconciliation);
+      }
+      if (reconciliation && billingUserId) {
+        reconciliationResult = await withMemoryPersistenceLock(
+          `apple-original:${reconciliation.originalTransactionId}`,
+          () => persistMemoryAppleReconciliation(billingUserId, reconciliation),
+        );
+      }
+      const processed = reconciliationResult?.status === 'saved';
+      memoryAppleNotificationsByUuid.set(notification.notificationUUID, {
+        ...notification,
+        originalTransactionId: processed ? reconciliation.originalTransactionId : null,
+        userId: processed ? billingUserId : null,
+        processingState: processed ? 'processed' : 'ignored',
+      });
+      return {
+        duplicate: false,
+        processingState: processed ? 'processed' : 'ignored',
+        user: reconciliationResult?.user ?? null,
+      };
+    });
+  }
+  return withPersistenceLock(`apple-notification:${notification.notificationUUID}`, async (client) => {
+    const duplicate = await client.query(
+      `SELECT processing_state FROM ${schema}.apple_iap_notifications
+       WHERE notification_uuid = $1`,
+      [notification.notificationUUID],
+    );
+    if (duplicate.rows[0]) {
+      return { duplicate: true, processingState: duplicate.rows[0].processing_state, user: null };
+    }
+    let reconciliationResult = null;
+    let billingUserId = null;
+    if (reconciliation) {
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `apple-original:${reconciliation.originalTransactionId}`,
+      ]);
+      billingUserId = await postgresAppleBillingUserForReconciliation(client, reconciliation);
+    }
+    if (reconciliation && billingUserId) {
+      reconciliationResult = await persistPostgresAppleReconciliation(
+        client,
+        billingUserId,
+        reconciliation,
+      );
+    }
+    const processed = reconciliationResult?.status === 'saved';
+    await client.query(
+      `INSERT INTO ${schema}.apple_iap_notifications (
+         notification_uuid, notification_type, subtype, environment,
+         original_transaction_id, user_id, signed_at, signed_payload_sha256,
+         processing_state, received_at
+       ) VALUES (
+         $1, $2, $3, $4, $5, $6, $7::timestamptz, $8, $9, $10::timestamptz
+       )`,
+      [
+        notification.notificationUUID,
+        notification.notificationType,
+        notification.subtype,
+        notification.environment,
+        processed ? reconciliation.originalTransactionId : null,
+        processed ? billingUserId : null,
+        appleDate(notification.signedDate),
+        notification.signedPayloadHash,
+        processed ? 'processed' : 'ignored',
+        appleDate(notification.receivedAt),
+      ],
+    );
+    return {
+      duplicate: false,
+      processingState: processed ? 'processed' : 'ignored',
+      user: reconciliationResult?.user ?? null,
+    };
+  });
 }
 
 export async function saveRoom(room, host) {
@@ -13910,6 +15981,160 @@ export async function listBlockedAccountProfiles(userId, { offset = 0, limit = 2
   }));
 }
 
+function memoryModerationProfile(user) {
+  if (!user) return null;
+  return {
+    profileId: user.id,
+    displayName: user.displayName,
+    username: user.username || normalizedUsername(user.displayName, user.id),
+  };
+}
+
+function memoryFriendReportForModeration(report) {
+  if (!report) return null;
+  const reporter = memoryModerationProfile(memoryAuthUsersById.get(report.reporterUserId));
+  const reported = memoryModerationProfile(memoryAuthUsersById.get(report.reportedUserId));
+  if (!reporter || !reported) return null;
+  return {
+    reportId: report.id,
+    reporter,
+    reported,
+    reason: report.reason,
+    details: report.details,
+    status: report.status,
+    action: report.moderationAction ?? 'none',
+    note: report.moderationNote ?? '',
+    createdAt: report.createdAt,
+    reviewedAt: report.reviewedAt ?? null,
+    reviewedByUserId: report.reviewedByUserId ?? null,
+  };
+}
+
+function friendReportForModerationFromRow(row) {
+  if (!row) return null;
+  return {
+    reportId: row.report_id,
+    reporter: {
+      profileId: row.reporter_profile_id,
+      displayName: row.reporter_display_name,
+      username: row.reporter_username,
+    },
+    reported: {
+      profileId: row.reported_profile_id,
+      displayName: row.reported_display_name,
+      username: row.reported_username,
+    },
+    reason: row.reason,
+    details: row.details,
+    status: row.status,
+    action: row.moderation_action ?? 'none',
+    note: row.moderation_note ?? '',
+    createdAt: new Date(row.created_at).toISOString(),
+    reviewedAt: row.reviewed_at ? new Date(row.reviewed_at).toISOString() : null,
+    reviewedByUserId: row.reviewed_by_user_id ?? null,
+  };
+}
+
+export async function listFriendReportsForModeration({ status = 'open', offset = 0, limit = 25 } = {}) {
+  if (!pool) {
+    const matching = [...memoryFriendReports.values()]
+      .filter((report) => status === 'all' || report.status === status)
+      .sort((left, right) => (
+        Date.parse(left.createdAt) - Date.parse(right.createdAt)
+        || String(left.id).localeCompare(String(right.id))
+      ));
+    return {
+      items: matching
+        .slice(offset, offset + limit)
+        .map(memoryFriendReportForModeration)
+        .filter(Boolean),
+      total: matching.length,
+    };
+  }
+  const result = await query(
+    `SELECT
+       report.id AS report_id,
+       report.reason,
+       report.details,
+       report.status,
+       report.moderation_action,
+       report.moderation_note,
+       report.created_at,
+       report.reviewed_at,
+       report.reviewed_by_user_id,
+       reporter.id AS reporter_profile_id,
+       reporter.display_name AS reporter_display_name,
+       reporter.username AS reporter_username,
+       reported.id AS reported_profile_id,
+       reported.display_name AS reported_display_name,
+       reported.username AS reported_username,
+       count(*) OVER() AS total_count
+     FROM ${schema}.friend_reports AS report
+     JOIN ${schema}.auth_users AS reporter ON reporter.id = report.reporter_user_id
+     JOIN ${schema}.auth_users AS reported ON reported.id = report.reported_user_id
+     WHERE $1 = 'all' OR report.status = $1
+     ORDER BY report.created_at, report.id
+     OFFSET $2 LIMIT $3`,
+    [status, offset, limit],
+  );
+  const rows = result?.rows ?? [];
+  return {
+    items: rows.map(friendReportForModerationFromRow).filter(Boolean),
+    total: Number(rows[0]?.total_count) || 0,
+  };
+}
+
+export async function reviewFriendReportForModeration({
+  reportId,
+  reviewerUserId,
+  status,
+  action,
+  note = '',
+}) {
+  if (!pool) {
+    const report = memoryFriendReports.get(reportId);
+    if (!report || !memoryAuthUsersById.has(reviewerUserId)) return null;
+    Object.assign(report, {
+      status,
+      moderationAction: action,
+      moderationNote: note,
+      reviewedAt: new Date().toISOString(),
+      reviewedByUserId: reviewerUserId,
+    });
+    return memoryFriendReportForModeration(report);
+  }
+  const result = await query(
+    `UPDATE ${schema}.friend_reports AS report
+     SET status = $3,
+       moderation_action = $4,
+       moderation_note = $5,
+       reviewed_at = now(),
+       reviewed_by_user_id = $2
+     FROM ${schema}.auth_users AS reporter, ${schema}.auth_users AS reported
+     WHERE report.id = $1
+       AND reporter.id = report.reporter_user_id
+       AND reported.id = report.reported_user_id
+     RETURNING
+       report.id AS report_id,
+       report.reason,
+       report.details,
+       report.status,
+       report.moderation_action,
+       report.moderation_note,
+       report.created_at,
+       report.reviewed_at,
+       report.reviewed_by_user_id,
+       reporter.id AS reporter_profile_id,
+       reporter.display_name AS reporter_display_name,
+       reporter.username AS reporter_username,
+       reported.id AS reported_profile_id,
+       reported.display_name AS reported_display_name,
+       reported.username AS reported_username`,
+    [reportId, reviewerUserId, status, action, note],
+  );
+  return friendReportForModerationFromRow(result?.rows?.[0]);
+}
+
 export async function createFriendReport(report) {
   if (!report.reporterUserId || !report.reportedUserId || report.reporterUserId === report.reportedUserId) {
     return null;
@@ -13918,7 +16143,15 @@ export async function createFriendReport(report) {
     if (!memoryAuthUsersById.has(report.reportedUserId)) {
       return null;
     }
-    const record = { ...report, status: 'open', createdAt: new Date().toISOString() };
+    const record = {
+      ...report,
+      status: 'open',
+      moderationAction: 'none',
+      moderationNote: '',
+      reviewedAt: null,
+      reviewedByUserId: null,
+      createdAt: new Date().toISOString(),
+    };
     memoryFriendReports.set(record.id, record);
     return { reportId: record.id, status: record.status, createdAt: record.createdAt };
   }
@@ -15161,11 +17394,11 @@ export async function loadPreRaceRiderStats(trackId, profileKeys, riderNames) {
 export async function pruneExpiredData(now = Date.now()) {
   const cutoff = new Date(now);
   let removedSessions = 0;
-  let removedBillingCheckouts = 0;
   let removedHeartRateInvitations = 0;
   let removedHeartRatePairings = 0;
   let removedClubMonitorSprintAuthorizations = 0;
   let removedClubTabletResultAuthorizations = 0;
+  let removedWattbikeConnectionLeases = 0;
   let removedPushEvents = 0;
   let removedLiveAudioFriendInvites = 0;
 
@@ -15178,16 +17411,6 @@ export async function pruneExpiredData(now = Date.now()) {
         await removeMemoryPushInstallationsForSession(tokenHash);
         removedSessions += 1;
       });
-    }
-  }
-
-  for (const [stateHash, checkout] of memoryBillingCheckoutsByState.entries()) {
-    const claimedAt = checkout.claimedAt ? Date.parse(checkout.claimedAt) : null;
-    const expired = Date.parse(checkout.expiresAt) <= cutoff.getTime();
-    const claimedLongAgo = claimedAt != null && claimedAt <= cutoff.getTime() - (7 * 24 * 60 * 60 * 1000);
-    if (expired || claimedLongAgo) {
-      memoryBillingCheckoutsByState.delete(stateHash);
-      removedBillingCheckouts += 1;
     }
   }
 
@@ -15231,6 +17454,13 @@ export async function pruneExpiredData(now = Date.now()) {
     }
   }
 
+  for (const [key, lease] of memoryWattbikeConnectionLeases.entries()) {
+    if (lease.expiresAt <= cutoff.getTime()) {
+      memoryWattbikeConnectionLeases.delete(key);
+      removedWattbikeConnectionLeases += 1;
+    }
+  }
+
   const privateNotificationRetentionCutoff = cutoff.getTime() - (7 * 24 * 60 * 60 * 1000);
   for (const [eventId, event] of memoryPushEvents) {
     if (Date.parse(event.expiresAt) > privateNotificationRetentionCutoff) continue;
@@ -15256,11 +17486,12 @@ export async function pruneExpiredData(now = Date.now()) {
   if (!pool) {
     return {
       removedSessions,
-      removedBillingCheckouts,
+      removedBillingCheckouts: 0,
       removedHeartRateInvitations,
       removedHeartRatePairings,
       removedClubMonitorSprintAuthorizations,
       removedClubTabletResultAuthorizations,
+      removedWattbikeConnectionLeases,
       removedPushEvents,
       removedLiveAudioFriendInvites,
     };
@@ -15268,11 +17499,11 @@ export async function pruneExpiredData(now = Date.now()) {
 
   const [
     sessions,
-    checkouts,
     invitations,
     pairings,
     monitorAuthorizations,
     resultAuthorizations,
+    wattbikeConnectionLeases,
     ,
     pushEvents,
     liveAudioInvites,
@@ -15281,13 +17512,6 @@ export async function pruneExpiredData(now = Date.now()) {
       `DELETE FROM ${schema}.auth_sessions
        WHERE expires_at <= $1::timestamptz
        RETURNING id`,
-      [cutoff],
-    ),
-    query(
-      `DELETE FROM ${schema}.billing_checkouts
-       WHERE expires_at <= $1::timestamptz
-          OR (claimed_at IS NOT NULL AND claimed_at <= $1::timestamptz - interval '7 days')
-       RETURNING state_hash`,
       [cutoff],
     ),
     query(
@@ -15324,6 +17548,12 @@ export async function pruneExpiredData(now = Date.now()) {
       [cutoff],
     ),
     query(
+      `DELETE FROM ${schema}.wattbike_connection_leases
+       WHERE expires_at <= $1::timestamptz
+       RETURNING allocation_key`,
+      [cutoff],
+    ),
+    query(
       `DELETE FROM ${schema}.heart_rate_training_segment_bindings
        WHERE expires_at <= $1::timestamptz`,
       [cutoff],
@@ -15344,13 +17574,17 @@ export async function pruneExpiredData(now = Date.now()) {
 
   return {
     removedSessions: removedSessions + (sessions?.rowCount ?? 0),
-    removedBillingCheckouts: removedBillingCheckouts + (checkouts?.rowCount ?? 0),
+    // Historical Square checkout rows are retained read-only for audit and
+    // support. Only account erasure may remove them through the user FK.
+    removedBillingCheckouts: 0,
     removedHeartRateInvitations: removedHeartRateInvitations + (invitations?.rowCount ?? 0),
     removedHeartRatePairings: removedHeartRatePairings + (pairings?.rowCount ?? 0),
     removedClubMonitorSprintAuthorizations: removedClubMonitorSprintAuthorizations
       + (monitorAuthorizations?.rowCount ?? 0),
     removedClubTabletResultAuthorizations: removedClubTabletResultAuthorizations
       + (resultAuthorizations?.rowCount ?? 0),
+    removedWattbikeConnectionLeases: removedWattbikeConnectionLeases
+      + (wattbikeConnectionLeases?.rowCount ?? 0),
     removedPushEvents: removedPushEvents + (pushEvents?.rowCount ?? 0),
     removedLiveAudioFriendInvites: removedLiveAudioFriendInvites + (liveAudioInvites?.rowCount ?? 0),
   };

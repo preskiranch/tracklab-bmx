@@ -32,6 +32,9 @@ describe('public App Store pages', () => {
     expect(markup).toContain('excluded from generic session JSON/CSV, the standard selected-day workbook, and public or club exports');
     expect(markup).toContain('separate private Numbers/Excel workbook containing heart-rate summaries');
     expect(markup).toContain('does not include raw heart-rate samples');
+    expect(markup).toContain('open My Profile, choose Delete Account, reenter the current password');
+    expect(markup).toContain('Deleting a TrackLab account does not cancel an Apple subscription');
+    expect(markup).toContain('Deleting the TrackLab account also deletes its saved heart-rate records');
     expect(markup).toContain('must not be enabled for a minor without the permission');
     expect(markup).toContain('does not store personal health information in iCloud');
     expect(markup).toContain('Explicitly accepted friends can see whether the other account is');

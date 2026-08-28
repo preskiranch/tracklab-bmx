@@ -70,6 +70,7 @@ import {
   updateBikeRaceAudio,
 } from './lib/bikeRaceAudio';
 import { safeSetLocalStorage } from './lib/browserStorage';
+import { trackLabServiceOrigin } from './lib/serviceOrigins';
 import {
   clubTabletRaceStartAllowed,
   type RaceStartSource,
@@ -287,7 +288,6 @@ import type {
 } from './components/ClubLiveAthleteBridge';
 import { authenticatedRacerBikeSeatLimit, shouldStopAdvancedConnector } from './lib/advancedConnectorPolicy';
 import {
-  claimBillingReturn,
   loginAuthUser,
   logoutAuthUser,
   readCurrentAuthUser,
@@ -297,7 +297,7 @@ import {
 } from './lib/auth';
 import {
   benchmarkDemoTrackId,
-  clampBillingBikeSeats,
+  clampAppleWattbikeConnections,
   createMembership,
   isAdminAccountEmail,
   normalizeAccountEmail,
@@ -305,6 +305,16 @@ import {
   writeStoredMembership,
   type MembershipState,
 } from './lib/membership';
+import type {
+  NativeStoreKitProduct,
+  NativeStoreKitTransaction,
+} from './lib/nativeInAppPurchases';
+import {
+  effectiveWattbikeConnectionLimit,
+  wattbikeCapacityClientGrantTtlMs,
+  wattbikeCapacityStatusMessage,
+  type WattbikeCapacityState,
+} from './lib/wattbikeCapacity';
 import { createInitialRiders } from './game/physics';
 import { useRaceEngine } from './hooks/useRaceEngine';
 import { useRaceCommentary } from './hooks/useRaceCommentary';
@@ -432,6 +442,9 @@ const ClubLiveAthleteBridge = lazy(() => import('./components/ClubLiveAthleteBri
 const ClubLiveAccessNotice = lazy(() => import('./components/ClubLiveAccessNotice'));
 const ClubTabletMode = lazy(() => import('./components/ClubTabletMode'));
 const ClubTabletRuntime = lazy(() => import('./components/ClubTabletRuntime'));
+const AppleBillingCoordinator = lazy(() => import('./components/AppleBillingCoordinator').then((module) => ({
+  default: module.AppleBillingCoordinator,
+})));
 const loadEarthTrackView = () => import('./components/EarthTrackView').then((module) => ({
   default: module.EarthTrackView,
 }));
@@ -446,8 +459,11 @@ const customRouteInitialZoom = 18;
 const customRouteInitialAngle = 0;
 const customRouteInitialHeading = 0;
 const connectedBikeDeviceTimeoutMs = 15000;
+const loadNativeInAppPurchases = () => import('./lib/nativeInAppPurchases')
+  .then((module) => module.nativeInAppPurchases);
 type BikeConnectionSource = 'bluetooth' | 'advanced' | 'demo';
-type CheckoutStatus = 'idle' | 'loading' | 'error';
+type AppleBillingStatus = 'idle' | 'loading' | 'error' | 'success';
+type AppleBillingAction = 'products' | 'purchase' | 'restore' | 'manage' | null;
 type SplitBranchId = TrackSplitBranch['id'];
 type RaceRouteVariantId = TrackRouteVariantId;
 type MappingHistoryScope = 'route' | 'zones' | 'split';
@@ -2062,11 +2078,22 @@ export default function App() {
       || currentSearchParam('locator') != null
     ),
   );
-  const [checkoutBikeSeats, setCheckoutBikeSeats] = useState(() => clampBillingBikeSeats(initialMembershipRef.current?.bikeSeats ?? 1));
-  const [checkoutStatus, setCheckoutStatus] = useState<CheckoutStatus>('idle');
-  const [checkoutMessage, setCheckoutMessage] = useState<string | null>(null);
+  const [appleConnectionCount, setAppleConnectionCount] = useState(() => (
+    clampAppleWattbikeConnections(initialMembershipRef.current?.bikeSeats ?? 1)
+  ));
+  const [appleProducts, setAppleProducts] = useState<NativeStoreKitProduct[]>([]);
+  const [appleBillingStatus, setAppleBillingStatus] = useState<AppleBillingStatus>('idle');
+  const [appleBillingAction, setAppleBillingAction] = useState<AppleBillingAction>(null);
+  const [appleBillingMessage, setAppleBillingMessage] = useState<string | null>(null);
+  const [appleStoreAvailable, setAppleStoreAvailable] = useState<boolean | null>(null);
+  const [appleBillingServerReady, setAppleBillingServerReady] = useState<boolean | null>(null);
+  const appleTransactionClaimsRef = useRef<Map<string, Promise<void>>>(new Map());
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authStatus, setAuthStatus] = useState<'loading' | 'signed-out' | 'signed-in'>('loading');
+  const [scopedWattbikeCapacity, setScopedWattbikeCapacity] = useState<{
+    scopeKey: string;
+    capacity: WattbikeCapacityState;
+  } | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>('register');
   const [authPasswordDraft, setAuthPasswordDraft] = useState('');
   const [profileNameDraft, setProfileNameDraft] = useState('');
@@ -2219,6 +2246,115 @@ export default function App() {
     && clubTabletSession.session.clubId === clubTabletDevice?.device.clubId,
   );
   const clubTabletProfileKey = clubTabletDevice ? `club-tablet:${clubTabletDevice.device.id}` : '';
+  const wattbikeCapacityScopeKey = clubTabletKioskMode
+    ? clubTabletSessionActive && clubTabletSession
+      ? `club-tablet-session:${clubTabletSession.sessionToken}`
+      : `club-tablet:${clubTabletDevice?.device.id ?? 'inactive'}`
+    : authUser?.id
+      ? `owner:${authUser.id}`
+      : 'signed-out';
+  const serverWattbikeCapacity = scopedWattbikeCapacity?.scopeKey === wattbikeCapacityScopeKey
+    ? scopedWattbikeCapacity.capacity
+    : null;
+  const handleWattbikeCapacityChange = useCallback((capacity: WattbikeCapacityState | null) => {
+    if (!capacity) {
+      setScopedWattbikeCapacity(null);
+      return;
+    }
+    setScopedWattbikeCapacity({
+      scopeKey: wattbikeCapacityScopeKey,
+      capacity,
+    });
+  }, [wattbikeCapacityScopeKey]);
+  useEffect(() => {
+    if (
+      !clubTabletDevice
+      || !clubTabletDeviceActive
+      || clubTabletSessionActive
+      || demoMode
+      || appMode !== 'club-tablet'
+    ) return undefined;
+
+    const pickerScopeKey = `club-tablet:${clubTabletDevice.device.id}`;
+    let cancelled = false;
+    let requestController: AbortController | null = null;
+    let pollTimer: number | null = null;
+    let expiryTimer: number | null = null;
+
+    const clearPickerGrant = () => {
+      setScopedWattbikeCapacity((current) => (
+        current?.scopeKey === pickerScopeKey ? null : current
+      ));
+    };
+    const schedulePoll = (delayMs: number, poll: () => void) => {
+      if (cancelled) return;
+      if (pollTimer != null) window.clearTimeout(pollTimer);
+      pollTimer = window.setTimeout(poll, Math.max(2_000, Math.min(30_000, delayMs)));
+    };
+    const refreshPickerGrant = () => {
+      if (cancelled) return;
+      if (document.visibilityState === 'hidden') {
+        schedulePoll(2_000, refreshPickerGrant);
+        return;
+      }
+      requestController?.abort();
+      requestController = new AbortController();
+      void import('./lib/clubTablet')
+        .then(({ claimClubTabletPickerWattbikeCapacity }) => (
+          claimClubTabletPickerWattbikeCapacity(clubTabletDevice, requestController?.signal)
+        ))
+        .then((grant) => {
+          if (cancelled) return;
+          setScopedWattbikeCapacity({
+            scopeKey: pickerScopeKey,
+            capacity: grant.capacity,
+          });
+          if (expiryTimer != null) window.clearTimeout(expiryTimer);
+          const serverGrantRemainingMs = Math.max(0, grant.expiresAt - Date.now());
+          expiryTimer = window.setTimeout(
+            clearPickerGrant,
+            Math.min(wattbikeCapacityClientGrantTtlMs, serverGrantRemainingMs),
+          );
+          schedulePoll(grant.pollAfterMs, refreshPickerGrant);
+        })
+        .catch((error) => {
+          if (cancelled || (error as Error).name === 'AbortError') return;
+          clearPickerGrant();
+          schedulePoll(5_000, refreshPickerGrant);
+        });
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (pollTimer != null) window.clearTimeout(pollTimer);
+      pollTimer = null;
+      refreshPickerGrant();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    refreshPickerGrant();
+    return () => {
+      cancelled = true;
+      requestController?.abort();
+      if (pollTimer != null) window.clearTimeout(pollTimer);
+      if (expiryTimer != null) window.clearTimeout(expiryTimer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearPickerGrant();
+      // The device-holder identity cannot release the athlete-session holder
+      // that atomically replaced it, so this cleanup is safe even when the
+      // picker unmounts immediately after POST /sessions succeeds.
+      void import('./lib/clubTablet')
+        .then(({ releaseClubTabletPickerWattbikeCapacity }) => (
+          releaseClubTabletPickerWattbikeCapacity(clubTabletDevice, { keepalive: true })
+        ))
+        .catch(() => undefined);
+    };
+  }, [
+    appMode,
+    clubTabletDevice,
+    clubTabletDeviceActive,
+    clubTabletSessionActive,
+    demoMode,
+  ]);
   const accountEmail = normalizeAccountEmail(authUser?.email ?? '');
   const accountProfileComplete = authStatus === 'signed-in' && Boolean(authUser);
   const adminProfileActive = !clubTabletKioskMode && Boolean(authUser?.admin);
@@ -2468,14 +2604,14 @@ export default function App() {
     setHeartRateStudioInviteOpen(false);
     setAuthMode('login');
     setProfileFormError(null);
-    setCheckoutMessage('Sign in as the athlete named in the Apple Watch studio invitation.');
+    setAppleBillingMessage('Sign in as the athlete named in the Apple Watch studio invitation.');
     setShowMembershipLanding(true);
   }, []);
 
   const handleHeartRateAccountBlockSignIn = useCallback(() => {
     setAuthMode('login');
     setProfileFormError(null);
-    setCheckoutMessage('Sign in to the same personal TrackLab account that created this private Apple Watch handoff.');
+    setAppleBillingMessage('Sign in to the same personal TrackLab account that created this private Apple Watch handoff.');
     setShowMembershipLanding(true);
   }, []);
 
@@ -2532,7 +2668,7 @@ export default function App() {
     }
 
     const relay = await heartRate.configureRelay({
-      baseUrl: window.location.origin,
+      baseUrl: trackLabServiceOrigin,
       ingestToken: claim.ingestToken,
       sessionId: claim.pairing.sessionId,
       startedAt: Date.now(),
@@ -2620,7 +2756,7 @@ export default function App() {
         knownPairingIds: heartRateKnownPairingIdsRef.current,
         cancelledSessionIds: cancelledHeartRateRelaySessionsRef.current,
         finalizedSessionIds: finalizedHeartRateRelaySessionsRef.current,
-        baseUrl: window.location.origin,
+        baseUrl: trackLabServiceOrigin,
         onMessage: setHeartRateMessage,
       })).finally(() => {
         if (heartRateRelayStartPromisesRef.current.get(sessionId) === startOperation) {
@@ -2852,20 +2988,38 @@ export default function App() {
     maxPlayers,
   );
   const clubMonitorReleasesLocalBikes = appMode === 'club-monitor';
+  const localWattbikeConnectionLimit = clubTabletKioskMode
+    ? clubTabletDeviceActive ? 1 : 0
+    : authenticatedRacerAccess
+      ? authenticatedBikeSeatLimit
+      : clubLiveAccessActive ? 1 : 0;
+  const serverAuthorizedWattbikeConnectionLimit = (
+    !clubTabletKioskMode
+    && !authenticatedRacerAccess
+    && clubLiveAccessActive
+  )
+    // Claimed athletes receive this single temporary club-bike grant from the
+    // separately authenticated /api/club-live/access poll, which revalidates
+    // and fails closed every two seconds rather than using the owner's IAP.
+    ? 1
+    : effectiveWattbikeConnectionLimit(
+      localWattbikeConnectionLimit,
+      serverWattbikeCapacity,
+    );
   const bluetoothAccessGranted = !clubMonitorReleasesLocalBikes
+    && serverAuthorizedWattbikeConnectionLimit > 0
     && (authenticatedRacerAccess || clubLiveAccessActive || clubTabletDeviceActive);
   const bluetooth = useBluetoothBikes({
     enabled: bluetoothAccessGranted,
-    maxDevices: clubTabletKioskMode ? 1 : authenticatedBikeSeatLimit || 1,
+    maxDevices: Math.max(1, serverAuthorizedWattbikeConnectionLimit),
     preferredDeviceScope: clubTabletKioskMode ? clubTabletDevice?.device.id ?? null : null,
   });
+  useEffect(() => {
+    if (!bluetoothAccessGranted) setBluetoothPairingOpen(false);
+  }, [bluetoothAccessGranted]);
   const liveBikeSeatLimit = clubMonitorReleasesLocalBikes
     ? 0
-    : clubTabletKioskMode
-      ? clubTabletDeviceActive ? 1 : 0
-      : authenticatedRacerAccess
-      ? authenticatedBikeSeatLimit
-      : clubLiveAccessActive ? 1 : 0;
+    : serverAuthorizedWattbikeConnectionLimit;
   const liveBikeAccessLocked = !bluetoothAccessGranted;
   const developerUiActive = !clubTabletKioskMode && adminProfileActive && !regularUserPreview;
   const developerRaceLayoutActive = !clubTabletKioskMode && isAdminAccountEmail(accountEmail);
@@ -3003,11 +3157,11 @@ export default function App() {
           setProfileNameDraft(user.name);
           setProfileEmailDraft(user.email);
           setMembership(user.membership);
-          setCheckoutBikeSeats(user.membership.bikeSeats);
+          setAppleConnectionCount(clampAppleWattbikeConnections(user.membership.bikeSeats));
         } else {
           const visitorMembership = createMembership('visitor');
           setMembership(visitorMembership);
-          setCheckoutBikeSeats(1);
+          setAppleConnectionCount(1);
         }
       })
       .catch(async (error: Error) => {
@@ -3017,7 +3171,7 @@ export default function App() {
           setAuthUser(null);
           setAuthStatus('signed-out');
           setMembership(createMembership('visitor'));
-          setCheckoutBikeSeats(1);
+          setAppleConnectionCount(1);
         }
       });
 
@@ -4013,19 +4167,38 @@ export default function App() {
     clubTabletSession,
     clubTabletSessionActive,
   ]);
+  const wattbikeConnectionCount = useMemo(() => {
+    if (demoMode) return 0;
+    const connectedDeviceIds = new Set<number>();
+    bluetooth.devices.forEach((device) => {
+      if (device.connected) connectedDeviceIds.add(device.deviceId);
+    });
+    if (!clubTabletKioskMode) {
+      bridge.devices.forEach((device) => {
+        if (device.connected) connectedDeviceIds.add(device.deviceId);
+      });
+    }
+    return Math.min(maxPlayers, connectedDeviceIds.size);
+  }, [bluetooth.devices, bridge.devices, clubTabletKioskMode, demoMode]);
   const multiplayer = useMultiplayer({
     enabled: playMode === 'multiplayer' && (!clubTabletKioskMode || clubTabletSessionActive),
+    capacityChannelEnabled: Boolean(
+      (!clubTabletKioskMode && authStatus === 'signed-in' && authUser)
+      || (clubTabletKioskMode && clubTabletSessionActive),
+    ),
     track: effectiveTrack,
     bikeCount: appMode === 'explore'
       ? explorePlayers.length
       : demoMode
         ? activePlayers.length
         : enteredRacePlayers.length,
+    wattbikeConnectionCount,
     identityOverride: multiplayerIdentityOverride,
     clubTabletSession: clubTabletSessionActive ? clubTabletSession : null,
     onFriendNetworkChange: authUser && !clubTabletKioskMode
       ? handleFriendNetworkChange
       : undefined,
+    onWattbikeCapacityChange: handleWattbikeCapacityChange,
   });
   latestRoomExitSequenceRef.current = multiplayer.roomExit.sequence;
   useEffect(() => {
@@ -4513,7 +4686,7 @@ export default function App() {
       || membership.bikeSeats !== authUser.membership.bikeSeats
     ) {
       setMembership(authUser.membership);
-      setCheckoutBikeSeats(authUser.membership.bikeSeats);
+      setAppleConnectionCount(clampAppleWattbikeConnections(authUser.membership.bikeSeats));
     }
 
     if (
@@ -4539,43 +4712,6 @@ export default function App() {
     multiplayer.profile.name,
     multiplayer.setProfile,
   ]);
-
-  useEffect(() => {
-    if (!authUser) {
-      return;
-    }
-
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('billing') !== 'success' || params.get('tier') !== 'racer') {
-      return;
-    }
-
-    const billingState = params.get('billingState') ?? '';
-    const cleanUrl = new URL(window.location.href);
-    ['billing', 'tier', 'bikes', 'billingState', 'checkoutId', 'orderId', 'referenceId', 'transactionId', 'profileKey']
-      .forEach((key) => cleanUrl.searchParams.delete(key));
-    window.history.replaceState(null, '', cleanUrl);
-
-    if (!billingState) {
-      setCheckoutStatus('error');
-      setCheckoutMessage('Square returned without a TrackLab verification code. Racer access was not changed.');
-      return;
-    }
-
-    claimBillingReturn(billingState)
-      .then((user) => {
-        if (!user) {
-          return;
-        }
-        setAuthUser(user);
-        setMembership(user.membership);
-        setCheckoutBikeSeats(user.membership.bikeSeats);
-        setCheckoutMessage('Racer access activated.');
-      })
-      .catch((error: Error) => {
-        setCheckoutMessage(`Square checkout returned, but Racer access could not be saved. ${error.message}`);
-      });
-  }, [authUser?.id]);
 
   const livePlayerCount = useMemo(
     () => activePlayers.filter((player) => {
@@ -5401,6 +5537,7 @@ export default function App() {
 
   useEffect(() => {
     if (shouldStopAdvancedConnector({
+      authStatus,
       authenticatedRacerAccess,
       clubMonitorOpen: clubMonitorReleasesLocalBikes,
       sourceState: bridge.sourceState,
@@ -5411,6 +5548,7 @@ export default function App() {
     bridge.sourceState,
     bridge.stopLocalBridge,
     clubMonitorReleasesLocalBikes,
+    authStatus,
     authenticatedRacerAccess,
   ]);
 
@@ -8252,7 +8390,7 @@ export default function App() {
     setProfileNameDraft(user.name);
     setProfileEmailDraft(user.email);
     setMembership(user.membership);
-    setCheckoutBikeSeats(user.membership.bikeSeats);
+    setAppleConnectionCount(clampAppleWattbikeConnections(user.membership.bikeSeats));
     setAccountProfile(profile);
     setLockedRacePlayers(null);
     setCloudUserDataStatus('online');
@@ -9110,23 +9248,23 @@ export default function App() {
 
     if (!accountProfileComplete && !clubTabletDeviceActive) {
       setProfileFormError('Create an account or sign in before connecting Wattbikes.');
-      setCheckoutMessage(null);
+      setAppleBillingMessage(null);
       setShowMembershipLanding(true);
       return;
     }
 
     if (source === 'advanced' && !authenticatedRacerAccess) {
-      setCheckoutMessage(advancedConnectorMembershipMessage);
-      setCheckoutStatus('idle');
+      setAppleBillingMessage(advancedConnectorMembershipMessage);
+      setAppleBillingStatus('idle');
       setShowMembershipLanding(true);
       return;
     }
 
     if (source === 'bluetooth' && liveBikeAccessLocked) {
-      setCheckoutMessage(selectedClubTrainingMembershipActive
+      setAppleBillingMessage(selectedClubTrainingMembershipActive
         ? clubBikeAccessUnavailableMessage
         : 'Choose “Training at your club” for temporary studio access, or upgrade to Racer.');
-      setCheckoutStatus('idle');
+      setAppleBillingStatus('idle');
       return;
     }
 
@@ -9193,7 +9331,7 @@ export default function App() {
     }
 
     setProfileFormError(message);
-    setCheckoutMessage(null);
+    setAppleBillingMessage(null);
     setShowMembershipLanding(true);
     return false;
   }, [accountProfileComplete]);
@@ -9219,7 +9357,7 @@ export default function App() {
 
     setAuthStatus('loading');
     setProfileFormError(null);
-    setCheckoutMessage(null);
+    setAppleBillingMessage(null);
 
     try {
       const user = authMode === 'register'
@@ -9237,12 +9375,13 @@ export default function App() {
       setAuthUser(user);
       setAuthStatus('signed-in');
       setMembership(user.membership);
-      setCheckoutBikeSeats(user.membership.bikeSeats);
+      setAppleConnectionCount(clampAppleWattbikeConnections(user.membership.bikeSeats));
       setProfileNameDraft(user.name);
       setProfileEmailDraft(user.email);
       setAuthPasswordDraft('');
-      setCheckoutStatus('idle');
-      setCheckoutMessage(user.admin ? 'Administrator racer access unlocked.' : null);
+      setAppleBillingStatus('idle');
+      setAppleBillingAction(null);
+      setAppleBillingMessage(user.admin ? 'Administrator racer access unlocked.' : null);
       setShowMembershipLanding(false);
       setPlayMode('multiplayer');
       setAppMode('race');
@@ -9251,7 +9390,7 @@ export default function App() {
       setAuthUser(null);
       setAuthStatus('signed-out');
       setMembership(createMembership('visitor'));
-      setCheckoutBikeSeats(1);
+      setAppleConnectionCount(1);
       setProfileFormError(error instanceof Error ? error.message : 'Could not sign in.');
       return false;
     }
@@ -9325,7 +9464,7 @@ export default function App() {
     setClubRosterManagementProfileKey(null);
     setClubTrainingSelection(null);
     setClubTrainingStatus('idle');
-    setCheckoutMessage(null);
+    setAppleBillingMessage(null);
     setProfileFormError(null);
     setAuthPasswordDraft('');
     setAuthStatus('loading');
@@ -9464,7 +9603,10 @@ export default function App() {
     setAuthUser(null);
     setAuthStatus('signed-out');
     setMembership(visitorMembership);
-    setCheckoutBikeSeats(1);
+    setAppleConnectionCount(1);
+    setAppleBillingStatus('idle');
+    setAppleBillingAction(null);
+    setAppleBillingMessage(null);
     setPlayMode('local');
     setBikeConnectionSource('bluetooth');
     setDemoMode(false);
@@ -9503,8 +9645,9 @@ export default function App() {
       : createMembership('spectator', 1);
     setMembership(nextMembership);
     multiplayer.setProfile({ membershipTier: nextMembership.tier });
-    setCheckoutMessage(null);
-    setCheckoutStatus('idle');
+    setAppleBillingMessage(null);
+    setAppleBillingStatus('idle');
+    setAppleBillingAction(null);
     setShowMembershipLanding(false);
     setPlayMode('multiplayer');
     setAppMode('race');
@@ -9522,8 +9665,9 @@ export default function App() {
     const nextMembership = membership.tier === 'visitor' ? createMembership('spectator', 1) : membership;
     setMembership(nextMembership);
     multiplayer.setProfile({ membershipTier: nextMembership.tier });
-    setCheckoutMessage(null);
-    setCheckoutStatus('idle');
+    setAppleBillingMessage(null);
+    setAppleBillingStatus('idle');
+    setAppleBillingAction(null);
     setShowMembershipLanding(false);
     setPlayMode('multiplayer');
     handleTrackChange(benchmarkDemoTrackId);
@@ -9542,8 +9686,9 @@ export default function App() {
       setMembership(nextMembership);
       multiplayer.setProfile({ membershipTier: nextMembership.tier });
     }
-    setCheckoutMessage(null);
-    setCheckoutStatus('idle');
+    setAppleBillingMessage(null);
+    setAppleBillingStatus('idle');
+    setAppleBillingAction(null);
     setShowMembershipLanding(false);
     setAppMode('race');
   }, [membership.tier, multiplayer, requireAccountProfile]);
@@ -9559,41 +9704,261 @@ export default function App() {
     }, 0);
   }, [requireAccountProfile]);
 
-  const handleCheckoutBikeSeatsChange = useCallback((bikeSeats: number) => {
-    setCheckoutBikeSeats(clampBillingBikeSeats(bikeSeats));
-    setCheckoutMessage(null);
-    setCheckoutStatus('idle');
+  const handleAppleConnectionCountChange = useCallback((bikeSeats: number) => {
+    setAppleConnectionCount(clampAppleWattbikeConnections(bikeSeats));
+    setAppleBillingMessage(null);
+    setAppleBillingStatus('idle');
+    setAppleBillingAction(null);
   }, []);
 
-  const startSquareCheckout = useCallback(async () => {
-    if (!requireAccountProfile('Create an account or sign in before upgrading to Racer.')) {
+  const applyAppleBillingAuthUser = useCallback((user: AuthUser) => {
+    setAuthUser(user);
+    setMembership(user.membership);
+    setAppleConnectionCount(clampAppleWattbikeConnections(user.membership.bikeSeats));
+  }, []);
+
+  const refreshAppleMembership = useCallback(async () => {
+    const user = await readCurrentAuthUser();
+    if (!user) {
+      throw new Error('Sign in to continue.');
+    }
+    applyAppleBillingAuthUser(user);
+    return user;
+  }, [applyAppleBillingAuthUser]);
+
+  const claimAppleStoreTransaction = useCallback((
+    transaction: NativeStoreKitTransaction,
+    restore = false,
+  ) => {
+    const claimKey = `${transaction.transactionId}:${restore ? 'restore' : 'claim'}`;
+    const inFlight = appleTransactionClaimsRef.current.get(claimKey);
+    if (inFlight) return inFlight;
+
+    const claim = import('./lib/appleBilling')
+      .then(({ claimAppleTransaction }) => claimAppleTransaction(
+        transaction,
+        undefined,
+        { restore },
+      ))
+      .finally(() => {
+        appleTransactionClaimsRef.current.delete(claimKey);
+      });
+    appleTransactionClaimsRef.current.set(claimKey, claim);
+    return claim;
+  }, []);
+
+  const synchronizeAppleTransactions = useCallback(async (
+    transactions: readonly NativeStoreKitTransaction[],
+    restore = false,
+  ) => {
+    for (const transaction of transactions) {
+      await claimAppleStoreTransaction(transaction, restore);
+    }
+    return refreshAppleMembership();
+  }, [claimAppleStoreTransaction, refreshAppleMembership]);
+
+  const purchaseAppleSubscription = useCallback(async () => {
+    if (!requireAccountProfile('Sign in before subscribing.')) {
+      return;
+    }
+    if (!authUser) return;
+    if (appleStoreAvailable !== true) {
+      setAppleBillingStatus('error');
+      setAppleBillingMessage('Use the iOS app.');
+      return;
+    }
+    if (appleBillingServerReady !== true) {
+      setAppleBillingStatus('error');
+      setAppleBillingMessage('Billing setup in progress.');
       return;
     }
 
-    setCheckoutStatus('loading');
-    setCheckoutMessage(null);
+    const selectedProduct = appleProducts.find((product) => product.bikeSeats === appleConnectionCount);
+    if (!selectedProduct?.displayPrice.trim()) {
+      setAppleBillingStatus('error');
+      setAppleBillingMessage('Price unavailable.');
+      return;
+    }
+
+    setAppleBillingStatus('loading');
+    setAppleBillingAction('purchase');
+    setAppleBillingMessage(null);
 
     try {
-      const response = await fetch('/api/billing/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bikeSeats: checkoutBikeSeats }),
-      });
-      const payload = await response.json() as { checkoutUrl?: string; error?: string };
-      if (!response.ok || !payload.checkoutUrl) {
-        throw new Error(payload.error ?? `Checkout request returned ${response.status}`);
+      const nativeInAppPurchases = await loadNativeInAppPurchases();
+      const result = await nativeInAppPurchases.purchase(selectedProduct.productId, authUser.id);
+      if (result.status === 'userCancelled') {
+        setAppleBillingStatus('idle');
+        setAppleBillingMessage('Purchase canceled.');
+        return;
+      }
+      if (result.status === 'pending') {
+        setAppleBillingStatus('idle');
+        setAppleBillingMessage('Pending.');
+        return;
+      }
+      if (result.status !== 'success' || !result.transaction) {
+        throw new Error(
+          result.message
+          || (result.status === 'unverified'
+            ? 'Apple could not verify the purchase.'
+            : 'Purchase failed.'),
+        );
       }
 
-      window.location.assign(payload.checkoutUrl);
+      await synchronizeAppleTransactions([result.transaction]);
+      setAppleBillingStatus('success');
+      setAppleBillingMessage('Purchase verified.');
     } catch (error) {
-      setCheckoutStatus('error');
-      setCheckoutMessage(
-        error instanceof Error
-          ? error.message
-          : 'Square checkout is not available right now.',
-      );
+      setAppleBillingStatus('error');
+      setAppleBillingMessage(error instanceof Error ? error.message : 'Verification failed.');
+    } finally {
+      setAppleBillingAction(null);
     }
-  }, [checkoutBikeSeats, requireAccountProfile]);
+  }, [
+    appleConnectionCount,
+    appleBillingServerReady,
+    appleProducts,
+    appleStoreAvailable,
+    authUser,
+    requireAccountProfile,
+    synchronizeAppleTransactions,
+  ]);
+
+  const restoreAppleSubscriptions = useCallback(async () => {
+    if (!requireAccountProfile('Sign in to restore.')) {
+      return;
+    }
+    if (appleStoreAvailable !== true) {
+      setAppleBillingStatus('error');
+      setAppleBillingMessage('Restore in the iOS app.');
+      return;
+    }
+    if (appleBillingServerReady !== true) {
+      setAppleBillingStatus('error');
+      setAppleBillingMessage('Billing setup in progress.');
+      return;
+    }
+
+    setAppleBillingStatus('loading');
+    setAppleBillingAction('restore');
+    setAppleBillingMessage(null);
+    try {
+      const nativeInAppPurchases = await loadNativeInAppPurchases();
+      const result = await nativeInAppPurchases.restore();
+      if (result.transactions.length > 0) {
+        await synchronizeAppleTransactions(result.transactions, true);
+      }
+      const { reconcileAppleBillingStatus } = await import('./lib/appleBilling');
+      await reconcileAppleBillingStatus();
+      await refreshAppleMembership();
+      if (result.transactions.length > 0) {
+        setAppleBillingStatus(result.unverifiedCount > 0 ? 'error' : 'success');
+        setAppleBillingMessage(
+          result.unverifiedCount > 0
+            ? 'Unverified purchase ignored.'
+            : 'Purchases restored.',
+        );
+      } else {
+        setAppleBillingStatus(result.unverifiedCount > 0 ? 'error' : 'idle');
+        setAppleBillingMessage(
+          result.unverifiedCount > 0
+            ? 'Unverified transaction ignored.'
+            : 'No purchases found.',
+        );
+      }
+    } catch (error) {
+      setAppleBillingStatus('error');
+      setAppleBillingMessage(error instanceof Error ? error.message : 'Restore failed.');
+    } finally {
+      setAppleBillingAction(null);
+    }
+  }, [appleBillingServerReady, appleStoreAvailable, refreshAppleMembership, requireAccountProfile, synchronizeAppleTransactions]);
+
+  const manageAppleSubscription = useCallback(async () => {
+    if (appleStoreAvailable !== true) {
+      setAppleBillingStatus('error');
+      setAppleBillingMessage('Manage in the iOS app.');
+      return;
+    }
+    setAppleBillingStatus('loading');
+    setAppleBillingAction('manage');
+    setAppleBillingMessage(null);
+    try {
+      const nativeInAppPurchases = await loadNativeInAppPurchases();
+      await nativeInAppPurchases.manageSubscriptions();
+      setAppleBillingStatus('idle');
+      setAppleBillingMessage('Subscriptions opened.');
+    } catch (error) {
+      setAppleBillingStatus('error');
+      setAppleBillingMessage(error instanceof Error ? error.message : 'Management failed.');
+    } finally {
+      setAppleBillingAction(null);
+    }
+  }, [appleStoreAvailable]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadNativeInAppPurchases()
+      .then((client) => {
+        if (!cancelled) setAppleStoreAvailable(client.isAvailable());
+      })
+      .catch(() => {
+        if (!cancelled) setAppleStoreAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authUser) {
+      setAppleBillingServerReady(null);
+      return;
+    }
+    let cancelled = false;
+    setAppleBillingServerReady(null);
+    void import('./lib/appleBilling')
+      .then(({ appleBillingServerIsReady }) => appleBillingServerIsReady())
+      .then((ready) => {
+        if (!cancelled) setAppleBillingServerReady(ready);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser?.id]);
+
+  useEffect(() => {
+    if (appleStoreAvailable !== true) return;
+    let cancelled = false;
+    setAppleBillingStatus('loading');
+    setAppleBillingAction('products');
+    void loadNativeInAppPurchases()
+      .then((client) => client.getProducts())
+      .then((result) => {
+        if (cancelled) return;
+        setAppleProducts([...result.products]);
+        if (result.missingProductIds.length > 0) {
+          setAppleBillingStatus('error');
+          setAppleBillingMessage('Plans unavailable.');
+        } else {
+          setAppleBillingStatus('idle');
+          setAppleBillingMessage(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setAppleProducts([]);
+        setAppleBillingStatus('error');
+        setAppleBillingMessage(error instanceof Error ? error.message : 'App Store unavailable.');
+      })
+      .finally(() => {
+        if (!cancelled) setAppleBillingAction(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [appleStoreAvailable]);
 
   const prepareNoBikeDemoTest = useCallback(() => {
     if (!adminProfileActive) {
@@ -10820,12 +11185,16 @@ export default function App() {
     const status = await bootstrapNativeBluetooth();
     setNativeBluetoothStatus(status);
   };
+  const serverWattbikeCapacityMessage = wattbikeCapacityStatusMessage(serverWattbikeCapacity);
   const connectionLabel = (() => {
     if (demoMode) {
       return 'Demo race source online';
     }
 
     if (bikeConnectionSource === 'bluetooth') {
+      if (serverWattbikeCapacity && serverAuthorizedWattbikeConnectionLimit === 0) {
+        return 'Account Wattbike capacity in use';
+      }
       if (nativeBluetoothFailed) {
         return 'Native Bluetooth could not start';
       }
@@ -10883,6 +11252,12 @@ export default function App() {
     }
 
     if (bikeConnectionSource === 'bluetooth') {
+      if (serverWattbikeCapacityMessage && (
+        serverWattbikeCapacity?.action === 'disconnect-excess'
+        || serverAuthorizedWattbikeConnectionLimit === 0
+      )) {
+        return serverWattbikeCapacityMessage;
+      }
       if (nativeBluetoothFailed) {
         return nativeBluetoothFailureMessage;
       }
@@ -10891,9 +11266,12 @@ export default function App() {
         return bluetooth.status;
       }
 
-      return activePlayers.length > 0
+      const bluetoothConnectionStatus = activePlayers.length > 0
         ? `${activePlayers.length} live Bluetooth bike${activePlayers.length === 1 ? '' : 's'} connected.`
         : bluetooth.status;
+      return serverWattbikeCapacityMessage
+        ? `${bluetoothConnectionStatus} ${serverWattbikeCapacityMessage}`
+        : bluetoothConnectionStatus;
     }
 
     const bridgeControlStatus = bridge.controlStatus ? ` ${bridge.controlStatus}` : '';
@@ -10907,17 +11285,19 @@ export default function App() {
   const bridgeBusy = bridge.sourceState === 'starting' || bridge.sourceState === 'stopping';
   const bridgeRunning = bridge.sourceState === 'running';
   const showLiveBikeUpgrade = () => {
-    setCheckoutMessage(selectedClubTrainingMembershipActive && !authenticatedRacerAccess
+    setAppleBillingMessage(selectedClubTrainingMembershipActive && !authenticatedRacerAccess
       ? clubBikeAccessUnavailableMessage
-      : 'Upgrade to Racer to connect personal Wattbikes.');
-    setCheckoutStatus('idle');
+      : 'Subscribe in the iPhone or iPad app.');
+    setAppleBillingStatus('idle');
+    setAppleBillingAction(null);
     if (!selectedClubTrainingMembershipActive) {
       setShowMembershipLanding(true);
     }
   };
   const showAdvancedConnectorUpgrade = () => {
-    setCheckoutMessage(advancedConnectorMembershipMessage);
-    setCheckoutStatus('idle');
+    setAppleBillingMessage(advancedConnectorMembershipMessage);
+    setAppleBillingStatus('idle');
+    setAppleBillingAction(null);
     setShowMembershipLanding(true);
   };
   const advancedConnectorAccessLocked = !authenticatedRacerAccess || clubMonitorReleasesLocalBikes;
@@ -10980,6 +11360,8 @@ export default function App() {
       ? 'Start Advanced Connector, put each Wattbike in Just Ride at resistance level 1, then pedal for Bluetooth/ANT+/USB discovery.'
       : nativeBluetoothFailed
         ? nativeBluetoothFailureMessage
+        : serverWattbikeCapacityMessage && serverAuthorizedWattbikeConnectionLimit === 0
+          ? serverWattbikeCapacityMessage
         : bluetooth.supported
         ? 'Press Pair Wattbike to authorize a bike. Riders appear only after TrackLab establishes the connection.'
         : bluetooth.status;
@@ -10990,6 +11372,7 @@ export default function App() {
       ? 'Free spectator'
       : 'Visitor';
   const connectedBikeDisplayCount = demoMode ? demoBikeCount : activePlayers.length;
+  const displayedBikeCapacity = demoMode ? demoBikeCount : liveBikeSeatLimit;
   const workflowConnectionReady = demoMode || activePlayers.length > 0;
   const workflowRaceEntryReady = demoMode || racePlayers.length > 0;
   const sessionTrackAvailable = raceWorkspaceMode !== 'straight-sprint' || selectedTrack.countryCode === 'CUSTOM';
@@ -11250,6 +11633,14 @@ export default function App() {
       />
     </Suspense>
   ) : null;
+  const appleBillingCoordinator = !clubTabletKioskMode ? (
+    <Suspense fallback={null}>
+      <AppleBillingCoordinator
+        accountId={authUser?.id ?? null}
+        onUserRefresh={applyAppleBillingAuthUser}
+      />
+    </Suspense>
+  ) : null;
   if (!clubTabletKioskMode && (showMembershipLanding || !accountProfileComplete)) {
     return (
       <>
@@ -11257,12 +11648,17 @@ export default function App() {
         {heartRateStudioInviteDialog}
         {heartRateAccountBlockCoordinator}
         {watchConnectCoordinator}
+        {appleBillingCoordinator}
         <Suspense fallback={lazyLoadingFallback}>
           <MembershipLanding
           membership={membership}
-          bikeSeats={checkoutBikeSeats}
-          checkoutStatus={checkoutStatus}
-          checkoutMessage={checkoutMessage}
+          bikeSeats={appleConnectionCount}
+          appleStoreAvailable={appleStoreAvailable}
+          appleBillingServerReady={appleBillingServerReady}
+          appleProducts={appleProducts}
+          billingStatus={appleBillingStatus}
+          billingAction={appleBillingAction}
+          billingMessage={appleBillingMessage}
           authMode={authMode}
           authLoading={authStatus === 'loading'}
           profileName={profileNameDraft}
@@ -11296,8 +11692,10 @@ export default function App() {
           onJoinFree={openFreeSpectatorAccess}
           onEnterApp={openRaceDashboard}
           onStartDemo={startBenchmarkDemo}
-          onBikeSeatsChange={handleCheckoutBikeSeatsChange}
-            onCheckout={startSquareCheckout}
+          onBikeSeatsChange={handleAppleConnectionCountChange}
+          onPurchase={() => { void purchaseAppleSubscription(); }}
+          onRestorePurchases={() => { void restoreAppleSubscriptions(); }}
+          onManageSubscription={() => { void manageAppleSubscription(); }}
           />
         </Suspense>
       </>
@@ -11353,6 +11751,7 @@ export default function App() {
       {heartRateStudioInviteDialog}
       {heartRateAccountBlockCoordinator}
       {watchConnectCoordinator}
+      {appleBillingCoordinator}
       {clubTabletKioskMode && demoMode && appMode !== 'club-tablet' && (
         <div className="club-tablet-demo-banner" role="status" aria-label="Club Tablet demo mode active">
           <Activity size={22} />
@@ -11478,7 +11877,7 @@ export default function App() {
             <span className={`connection-dot ${connectionState}`} />
             <div>
               <strong>{connectionLabel}</strong>
-              <span>{connectedBikeDisplayCount} / {Math.max(1, liveBikeSeatLimit)} bikes connected</span>
+              <span>{connectedBikeDisplayCount} / {displayedBikeCapacity} bikes connected</span>
             </div>
           </div>
           <p>{connectionStatus}</p>
@@ -12098,7 +12497,7 @@ export default function App() {
           emptyMessage={pairingEmptyMessage}
           deviceLabel={demoMode ? 'Demo device' : pairingDeviceLabel}
           readOnly={demoMode}
-          maxPlayers={Math.max(1, liveBikeSeatLimit)}
+          maxPlayers={demoMode ? maxPlayers : Math.max(1, liveBikeSeatLimit)}
           demoRiderCount={demoMode ? demoBikeCount : undefined}
           onDemoRiderCountChange={demoMode ? handleDemoBikeCountChange : undefined}
         />}
@@ -12931,6 +13330,8 @@ export default function App() {
                   onRespondToGroupInvite={multiplayer.respondToGroupInvite}
                   onChatDraftChange={setChatDraft}
                   onChatSend={sendChatMessage}
+                  onReportRoomMember={multiplayer.reportRoomMember}
+                  onBlockRoomMember={multiplayer.blockRoomMember}
                   trackVoteCandidates={multiplayerVoteCandidates}
                   voiceEnabled={roomVoice.enabled}
                   voiceSupported={roomVoice.supported}

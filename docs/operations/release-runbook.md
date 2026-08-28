@@ -4,6 +4,11 @@ This runbook is the release contract for the TrackLab cloud service. A release
 is eligible for production only after every required gate below passes and the
 operator records the evidence with the release commit.
 
+For releases that include Friends, room chat, or live audio, complete the
+[`community safety and moderation`](./community-safety.md) verification before
+submission and confirm an administrator is assigned to the 24-hour report
+queue.
+
 ## Release Owners
 
 Assign one person to each role before the release:
@@ -36,10 +41,23 @@ Render must use Node.js 22 or newer and contain these server-side values:
 | `TRACKLAB_PUSH_TOKEN_PREVIOUS_ENCRYPTION_KEYS` | Optional JSON map of at most four prior versions to 32-byte standard-base64 keys during staged rotation. |
 | `VITE_GOOGLE_MAPS_API_KEY` | Browser-restricted Google Maps JavaScript API key. |
 | `OPENAI_API_KEY` | Optional server-only key for source-backed track research, pre-race reports, natural race wording, and speech. Without it, TrackLab uses verified catalog facts and the browser voice fallback. |
-| `SQUARE_ENVIRONMENT` | `sandbox` during billing acceptance; `production` only after approval. |
-| `SQUARE_ACCESS_TOKEN` | Server-only Square credential. Never use a `VITE_` prefix. |
-| `SQUARE_LOCATION_ID` | Square location that owns the subscriptions. |
-| `SQUARE_RACER_PLAN_VARIATION_ID` | One $9.99 monthly per-Wattbike-seat plan variation. The legacy `SQUARE_RACER_PLAN_VARIATION_1_BIKE` key is accepted during migration. |
+| `TRACKLAB_APPLE_IAP_ENABLED` | Set to `1` only after all Apple products, server credentials, and notification URLs are configured. Startup fails closed if an enabled configuration is incomplete. |
+| `TRACKLAB_APPLE_ONLY_CUTOVER` | Keep `0` through staging and migration. Set to `1` only after production StoreKit lifecycle tests pass and legacy Square renewals/paid obligations are resolved. |
+| `TRACKLAB_APPLE_BUNDLE_ID` / `TRACKLAB_APPLE_APP_ID` | `com.preskilranch.tracklabbmx` and its numeric App Store Connect Apple ID. |
+| `TRACKLAB_APPLE_SUBSCRIPTION_GROUP_ID` | Numeric identifier of the single Wattbike Connections subscription group. All four plans must be in this group. |
+| `TRACKLAB_APPLE_ISSUER_ID` / `TRACKLAB_APPLE_KEY_ID` | App Store Connect In-App Purchase API key identifiers. |
+| `TRACKLAB_APPLE_PRIVATE_KEY` | Server-only App Store Connect `.p8` private key as PEM, escaped-newline PEM, or base64 PEM. Never use a `VITE_` prefix. |
+| `TRACKLAB_APPLE_SANDBOX_ACCOUNT_TOKENS` | Comma-separated TrackLab UUIDs for designated TestFlight/App Review accounts only; never authorize arbitrary production users with sandbox purchases. |
+
+`GET /api/health` reports Apple billing under `billing`. A configured pre-cutover
+deployment must report `provider: "apple-app-store"`, `enabled: true`,
+`configured: true`, and `ready: true`. After the final switch it must additionally
+report `billing.appleOnlyCutover: true` and
+`requirements.appleOnlyCutover: true`.
+
+Before submission, App Store Connect App Privacy must disclose linked,
+non-tracking Purchase History and User ID data used to verify Wattbike
+subscriptions. Those answers must match `ios/App/App/PrivacyInfo.xcprivacy`.
 
 Keep `TRACKLAB_LOG_HTTP=0` during normal operation. Enable it only for a short
 diagnostic window. Restrict Google Maps HTTP referrers to the production and
@@ -102,6 +120,7 @@ returns `200` with `"storage":"postgres"`.
 TRACKLAB_SMOKE_URL=https://staging.example.com \
 TRACKLAB_EXPECT_POSTGRES=1 \
 TRACKLAB_EXPECT_APNS=1 \
+TRACKLAB_EXPECT_APPLE_IAP=1 \
 npm run smoke:deployment
 
 TRACKLAB_SMOKE_URL=https://staging.example.com \
@@ -112,14 +131,22 @@ npm run probe:load
 ```
 
 5. Complete one spectator login, one administrator login, one saved-map read,
-   one demo race, one private-room join, and one Square sandbox checkout.
+   one demo race, one private-room join, and one StoreKit sandbox purchase and
+   restore on a signed iOS build.
 6. For bike or race-engine changes, complete the relevant rows in
    [`hardware-acceptance.md`](./hardware-acceptance.md).
 7. Deploy the same commit to production.
-8. Repeat the production smoke test with `TRACKLAB_EXPECT_POSTGRES=1` and
-   `TRACKLAB_EXPECT_APNS=1`.
+8. Repeat the production smoke test with `TRACKLAB_EXPECT_POSTGRES=1`,
+   `TRACKLAB_EXPECT_APNS=1`, and `TRACKLAB_EXPECT_APPLE_IAP=1`.
 9. Watch error ratio, p95 latency, persistence failures, WebSocket clients, and
    process restarts for at least 15 minutes.
+
+After completing the documented Square customer transition and setting
+`TRACKLAB_APPLE_ONLY_CUTOVER=1`, rerun the production smoke with both
+`TRACKLAB_EXPECT_APPLE_IAP=1` and
+`TRACKLAB_EXPECT_APPLE_ONLY_CUTOVER=1`. The cutover is not complete until that
+gate passes. Use the matching opt-in inputs when running the manual GitHub
+Actions workflow.
 
 The manual GitHub Actions workflow `Deployment smoke` can execute the smoke
 and optional load probe against staging or production. It supplements, but does
@@ -134,6 +161,8 @@ Proceed only when all of these are true:
 - bounded load p95 is at or below the release budget with zero failed requests;
 - migration logs show no checksum, lock, or query failure;
 - authentication boundaries and administrator access behave as expected;
+- Apple billing health matches the release phase (configured before cutover,
+  Apple-only after the final switch);
 - the current hardware acceptance scope has passed;
 - the incident owner has a tested rollback target and database recovery path.
 
@@ -146,6 +175,13 @@ gate to meet a release date.
 Use the previous healthy Render deploy when the database schema remains
 backward compatible:
 
+After the first Apple subscription is reconciled, the rollback target must be
+an Apple-IAP-capable commit that reads verified entitlements. Apple-managed
+accounts keep the legacy `membership_tier` and `bike_seats` columns
+fail-closed, so a pre-IAP build cannot grant perpetual access but would remove
+paid Wattbike access. Record the minimum safe rollback commit before enabling
+Apple purchases.
+
 1. Stop new billing or race starts if the incident can corrupt data.
 2. Record the failing commit, request IDs, timestamps, and migration version.
 3. Roll back the Render service to the previous healthy commit.
@@ -156,6 +192,30 @@ Migrations are forward-only. Do not delete rows from
 `tracklab.schema_migrations`, modify migration checksums, or manually undo DDL
 on the live database. If the new schema or application writes damaged data,
 restore to an isolated database first and follow the recovery procedure.
+
+## Square Credential Retirement
+
+Removing TrackLab's Square checkout code does not cancel subscriptions or
+disable a leaked credential. Before the final Apple-only cutover:
+
+1. Export the customer/subscription reconciliation evidence required for
+   support, accounting, refunds, and already-paid service obligations.
+2. Cancel every TrackLab Square renewal and confirm no customer remains in a
+   recurring billing state.
+3. Confirm the Square application credential is not shared with another
+   service or business workflow.
+4. Remove `SQUARE_ENVIRONMENT`, `SQUARE_VERSION`, `SQUARE_ACCESS_TOKEN`,
+   `SQUARE_LOCATION_ID`, and every `SQUARE_RACER_PLAN_VARIATION_*` value from
+   Render and any CI secret stores.
+5. Revoke the TrackLab Square access token in the Square Developer Dashboard.
+   Record the revocation time and operator in the release evidence.
+6. Redeploy, run the Apple-only deployment smoke gate, and verify historical
+   billing records remain available only through the intended support/audit
+   paths.
+
+Do not delete historical Square database records as part of credential
+retirement. Follow [`apple-iap.md`](../mobile/apple-iap.md#square-cutover) for
+the customer-access sequence.
 
 ## Failed Migration Recovery
 

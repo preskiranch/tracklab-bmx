@@ -13,10 +13,9 @@ const config: CapacitorConfig = {
     preferredContentMode: 'mobile',
     scrollEnabled: true,
   },
-  server: {
-    cleartext: false,
-    url: 'https://tracklab-bmx.onrender.com',
-  },
+  // Release builds intentionally load the audited `dist` bundle packaged in
+  // the application. TrackLab cloud requests are routed explicitly by the
+  // service transport; never restore a remote `server.url` here.
   plugins: {
     PushNotifications: {
       // Foreground remote alerts make one sound; TrackLab renders the visible,
