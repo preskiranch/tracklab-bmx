@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   claimWattbikeConnectionLease,
+  createAuthSession,
   createAuthUser,
+  enrollClubTabletDevice,
   enforceWattbikeConnectionCapacity,
+  ensureClub,
   findEffectiveWattbikeBillingOwnerById,
   loadWattbikeConnectionLeases,
   persistenceEnabled,
+  recoverClubTabletDevice,
   releaseWattbikeConnectionLease,
   releaseWattbikeConnectionLeaseForHolder,
   saveAppleSubscriptionReconciliation,
@@ -152,6 +156,103 @@ describe('account-wide Wattbike connection capacity', () => {
       expect.objectContaining({
         holderId: sessionHolder,
         ...clubAssignment,
+      }),
+    ]);
+  });
+
+  it('clears a remote athlete lease during recovery but rebinds the exact picker lease', async () => {
+    const suffix = `${Date.now()}-${Math.random()}`;
+    const ownerUserId = `recovery-owner-${suffix}`;
+    const ownerProfileKey = `user:${ownerUserId}`;
+    const clubId = `recovery-club-${suffix}`;
+    const deviceId = `recovery-device-${suffix}`;
+    const allocationKey = `club-tablet:${deviceId}`;
+    const originalDeviceHash = `original-device-hash-${suffix}`;
+    const recoveredDeviceHash = `recovered-device-hash-${suffix}`;
+    const finalDeviceHash = `final-device-hash-${suffix}`;
+    const firstAuthHash = `first-auth-hash-${suffix}`;
+    const recoveryAuthHash = `recovery-auth-hash-${suffix}`;
+    const secondRecoveryAuthHash = `second-recovery-auth-hash-${suffix}`;
+    const now = Date.now();
+
+    await ensureClub(ownerProfileKey, 'Recovery Capacity Club', clubId);
+    await createAuthSession({
+      id: `first-auth-session-${suffix}`,
+      userId: ownerUserId,
+      tokenHash: firstAuthHash,
+      expiresAt: new Date(now + 60_000).toISOString(),
+    });
+    await expect(enrollClubTabletDevice({
+      id: deviceId,
+      ownerProfileKey,
+      ownerUserId,
+      name: 'Recovery Capacity Tablet',
+      tokenHash: originalDeviceHash,
+      authSessionTokenHash: firstAuthHash,
+    })).resolves.toBeTruthy();
+
+    // This lease represents an athlete session owned by another server
+    // instance, so the recovery-serving process has no local session to stop.
+    await expect(claimWattbikeConnectionLease(leaseInput({
+      billingOwnerUserId: ownerUserId,
+      allocationKey,
+      allocationKind: 'club-tablet',
+      holderInstanceId: 'remote-instance-aaaaaaaa',
+      holderId: `remote-athlete-session-${suffix}`,
+      clubId,
+      studioRiderId: `remote-rider-${suffix}`,
+      bikeDeviceId: `remote-bike-${suffix}`,
+      protectExistingHolder: true,
+      now,
+      expiresAt: now + 60_000,
+    }))).resolves.toMatchObject({ status: 'granted', grantedSeats: 1 });
+
+    await createAuthSession({
+      id: `recovery-auth-session-${suffix}`,
+      userId: ownerUserId,
+      tokenHash: recoveryAuthHash,
+      expiresAt: new Date(now + 60_000).toISOString(),
+    });
+    await expect(recoverClubTabletDevice({
+      deviceId,
+      ownerProfileKey,
+      ownerUserId,
+      tokenHash: recoveredDeviceHash,
+      authSessionTokenHash: recoveryAuthHash,
+    })).resolves.toMatchObject({ status: 'recovered', previousTokenHash: originalDeviceHash });
+    await expect(loadWattbikeConnectionLeases(ownerUserId, now + 1)).resolves.toEqual([]);
+
+    // A picker lease belongs to the device credential itself and therefore
+    // survives a later rotation with only its holder hash replaced.
+    await expect(claimWattbikeConnectionLease(leaseInput({
+      billingOwnerUserId: ownerUserId,
+      allocationKey,
+      allocationKind: 'club-tablet',
+      holderInstanceId: 'remote-picker-instance',
+      holderId: recoveredDeviceHash,
+      protectExistingHolder: true,
+      now: now + 2,
+      expiresAt: now + 60_002,
+    }))).resolves.toMatchObject({ status: 'granted', grantedSeats: 1 });
+    await createAuthSession({
+      id: `second-recovery-auth-session-${suffix}`,
+      userId: ownerUserId,
+      tokenHash: secondRecoveryAuthHash,
+      expiresAt: new Date(now + 60_000).toISOString(),
+    });
+    await expect(recoverClubTabletDevice({
+      deviceId,
+      ownerProfileKey,
+      ownerUserId,
+      tokenHash: finalDeviceHash,
+      authSessionTokenHash: secondRecoveryAuthHash,
+    })).resolves.toMatchObject({ status: 'recovered', previousTokenHash: recoveredDeviceHash });
+    await expect(loadWattbikeConnectionLeases(ownerUserId, now + 3)).resolves.toEqual([
+      expect.objectContaining({
+        allocationKey,
+        holderId: finalDeviceHash,
+        holderInstanceId: 'remote-picker-instance',
+        seatCount: 1,
       }),
     ]);
   });

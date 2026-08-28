@@ -38,7 +38,12 @@
 .club-tablet-device-manager { display: grid; max-width: 920px; gap: 16px; margin: 22px auto 0; padding: 22px; border: 1px solid #d1dbcd; border-radius: 19px; background: rgba(255, 255, 255, 0.96); box-shadow: 0 15px 42px rgba(39, 57, 35, 0.08); }
 .club-tablet-device-manager h3 { margin: 4px 0 5px; font-size: 20px; }
 .club-tablet-device-list { display: grid; gap: 9px; }
+.club-tablet-device-group-title { margin: 7px 2px 0; color: #5d6b59; font-size: 12px; font-weight: 950; letter-spacing: 0.08em; text-transform: uppercase; }
 .club-tablet-device-list article { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px; border: 1px solid #dde4da; border-radius: 13px; background: #f8faf7; }
+.club-tablet-device-list article.recovery-complete { border-color: #c9d9c2; background: #f3f8f0; }
+.club-tablet-completed-devices { margin-top: 4px; border-top: 1px solid #dce4d8; padding-top: 10px; }
+.club-tablet-completed-devices > summary { cursor: pointer; color: #4f614a; font-size: 13px; font-weight: 900; }
+.club-tablet-completed-devices > div { display: grid; gap: 9px; margin-top: 10px; }
 .club-tablet-device-list article > svg { color: #4cad21; }
 .club-tablet-device-list strong,
 .club-tablet-device-list small { display: block; }
@@ -46,6 +51,7 @@
 .club-tablet-device-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .club-tablet-device-list button { display: inline-flex; min-height: 38px; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid #efb0a8; border-radius: 9px; background: #fff; color: #a52d20; font-weight: 850; }
 .club-tablet-device-list button.restore { border-color: #9fca8d; color: #286b16; }
+.club-tablet-recovery-badge { display: inline-flex; min-height: 32px; align-items: center; padding: 0 10px; border-radius: 999px; background: #e3f3dc; color: #2b6819; font-size: 12px; font-weight: 900; }
 .club-tablet-setup-card label { display: grid; gap: 7px; font-weight: 850; }
 .club-tablet-setup-card input,
 .club-tablet-search { min-height: 48px; border: 1px solid #c6d0c1; border-radius: 12px; background: #fff; }
@@ -118,6 +124,10 @@
 .club-tablet-demo-bike small { display: block; }
 .club-tablet-demo-bike small { margin-top: 3px; color: #527149; }
 .club-tablet-bike-actions { display: grid; gap: 10px; padding: 17px; border: 1px dashed #abb7a5; border-radius: 14px; background: #f5f8f3; }
+.club-tablet-remembered-bike { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; padding: 11px; border: 1px solid #b9d4ad; border-radius: 11px; background: #ebf6e6; color: #286617; }
+.club-tablet-remembered-bike strong,
+.club-tablet-remembered-bike small { display: block; }
+.club-tablet-remembered-bike small { margin-top: 2px; color: #597152; }
 .club-tablet-bike-actions button { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; gap: 8px; border: 1px solid #bbc6b6; border-radius: 10px; background: #fff; font-weight: 850; }
 .club-tablet-start { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 18px; padding: 14px 16px; border-radius: 16px; background: #142019; color: #dce8d7; }
 .club-tablet-start > span { display: inline-flex; align-items: center; gap: 8px; }

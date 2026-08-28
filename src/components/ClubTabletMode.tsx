@@ -132,6 +132,22 @@ export function clubTabletBikeAccessReady(
   return deviceStatus === 'active' && accessReady;
 }
 
+/**
+ * A successful recovery rotates the selected row's bearer and consumes the
+ * owner's authorizing session. Keep that row out of this installation's
+ * restore picker even if an already-running list request returns afterward.
+ */
+export function clubTabletRestoreCandidates(
+  devices: readonly ClubTabletDevice[],
+  consumedDeviceIds: ReadonlySet<string>,
+) {
+  return devices.filter((device) => (
+    device.recoveryState === 'pending'
+    && !device.recoveryCompleted
+    && !consumedDeviceIds.has(device.id)
+  ));
+}
+
 export function clubTabletWatchStatusRequestIsCurrent(requestKey: string, currentKey: string) {
   return Boolean(requestKey) && requestKey === currentKey;
 }
@@ -237,6 +253,7 @@ export default function ClubTabletMode({
   const [managedDevices, setManagedDevices] = useState<ClubTabletDevice[]>([]);
   const [deviceManagementBusy, setDeviceManagementBusy] = useState(false);
   const [recoveringDeviceId, setRecoveringDeviceId] = useState('');
+  const consumedRestoreDeviceIdsRef = useRef(new Set<string>());
   const [message, setMessage] = useState<string | null>(null);
   const [watchStatus, setWatchStatus] = useState<ClubTabletWatchConnectStatus | null>(null);
   const [watchClock, setWatchClock] = useState(Date.now());
@@ -244,6 +261,14 @@ export default function ClubTabletMode({
   const clubEventSnapshotRef = useRef<ClubEventSnapshot | null>(null);
   const bikeAccessReady = clubTabletBikeAccessReady(deviceStatus, accessReady);
   const nativeBluetoothFailed = nativeBluetoothStatus.state === 'failed';
+  const rememberedBike = roster?.device.pairedBike ?? deviceCredential?.device.pairedBike ?? null;
+  const restoreCandidates = clubTabletRestoreCandidates(
+    managedDevices,
+    consumedRestoreDeviceIdsRef.current,
+  );
+  const completedRecoveryDevices = managedDevices.filter((device) => (
+    !restoreCandidates.some((candidate) => candidate.id === device.id)
+  ));
 
   const activeSession = sessionCredential && sessionCredential.session.expiresAt > Date.now()
     ? sessionCredential
@@ -354,11 +379,16 @@ export default function ClubTabletMode({
     try {
       await onBeforeAuthorize?.();
       const credential = await recoverClubTabletDevice(device.id);
-      await import('./NativeNotificationsCoordinator')
+      // The server has now consumed the owner session and the replacement
+      // credential is already durable. Commit kiosk identity immediately so
+      // roster verification uses that exact bearer; native notification
+      // cleanup is best-effort and must never hold this transition open.
+      consumedRestoreDeviceIdsRef.current.add(device.id);
+      setManagedDevices((current) => [...current]);
+      onDeviceChange(credential);
+      void import('./NativeNotificationsCoordinator')
         .then(({ clearNativePushAccountBoundary }) => clearNativePushAccountBoundary())
         .catch(() => undefined);
-      onDeviceChange(credential);
-      setMessage(`${device.name} restored on this iPad. Verifying authorization…`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not restore this tablet.');
     } finally {
@@ -366,6 +396,10 @@ export default function ClubTabletMode({
       setDeviceManagementBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (deviceStatus === 'active') setMessage(null);
+  }, [deviceStatus]);
 
   const refreshRoster = async (credential = deviceCredential) => {
     if (!credential) return;
@@ -767,7 +801,10 @@ export default function ClubTabletMode({
               <p>Updated or reinstalled this iPad? Restore its existing authorization here. Revoke only a lost, sold, or retired tablet.</p>
             </div>
             <div className="club-tablet-device-list">
-              {managedDevices.map((device) => (
+              {restoreCandidates.length > 0 && (
+                <p className="club-tablet-device-group-title">Needs restoration on this iPad</p>
+              )}
+              {restoreCandidates.map((device) => (
                 <article key={device.id}>
                   <TabletSmartphone size={23} />
                   <span>
@@ -796,6 +833,38 @@ export default function ClubTabletMode({
                   </div>
                 </article>
               ))}
+              {completedRecoveryDevices.length > 0 && (
+                <details className="club-tablet-completed-devices">
+                  <summary>Manage already restored tablets ({completedRecoveryDevices.length})</summary>
+                  <div>
+                    {completedRecoveryDevices.map((device) => (
+                      <article className="recovery-complete" key={device.id}>
+                        <TabletSmartphone size={23} />
+                        <span>
+                          <strong>{device.name}</strong>
+                          <small>{device.recoveryState === 'restored'
+                            ? 'Restored authorization is active'
+                            : 'Authorization is already complete'}</small>
+                          {device.pairedBike && (
+                            <small>Saved Wattbike: {bikeLabel(device.pairedBike)}</small>
+                          )}
+                        </span>
+                        <div className="club-tablet-device-actions">
+                          <span className="club-tablet-recovery-badge">No restore needed</span>
+                          <button
+                            type="button"
+                            disabled={deviceManagementBusy}
+                            onClick={() => void revokeDevice(device)}
+                            aria-label={`Revoke ${device.name}`}
+                          >
+                            <Trash2 size={17} /> Revoke
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </details>
+              )}
               {!deviceManagementBusy && managedDevices.length === 0 && <p>No authorized tablets yet.</p>}
               {deviceManagementBusy && <p>Loading authorized tablets…</p>}
             </div>
@@ -902,7 +971,11 @@ export default function ClubTabletMode({
           <div>
             <span className="eyebrow"><CheckCircle2 size={15} /> Athlete session active</span>
             <h2>{athleteName}</h2>
-            <p>{activeSession.session.clubName} · {bikeLabel({ deviceId: activeSession.session.bikeDeviceId, label: bikes.find((bike) => bike.deviceId === activeSession.session.bikeDeviceId)?.label ?? 'Wattbike' })}</p>
+            <p>{activeSession.session.clubName} · {bikeLabel({
+              deviceId: activeSession.session.bikeDeviceId,
+              label: bikes.find((bike) => bike.deviceId === activeSession.session.bikeDeviceId)?.label
+                ?? (rememberedBike?.deviceId === activeSession.session.bikeDeviceId ? rememberedBike.label : 'Wattbike'),
+            })}</p>
             <small><Clock3 size={13} /> Secure session renews automatically · about {expiresInMinutes} min remaining</small>
             <StudioWatchConnectStatus athleteName={athleteName} state={activeWatchState} />
             {activeWatchState.phase === 'connected'
@@ -1063,12 +1136,23 @@ export default function ClubTabletMode({
           </div>
           {!demoActive && bikes.length === 0 && (
             <div className="club-tablet-bike-actions">
+              {rememberedBike && (
+                <div className="club-tablet-remembered-bike" role="status">
+                  <Bluetooth size={20} />
+                  <span>
+                    <strong>{bikeLabel(rememberedBike)}</strong>
+                    <small>Saved to this tablet · waiting for Bluetooth reconnect</small>
+                  </span>
+                </div>
+              )}
               <p>{bluetoothSupported
-                ? 'No Wattbike is connected to this tablet yet.'
+                ? rememberedBike
+                  ? 'TrackLab remembers this Wattbike and is waiting for its live Bluetooth connection.'
+                  : 'No Wattbike is connected to this tablet yet.'
                 : nativeBluetoothFailed
                   ? 'Native Bluetooth could not start. Close and reopen the TrackLab app. If it continues, install the latest app build.'
                   : 'Bluetooth is unavailable in this browser. Use the TrackLab iPad app.'}</p>
-              {bluetoothSupported && bikeAccessReady && authorizedBikeCount > 0 && (
+              {bluetoothSupported && bikeAccessReady && (authorizedBikeCount > 0 || rememberedBike) && (
                 <button type="button" disabled={bluetoothBusy} onClick={() => void reconnectSavedBike()}>
                   <RefreshCw size={17} /> Reconnect saved Wattbike
                 </button>

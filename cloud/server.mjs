@@ -5960,11 +5960,30 @@ function publicClubTabletConnectedBike(presence) {
   } : null;
 }
 
+function publicClubTabletPairedBike(device) {
+  return device
+    && Number.isSafeInteger(device.pairedBikeDeviceId)
+    && device.pairedBikeDeviceId > 0
+    && typeof device.pairedBikeLabel === 'string'
+    && device.pairedBikeLabel
+    && Number.isFinite(device.pairedBikeUpdatedAt)
+    ? {
+      deviceId: device.pairedBikeDeviceId,
+      label: device.pairedBikeLabel,
+      updatedAt: device.pairedBikeUpdatedAt,
+    }
+    : null;
+}
+
 function publicClubTabletDevice(device, now = Date.now()) {
   if (!device) return null;
   const connectedBike = publicClubTabletConnectedBike(
     activeClubTabletBikePresence(device.id, now),
   );
+  const pairedBike = publicClubTabletPairedBike(device);
+  const recoveryState = ['complete', 'restored'].includes(device.recoveryState)
+    ? device.recoveryState
+    : 'pending';
   return {
     id: device.id,
     name: device.name,
@@ -5972,6 +5991,9 @@ function publicClubTabletDevice(device, now = Date.now()) {
     clubName: device.clubName,
     lastSeenAt: device.lastSeenAt ?? null,
     createdAt: device.createdAt,
+    recoveryState,
+    recoveryCompleted: recoveryState !== 'pending',
+    ...(pairedBike ? { pairedBike } : {}),
     ...(connectedBike ? { connectedBike } : {}),
   };
 }
@@ -17301,10 +17323,10 @@ async function serveStatic(request, response) {
       return;
     }
 
-    // Credential rotation is a kiosk identity boundary. Remove every
-    // process-local capability held by the previous credential before the new
-    // token is returned. Durable event participation and Wattbike leases were
-    // already removed in the same persistence transaction as the rotation.
+    // Recovery rotates the bearer for this same logical tablet. Preserve its
+    // durable name, paired Wattbike, live bike presence, and picker allocation,
+    // but end transient athlete/event identity so an old installation cannot
+    // continue a rider session after its device credential is replaced.
     const activeSessionHash = clubTabletSessionTokenHashByDeviceId.get(deviceId);
     const activeSession = activeSessionHash
       ? clubTabletSessionsByTokenHash.get(activeSessionHash)
@@ -17317,7 +17339,6 @@ async function serveStatic(request, response) {
         });
       });
     }
-    clubTabletBikePresenceByDeviceId.delete(deviceId);
 
     // Match first enrollment exactly: this app installation is now a shared
     // kiosk, not an authenticated administrator device.
@@ -17576,6 +17597,25 @@ async function serveStatic(request, response) {
       writeJson(response, 400, { error: 'A valid connected Wattbike is required.' }, { 'Cache-Control': 'no-store' });
       return;
     }
+    const existingPairedBike = publicClubTabletPairedBike(device);
+    // Presence heartbeats arrive every few seconds. The durable pairing is an
+    // assignment, not a liveness signal, so write it only when the physical
+    // Wattbike identity changes; live presence still refreshes below.
+    const pairedDevice = existingPairedBike?.deviceId === bikeDeviceId
+      && existingPairedBike.label === bikeLabel
+      ? device
+      : await persistence.saveClubTabletPairedBike({
+        deviceId: device.id,
+        deviceTokenHash: device.tokenHash,
+        bikeDeviceId,
+        bikeLabel,
+      });
+    if (!pairedDevice) {
+      writeJson(response, 503, {
+        error: 'The paired Wattbike could not be saved. Try again before training.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
     const now = Date.now();
     const presence = {
       deviceId: device.id,
@@ -17588,6 +17628,7 @@ async function serveStatic(request, response) {
     clubTabletBikePresenceByDeviceId.set(device.id, presence);
     writeJson(response, 200, {
       connectedBike: publicClubTabletConnectedBike(presence),
+      pairedBike: publicClubTabletPairedBike(pairedDevice),
       heartbeatTtlMs: clubTabletBikePresenceTtlMs,
     }, { 'Cache-Control': 'no-store' });
     return;

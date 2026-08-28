@@ -7539,7 +7539,7 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
   await expect(monitor.getByText('Bike connected · PM 950', { exact: true })).toHaveCount(0);
 });
 
-test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode between sessions', async ({ page }) => {
+test('club owner restores a shared tablet into stable athlete-only kiosk mode', async ({ page }) => {
   test.setTimeout(120_000);
   const now = Date.now();
   const authUser = {
@@ -7561,6 +7561,25 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
     clubName: 'Preski Ranch LLC',
     createdAt: now,
     lastSeenAt: now,
+    recoveryState: 'pending',
+    recoveryCompleted: false,
+  };
+  const recoveredTabletDevice = {
+    ...tabletDevice,
+    recoveryState: 'restored',
+    recoveryCompleted: true,
+    pairedBike: {
+      deviceId: 58701,
+      label: 'WattbikePM25058701',
+      updatedAt: now,
+    },
+  };
+  const completedTabletDevice = {
+    ...tabletDevice,
+    id: 'tablet-bike-950',
+    name: 'Club tablet · Bike 950',
+    recoveryState: 'complete',
+    recoveryCompleted: true,
   };
   const athletes = [
     {
@@ -7705,13 +7724,13 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
     },
     commentaryUpdatedAt: 700,
   };
-  let enrollmentRequest: unknown = null;
+  let recoveryRequests = 0;
   let rosterAuthorization = '';
   let rosterRequests = 0;
   let logoutRequests = 0;
   let raceViewSaveCompletedAt = 0;
   let raceViewSaveRequests = 0;
-  let enrollmentStartedAt = 0;
+  let recoveryStartedAt = 0;
   let failNextRosterAuthorization = false;
   let sessionRequest: unknown = null;
   let sessionPosts = 0;
@@ -7900,8 +7919,6 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   });
   await page.route('**/api/club-tablet/devices', async (route) => {
     if (route.request().method() === 'POST') {
-      enrollmentStartedAt = Date.now();
-      enrollmentRequest = route.request().postDataJSON();
       await route.fulfill({
         status: 201,
         contentType: 'application/json',
@@ -7911,7 +7928,19 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
     }
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ devices: [tabletDevice] }),
+      body: JSON.stringify({ devices: [tabletDevice, completedTabletDevice] }),
+    });
+  });
+  await page.route('**/api/club-tablet/devices/*/recover', async (route) => {
+    recoveryRequests += 1;
+    recoveryStartedAt = Date.now();
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        device: recoveredTabletDevice,
+        deviceToken: 'rotated-tablet-device-token',
+      }),
     });
   });
   await page.route('**/api/club-tablet/roster', async (route) => {
@@ -7929,7 +7958,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
     }
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ device: tabletDevice, athletes, racePresentation }),
+      body: JSON.stringify({ device: recoveredTabletDevice, athletes, racePresentation }),
     });
   });
   await page.route('**/api/club-tablet/wattbike-capacity', async (route) => {
@@ -8027,22 +8056,28 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
     name: `Restore ${tabletDevice.name} on this iPad`,
     exact: true,
   })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Restore .* on this iPad/ })).toHaveCount(1);
+  await expect(page.getByText(completedTabletDevice.name, { exact: true })).toBeHidden();
+  await expect(page.getByText('Manage already restored tablets (1)', { exact: true })).toBeVisible();
 
-  await page.getByLabel('Tablet name').fill(tabletDevice.name);
-  // Count only the explicit pre-enrollment flush below. Any earlier account
+  // Count only the explicit pre-recovery flush below. Any earlier account
   // reconciliation must not be able to satisfy this ordering assertion.
   raceViewSaveRequests = 0;
   raceViewSaveCompletedAt = 0;
-  await page.getByRole('button', { name: 'Authorize this tablet', exact: true }).click();
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', {
+    name: `Restore ${tabletDevice.name} on this iPad`,
+    exact: true,
+  }).click();
   await expect(page.getByRole('heading', { name: 'Independent Training' })).toBeVisible();
-  expect(enrollmentRequest).toEqual({ name: tabletDevice.name });
+  expect(recoveryRequests).toBe(1);
   expect(raceViewSaveRequests).toBeGreaterThanOrEqual(1);
   expect(raceViewSaveCompletedAt).toBeGreaterThan(0);
-  expect(enrollmentStartedAt).toBeGreaterThanOrEqual(raceViewSaveCompletedAt);
+  expect(recoveryStartedAt).toBeGreaterThanOrEqual(raceViewSaveCompletedAt);
   await page.waitForTimeout(250);
   expect(rosterRequests).toBeGreaterThanOrEqual(1);
   expect(rosterRequests).toBeLessThanOrEqual(2);
-  expect(rosterAuthorization).toBe('Bearer tablet-device-token');
+  expect(rosterAuthorization).toBe('Bearer rotated-tablet-device-token');
   await expect.poll(() => logoutRequests).toBe(1);
   await page.waitForTimeout(250);
   expect(logoutRequests).toBe(1);
@@ -8339,7 +8374,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
       window.localStorage.getItem('tracklab.bluetooth-bike-identities.v1') ?? '{}',
     )['browser-club-tablet-bike'] ?? null,
   }))).toEqual({
-    device: { device: tabletDevice, deviceToken: 'tablet-device-token' },
+    device: { device: recoveredTabletDevice, deviceToken: 'rotated-tablet-device-token' },
     session: null,
     pairedBikeMonitorId: 58701,
   });

@@ -10591,6 +10591,10 @@ export async function ensureClub(ownerProfileKey, ownerName, clubId) {
 
 function clubTabletDeviceFromRow(row) {
   if (!row) return null;
+  const recoveryState = ['complete', 'restored'].includes(row.recovery_state)
+    ? row.recovery_state
+    : 'pending';
+  const pairedBikeDeviceId = Number(row.paired_bike_device_id);
   return {
     id: row.id,
     clubId: row.club_id,
@@ -10598,6 +10602,16 @@ function clubTabletDeviceFromRow(row) {
     ownerProfileKey: row.owner_profile_key,
     name: row.name,
     tokenHash: row.token_hash,
+    recoveryState,
+    pairedBikeDeviceId: Number.isSafeInteger(pairedBikeDeviceId) && pairedBikeDeviceId > 0
+      ? pairedBikeDeviceId
+      : null,
+    pairedBikeLabel: typeof row.paired_bike_label === 'string' && row.paired_bike_label
+      ? row.paired_bike_label
+      : null,
+    pairedBikeUpdatedAt: row.paired_bike_updated_at
+      ? new Date(row.paired_bike_updated_at).getTime()
+      : null,
     lastSeenAt: row.last_seen_at ? new Date(row.last_seen_at).getTime() : null,
     revokedAt: row.revoked_at ? new Date(row.revoked_at).getTime() : null,
     createdAt: new Date(row.created_at).getTime(),
@@ -10642,6 +10656,10 @@ export async function enrollClubTabletDevice({
         clubId,
         name,
         tokenHash,
+        recoveryState: 'complete',
+        pairedBikeDeviceId: null,
+        pairedBikeLabel: null,
+        pairedBikeUpdatedAt: null,
         lastSeenAt: now,
         revokedAt: null,
         createdAt: now,
@@ -10679,9 +10697,10 @@ export async function enrollClubTabletDevice({
     }
     const deviceResult = await client.query(
       `INSERT INTO ${schema}.club_tablet_devices (
-         id, club_id, name, token_hash, last_seen_at, created_at, updated_at
+         id, club_id, name, token_hash, recovery_state,
+         last_seen_at, created_at, updated_at
        )
-       SELECT $1, clubs.id, $3, $4, now(), now(), now()
+       SELECT $1, clubs.id, $3, $4, 'complete', now(), now(), now()
        FROM ${schema}.clubs AS clubs
        WHERE clubs.owner_profile_key = $2
        RETURNING *`,
@@ -10756,17 +10775,31 @@ export async function recoverClubTabletDevice({
       await removeMemoryPushInstallationsForSession(authSessionTokenHash);
       memoryClubTabletDeviceIdByTokenHash.delete(previousTokenHash);
       device.tokenHash = tokenHash;
+      device.recoveryState = 'restored';
       device.lastSeenAt = now;
       device.updatedAt = now;
       memoryClubTabletDeviceIdByTokenHash.set(tokenHash, deviceId);
 
-      // Recovery is also an identity boundary. Release any stale athlete or
-      // picker allocation and remove this tablet from a current Club Event;
-      // completed-result authorizations remain bound to the same logical
-      // device so a durable outbox can still finish uploading.
-      memoryWattbikeConnectionLeases.delete(
-        wattbikeConnectionLeaseKey(ownerUserId, `club-tablet:${deviceId}`),
-      );
+      // Preserve only a picker allocation owned by the credential being
+      // rotated. An athlete/session holder is transient authority and must be
+      // removed here so recovery is safe even when that session lives on a
+      // different server instance. Use the same account lock as capacity
+      // claims so a concurrent picker/session transition cannot recreate the
+      // stale holder after this decision.
+      await withMemoryPersistenceLock(`wattbike-capacity:${ownerUserId}`, async () => {
+        const leaseKey = wattbikeConnectionLeaseKey(
+          ownerUserId,
+          `club-tablet:${deviceId}`,
+        );
+        const lease = memoryWattbikeConnectionLeases.get(leaseKey);
+        if (!lease) return;
+        if (lease.holderId === previousTokenHash) {
+          lease.holderId = tokenHash;
+          lease.updatedAt = now;
+        } else {
+          memoryWattbikeConnectionLeases.delete(leaseKey);
+        }
+      });
       const eventId = memoryCurrentClubEventIdByClubId.get(clubId);
       const participants = eventId ? memoryClubEventParticipantsByEventId.get(eventId) : null;
       if (participants?.delete(deviceId)) {
@@ -10821,7 +10854,10 @@ export async function recoverClubTabletDevice({
     const previousTokenHash = selectedRow.token_hash;
     const deviceResult = await client.query(
       `UPDATE ${schema}.club_tablet_devices AS devices
-       SET token_hash = $2, last_seen_at = now(), updated_at = now()
+       SET token_hash = $2,
+           recovery_state = 'restored',
+           last_seen_at = now(),
+           updated_at = now()
        WHERE devices.id = $1
        RETURNING devices.*`,
       [deviceId, tokenHash],
@@ -10834,11 +10870,44 @@ export async function recoverClubTabletDevice({
       club_name: selectedRow.club_name,
       owner_profile_key: selectedRow.owner_profile_key,
     };
+    // Serialize with all account-capacity claims. Keep a picker lease only
+    // when its holder is the exact device hash being rotated; otherwise the
+    // row belongs to transient athlete authority and is removed. Performing
+    // this inside the recovery transaction makes the boundary cross-instance
+    // safe and prevents a stale athlete holder from blocking the new picker.
     await client.query(
-      `DELETE FROM ${schema}.wattbike_connection_leases
-       WHERE billing_owner_user_id = $1 AND allocation_key = $2`,
+      'SELECT pg_advisory_xact_lock(hashtext($1))',
+      [`wattbike-capacity:${ownerUserId}`],
+    );
+    const leaseResult = await client.query(
+      `SELECT holder_id
+       FROM ${schema}.wattbike_connection_leases
+       WHERE billing_owner_user_id = $1 AND allocation_key = $2
+       FOR UPDATE`,
       [ownerUserId, `club-tablet:${deviceId}`],
     );
+    const leaseHolderId = leaseResult.rows?.[0]?.holder_id;
+    if (leaseHolderId === previousTokenHash) {
+      await client.query(
+        `UPDATE ${schema}.wattbike_connection_leases
+         SET holder_id = $4, updated_at = now()
+         WHERE billing_owner_user_id = $1
+           AND allocation_key = $2
+           AND holder_id = $3`,
+        [ownerUserId, `club-tablet:${deviceId}`, previousTokenHash, tokenHash],
+      );
+    } else if (leaseHolderId) {
+      await client.query(
+        `DELETE FROM ${schema}.wattbike_connection_leases
+         WHERE billing_owner_user_id = $1
+           AND allocation_key = $2
+           AND holder_id = $3`,
+        [ownerUserId, `club-tablet:${deviceId}`, leaseHolderId],
+      );
+    }
+    // Athlete identity and synchronized-event participation are temporary and
+    // must never cross an owner-authorized credential rotation. The durable
+    // tablet name and paired Wattbike above remain attached to the row.
     await client.query(
       `DELETE FROM ${schema}.club_event_participants AS participants
        USING ${schema}.club_events AS events
@@ -10912,6 +10981,58 @@ export async function listClubTabletDevices(ownerProfileKey, { requireAvailable 
   );
   if (!result && requireAvailable) throw new ClubEventPersistenceUnavailableError();
   return (result?.rows ?? []).map(clubTabletDeviceFromRow).filter(Boolean);
+}
+
+/**
+ * Persists the last Wattbike paired to one authenticated logical Club Tablet.
+ *
+ * Live presence intentionally remains process-local and expires quickly. This
+ * separate identity survives an app update or server restart so recovery can
+ * restore the same tablet-to-bike assignment without claiming the bike is
+ * currently connected.
+ */
+export async function saveClubTabletPairedBike({
+  deviceId,
+  deviceTokenHash,
+  bikeDeviceId,
+  bikeLabel,
+}) {
+  const now = Date.now();
+  if (!pool) {
+    const device = memoryClubTabletDevicesById.get(deviceId);
+    if (
+      !device
+      || device.revokedAt
+      || device.tokenHash !== deviceTokenHash
+      || !Number.isSafeInteger(bikeDeviceId)
+      || bikeDeviceId <= 0
+      || typeof bikeLabel !== 'string'
+      || !bikeLabel
+    ) {
+      return null;
+    }
+    device.pairedBikeDeviceId = bikeDeviceId;
+    device.pairedBikeLabel = bikeLabel;
+    device.pairedBikeUpdatedAt = now;
+    device.updatedAt = now;
+    return cloneJson(enrichMemoryClubTabletDevice(device), device);
+  }
+
+  const result = await query(
+    `UPDATE ${schema}.club_tablet_devices AS devices
+     SET paired_bike_device_id = $3,
+         paired_bike_label = $4,
+         paired_bike_updated_at = now(),
+         updated_at = now()
+     FROM ${schema}.clubs AS clubs
+     WHERE devices.club_id = clubs.id
+       AND devices.id = $1
+       AND devices.token_hash = $2
+       AND devices.revoked_at IS NULL
+     RETURNING devices.*, clubs.name AS club_name, clubs.owner_profile_key`,
+    [deviceId, deviceTokenHash, bikeDeviceId, bikeLabel],
+  );
+  return clubTabletDeviceFromRow(result?.rows?.[0]);
 }
 
 function clubTabletResultAuthorizationFromRow(row) {

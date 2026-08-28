@@ -1994,6 +1994,61 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           VALIDATE CONSTRAINT wattbike_connection_leases_club_assignment_complete`,
       ],
     },
+    {
+      version: 36,
+      name: 'preserve club tablet recovery and paired wattbike identity',
+      statements: [
+        // Build 20 first shipped credential recovery at 2026-08-28T15:34:02Z.
+        // Any device that successfully used its bearer at or after that
+        // boundary is already healthy (including Bike 701) and must not be
+        // offered to the next iPad as a restore candidate. Older inactive
+        // rows remain pending. Later enrollments default to complete.
+        `ALTER TABLE ${schema}.club_tablet_devices
+          ADD COLUMN IF NOT EXISTS recovery_state TEXT`,
+        `UPDATE ${schema}.club_tablet_devices
+          SET recovery_state = CASE
+            WHEN last_seen_at >= TIMESTAMPTZ '2026-08-28 15:34:00+00' THEN 'restored'
+            ELSE 'pending'
+          END
+          WHERE recovery_state IS NULL`,
+        `ALTER TABLE ${schema}.club_tablet_devices
+          ALTER COLUMN recovery_state SET DEFAULT 'complete',
+          ALTER COLUMN recovery_state SET NOT NULL`,
+        `ALTER TABLE ${schema}.club_tablet_devices
+          DROP CONSTRAINT IF EXISTS club_tablet_devices_recovery_state_check`,
+        `ALTER TABLE ${schema}.club_tablet_devices
+          ADD CONSTRAINT club_tablet_devices_recovery_state_check
+          CHECK (recovery_state IN ('pending', 'complete', 'restored')) NOT VALID`,
+        `ALTER TABLE ${schema}.club_tablet_devices
+          VALIDATE CONSTRAINT club_tablet_devices_recovery_state_check`,
+        `ALTER TABLE ${schema}.club_tablet_devices
+          ADD COLUMN IF NOT EXISTS paired_bike_device_id BIGINT`,
+        `ALTER TABLE ${schema}.club_tablet_devices
+          ADD COLUMN IF NOT EXISTS paired_bike_label TEXT`,
+        `ALTER TABLE ${schema}.club_tablet_devices
+          ADD COLUMN IF NOT EXISTS paired_bike_updated_at TIMESTAMPTZ`,
+        `ALTER TABLE ${schema}.club_tablet_devices
+          DROP CONSTRAINT IF EXISTS club_tablet_devices_paired_bike_complete`,
+        `ALTER TABLE ${schema}.club_tablet_devices
+          ADD CONSTRAINT club_tablet_devices_paired_bike_complete
+          CHECK (
+            (
+              paired_bike_device_id IS NULL
+              AND paired_bike_label IS NULL
+              AND paired_bike_updated_at IS NULL
+            )
+            OR (
+              paired_bike_device_id IS NOT NULL
+              AND paired_bike_device_id > 0
+              AND paired_bike_label IS NOT NULL
+              AND char_length(paired_bike_label) BETWEEN 1 AND 120
+              AND paired_bike_updated_at IS NOT NULL
+            )
+          ) NOT VALID`,
+        `ALTER TABLE ${schema}.club_tablet_devices
+          VALIDATE CONSTRAINT club_tablet_devices_paired_bike_complete`,
+      ],
+    },
   ];
 }
 

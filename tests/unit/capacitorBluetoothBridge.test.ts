@@ -14,13 +14,30 @@ const bleClient = vi.hoisted(() => ({
 }));
 
 const capacitor = vi.hoisted(() => ({
+  isPluginAvailable: vi.fn(),
   isNativePlatform: vi.fn(),
 }));
 
+const nativeSessionPlugin = vi.hoisted(() => ({
+  loadSavedBluetoothDevices: vi.fn(),
+  saveBluetoothDevice: vi.fn(),
+}));
+
 vi.mock('@capacitor-community/bluetooth-le', () => ({ BleClient: bleClient }));
-vi.mock('@capacitor/core', () => ({ Capacitor: capacitor }));
+vi.mock('@capacitor/core', () => ({
+  Capacitor: capacitor,
+  registerPlugin: () => nativeSessionPlugin,
+}));
 
 const savedDeviceIdsKey = 'tracklab.native-bluetooth-device-ids.v1';
+const nativeBikeIds = [
+  '11111111-1111-4111-8111-111111111111',
+  '22222222-2222-4222-8222-222222222222',
+  '33333333-3333-4333-8333-333333333333',
+  '44444444-4444-4444-8444-444444444444',
+  '55555555-5555-4555-8555-555555555555',
+] as const;
+const nativeBike701Id = '70170170-1701-4701-8701-701701701701';
 
 type InstalledBluetooth = {
   getDevices: () => Promise<Array<{
@@ -68,13 +85,16 @@ describe('Capacitor Bluetooth bridge', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     capacitor.isNativePlatform.mockReturnValue(true);
+    capacitor.isPluginAvailable.mockReturnValue(true);
+    nativeSessionPlugin.loadSavedBluetoothDevices.mockResolvedValue({ version: 1, deviceIds: [] });
+    nativeSessionPlugin.saveBluetoothDevice.mockResolvedValue({ saved: true });
     bleClient.initialize.mockResolvedValue(undefined);
     bleClient.isEnabled.mockResolvedValue(true);
     bleClient.connect.mockResolvedValue(undefined);
     bleClient.disconnect.mockResolvedValue(undefined);
     bleClient.getDevices.mockResolvedValue([]);
     bleClient.getServices.mockResolvedValue([]);
-    bleClient.requestDevice.mockResolvedValue({ deviceId: 'native-bike-1', name: 'WattbikePM25043950' });
+    bleClient.requestDevice.mockResolvedValue({ deviceId: nativeBikeIds[0], name: 'WattbikePM25043950' });
     installWindow();
   });
 
@@ -126,8 +146,9 @@ describe('Capacitor Bluetooth bridge', () => {
         'f7461223-d7c1-11e4-9ab1-0002a5d5c51b',
       ],
     });
-    expect(device).toMatchObject({ id: 'native-bike-1', name: 'WattbikePM25043950' });
-    expect(storage.setItem).toHaveBeenCalledWith(savedDeviceIdsKey, '["native-bike-1"]');
+    expect(device).toMatchObject({ id: nativeBikeIds[0], name: 'WattbikePM25043950' });
+    expect(storage.setItem).toHaveBeenCalledWith(savedDeviceIdsKey, JSON.stringify([nativeBikeIds[0]]));
+    expect(nativeSessionPlugin.saveBluetoothDevice).toHaveBeenCalledWith({ deviceId: nativeBikeIds[0] });
   });
 
   it('reports when native Bluetooth is disabled before opening the device list', async () => {
@@ -148,17 +169,13 @@ describe('Capacitor Bluetooth bridge', () => {
   it('restores at most four saved native bikes and reconnects after a GATT disconnect', async () => {
     const storage = createStorage({
       [savedDeviceIdsKey]: JSON.stringify([
-        'native-bike-1',
-        'native-bike-2',
-        'native-bike-3',
-        'native-bike-4',
-        'native-bike-5',
+        ...nativeBikeIds,
       ]),
     });
     const { fakeWindow } = installWindow(storage);
     bleClient.getDevices.mockResolvedValue([
-      { deviceId: 'native-bike-1', name: 'PM25043950' },
-      { deviceId: 'native-bike-2', name: 'WattbikePM25043851' },
+      { deviceId: nativeBikeIds[1], name: 'PM25043950' },
+      { deviceId: nativeBikeIds[2], name: 'WattbikePM25043851' },
     ]);
     const disconnectCallbacks = new Map<string, () => void>();
     bleClient.connect.mockImplementation(async (deviceId: string, onDisconnect: () => void) => {
@@ -171,12 +188,12 @@ describe('Capacitor Bluetooth bridge', () => {
     const devices = await bluetooth.getDevices();
 
     expect(bleClient.getDevices).toHaveBeenCalledWith([
-      'native-bike-1',
-      'native-bike-2',
-      'native-bike-3',
-      'native-bike-4',
+      nativeBikeIds[1],
+      nativeBikeIds[2],
+      nativeBikeIds[3],
+      nativeBikeIds[4],
     ]);
-    expect(devices.map(({ id }) => id)).toEqual(['native-bike-1', 'native-bike-2']);
+    expect(devices.map(({ id }) => id)).toEqual([nativeBikeIds[1], nativeBikeIds[2]]);
 
     const disconnected = vi.fn();
     devices[0].addEventListener('gattserverdisconnected', disconnected);
@@ -185,7 +202,7 @@ describe('Capacitor Bluetooth bridge', () => {
     expect(bleClient.connect).toHaveBeenCalledTimes(1);
     expect(devices[0].gatt.connected).toBe(true);
 
-    disconnectCallbacks.get('native-bike-1')?.();
+    disconnectCallbacks.get(nativeBikeIds[1])?.();
     expect(disconnected).toHaveBeenCalledTimes(1);
     expect(devices[0].gatt.connected).toBe(false);
 
@@ -195,13 +212,75 @@ describe('Capacitor Bluetooth bridge', () => {
     expect(devices[0].gatt.connected).toBe(true);
   });
 
-  it('disconnects a partial native link when service discovery fails', async () => {
+  it('restores Wattbike peripheral IDs from the device-only native store after WebView data is replaced', async () => {
+    const { fakeWindow, storage } = installWindow();
+    nativeSessionPlugin.loadSavedBluetoothDevices.mockResolvedValue({
+      version: 1,
+      deviceIds: [nativeBike701Id],
+    });
+    bleClient.getDevices.mockResolvedValue([
+      { deviceId: nativeBike701Id, name: 'WattbikePM25058701' },
+    ]);
+    const { installCapacitorBluetoothBridge } = await loadBridge();
+    await installCapacitorBluetoothBridge();
+
+    const devices = await (fakeWindow.navigator.bluetooth as InstalledBluetooth).getDevices();
+
+    expect(bleClient.getDevices).toHaveBeenCalledWith([nativeBike701Id]);
+    expect(devices).toHaveLength(1);
+    expect(storage.setItem).toHaveBeenCalledWith(savedDeviceIdsKey, JSON.stringify([nativeBike701Id]));
+  });
+
+  it('migrates an existing local Wattbike pairing into the device-only native store', async () => {
     const storage = createStorage({
-      [savedDeviceIdsKey]: JSON.stringify(['native-bike-1']),
+      [savedDeviceIdsKey]: JSON.stringify([nativeBike701Id]),
     });
     const { fakeWindow } = installWindow(storage);
     bleClient.getDevices.mockResolvedValue([
-      { deviceId: 'native-bike-1', name: 'WattbikePM25043950' },
+      { deviceId: nativeBike701Id, name: 'WattbikePM25058701' },
+    ]);
+    const { installCapacitorBluetoothBridge } = await loadBridge();
+    await installCapacitorBluetoothBridge();
+
+    await (fakeWindow.navigator.bluetooth as InstalledBluetooth).getDevices();
+
+    expect(nativeSessionPlugin.saveBluetoothDevice).toHaveBeenCalledWith({ deviceId: nativeBike701Id });
+  });
+
+  it('keeps a newly migrated local pairing in the immediate most-recent-four restore set', async () => {
+    const storage = createStorage({
+      [savedDeviceIdsKey]: JSON.stringify([nativeBikeIds[4]]),
+    });
+    const { fakeWindow } = installWindow(storage);
+    nativeSessionPlugin.loadSavedBluetoothDevices.mockResolvedValue({
+      version: 1,
+      deviceIds: nativeBikeIds.slice(0, 4),
+    });
+    bleClient.getDevices.mockResolvedValue(nativeBikeIds.slice(1).map((deviceId, index) => ({
+      deviceId,
+      name: `WattbikePM2505870${index + 1}`,
+    })));
+    const { installCapacitorBluetoothBridge } = await loadBridge();
+    await installCapacitorBluetoothBridge();
+
+    const devices = await (fakeWindow.navigator.bluetooth as InstalledBluetooth).getDevices();
+
+    expect(nativeSessionPlugin.saveBluetoothDevice).toHaveBeenCalledWith({ deviceId: nativeBikeIds[4] });
+    expect(bleClient.getDevices).toHaveBeenCalledWith(nativeBikeIds.slice(1));
+    expect(devices.map(({ id }) => id)).toEqual(nativeBikeIds.slice(1));
+    expect(storage.setItem).toHaveBeenCalledWith(
+      savedDeviceIdsKey,
+      JSON.stringify(nativeBikeIds.slice(1)),
+    );
+  });
+
+  it('disconnects a partial native link when service discovery fails', async () => {
+    const storage = createStorage({
+      [savedDeviceIdsKey]: JSON.stringify([nativeBikeIds[0]]),
+    });
+    const { fakeWindow } = installWindow(storage);
+    bleClient.getDevices.mockResolvedValue([
+      { deviceId: nativeBikeIds[0], name: 'WattbikePM25043950' },
     ]);
     bleClient.getServices.mockRejectedValue(new Error('Service discovery timed out.'));
     const { installCapacitorBluetoothBridge } = await loadBridge();
@@ -213,8 +292,8 @@ describe('Capacitor Bluetooth bridge', () => {
       'The Wattbike was found, but its live data connection failed. Service discovery timed out.',
     );
 
-    expect(bleClient.connect).toHaveBeenCalledWith('native-bike-1', expect.any(Function));
-    expect(bleClient.disconnect).toHaveBeenCalledWith('native-bike-1');
+    expect(bleClient.connect).toHaveBeenCalledWith(nativeBikeIds[0], expect.any(Function));
+    expect(bleClient.disconnect).toHaveBeenCalledWith(nativeBikeIds[0]);
     expect(device.gatt.connected).toBe(false);
   });
 

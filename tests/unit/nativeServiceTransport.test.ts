@@ -83,10 +83,14 @@ describe('bundled native service transport', () => {
     expect(nativePlugin).toContain('loadClubTabletCredential');
     expect(nativePlugin).toContain('saveClubTabletCredential');
     expect(nativePlugin).toContain('clearClubTabletCredential');
+    expect(nativePlugin).toContain('loadSavedBluetoothDevices');
+    expect(nativePlugin).toContain('saveBluetoothDevice');
     expect(nativePlugin).toContain('com.preskilranch.tracklabbmx.club-tablet');
     expect(nativePlugin).toContain('device-credential-v1');
-    expect(nativePlugin.match(/kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly/gu)).toHaveLength(2);
-    expect(nativePlugin.match(/kSecAttrSynchronizable as String\]\s*=\s*false/gu)).toHaveLength(2);
+    expect(nativePlugin).toContain('com.preskilranch.tracklabbmx.bluetooth');
+    expect(nativePlugin).toContain('peripheral-ids-v1');
+    expect(nativePlugin.match(/kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly/gu)).toHaveLength(3);
+    expect(nativePlugin.match(/kSecAttrSynchronizable as String\]\s*=\s*false/gu)).toHaveLength(3);
     const personalClear = nativePlugin.slice(
       nativePlugin.indexOf('@objc public func clearSession'),
       nativePlugin.indexOf('@objc public func loadClubTabletCredential'),

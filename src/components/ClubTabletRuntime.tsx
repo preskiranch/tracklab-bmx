@@ -26,6 +26,8 @@ import {
 
 export type ClubTabletDeviceStatus = 'idle' | 'checking' | 'active' | 'error' | 'revoked';
 
+export const clubTabletAuthorizationTimeoutMs = 15_000;
+
 export function expireClubTabletSessionLocallyFirst(
   session: ClubTabletSessionCredential,
   onSessionExpired: () => void,
@@ -173,7 +175,9 @@ export default function ClubTabletRuntime({
 
   useEffect(() => {
     let cancelled = false;
-    loadClubTabletRoster(device)
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), clubTabletAuthorizationTimeoutMs);
+    loadClubTabletRoster(device, { signal: controller.signal })
       .then((nextRoster) => {
         if (!cancelled) onDeviceReady(nextRoster, Boolean(readStoredClubTabletSession()));
       })
@@ -187,9 +191,14 @@ export default function ClubTabletRuntime({
           return;
         }
         onDeviceError();
-      });
-    return () => { cancelled = true; };
-  }, [device, onDeviceError, onDeviceReady, onDeviceRevoked]);
+      })
+      .finally(() => window.clearTimeout(timeout));
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [device.device.id, device.deviceToken, onDeviceError, onDeviceReady, onDeviceRevoked]);
 
   useEffect(() => {
     if (!session) return;

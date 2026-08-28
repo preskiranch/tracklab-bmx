@@ -16,6 +16,14 @@ export type ClubTabletConnectedBike = {
   expiresAt: number;
 };
 
+export type ClubTabletPairedBike = {
+  deviceId: number;
+  label: string;
+  updatedAt: number;
+};
+
+export type ClubTabletRecoveryState = 'pending' | 'complete' | 'restored';
+
 export type ClubTabletDevice = {
   id: string;
   name: string;
@@ -25,6 +33,9 @@ export type ClubTabletDevice = {
   lastSeenAt?: number;
   revokedAt?: number | null;
   connectedBike?: ClubTabletConnectedBike;
+  pairedBike?: ClubTabletPairedBike;
+  recoveryState?: ClubTabletRecoveryState;
+  recoveryCompleted?: boolean;
 };
 
 export type ClubTabletDeviceCredential = {
@@ -124,6 +135,16 @@ export function normalizeClubTabletConnectedBike(value: unknown): ClubTabletConn
   };
 }
 
+export function normalizeClubTabletPairedBike(value: unknown): ClubTabletPairedBike | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Partial<ClubTabletPairedBike>;
+  const deviceId = Math.round(positiveClubTabletNumber(candidate.deviceId));
+  const label = clubTabletText(candidate.label, 120);
+  const updatedAt = positiveClubTabletNumber(candidate.updatedAt);
+  if (!Number.isSafeInteger(deviceId) || deviceId <= 0 || !label || !updatedAt) return null;
+  return { deviceId, label, updatedAt };
+}
+
 export function normalizeClubTabletDevice(value: unknown): ClubTabletDevice | null {
   if (!value || typeof value !== 'object') return null;
   const candidate = value as Partial<ClubTabletDevice>;
@@ -136,6 +157,15 @@ export function normalizeClubTabletDevice(value: unknown): ClubTabletDevice | nu
   const lastSeenAt = positiveClubTabletNumber(candidate.lastSeenAt);
   const revokedAt = positiveClubTabletNumber(candidate.revokedAt);
   const connectedBike = normalizeClubTabletConnectedBike(candidate.connectedBike);
+  const pairedBike = normalizeClubTabletPairedBike(candidate.pairedBike);
+  const suppliedRecoveryState = candidate.recoveryState;
+  const recoveryState: ClubTabletRecoveryState | null = suppliedRecoveryState === 'pending'
+    || suppliedRecoveryState === 'complete'
+    || suppliedRecoveryState === 'restored'
+    ? suppliedRecoveryState
+    : candidate.recoveryCompleted === true ? 'complete' : null;
+  const recoveryCompleted = candidate.recoveryCompleted === true
+    || (recoveryState != null && recoveryState !== 'pending');
   return {
     id,
     name,
@@ -145,6 +175,11 @@ export function normalizeClubTabletDevice(value: unknown): ClubTabletDevice | nu
     ...(lastSeenAt ? { lastSeenAt } : {}),
     ...(revokedAt ? { revokedAt } : {}),
     ...(connectedBike ? { connectedBike } : {}),
+    ...(pairedBike ? { pairedBike } : {}),
+    ...(recoveryState ? { recoveryState } : {}),
+    ...(candidate.recoveryCompleted === true || candidate.recoveryCompleted === false || recoveryState
+      ? { recoveryCompleted }
+      : {}),
   };
 }
 

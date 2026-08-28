@@ -74,11 +74,11 @@ describe('iOS required-reason API declarations', () => {
     }
   });
 
-  it('keeps iOS and embedded Watch Debug and Release builds on build 20', () => {
+  it('keeps iOS and embedded Watch Debug and Release builds on build 21', () => {
     const buildNumbers = [...xcodeProject.matchAll(
       /CURRENT_PROJECT_VERSION = (\d+);/g,
     )].map((match) => match[1]);
-    expect(buildNumbers).toEqual(['20', '20', '20', '20']);
+    expect(buildNumbers).toEqual(['21', '21', '21', '21']);
   });
 
   it('declares every linked account, training, social, route, purchase, and diagnostic type without tracking', () => {

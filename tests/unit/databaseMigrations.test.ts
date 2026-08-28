@@ -239,6 +239,25 @@ describe('database migration runner', () => {
     expect(statements).toContain('bike_device_id IS NULL');
   });
 
+  it('marks legacy club tablets for recovery and preserves their paired Wattbike identity', () => {
+    const tabletRecoveryMigration = databaseMigrations().find((candidate) => candidate.version === 36);
+    const statements = tabletRecoveryMigration?.statements.join('\n') ?? '';
+
+    expect(tabletRecoveryMigration).toMatchObject({
+      version: 36,
+      name: 'preserve club tablet recovery and paired wattbike identity',
+    });
+    expect(statements).toContain('recovery_state');
+    expect(statements).toContain("WHEN last_seen_at >= TIMESTAMPTZ '2026-08-28 15:34:00+00' THEN 'restored'");
+    expect(statements).toContain("ELSE 'pending'");
+    expect(statements).toContain("ALTER COLUMN recovery_state SET DEFAULT 'complete'");
+    expect(statements).toContain("recovery_state IN ('pending', 'complete', 'restored')");
+    expect(statements).toContain('paired_bike_device_id BIGINT');
+    expect(statements).toContain('paired_bike_label TEXT');
+    expect(statements).toContain('paired_bike_updated_at TIMESTAMPTZ');
+    expect(statements).toContain('club_tablet_devices_paired_bike_complete');
+  });
+
   it('adds accountable administrator review fields to community reports', () => {
     const moderationMigration = databaseMigrations().find((candidate) => candidate.version === 32);
     const statements = moderationMigration?.statements.join('\n') ?? '';
