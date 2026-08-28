@@ -86,6 +86,13 @@ set Authorization. Friends, training history, and live heart-rate updates use
 authenticated fetch streaming instead of placing credentials in EventSource
 URLs. The bundled offline view is available even when the service cannot load.
 
+The bundled shell obtains its public Google Maps JavaScript client key from
+`GET /api/native/runtime-config` after the cloud health check and keeps it only
+in web-view memory. The production key must authorize
+`capacitor://localhost/*`; the deployment smoke verifies the endpoint is
+configured, but a signed iPhone and iPad map check remains required because
+WebView referrer behavior cannot be proven by the server test.
+
 ## App Store Connect checklist
 
 The repository includes public App Store URL shells at `/privacy` and

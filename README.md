@@ -340,12 +340,15 @@ Then set:
 
 ```text
 VITE_GOOGLE_MAPS_API_KEY=your_google_maps_key
+TRACKLAB_GOOGLE_MAPS_JS_API_KEY=your_google_maps_key
 GOOGLE_ROUTES_API_KEY=your_server_routes_key
 ```
 
-For Render, add both keys as environment variables and redeploy. Explore route
+For Render, add all three variables and redeploy. Explore route
 requests are proxied through the TrackLab server, require a Racer account, and are
-rate-limited. The Routes key is never sent to the browser.
+rate-limited. `TRACKLAB_GOOGLE_MAPS_JS_API_KEY` supplies the bundled iOS app at
+runtime and falls back to `VITE_GOOGLE_MAPS_API_KEY` during migration. The Routes
+key is never sent to the browser or native app.
 
 Explore uses satellite view for riding. Up to four local Wattbikes can share a
 route. In a private room the host chooses and starts the route for everyone. Riders
