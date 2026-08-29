@@ -927,14 +927,18 @@ export function GetPulledView({
             <div className="get-pulled-metric"><Activity size={20} /><strong>{displayed.peakCadence}</strong><small>Peak cadence</small></div>
             <div className="get-pulled-metric"><Gauge size={20} /><strong>{formatSpeedFromKph(displayed.speedKph, speedUnit)}</strong><small>{speedUnitLabel(speedUnit)}</small></div>
             {result && heartRateSummary?.sampleCount ? (
-              <div className="get-pulled-metric get-pulled-heart-rate-summary">
+              <div
+                className="get-pulled-metric get-pulled-heart-rate-summary"
+                aria-label={`Average heart rate ${Math.round(heartRateSummary.averageBpm ?? 0)} BPM, peak ${Math.round(heartRateSummary.peakBpm ?? 0)} BPM, ${heartRateSummary.coveragePercent}% coverage`}
+              >
                 <HeartPulse size={20} />
                 <strong>{Math.round(heartRateSummary.averageBpm ?? 0)}</strong>
-                <small>Average HR · {Math.round(heartRateSummary.peakBpm ?? 0)} BPM peak · {heartRateSummary.coveragePercent}% coverage</small>
+                <small>Peak {Math.round(heartRateSummary.peakBpm ?? 0)} · {heartRateSummary.coveragePercent}% data</small>
               </div>
             ) : (
               <HeartRateMetric
                 bpm={selectedHeartRate?.bpm}
+                compact={fullscreen}
                 recordedAt={selectedHeartRate?.recordedAt}
                 now={now}
                 label={`${sessionPlayer?.name ?? 'Athlete'} heart rate`}

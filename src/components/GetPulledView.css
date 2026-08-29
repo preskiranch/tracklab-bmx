@@ -51,7 +51,6 @@
   .get-pulled-options{grid-template-columns:repeat(2,1fr)}
   .get-pulled-air-options{grid-template-columns:repeat(5,1fr)}
   .get-pulled-bike-row{grid-template-columns:1fr}
-  .get-pulled-metrics{grid-template-columns:repeat(2,1fr)}
   .get-pulled-overlay{inset:10px 10px auto}
   .get-pulled-phase{display:none}
 }
