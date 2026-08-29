@@ -1,6 +1,20 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const iphonePortrait = { width: 390, height: 844 };
+const portraitViewports = [
+  { label: 'iPhone SE', width: 320, height: 568 },
+  { label: 'iPhone SE 3', width: 375, height: 667 },
+  { label: 'iPhone mini', width: 375, height: 812 },
+  { label: 'iPhone 16e', width: 390, height: 844 },
+  { label: 'iPhone 15/16', width: 393, height: 852 },
+  { label: 'iPhone 16 Pro', width: 402, height: 874 },
+  { label: 'iPhone Plus', width: 430, height: 932 },
+  { label: 'iPhone 16 Pro Max', width: 440, height: 956 },
+  { label: 'iPad mini', width: 744, height: 1133 },
+  { label: 'iPad', width: 768, height: 1024 },
+  { label: 'iPad Air', width: 820, height: 1180 },
+  { label: 'iPad Pro 11', width: 834, height: 1194 },
+] as const;
 
 async function mockSignedInRacer(
   page: Page,
@@ -163,16 +177,33 @@ async function exerciseRecoveryMinuteField({
 }
 
 test('iPhone portrait shell is fixed-width with readable navigation and headers', async ({ page }) => {
-  await page.setViewportSize(iphonePortrait);
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      get: () => 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148',
+    });
+  });
+  await page.setViewportSize({ width: 844, height: 390 });
   await mockSignedInRacer(page);
   await page.goto('/?track=oak-creek-bmx');
   await openSignedInApp(page);
+  await page.setViewportSize(iphonePortrait);
+
+  const watchIndicator = page.locator('.side-nav .watch-connect-indicator');
+  await expect(watchIndicator).toBeVisible();
+  await watchIndicator.locator('.watch-connect-indicator-label').evaluate((label) => {
+    label.textContent = 'Watch disconnected';
+  });
 
   const layout = await page.evaluate(() => {
     const navigation = document.querySelector<HTMLElement>('.side-nav');
     const buttons = [...(navigation?.querySelectorAll<HTMLElement>(':scope > button') ?? [])];
-    const buttonRows = new Set(buttons.map((button) => Math.round(button.getBoundingClientRect().top)));
+    const navItems = [...(navigation?.querySelectorAll<HTMLElement>(
+      ':scope > button, :scope > .watch-connect-indicator-slot .watch-connect-indicator',
+    ) ?? [])];
+    const buttonRows = new Set(navItems.map((button) => Math.round(button.getBoundingClientRect().top)));
     const firstButtonStyle = buttons[0] ? getComputedStyle(buttons[0]) : null;
+    const watch = navigation?.querySelector<HTMLElement>('.watch-connect-indicator');
     const selectorLabel = document.querySelector<HTMLElement>('.track-selectors span');
     const selector = document.querySelector<HTMLElement>('.track-selectors select');
     const readiness = document.querySelector<HTMLElement>('.race-readiness-strip');
@@ -181,11 +212,13 @@ test('iPhone portrait shell is fixed-width with readable navigation and headers'
       shellFits: (document.querySelector<HTMLElement>('.platform-shell')?.scrollWidth ?? 1)
         <= (document.querySelector<HTMLElement>('.platform-shell')?.clientWidth ?? 0),
       navButtonCount: buttons.length,
+      navItemCount: navItems.length,
       navRowCount: buttonRows.size,
       navFontSize: Number.parseFloat(firstButtonStyle?.fontSize ?? '0'),
       navFontWeight: Number.parseFloat(firstButtonStyle?.fontWeight ?? '0'),
       navButtonMinHeight: Math.min(...buttons.map((button) => button.getBoundingClientRect().height)),
       navPosition: navigation ? getComputedStyle(navigation).position : '',
+      watchFits: Boolean(watch && watch.scrollWidth <= watch.clientWidth + 1),
       selectorLabelFontSize: Number.parseFloat(selectorLabel ? getComputedStyle(selectorLabel).fontSize : '0'),
       selectorFontSize: Number.parseFloat(selector ? getComputedStyle(selector).fontSize : '0'),
       selectorHeight: selector?.getBoundingClientRect().height ?? 0,
@@ -196,15 +229,92 @@ test('iPhone portrait shell is fixed-width with readable navigation and headers'
   expect(layout.documentFits).toBe(true);
   expect(layout.shellFits).toBe(true);
   expect(layout.navButtonCount).toBe(10);
+  expect(layout.navItemCount).toBe(11);
   expect(layout.navRowCount).toBe(3);
   expect(layout.navFontSize).toBeGreaterThanOrEqual(13);
   expect(layout.navFontWeight).toBeGreaterThanOrEqual(700);
   expect(layout.navButtonMinHeight).toBeGreaterThanOrEqual(58);
   expect(layout.navPosition).toBe('sticky');
+  expect(layout.watchFits).toBe(true);
   expect(layout.selectorLabelFontSize).toBeGreaterThanOrEqual(12);
   expect(layout.selectorFontSize).toBeGreaterThanOrEqual(16);
   expect(layout.selectorHeight).toBeGreaterThanOrEqual(44);
   expect(layout.readinessFits).toBe(true);
+
+  const containedSelectors = [
+    '#root',
+    '.platform-shell',
+    '.side-nav',
+    '.platform-main',
+    '.platform-topbar',
+    '.track-selectors',
+    '.race-readiness-strip',
+    '.recovery-alert-card',
+    '.dashboard-grid',
+    '.earth-panel',
+    '.earth-header',
+    '.earth-meta',
+  ];
+  for (const viewport of portraitViewports) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    const containment = await page.evaluate((selectors) => {
+      const viewportWidth = document.documentElement.clientWidth;
+      const failures: string[] = [];
+      for (const selector of selectors) {
+        const element = document.querySelector<HTMLElement>(selector);
+        if (!element) {
+          failures.push(`${selector}: missing`);
+          continue;
+        }
+        const rect = element.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        if (rect.left < -1 || rect.right > viewportWidth + 1) {
+          failures.push(`${selector}: bounds ${rect.left.toFixed(1)}..${rect.right.toFixed(1)} / ${viewportWidth}`);
+        }
+        if (element.scrollWidth > element.clientWidth + 1) {
+          failures.push(`${selector}: width ${element.scrollWidth}/${element.clientWidth}`);
+        }
+      }
+      const nav = document.querySelector<HTMLElement>('.side-nav');
+      const navItems = [...(nav?.querySelectorAll<HTMLElement>(
+        ':scope > button, :scope > .watch-connect-indicator-slot .watch-connect-indicator',
+      ) ?? [])];
+      for (const [index, item] of navItems.entries()) {
+        const rect = item.getBoundingClientRect();
+        if (
+          rect.left < -1
+          || rect.right > viewportWidth + 1
+          || item.scrollWidth > item.clientWidth + 1
+        ) {
+          failures.push(`nav item ${index}: bounds ${rect.left.toFixed(1)}..${rect.right.toFixed(1)}, width ${item.scrollWidth}/${item.clientWidth}`);
+        }
+      }
+      const watchLabel = document.querySelector<HTMLElement>('.watch-connect-indicator-label');
+      if (
+        viewportWidth <= 720
+        && watchLabel
+        && watchLabel.scrollWidth > watchLabel.clientWidth + 1
+      ) {
+        failures.push(`watch label: width ${watchLabel.scrollWidth}/${watchLabel.clientWidth}`);
+      }
+      return {
+        failures,
+        documentWidth: document.documentElement.scrollWidth,
+        viewportWidth,
+      };
+    }, containedSelectors);
+    expect(containment.failures, viewport.label).toEqual([]);
+    expect(containment.documentWidth, viewport.label).toBeLessThanOrEqual(containment.viewportWidth);
+  }
+
+  await page.setViewportSize(iphonePortrait);
+  await page.mouse.wheel(600, 0);
+  await page.evaluate(() => window.scrollTo({ top: 900, left: 1000 }));
+  await expect.poll(() => page.evaluate(() => ({
+    page: window.scrollX,
+    navigation: document.querySelector<HTMLElement>('.side-nav')?.scrollLeft ?? -1,
+    main: document.querySelector<HTMLElement>('.platform-main')?.scrollLeft ?? -1,
+  }))).toEqual({ page: 0, navigation: 0, main: 0 });
 
   await page.getByRole('navigation', { name: 'Primary' })
     .getByRole('button', { name: 'My Profile', exact: true })

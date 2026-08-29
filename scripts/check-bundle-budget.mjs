@@ -16,11 +16,12 @@ const budgets = {
   // responsive Club Event snapshot projection and reliable iPad commentary
   // startup add a small amount to that controller. The media state machine
   // and full tablet/map runtimes stay lazy-loaded, while the network-relevant
-  // compressed budgets remain unchanged.
+  // compressed budgets remain tightly capped. The iPhone portrait containment
+  // and nested Watch tile rules add about 1 KB raw / 100 bytes Brotli.
   javascriptRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_RAW_BYTES', 621_000),
   javascriptBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_BR_BYTES', 175_000),
-  cssRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_RAW_BYTES', 134_000),
-  cssBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_BR_BYTES', 20_000),
+  cssRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_RAW_BYTES', 135_250),
+  cssBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_BR_BYTES', 20_250),
   initialBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_INITIAL_BR_BYTES', 195_000),
 };
 

@@ -36,6 +36,9 @@ final class TrackLabBridgeViewController: CAPBridgeViewController {
 
     override func capacitorDidLoad() {
         super.capacitorDidLoad()
+        webView?.scrollView.alwaysBounceHorizontal = false
+        webView?.scrollView.showsHorizontalScrollIndicator = false
+        webView?.scrollView.isDirectionalLockEnabled = true
         bridge?.registerPluginInstance(HeartRatePlugin())
         bridge?.registerPluginInstance(RecoveryAlertPlugin())
         bridge?.registerPluginInstance(PushInstallationPlugin())
