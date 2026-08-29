@@ -11762,14 +11762,10 @@ export default function App() {
       ref={raceShellRef}
     >
       {utilityFullscreen && <style>{`
-        .platform-shell.utility-fullscreen{position:fixed;inset:0;z-index:2147480000;display:block;width:100vw;height:100dvh;min-height:0;overflow:hidden;background:#07100b}
+        .platform-shell.utility-fullscreen{position:fixed;inset:0;z-index:2147480000;display:block;width:100vw;height:100vh;height:100dvh;min-height:0;overflow:hidden;background:#07100b}
         .utility-fullscreen .sidebar,.utility-fullscreen .platform-topbar{display:none}
         .utility-fullscreen .platform-main{width:100%;height:100%;min-height:0;padding:0;overflow:auto}
-        .utility-fullscreen .get-pulled-view,.utility-fullscreen .monitor-panel,.utility-fullscreen .club-live-monitor{width:100%;min-height:100%;box-sizing:border-box}
-        .utility-fullscreen .get-pulled-view{grid-template-rows:minmax(0,1fr) auto auto;padding:max(10px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left));background:#07100b}
-        .utility-fullscreen .get-pulled-hero{height:100%;min-height:0}
-        .utility-fullscreen .get-pulled-hero>.pull-sled-scene{height:100%!important;min-height:330px!important}
-        .utility-fullscreen .get-pulled-config,.utility-fullscreen .get-pulled-privacy{display:none}
+        .utility-fullscreen .monitor-panel,.utility-fullscreen .club-live-monitor{width:100%;min-height:100%;box-sizing:border-box}
         .utility-fullscreen .monitor-panel,.utility-fullscreen .club-live-monitor{padding:max(14px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) max(14px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left))}
         .utility-fullscreen .monitor-grid{min-height:calc(100dvh - 110px)}
       `}</style>}
