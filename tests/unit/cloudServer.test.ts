@@ -298,7 +298,6 @@ beforeAll(async () => {
       TRACKLAB_CLUB_LIVE_SESSION_TTL_MS: '600',
       TRACKLAB_CLUB_TABLET_WS_TICKET_TTL_MS: '120',
       TRACKLAB_CLUB_EVENT_START_LEAD_MS: '3000',
-      APPLE_MAPKIT_JS_TOKEN: 'test-domain-restricted-mapkit-token',
       OPENAI_API_KEY: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -4820,8 +4819,8 @@ describe('cloud API trust boundaries', () => {
 
     const forbidden = await api('/api/admin/map-3d-usage');
     expect(forbidden.status).toBe(403);
-    const appleForbidden = await api('/api/admin/apple-map-config');
-    expect(appleForbidden.status).toBe(403);
+    const removedAppleMapConfig = await api('/api/admin/apple-map-config');
+    expect(removedAppleMapConfig.status).toBe(404);
 
     const regularCookie = cookie;
     const adminRegistration = await api('/api/auth/register', {
@@ -4851,13 +4850,8 @@ describe('cloud API trust boundaries', () => {
           count: 1,
         }],
       });
-      const appleConfigResponse = await api('/api/admin/apple-map-config');
-      expect(appleConfigResponse.status).toBe(200);
-      expect(appleConfigResponse.headers.get('cache-control')).toBe('no-store');
-      await expect(appleConfigResponse.json()).resolves.toEqual({
-        configured: true,
-        token: 'test-domain-restricted-mapkit-token',
-      });
+      const removedAppleMapConfigAsAdmin = await api('/api/admin/apple-map-config');
+      expect(removedAppleMapConfigAsAdmin.status).toBe(404);
     } finally {
       cookie = regularCookie;
     }

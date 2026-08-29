@@ -79,9 +79,8 @@ test('track contacts and map actions stay clear, callable, and responsive', asyn
 
   const directions = locator.getByRole('group', { name: `Directions to ${contactTrack.name}` });
   await expect(directions.getByText('Directions', { exact: true })).toBeVisible();
-  await expect(directions.getByRole('link', { name: 'Apple Maps' })).toHaveAttribute('href', /maps\.apple\.com.*daddr=/);
   await expect(directions.getByRole('link', { name: 'Google Maps' })).toHaveAttribute('href', /google\.com\/maps\/dir\/.*destination=/);
-  await expect(directions.getByRole('link')).toHaveCount(2);
+  await expect(directions.getByRole('link')).toHaveCount(1);
 
   const earth = locator.getByRole('group', { name: 'Explore in 3D—not directions' });
   await expect(earth.getByText('Explore in 3D', { exact: true })).toBeVisible();

@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { trackCatalog } from '../../src/data/trackCatalog';
 import {
-  trackAppleMapsDirectionsUrl,
-  trackAppleMapsUrl,
   trackGoogleMapsDirectionsUrl,
   trackGoogleMapsUrl,
   trackGoogleEarthUrl,
@@ -24,15 +22,6 @@ describe('public track map links', () => {
     expect(url.searchParams.has('destination')).toBe(false);
   });
 
-  it('opens a named pin for the selected track in Apple Maps', () => {
-    const url = new URL(trackAppleMapsUrl(track));
-
-    expect(url.origin).toBe('https://maps.apple.com');
-    expect(url.searchParams.get('ll')).toBe(destination);
-    expect(url.searchParams.get('q')).toBe(track.name);
-    expect(url.searchParams.has('daddr')).toBe(false);
-  });
-
   it('opens turn-by-turn directions to the selected track in Google Maps', () => {
     const url = new URL(trackGoogleMapsDirectionsUrl(track));
 
@@ -41,15 +30,6 @@ describe('public track map links', () => {
     expect(url.searchParams.get('api')).toBe('1');
     expect(url.searchParams.get('destination')).toBe(destination);
     expect(url.searchParams.has('query')).toBe(false);
-  });
-
-  it('opens turn-by-turn directions to the selected track in Apple Maps', () => {
-    const url = new URL(trackAppleMapsDirectionsUrl(track));
-
-    expect(url.origin).toBe('https://maps.apple.com');
-    expect(url.searchParams.get('daddr')).toBe(destination);
-    expect(url.searchParams.has('ll')).toBe(false);
-    expect(url.searchParams.has('q')).toBe(false);
   });
 
   it('builds a Google Earth location link', () => {

@@ -204,22 +204,29 @@ export function exploreSmartRoutePlaceholder(distanceUnit: DistanceUnit) {
   return `Example: A ${exampleDistance} coastal ride in Malibu with ocean views, or stage 3 of the 2026 Tour de France`;
 }
 
-type ExploreMapRenderer = 'google-satellite' | 'google-3d' | 'apple-satellite';
+type ExploreMapRenderer = 'google-satellite' | 'google-3d';
 const exploreTravelMode = 'bicycle' as const;
 
 const ExploreGoogle3DMapPanel = lazy(() => import('./ExploreGoogle3DMapPanel')
   .then((module) => ({ default: module.ExploreGoogle3DMapPanel })));
-const ExploreAppleMapPanel = lazy(() => import('./ExploreAppleMapPanel')
-  .then((module) => ({ default: module.ExploreAppleMapPanel })));
 const exploreMapRendererStorageKey = 'tracklab-explore-map-renderer-v1';
 
 function savedExploreMapRenderer(): ExploreMapRenderer {
   try {
     const saved = window.localStorage.getItem(exploreMapRendererStorageKey);
-    return saved === 'google-3d' || saved === 'apple-satellite' ? saved : 'google-satellite';
+    if (saved === 'google-3d') return saved;
+    if (saved && saved !== 'google-satellite') {
+      window.localStorage.setItem(exploreMapRendererStorageKey, 'google-satellite');
+    }
+    return 'google-satellite';
   } catch {
     return 'google-satellite';
   }
+}
+
+function currentExploreViewportOrientation() {
+  if (typeof window === 'undefined') return 'landscape' as const;
+  return window.innerWidth >= window.innerHeight ? 'landscape' as const : 'portrait' as const;
 }
 
 type ExploreOrigin = {
@@ -460,6 +467,7 @@ export function ExploreView({
   const [showMapLabels, setShowMapLabels] = useState(true);
   const [followTravelHeading, setFollowTravelHeading] = useState(false);
   const [mapRenderer, setMapRenderer] = useState<ExploreMapRenderer>(savedExploreMapRenderer);
+  const [viewportOrientation, setViewportOrientation] = useState(currentExploreViewportOrientation);
   const [routeStatus, setRouteStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [routeMessage, setRouteMessage] = useState(
     initialRoute ? 'Unfinished ride restored. Pair your Wattbike, then press Resume ride when ready.' : '',
@@ -879,12 +887,8 @@ export function ExploreView({
   }, [closeLandmark]);
 
   const toggleInteractiveLandmarks = useCallback(() => {
-    const nextVisible = !showMapLabels;
-    if (nextVisible && developerMode && mapRenderer === 'apple-satellite') {
-      setMapRenderer('google-satellite');
-    }
-    setShowMapLabels(nextVisible);
-  }, [developerMode, mapRenderer, showMapLabels]);
+    setShowMapLabels((visible) => !visible);
+  }, []);
 
   const selectLandmark = useCallback((placeId: string) => {
     const requestId = landmarkRequestRef.current + 1;
@@ -1021,6 +1025,20 @@ export function ExploreView({
       // Private browsing may disable persistent storage.
     }
   }, [developerMode, mapRenderer]);
+
+  useEffect(() => {
+    const updateOrientation = () => {
+      setViewportOrientation(currentExploreViewportOrientation());
+    };
+    window.addEventListener('resize', updateOrientation);
+    window.addEventListener('orientationchange', updateOrientation);
+    window.visualViewport?.addEventListener('resize', updateOrientation);
+    return () => {
+      window.removeEventListener('resize', updateOrientation);
+      window.removeEventListener('orientationchange', updateOrientation);
+      window.visualViewport?.removeEventListener('resize', updateOrientation);
+    };
+  }, []);
 
   useEffect(() => {
     if (!showMapLabels) {
@@ -1970,13 +1988,6 @@ export function ExploreView({
                 >
                   Google 3D
                 </button>
-                <button
-                  className={mapRenderer === 'apple-satellite' ? 'selected' : ''}
-                  type="button"
-                  onClick={() => setMapRenderer('apple-satellite')}
-                >
-                  Apple Satellite
-                </button>
               </div>
               <small className="explore-route-warning">
                 Developer testing only. Riders always use the same route and Explore the World physics.
@@ -2217,9 +2228,7 @@ export function ExploreView({
                     <dd>
                       {effectiveMapRenderer === 'google-3d'
                         ? `Google 3D${showMapLabels ? ' + labels' : ''}`
-                        : effectiveMapRenderer === 'apple-satellite'
-                          ? `Apple satellite${showMapLabels ? ' + labels' : ''}`
-                          : showMapLabels ? 'Labeled satellite' : 'Google satellite'}
+                        : showMapLabels ? 'Labeled satellite' : 'Google satellite'}
                     </dd>
                   </div>
                   <div><dt>Maps</dt><dd>{groups.length || 1} screen{groups.length === 1 ? '' : 's'}</dd></div>
@@ -2436,7 +2445,6 @@ export function ExploreView({
               </div>
 
               {showMapLabels
-                && effectiveMapRenderer !== 'apple-satellite'
                 && !selectedLandmark
                 && !streetViewLandmark && (
                 <div className="explore-landmark-hint" role="status">
@@ -2454,23 +2462,10 @@ export function ExploreView({
                 }]).map((group) => (
                   <Suspense
                     fallback={<div className="explore-map-status">Loading comparison map…</div>}
-                    key={`${effectiveMapRenderer}-${group.id}`}
+                    key={`${effectiveMapRenderer}-${group.id}-${fullscreen ? 'fullscreen' : 'setup'}-${viewportOrientation}`}
                   >
                     {effectiveMapRenderer === 'google-3d' ? (
                       <ExploreGoogle3DMapPanel
-                        group={group}
-                        route={route}
-                        distanceUnit={exploreDistanceUnit}
-                        followZoom={followZoom}
-                        cameraFollowPosition={cameraFollowPosition}
-                        cameraFollowEnabled={cameraFollowEnabled}
-                        showMapLabels={showMapLabels}
-                        followTravelHeading={followTravelHeading}
-                        onCameraInteraction={useFreeCamera}
-                        onLandmarkSelect={selectLandmark}
-                      />
-                    ) : effectiveMapRenderer === 'apple-satellite' ? (
-                      <ExploreAppleMapPanel
                         group={group}
                         route={route}
                         distanceUnit={exploreDistanceUnit}

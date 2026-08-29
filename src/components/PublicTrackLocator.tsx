@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
-  Apple,
   Check,
   Copy,
   ExternalLink,
@@ -19,7 +18,6 @@ import {
   Youtube,
 } from 'lucide-react';
 import {
-  trackAppleMapsDirectionsUrl,
   copyTrackLocatorLink,
   trackGoogleMapsDirectionsUrl,
   trackGoogleEarthUrl,
@@ -575,9 +573,6 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
                     <div className="public-track-link-group" role="group" aria-label={`Directions to ${selectedTrack.name}`}>
                       <span>Directions</span>
                       <div className="public-track-actions">
-                        <a href={trackAppleMapsDirectionsUrl(selectedTrack)} target="_blank" rel="noopener noreferrer">
-                          <Apple size={16} /> Apple Maps
-                        </a>
                         <a href={trackGoogleMapsDirectionsUrl(selectedTrack)} target="_blank" rel="noopener noreferrer">
                           <Navigation size={16} /> Google Maps
                         </a>

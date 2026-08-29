@@ -10793,7 +10793,10 @@ export default function App() {
   const handleExploreFullscreenChange = useCallback((enabled: boolean) => {
     setExploreRideFullscreen(enabled);
     if (enabled) {
-      requestBrowserFullscreen(raceShellRef.current);
+      // Capacitor already owns the iPhone landscape transition. Invoking the
+      // browser Fullscreen API inside WKWebView can race UIKit orientation and
+      // leave the map canvas with a stale or black backing surface.
+      if (!isNativeTrackLabShell()) requestBrowserFullscreen(raceShellRef.current);
     } else {
       releaseBrowserFullscreen();
     }

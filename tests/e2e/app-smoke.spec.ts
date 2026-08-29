@@ -325,7 +325,6 @@ test('public landing page exposes the global track locator without an account', 
   expect(locatorGeometry.layoutFits).toBe(true);
   expect(locatorGeometry.detailsBottom).toBeLessThanOrEqual(locatorGeometry.previewBottom + 1);
   await expect(locator.getByRole('heading', { name: 'North Bay BMX' })).toBeVisible();
-  await expect(locator.getByRole('link', { name: 'Apple Maps' })).toHaveAttribute('href', /maps\.apple\.com.*daddr=/);
   await expect(locator.getByRole('link', { name: 'Google Maps' })).toHaveAttribute('href', /google\.com\/maps\/dir\/.*destination=/);
   await expect(locator.getByRole('link', { name: /Google Earth—not turn-by-turn directions/ })).toHaveAttribute('href', /earth\.google\.com/);
   await expect(locator.getByText('Needs manual mapping')).toHaveCount(0);
@@ -353,7 +352,6 @@ test('public landing page exposes the global track locator without an account', 
   await locator.scrollIntoViewIfNeeded();
   await expect(locator.getByRole('link', { name: 'Official Website' })).toBeVisible();
   await expect(locator.getByRole('link', { name: 'Federation: AusCycling' })).toBeVisible();
-  await expect(locator.getByRole('link', { name: 'Apple Maps' })).toBeVisible();
   await expect(locator.getByRole('link', { name: 'Google Maps' })).toBeVisible();
   const officialLinksFitPhone = await locator.locator('.public-track-official-links').evaluate((element) => (
     element.scrollWidth <= element.clientWidth
@@ -2320,7 +2318,6 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   };
   let commentaryRequestCount = 0;
   let quickRoute = false;
-  let appleMapConfigured = false;
   let elevationRecoveryRequests = 0;
   let staleRouteFulfilled = false;
   let releaseStaleRoute: (() => void) | null = null;
@@ -2339,6 +2336,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
 
   await page.addInitScript(() => {
     window.localStorage.setItem('wattbike-bmx-speed-unit-v1', 'mph');
+    window.localStorage.setItem('tracklab-explore-map-renderer-v1', 'apple-satellite');
     window.localStorage.setItem('tracklab-bmx-last-race-capture-v1', JSON.stringify({
       version: 1,
       sessionId: 'interrupted-demo-race',
@@ -2465,68 +2463,6 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       staleRouteFulfilled = true;
     }
   });
-  await page.route('**/api/admin/apple-map-config', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        configured: appleMapConfigured,
-        token: appleMapConfigured ? 'playwright-mapkit-token' : null,
-      }),
-    });
-  });
-  await page.route('https://cdn.apple-mapkit.com/**', async (route) => {
-    await route.fulfill({
-      contentType: 'text/javascript',
-      body: `(() => {
-        class MockAppleMap {
-          constructor(container, options = {}) {
-            Object.assign(this, options);
-            this.annotations = [];
-            this.overlays = [];
-            window.__tracklabAppleMapCreated = true;
-            container.dataset.appleMapReady = 'true';
-          }
-          addAnnotation(annotation) { this.annotations.push(annotation); }
-          addAnnotations(annotations) { this.annotations.push(...annotations); }
-          addOverlay(overlay) { this.overlays.push(overlay); }
-          destroy() {}
-          removeAnnotations(annotations) {
-            this.annotations = this.annotations.filter((item) => !annotations.includes(item));
-          }
-          removeOverlays(overlays) {
-            this.overlays = this.overlays.filter((item) => !overlays.includes(item));
-          }
-          setCameraDistanceAnimated(distance) { this.cameraDistance = distance; }
-          setCenterAnimated(center) { this.center = center; }
-        }
-        class MockAnnotation {
-          constructor(coordinate, options = {}) {
-            this.coordinate = coordinate;
-            Object.assign(this, options);
-          }
-        }
-        class MockPolyline {
-          constructor(coordinates, options = {}) {
-            this.coordinates = coordinates;
-            Object.assign(this, options);
-          }
-        }
-        class MockStyle {
-          constructor(options = {}) { Object.assign(this, options); }
-        }
-        window.mapkit = {
-          Map: MockAppleMap,
-          MapType: { Hybrid: 'hybrid', Satellite: 'satellite' },
-          MarkerAnnotation: MockAnnotation,
-          PolylineOverlay: MockPolyline,
-          Style: MockStyle,
-        };
-        const callback = document.currentScript?.dataset.callback;
-        if (callback && typeof window[callback] === 'function') window[callback]();
-      })();`,
-    });
-  });
   await page.route('**/api/commentary/{line,speech,pre-race}', async (route) => {
     commentaryRequestCount += 1;
     await route.fulfill({
@@ -2569,7 +2505,12 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(page.getByText(/54\/17 road rollout.*22\.6 ft.*19\.3–29\.0 KPH averages/i)).toBeVisible();
   const mapRenderer = page.getByRole('group', { name: 'Explore map renderer' });
   await expect(mapRenderer).toBeVisible();
-  await expect(mapRenderer.getByRole('button')).toHaveCount(3);
+  await expect(mapRenderer.getByRole('button')).toHaveCount(2);
+  await expect(mapRenderer.getByRole('button', { name: 'Apple Satellite' })).toHaveCount(0);
+  await expect(mapRenderer.getByRole('button', { name: 'Google Satellite' })).toHaveClass(/selected/);
+  await expect.poll(() => page.evaluate(() => (
+    window.localStorage.getItem('tracklab-explore-map-renderer-v1')
+  ))).toBe('google-satellite');
   const exploreDemoRiders = page.getByRole('group', { name: 'Choose demo riders' });
   const exploreDemoRiderButtons = exploreDemoRiders.getByRole('button');
   await expect(exploreDemoRiderButtons).toHaveCount(4);
@@ -2651,12 +2592,42 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     class MockMap {
       private heading = 0;
       private zoom = 18;
+      private center = { lat: 38.5, lng: -120.2 };
+      private readonly element: HTMLElement;
 
-      constructor(_element: HTMLElement, options: Record<string, unknown> & { zoom?: number }) {
+      constructor(element: HTMLElement, options: Record<string, unknown> & {
+        center?: { lat: number; lng: number };
+        zoom?: number;
+      }) {
+        this.element = element;
+        this.center = options.center ?? this.center;
         this.zoom = options.zoom ?? 18;
         (window as typeof window & { __tracklabExploreMapOptions?: Record<string, unknown> })
           .__tracklabExploreMapOptions = options;
+        this.paint();
       }
+
+      private paint() {
+        const surface = document.createElement('div');
+        surface.className = 'tracklab-mock-google-satellite';
+        surface.dataset.routePainted = 'true';
+        surface.style.cssText = [
+          'position:absolute',
+          'inset:0',
+          'pointer-events:none',
+          'background:linear-gradient(145deg,#315f3d 0 45%,#284d34 45% 100%)',
+          'border-top:8px solid #d8ff3e',
+        ].join(';');
+        this.element.replaceChildren(surface);
+        const bounds = this.element.getBoundingClientRect();
+        const testWindow = window as typeof window & {
+          __tracklabExploreMapPaints?: Array<{ height: number; width: number }>;
+        };
+        testWindow.__tracklabExploreMapPaints ??= [];
+        testWindow.__tracklabExploreMapPaints.push({ height: bounds.height, width: bounds.width });
+      }
+
+      handleResize() { this.paint(); }
 
       addListener(eventName: string, handler: MockMapClickHandler) {
         const testWindow = window as typeof window & {
@@ -2676,9 +2647,14 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       }
 
       fitBounds() {}
+      getCenter() { return { toJSON: () => this.center }; }
       getHeading() { return this.heading; }
       getZoom() { return this.zoom; }
-      moveCamera() {}
+      moveCamera(options: { center?: { lat: number; lng: number }; zoom?: number }) {
+        if (options.center) this.center = options.center;
+        if (options.zoom != null) this.zoom = options.zoom;
+      }
+      setCenter(center: { lat: number; lng: number }) { this.center = center; }
       setHeading(heading: number) { this.heading = heading; }
       setOptions() {}
       setTilt() {}
@@ -2814,6 +2790,11 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
               ? streetView
               : name === 'maps3d' ? maps3d : {}
         ),
+        event: {
+          trigger: (target: { handleResize?: () => void }, eventName: string) => {
+            if (eventName === 'resize') target.handleResize?.();
+          },
+        },
       },
     };
   });
@@ -2930,24 +2911,12 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(page.getByLabel(
     'Recommended Wattbike air setting 2. Set air lever to 2.',
   ).first()).toBeVisible();
-  await mapRenderer.getByRole('button', { name: 'Apple Satellite' }).click();
-  await expect(page.getByText(/Apple Satellite is not configured yet/i)).toBeVisible();
-  await expect(page.locator('.explore-route-summary')).toContainText('Apple satellite');
   await expect(page.locator('.explore-route-summary')).toContainText('Elevation gain33 ft');
-  appleMapConfigured = true;
-  await mapRenderer.getByRole('button', { name: 'Google Satellite' }).click();
   await expect(page.locator('.explore-route-summary')).toContainText('Labeled satellite');
   await mapRenderer.getByRole('button', { name: 'Google 3D' }).click();
   await expect(page.getByLabel('Google photorealistic 3D Explore map')).toBeVisible();
   await expect(page.getByText('Loading Google 3D…')).toHaveCount(0);
   await expect(page.locator('.explore-route-summary')).toContainText('Google 3D');
-  await mapRenderer.getByRole('button', { name: 'Apple Satellite' }).click();
-  await expect(page.getByLabel('Apple Satellite Explore map')).toBeVisible();
-  await expect(page.getByText('Loading Apple Satellite…')).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => Boolean(
-    (window as typeof window & { __tracklabAppleMapCreated?: boolean }).__tracklabAppleMapCreated,
-  ))).toBe(true);
-  await mapRenderer.getByRole('button', { name: 'Google 3D' }).click();
   await expect(page.locator('.explore-route-summary')).toContainText('Google 3D');
   await expect(page.getByText('0.62 mi', { exact: true })).toBeVisible();
   const distanceUnits = page.getByRole('group', { name: 'Explore distance unit' });

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { loadGoogleMaps } from '../lib/googleMaps';
 import {
   exploreCameraOffsetMeters,
@@ -103,6 +110,64 @@ export function useExploreCameraInteraction(onCameraInteraction: () => void) {
     beginWheelInteraction,
     interactionActiveRef,
   };
+}
+
+/**
+ * Map SDK canvases can retain their portrait backing size when iOS rotates the
+ * WKWebView into an activity. Refresh after the element, visual viewport, and
+ * fullscreen layout have all settled instead of relying on a single resize.
+ */
+export function useExploreMapViewportRefresh(
+  containerRef: RefObject<HTMLElement | null>,
+  refresh: () => void,
+  active: boolean,
+) {
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+
+  useEffect(() => {
+    if (!active) return undefined;
+    const container = containerRef.current;
+    if (!container) return undefined;
+    let firstFrame = 0;
+    let secondFrame = 0;
+    let settleTimer = 0;
+
+    const performRefresh = () => {
+      const bounds = container.getBoundingClientRect();
+      if (bounds.width < 2 || bounds.height < 2) return;
+      refreshRef.current();
+    };
+    const scheduleRefresh = () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+      window.clearTimeout(settleTimer);
+      firstFrame = window.requestAnimationFrame(() => {
+        secondFrame = window.requestAnimationFrame(performRefresh);
+      });
+      settleTimer = window.setTimeout(performRefresh, 320);
+    };
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(scheduleRefresh);
+    resizeObserver?.observe(container);
+    window.addEventListener('resize', scheduleRefresh);
+    window.addEventListener('orientationchange', scheduleRefresh);
+    window.visualViewport?.addEventListener('resize', scheduleRefresh);
+    document.addEventListener('fullscreenchange', scheduleRefresh);
+    scheduleRefresh();
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+      window.clearTimeout(settleTimer);
+      window.removeEventListener('resize', scheduleRefresh);
+      window.removeEventListener('orientationchange', scheduleRefresh);
+      window.visualViewport?.removeEventListener('resize', scheduleRefresh);
+      document.removeEventListener('fullscreenchange', scheduleRefresh);
+    };
+  }, [active, containerRef]);
 }
 
 function exploreRiderInitials(name: string) {
@@ -324,7 +389,6 @@ export function ExploreMapPanel({
           keyboardShortcuts: true,
           mapTypeControl: false,
           mapTypeId: initialShowMapLabelsRef.current ? 'hybrid' : 'satellite',
-          renderingType: google.maps.RenderingType?.VECTOR,
           rotateControl: false,
           scaleControl: true,
           streetViewControl: false,
@@ -598,6 +662,19 @@ export function ExploreMapPanel({
     frameRequest = window.requestAnimationFrame(alignCamera);
     return () => window.cancelAnimationFrame(frameRequest);
   }, [cameraFollowEnabled, followTravelHeading, status]);
+
+  useExploreMapViewportRefresh(containerRef, () => {
+    const google = googleRef.current;
+    const map = mapRef.current;
+    if (!google || !map) return;
+    const center = cameraCenterRef.current ?? map.getCenter?.()?.toJSON();
+    const zoom = map.getZoom?.();
+    google.maps.event?.trigger(map, 'resize');
+    if (center) {
+      map.moveCamera?.({ center, ...(Number.isFinite(zoom) ? { zoom } : {}) });
+      if (!map.moveCamera) map.setCenter?.(center);
+    }
+  }, status === 'ready');
 
   const leadRider = [...group.riders].sort((a, b) => b.distanceMeters - a.distanceMeters)[0];
 

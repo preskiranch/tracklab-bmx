@@ -1,9 +1,19 @@
+.platform-shell.explore-fullscreen {
+  --explore-safe-top: env(safe-area-inset-top, 0px);
+  --explore-safe-right: env(safe-area-inset-right, 0px);
+  --explore-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --explore-safe-left: env(safe-area-inset-left, 0px);
+  --explore-toolbar-reserve: calc(52px + var(--explore-safe-top));
+  --explore-rider-reserve: calc(97px + var(--explore-safe-bottom));
+}
+
 .platform-shell.explore-fullscreen .explore-map-grid,
 .platform-shell.explore-fullscreen .explore-map-grid.single,
 .platform-shell.explore-fullscreen .explore-map-grid.split,
 .platform-shell.explore-fullscreen .explore-map-grid.three-way,
 .platform-shell.explore-fullscreen .explore-map-grid.four-way {
-  inset: 52px 0 97px;
+  inset: var(--explore-toolbar-reserve) 0 var(--explore-rider-reserve);
+  width: auto;
   height: auto;
 }
 
@@ -18,13 +28,22 @@
 
 .platform-shell.explore-fullscreen .explore-map-group-label {
   top: 8px;
+  left: calc(8px + var(--explore-safe-left));
 }
 
 .platform-shell.explore-fullscreen .explore-rider-strip {
-  right: 6px;
-  bottom: 5px;
-  left: 6px;
+  right: calc(6px + var(--explore-safe-right));
+  bottom: calc(5px + var(--explore-safe-bottom));
+  left: calc(6px + var(--explore-safe-left));
   padding: 4px;
+}
+
+.platform-shell.explore-fullscreen .explore-camera-toolbar {
+  padding:
+    calc(5px + var(--explore-safe-top))
+    calc(6px + var(--explore-safe-right))
+    5px
+    calc(6px + var(--explore-safe-left));
 }
 
 .platform-shell.explore-fullscreen .explore-rider-strip article {
@@ -64,6 +83,26 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-height: 500px) and (orientation: landscape) {
+  .platform-shell.explore-fullscreen {
+    --explore-rider-reserve: calc(84px + var(--explore-safe-bottom));
+  }
+
+  .platform-shell.explore-fullscreen .explore-rider-strip article {
+    padding-block: 4px;
+  }
+
+  .platform-shell.explore-fullscreen .explore-rider-strip img,
+  .platform-shell.explore-fullscreen .explore-rider-initials {
+    width: 36px;
+    height: 36px;
+  }
+
+  .platform-shell.explore-fullscreen .explore-rider-strip article {
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+  }
 }
 .explore-heart-rate {
   align-items: center;
