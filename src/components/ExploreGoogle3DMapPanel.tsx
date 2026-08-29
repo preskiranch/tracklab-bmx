@@ -22,6 +22,7 @@ import {
   type ExploreRiderPinPresentation,
   type ExploreMapPanelProps,
   useExploreCameraInteraction,
+  useExploreMapViewportRefresh,
 } from './ExploreMapPanel';
 
 const exploreRiderPin3DAnchorLeft = '-50%';
@@ -349,6 +350,18 @@ export function ExploreGoogle3DMapPanel({
     frameRequest = requestAnimationFrame(updateCamera);
     return () => cancelAnimationFrame(frameRequest);
   }, [cameraFollowEnabled, followTravelHeading, status]);
+
+  useExploreMapViewportRefresh(containerRef, () => {
+    const map = mapRef.current;
+    if (!map) return;
+    const center = cameraCenterRef.current ?? map.center;
+    const range = map.range;
+    map.style.display = 'block';
+    map.style.width = '100%';
+    map.style.height = '100%';
+    if (center) map.center = { ...center, altitude: 0 };
+    if (Number.isFinite(range)) map.range = range;
+  }, status === 'ready');
 
   const leadRider = [...group.riders].sort((a, b) => b.distanceMeters - a.distanceMeters)[0];
   return (

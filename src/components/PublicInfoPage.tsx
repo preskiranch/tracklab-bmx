@@ -336,7 +336,7 @@ function PrivacyPage() {
               </ul>
               <p>
                 External services process data under their own terms and privacy notices. Opening a landmark website,
-                Apple Maps, Google Maps, or another external link takes you to that provider.
+                Google Maps or another external link takes you to that provider.
               </p>
             </div>
           </section>

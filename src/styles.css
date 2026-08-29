@@ -9056,8 +9056,6 @@ input:focus {
   inset: 0;
   z-index: 2147480000;
   display: block;
-  width: 100vw;
-  height: 100dvh;
   min-height: 0;
   overflow: hidden;
   background: #05080c;
@@ -9109,8 +9107,6 @@ input:focus {
 .explore-fullscreen .explore-map-grid.four-way {
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
   min-height: 0;
   border-radius: 0;
 }
