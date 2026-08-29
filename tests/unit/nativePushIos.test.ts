@@ -57,6 +57,7 @@ describe('native iOS push integration', () => {
     expect(entitlements).toContain('<key>aps-environment</key>');
     expect(project).toContain('com.apple.Push');
     expect(project.match(/CURRENT_PROJECT_VERSION = 23;/gu)).toHaveLength(4);
+    expect(project).not.toContain('CURRENT_PROJECT_VERSION = 22;');
     expect(project).not.toContain('CURRENT_PROJECT_VERSION = 21;');
     expect(unsignedBuild).toContain("node_modules/@capacitor/push-notifications/Package.swift");
     expect(unsignedBuild).toContain('binaryArtifactIsValid');
