@@ -92,6 +92,8 @@ type PreparedRaceSpeech = {
 type UseRaceCommentaryOptions = {
   preferences: RaceCommentaryPreferences;
   clubTabletSessionToken?: string | null;
+  clubTabletDeviceId?: string | null;
+  clubTabletDeviceToken?: string | null;
   accountProfileKey?: string | null;
   raceState: RaceState;
   startGateActive: boolean;
@@ -199,21 +201,30 @@ async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, tim
 export function raceCommentaryRequestHeaders(
   accept: string,
   clubTabletSessionToken?: string | null,
+  clubTabletDeviceToken?: string | null,
 ) {
   const sessionToken = clubTabletSessionToken?.trim();
+  const deviceToken = clubTabletDeviceToken?.trim();
   return {
     Accept: accept,
     'Content-Type': 'application/json',
-    ...(sessionToken ? { 'X-TrackLab-Club-Tablet-Session': sessionToken } : {}),
+    ...(sessionToken
+      ? { 'X-TrackLab-Club-Tablet-Session': sessionToken }
+      : deviceToken
+        ? { Authorization: `Bearer ${deviceToken}` }
+        : {}),
   };
 }
 
 export function raceCommentaryAccessPrincipalKey(
   clubTabletSessionToken?: string | null,
   accountProfileKey?: string | null,
+  clubTabletDeviceId?: string | null,
 ) {
   const sessionToken = clubTabletSessionToken?.trim();
   if (sessionToken) return `club-tablet:${sessionToken}`;
+  const deviceId = clubTabletDeviceId?.trim();
+  if (deviceId) return `club-tablet-device:${deviceId}`;
   const profileKey = accountProfileKey?.trim();
   return profileKey ? `account:${profileKey}` : 'anonymous';
 }
@@ -225,13 +236,18 @@ async function requestAiSpeechBlob(
   riderNames: string[],
   deliveryStyle: CommentaryDeliveryStyle = 'straight',
   clubTabletSessionToken?: string | null,
+  clubTabletDeviceToken?: string | null,
   timeoutMs = 12_000,
   signal?: AbortSignal,
 ) {
   const response = await fetchWithTimeout('/api/commentary/speech', {
     method: 'POST',
     signal,
-    headers: raceCommentaryRequestHeaders('audio/wav', clubTabletSessionToken),
+    headers: raceCommentaryRequestHeaders(
+      'audio/wav',
+      clubTabletSessionToken,
+      clubTabletDeviceToken,
+    ),
     body: JSON.stringify({
       line,
       voicePreset: preferences.voicePreset,
@@ -536,6 +552,8 @@ async function playAudioBlob(
 export function useRaceCommentary({
   preferences,
   clubTabletSessionToken,
+  clubTabletDeviceId,
+  clubTabletDeviceToken,
   accountProfileKey,
   raceState,
   startGateActive,
@@ -667,6 +685,7 @@ export function useRaceCommentary({
   const accessPrincipalKey = raceCommentaryAccessPrincipalKey(
     clubTabletSessionToken,
     accountProfileKey,
+    clubTabletDeviceId,
   );
   const preRaceKey = preparedPreRaceSpeechKey(
     track.id,
@@ -743,6 +762,7 @@ export function useRaceCommentary({
         riderNames,
         deliveryStyle,
         clubTabletSessionToken,
+        clubTabletDeviceToken,
         commentarySpeechTimeoutMs(eventKind),
         signal,
       );
@@ -752,7 +772,12 @@ export function useRaceCommentary({
       recordSpeechFailure(error);
       throw error;
     }
-  }, [clubTabletSessionToken, recordSpeechFailure, recordSpeechReady]);
+  }, [
+    clubTabletDeviceToken,
+    clubTabletSessionToken,
+    recordSpeechFailure,
+    recordSpeechReady,
+  ]);
 
   const playCommentarySpeech = useCallback(async (
     line: string,
@@ -1079,7 +1104,11 @@ export function useRaceCommentary({
     void fetchWithTimeout('/api/commentary/pre-race', {
       method: 'POST',
       signal: controller.signal,
-      headers: raceCommentaryRequestHeaders('application/json', clubTabletSessionToken),
+      headers: raceCommentaryRequestHeaders(
+        'application/json',
+        clubTabletSessionToken,
+        clubTabletDeviceToken,
+      ),
       body: JSON.stringify({
         track: preRaceContext,
         voicePreset: preferences.voicePreset,

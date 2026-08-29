@@ -11,7 +11,13 @@ let audioContext: AudioContext | null = null;
 let raceAudioKeepAliveOscillator: OscillatorNode | null = null;
 let raceAudioKeepAliveGain: GainNode | null = null;
 let activeStartGateAudio: HTMLAudioElement | null = null;
+let startGateMediaContext: AudioContext | null = null;
+let startGateMediaSource: MediaElementAudioSourceNode | null = null;
+let startGateMediaGain: GainNode | null = null;
+let startGateMediaNodes: AudioNode[] = [];
+let startGateMediaPriming = false;
 let activeStartGateBufferSource: AudioBufferSourceNode | null = null;
+let activeStartGateBufferNodes: AudioNode[] = [];
 let startGateAudioGeneration = 0;
 let startGateToneGeneration = 0;
 let startGateToneAudioPool: HTMLAudioElement[] = [];
@@ -23,14 +29,26 @@ let mediaElementPrimed = false;
 let mediaElementPrimePromise: Promise<void> | null = null;
 let raceAmbienceBedAudio: HTMLAudioElement | null = null;
 let raceAmbienceCrowdAudio: HTMLAudioElement | null = null;
+let raceAmbienceMediaContext: AudioContext | null = null;
+let raceAmbienceBedSource: MediaElementAudioSourceNode | null = null;
+let raceAmbienceCrowdSource: MediaElementAudioSourceNode | null = null;
+let raceAmbienceBedGain: GainNode | null = null;
+let raceAmbienceCrowdGain: GainNode | null = null;
 let raceAmbiencePrimed = false;
 let raceAmbiencePrimePromise: Promise<void> | null = null;
+let raceAmbiencePlaybackRequested = false;
+let raceAmbiencePlaybackGeneration = 0;
 let activeRaceAmbienceProfile: BmxEventAmbienceProfile | null = null;
 let lastRaceAmbienceProfileIndex = -1;
 let raceAmbienceMasterVolume = 0.065;
 let raceAmbienceCommentaryDucked = false;
+let raceAmbienceGateDucked = false;
+let raceAmbienceGateDuckReleaseTimer: number | null = null;
 
 export const uciRandomStartVoiceUrl = '/assets/uci-random-start.mp3';
+// 40 ms of mono 8 kHz 16-bit PCM containing only zero samples. This is safe
+// at full element volume even on WKWebView versions that ignore `.volume`.
+export const startGateMediaUnlockUrl = 'data:audio/wav;base64,UklGRqQCAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YYACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 export const bmxEventAmbienceUrl = '/assets/bmx-event-ambience.mp3';
 export const bmxEventAmbienceSources = [
   {
@@ -48,10 +66,45 @@ export const bmxEventAmbienceVariationCount = 128;
 const tracksideBedSource = bmxEventAmbienceSources[0];
 const raceCrowdSource = bmxEventAmbienceSources[1];
 const raceCrowdLoopEndSeconds = 68;
-const raceAmbienceBedMix = 0.74;
-const raceAmbienceCrowdMix = 0.34;
-const raceAmbienceCommentaryDuckMix = 0.2;
+/**
+ * Fixed broadcast mix shared by phones, tablets, and desktop browsers.
+ *
+ * The source crowd recordings are mastered much hotter than the cadence voice.
+ * Keeping these ratios here prevents small iPad speakers from making the crowd
+ * sound louder than the safety-critical gate and natural announcer.
+ */
+export const raceAudioMixProfile = Object.freeze({
+  ambienceBedMix: 0.42,
+  ambienceCrowdMix: 0.12,
+  ambienceCommentaryDuckMix: 0.04,
+  ambienceGateDuckMix: 0.025,
+  cadenceVoiceGain: 2.35,
+  cadenceVoiceHighPassHz: 125,
+  cadenceVoicePresenceHz: 2_250,
+  cadenceVoicePresenceGainDb: 4.5,
+  cadenceVoiceLimiterThresholdDb: -10,
+  cadenceVoiceLimiterRatio: 8,
+  cadenceToneVolume: 0.72,
+  gateToneVolume: 0.58,
+  tickToneVolume: 0.34,
+});
 export const uciVoiceWatchGateOffsetMs = 5300;
+
+export function bmxEventAmbienceLayerVolumes(
+  volume: number,
+  priority: { commentary?: boolean; gate?: boolean } = {},
+) {
+  const masterVolume = Math.max(0, Math.min(0.2, volume));
+  const priorityMix = priority.gate
+    ? raceAudioMixProfile.ambienceGateDuckMix
+    : priority.commentary
+      ? raceAudioMixProfile.ambienceCommentaryDuckMix
+      : 1;
+  return {
+    bed: masterVolume * priorityMix * raceAudioMixProfile.ambienceBedMix,
+    crowd: masterVolume * priorityMix * raceAudioMixProfile.ambienceCrowdMix,
+  };
+}
 
 export type BmxEventAmbienceProfile = {
   index: number;
@@ -126,6 +179,20 @@ function getAudioContext() {
   }
   if (audioContext?.state === 'closed') {
     stopRaceAudioKeepAlive();
+    startGateMediaSource = null;
+    startGateMediaGain = null;
+    startGateMediaNodes = [];
+    startGateMediaContext = null;
+    activeStartGateAudio = null;
+    mediaElementPrimed = false;
+    raceAmbienceMediaContext = null;
+    raceAmbienceBedSource = null;
+    raceAmbienceCrowdSource = null;
+    raceAmbienceBedGain = null;
+    raceAmbienceCrowdGain = null;
+    raceAmbienceBedAudio = null;
+    raceAmbienceCrowdAudio = null;
+    raceAmbiencePrimed = false;
     audioContext = null;
   }
 
@@ -152,6 +219,80 @@ function getStartGateAudio() {
   return activeStartGateAudio;
 }
 
+function createStartGateVoiceMix(context: AudioContext) {
+  const highPass = context.createBiquadFilter();
+  const presence = context.createBiquadFilter();
+  const gain = context.createGain();
+  const limiter = context.createDynamicsCompressor();
+  const now = context.currentTime;
+
+  highPass.type = 'highpass';
+  highPass.frequency.setValueAtTime(raceAudioMixProfile.cadenceVoiceHighPassHz, now);
+  highPass.Q.setValueAtTime(0.7, now);
+  presence.type = 'peaking';
+  presence.frequency.setValueAtTime(raceAudioMixProfile.cadenceVoicePresenceHz, now);
+  presence.Q.setValueAtTime(0.9, now);
+  presence.gain.setValueAtTime(raceAudioMixProfile.cadenceVoicePresenceGainDb, now);
+  gain.gain.setValueAtTime(raceAudioMixProfile.cadenceVoiceGain, now);
+  limiter.threshold.setValueAtTime(raceAudioMixProfile.cadenceVoiceLimiterThresholdDb, now);
+  limiter.knee.setValueAtTime(8, now);
+  limiter.ratio.setValueAtTime(raceAudioMixProfile.cadenceVoiceLimiterRatio, now);
+  limiter.attack.setValueAtTime(0.003, now);
+  limiter.release.setValueAtTime(0.18, now);
+
+  highPass.connect(presence);
+  presence.connect(gain);
+  gain.connect(limiter);
+  limiter.connect(context.destination);
+  return {
+    input: highPass as AudioNode,
+    gain,
+    nodes: [highPass, presence, gain, limiter] as AudioNode[],
+  };
+}
+
+function setStartGateMediaOutputGain(value: number) {
+  if (!startGateMediaGain || !startGateMediaContext || startGateMediaContext.state === 'closed') return;
+  const now = startGateMediaContext.currentTime;
+  if (typeof startGateMediaGain.gain.cancelScheduledValues === 'function') {
+    startGateMediaGain.gain.cancelScheduledValues(now);
+  }
+  startGateMediaGain.gain.setValueAtTime(value, now);
+}
+
+/**
+ * Routes the cadence recording through an intelligibility EQ and limiter when
+ * Web Audio is available. The HTMLAudioElement remains the playback clock, so
+ * the same user-primed path still works in WKWebView; the gain may exceed 1
+ * without clipping the tablet speaker.
+ */
+function connectStartGateMediaMix(audio: HTMLAudioElement, context: AudioContext | null) {
+  if (!context || context.state === 'closed' || typeof context.createMediaElementSource !== 'function') {
+    return false;
+  }
+  if (startGateMediaSource && startGateMediaContext === context) {
+    return true;
+  }
+  if (startGateMediaSource || startGateMediaContext) {
+    // A media element can only belong to one AudioContext. The closed-context
+    // path recreates the element before reaching this point.
+    return false;
+  }
+
+  try {
+    const mix = createStartGateVoiceMix(context);
+    const source = context.createMediaElementSource(audio);
+    source.connect(mix.input);
+    startGateMediaContext = context;
+    startGateMediaSource = source;
+    startGateMediaGain = mix.gain;
+    startGateMediaNodes = mix.nodes;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function startGateToneProfile(kind: StartGateToneKind) {
   const isGateTone = kind === 'gate' || kind === 'uci-green';
   return {
@@ -163,7 +304,11 @@ function startGateToneProfile(kind: StartGateToneKind) {
         : isGateTone
           ? 0.76
           : 0.17,
-    volume: kind.startsWith('uci') ? 0.42 : isGateTone ? 0.28 : 0.17,
+    volume: kind.startsWith('uci')
+      ? raceAudioMixProfile.cadenceToneVolume
+      : isGateTone
+        ? raceAudioMixProfile.gateToneVolume
+        : raceAudioMixProfile.tickToneVolume,
   };
 }
 
@@ -265,6 +410,59 @@ function getRaceAmbienceAudioLayers() {
   };
 }
 
+function connectRaceAmbienceLayer(
+  audio: HTMLAudioElement,
+  context: AudioContext,
+): { source: MediaElementAudioSourceNode; gain: GainNode } | null {
+  try {
+    const gain = context.createGain();
+    gain.connect(context.destination);
+    const source = context.createMediaElementSource(audio);
+    source.connect(gain);
+    return { source, gain };
+  } catch {
+    // The element-volume fallback below remains available in browsers that do
+    // not expose MediaElementAudioSourceNode or reject graph construction.
+    return null;
+  }
+}
+
+/**
+ * iOS can ignore HTMLMediaElement.volume. Move both crowd recordings behind
+ * real GainNodes whenever an AudioContext is available, including while it is
+ * suspended. This makes media priming silent before iOS finishes resume(),
+ * while retaining direct-media fallback only for browsers without Web Audio.
+ */
+function connectRaceAmbienceMediaMix(
+  layers: { bed: HTMLAudioElement; crowd: HTMLAudioElement },
+  context: AudioContext | null,
+) {
+  if (!context || context.state === 'closed' || typeof context.createMediaElementSource !== 'function') {
+    return false;
+  }
+  if (raceAmbienceMediaContext && raceAmbienceMediaContext !== context) {
+    return false;
+  }
+  raceAmbienceMediaContext = context;
+
+  if (!raceAmbienceBedSource) {
+    const connected = connectRaceAmbienceLayer(layers.bed, context);
+    if (connected) {
+      raceAmbienceBedSource = connected.source;
+      raceAmbienceBedGain = connected.gain;
+    }
+  }
+  if (!raceAmbienceCrowdSource) {
+    const connected = connectRaceAmbienceLayer(layers.crowd, context);
+    if (connected) {
+      raceAmbienceCrowdSource = connected.source;
+      raceAmbienceCrowdGain = connected.gain;
+    }
+  }
+  applyRaceAmbienceVolume();
+  return Boolean(raceAmbienceBedGain && raceAmbienceCrowdGain);
+}
+
 function nextRaceAmbienceProfile() {
   const values = new Uint32Array(1);
   let index = Date.now() % bmxEventAmbienceVariationCount;
@@ -315,11 +513,48 @@ function prepareRaceAmbience() {
 }
 
 function applyRaceAmbienceVolume() {
-  const masterVolume = raceAmbienceMasterVolume
-    * (raceAmbienceCommentaryDucked ? raceAmbienceCommentaryDuckMix : 1);
+  if (!raceAmbienceBedAudio && !raceAmbienceCrowdAudio) {
+    // Record the priority state without allocating media elements. Gate tones
+    // and cancellation tests must not create or autoplay ambience when the
+    // ambient option is disabled.
+    return;
+  }
+  const layerVolumes = bmxEventAmbienceLayerVolumes(raceAmbienceMasterVolume, {
+    commentary: raceAmbienceCommentaryDucked,
+    gate: raceAmbienceGateDucked,
+  });
   const { bed, crowd } = getRaceAmbienceAudioLayers();
-  bed.volume = masterVolume * raceAmbienceBedMix;
-  crowd.volume = masterVolume * raceAmbienceCrowdMix;
+  const context = raceAmbienceMediaContext;
+  const applyLayerVolume = (
+    audio: HTMLAudioElement,
+    gain: GainNode | null,
+    volume: number,
+  ) => {
+    if (gain && context && context.state !== 'closed') {
+      // The graph is authoritative on iOS; leave the media element at unity so
+      // devices that honor both controls do not attenuate the signal twice.
+      audio.volume = 1;
+      if (typeof gain.gain.cancelScheduledValues === 'function') {
+        gain.gain.cancelScheduledValues(context.currentTime);
+      }
+      gain.gain.setValueAtTime(volume, context.currentTime);
+      return;
+    }
+    audio.volume = volume;
+  };
+  applyLayerVolume(bed, raceAmbienceBedGain, layerVolumes.bed);
+  applyLayerVolume(crowd, raceAmbienceCrowdGain, layerVolumes.crowd);
+  if (typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('tracklab-race-audio-mix', {
+      detail: {
+        bed: layerVolumes.bed,
+        crowd: layerVolumes.crowd,
+        commentaryDucked: raceAmbienceCommentaryDucked,
+        gateDucked: raceAmbienceGateDucked,
+        webAudio: Boolean(raceAmbienceBedGain && raceAmbienceCrowdGain),
+      },
+    }));
+  }
 }
 
 function setRaceAmbienceVolume(volume: number) {
@@ -332,6 +567,34 @@ export function setBmxEventAmbienceCommentaryDucked(ducked: boolean) {
   if (raceAmbienceCommentaryDucked === ducked) return;
   raceAmbienceCommentaryDucked = ducked;
   applyRaceAmbienceVolume();
+}
+
+function setBmxEventAmbienceGateDucked(ducked: boolean) {
+  if (raceAmbienceGateDucked === ducked) return;
+  raceAmbienceGateDucked = ducked;
+  applyRaceAmbienceVolume();
+}
+
+function scheduleRaceAmbienceGateDuckRelease(delayMs: number) {
+  if (raceAmbienceGateDuckReleaseTimer != null) {
+    window.clearTimeout(raceAmbienceGateDuckReleaseTimer);
+  }
+  raceAmbienceGateDuckReleaseTimer = window.setTimeout(() => {
+    raceAmbienceGateDuckReleaseTimer = null;
+    setBmxEventAmbienceGateDucked(false);
+  }, Math.max(0, delayMs));
+}
+
+/**
+ * Ends cadence ducking when a synchronized gate timeline catches up directly
+ * to green without playing the now-stale green tone.
+ */
+export function releaseBmxEventAmbienceGateDuck() {
+  if (raceAmbienceGateDuckReleaseTimer != null) {
+    window.clearTimeout(raceAmbienceGateDuckReleaseTimer);
+    raceAmbienceGateDuckReleaseTimer = null;
+  }
+  setBmxEventAmbienceGateDucked(false);
 }
 
 function loadUciVoiceBuffer(context: AudioContext) {
@@ -435,7 +698,12 @@ function cancelPendingStartGateAudio(audio: HTMLAudioElement) {
   }
 
   if (activeStartGateAudio === audio) {
-    activeStartGateAudio = null;
+    // Keep reusing the graph-bound element. MediaElementAudioSourceNode may
+    // only be created once for a given element, so replacing it after one
+    // failed play() would silently bypass the cadence EQ on the next race.
+    if (!startGateMediaSource || !startGateMediaContext) {
+      activeStartGateAudio = null;
+    }
     mediaElementPrimed = false;
   }
 }
@@ -443,9 +711,11 @@ function cancelPendingStartGateAudio(audio: HTMLAudioElement) {
 export async function primeAudioCues() {
   const context = getAudioContext();
   const preloadTasks: Promise<unknown>[] = [];
+  let contextResume: Promise<unknown> | null = null;
 
   if (context && context.state !== 'running' && context.state !== 'closed') {
-    preloadTasks.push(context.resume());
+    contextResume = context.resume();
+    preloadTasks.push(contextResume);
   }
   if (context) {
     startSilentUnlockPulse(context);
@@ -456,12 +726,23 @@ export async function primeAudioCues() {
   }
 
   const audio = getStartGateAudio();
+  const cadenceGraphRouted = connectStartGateMediaMix(audio, context);
   audio.load();
-  if (!mediaElementPrimed && !mediaElementPrimePromise) {
+  if (
+    !mediaElementPrimed
+    && !mediaElementPrimePromise
+    && (!context || cadenceGraphRouted)
+  ) {
+    const primeGeneration = startGateAudioGeneration;
+    startGateMediaPriming = true;
     audio.muted = false;
-    audio.volume = 0.0001;
+    audio.volume = cadenceGraphRouted ? 1 : 0.0001;
+    if (cadenceGraphRouted) setStartGateMediaOutputGain(0.00001);
     mediaElementPrimePromise = audio.play()
       .then(() => {
+        if (primeGeneration !== startGateAudioGeneration || activeStartGateAudio !== audio) {
+          return;
+        }
         audio.pause();
         audio.currentTime = 0;
         mediaElementPrimed = true;
@@ -470,6 +751,10 @@ export async function primeAudioCues() {
         // AudioContext remains the primary path when media-element priming is blocked.
       })
       .finally(() => {
+        startGateMediaPriming = false;
+        if (startGateMediaSource && startGateMediaContext === context) {
+          setStartGateMediaOutputGain(raceAudioMixProfile.cadenceVoiceGain);
+        }
         audio.volume = 1;
         audio.muted = false;
         mediaElementPrimePromise = null;
@@ -479,28 +764,37 @@ export async function primeAudioCues() {
     preloadTasks.push(mediaElementPrimePromise);
   }
 
+  // Prime the exact four fallback elements that later carry red/green tones.
+  // Web Audio permission does not transfer to separate HTMLMediaElements, and
+  // iOS can suspend the context before a remote coach start. The unlock WAV is
+  // zero PCM, so it remains silent even if WKWebView ignores element.volume.
   const toneAudios = Array.from({ length: 4 }, (_, index) => getStartGateToneAudio(index));
   if (!startGateToneMediaPrimed && !startGateToneMediaPrimePromise) {
+    const tonePrimeGeneration = startGateToneGeneration;
     toneAudios.forEach((toneAudio) => {
-      toneAudio.src = startGateToneUrl('tick');
+      toneAudio.src = startGateMediaUnlockUrl;
       toneAudio.setAttribute('data-tracklab-start-gate-tone', 'prime');
       toneAudio.muted = false;
-      toneAudio.volume = 0.0001;
+      toneAudio.volume = 1;
       toneAudio.load();
     });
     startGateToneMediaPrimePromise = Promise.allSettled(
       toneAudios.map((toneAudio) => toneAudio.play()),
     )
       .then((results) => {
-        startGateToneMediaPrimed = results.every((result) => result.status === 'fulfilled');
+        if (tonePrimeGeneration === startGateToneGeneration) {
+          startGateToneMediaPrimed = results.every((result) => result.status === 'fulfilled');
+        }
       })
       .finally(() => {
         toneAudios.forEach((toneAudio) => {
-          toneAudio.pause();
-          toneAudio.currentTime = 0;
-          toneAudio.volume = 1;
-          toneAudio.muted = false;
-          toneAudio.removeAttribute('data-tracklab-start-gate-tone');
+          if (tonePrimeGeneration === startGateToneGeneration) {
+            toneAudio.pause();
+            toneAudio.currentTime = 0;
+            toneAudio.volume = 1;
+            toneAudio.muted = false;
+            toneAudio.removeAttribute('data-tracklab-start-gate-tone');
+          }
         });
         startGateToneMediaPrimePromise = null;
       });
@@ -510,22 +804,38 @@ export async function primeAudioCues() {
   }
 
   const { bed, crowd, profile } = prepareRaceAmbience();
-  if (!raceAmbiencePrimed && !raceAmbiencePrimePromise) {
+  const ambienceGraphRouted = connectRaceAmbienceMediaMix({ bed, crowd }, context);
+  if (
+    !raceAmbiencePrimed
+    && !raceAmbiencePrimePromise
+    && (!context || ambienceGraphRouted)
+  ) {
     bed.load();
     crowd.load();
     for (const layer of [bed, crowd]) {
       layer.muted = false;
-      layer.volume = 0.0001;
+      layer.volume = ambienceGraphRouted ? 1 : 0.0001;
+    }
+    const ambienceContext = raceAmbienceMediaContext;
+    for (const gain of [raceAmbienceBedGain, raceAmbienceCrowdGain]) {
+      if (gain && ambienceContext && ambienceContext.state !== 'closed') {
+        if (typeof gain.gain.cancelScheduledValues === 'function') {
+          gain.gain.cancelScheduledValues(ambienceContext.currentTime);
+        }
+        gain.gain.setValueAtTime(0.00001, ambienceContext.currentTime);
+      }
     }
     raceAmbiencePrimePromise = Promise.allSettled([
       bed.play(),
       crowd.play(),
     ])
       .then((results) => {
-        bed.pause();
-        crowd.pause();
-        bed.currentTime = profile.bedStartOffsetSeconds;
-        crowd.currentTime = profile.startOffsetSeconds;
+        if (!raceAmbiencePlaybackRequested) {
+          bed.pause();
+          crowd.pause();
+          bed.currentTime = profile.bedStartOffsetSeconds;
+          crowd.currentTime = profile.startOffsetSeconds;
+        }
         raceAmbiencePrimed = results.every((result) => result.status === 'fulfilled');
       })
       .finally(() => {
@@ -549,10 +859,40 @@ export async function primeAudioCues() {
 }
 
 export async function startBmxEventAmbience(volume = 0.065) {
+  const playbackGeneration = ++raceAmbiencePlaybackGeneration;
+  raceAmbiencePlaybackRequested = true;
   const { bed, crowd, profile } = prepareRaceAmbience();
+  const context = resumeAudioContext();
+  if (context && context.state !== 'running' && context.state !== 'closed') {
+    await settleWithin(context.resume(), 800, undefined);
+  }
+  if (
+    !raceAmbiencePlaybackRequested
+    || playbackGeneration !== raceAmbiencePlaybackGeneration
+  ) {
+    return false;
+  }
+  const ambienceGraphRouted = connectRaceAmbienceMediaMix({ bed, crowd }, context);
+  if (context && !ambienceGraphRouted) {
+    // A direct media fallback is unsafe on iOS because WKWebView may ignore
+    // element.volume. Prefer no ambience over an uncontrolled full-volume
+    // crowd whenever Web Audio exists but cannot own both media elements.
+    if (playbackGeneration === raceAmbiencePlaybackGeneration) {
+      raceAmbiencePlaybackRequested = false;
+    }
+    bed.pause();
+    crowd.pause();
+    return false;
+  }
   const pendingPrime = raceAmbiencePrimePromise;
   if (pendingPrime) {
     await settleWithin(pendingPrime, 1_200, undefined);
+  }
+  if (
+    !raceAmbiencePlaybackRequested
+    || playbackGeneration !== raceAmbiencePlaybackGeneration
+  ) {
+    return false;
   }
 
   bed.loop = true;
@@ -566,11 +906,24 @@ export async function startBmxEventAmbience(volume = 0.065) {
     settleWithin(bed.play().then(() => true).catch(() => false), 1_200, false),
     settleWithin(crowd.play().then(() => true).catch(() => false), 1_200, false),
   ]);
+  if (
+    !raceAmbiencePlaybackRequested
+    || playbackGeneration !== raceAmbiencePlaybackGeneration
+  ) {
+    return false;
+  }
   return bedStarted || crowdStarted;
 }
 
 export function stopBmxEventAmbience() {
+  raceAmbiencePlaybackGeneration += 1;
+  raceAmbiencePlaybackRequested = false;
   activeRaceAmbienceProfile = null;
+  if (raceAmbienceGateDuckReleaseTimer != null) {
+    window.clearTimeout(raceAmbienceGateDuckReleaseTimer);
+    raceAmbienceGateDuckReleaseTimer = null;
+  }
+  raceAmbienceGateDucked = false;
   for (const layer of [raceAmbienceBedAudio, raceAmbienceCrowdAudio]) {
     if (!layer) {
       continue;
@@ -653,6 +1006,11 @@ export function playStartGateTone(kind: StartGateToneKind) {
       detail: { kind, at: Date.now() },
     }));
   }
+  if (kind === 'uci-red') {
+    setBmxEventAmbienceGateDucked(true);
+  } else if (kind === 'uci-green') {
+    scheduleRaceAmbienceGateDuckRelease((uciGreenToneDurationSeconds * 1_000) + 80);
+  }
   const context = resumeAudioContext();
   if (playStartGateToneWithWebAudio(kind)) {
     return;
@@ -708,6 +1066,8 @@ export function stopStartGateAudio() {
     activeStartGateBufferSource.disconnect();
     activeStartGateBufferSource = null;
   }
+  activeStartGateBufferNodes.forEach((node) => node.disconnect());
+  activeStartGateBufferNodes = [];
 
   if (activeStartGateAudio) {
     activeStartGateAudio.pause();
@@ -724,6 +1084,8 @@ export function stopStartGateAudio() {
 
 export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoiceStartResult> {
   stopStartGateAudio();
+  startGateMediaPriming = false;
+  setBmxEventAmbienceGateDucked(true);
   const playbackGeneration = startGateAudioGeneration;
   const playbackWasCancelled = () => playbackGeneration !== startGateAudioGeneration;
   const cancelledResult = (): UciVoiceStartResult => ({
@@ -731,6 +1093,13 @@ export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoi
     source: 'cancelled',
   });
   const audio = getStartGateAudio();
+  const context = getAudioContext();
+  if (context && context.state !== 'running' && context.state !== 'closed') {
+    await settleWithin(context.resume(), 1_200, undefined);
+    if (playbackWasCancelled()) return cancelledResult();
+  }
+  connectStartGateMediaMix(audio, context);
+  setStartGateMediaOutputGain(raceAudioMixProfile.cadenceVoiceGain);
   if (!audio.src.endsWith(uciRandomStartVoiceUrl)) {
     audio.src = uciRandomStartVoiceUrl;
   }
@@ -740,7 +1109,15 @@ export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoi
   audio.volume = 1;
   audio.currentTime = 0;
 
-  const mediaResult = await new Promise<UciVoiceStartResult | null>((resolve) => {
+  // A graph-bound element is inaudible while its context is suspended even if
+  // HTMLMediaElement.play() resolves. Do not report that as a real cadence;
+  // move directly to the independent tone fallback instead.
+  const mediaGraphBlocked = Boolean(
+    startGateMediaSource
+    && startGateMediaContext
+    && startGateMediaContext.state !== 'running',
+  );
+  const mediaResult = mediaGraphBlocked ? null : await new Promise<UciVoiceStartResult | null>((resolve) => {
     let settled = false;
     let timeoutId: number | null = null;
 
@@ -783,16 +1160,16 @@ export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoi
   }
 
   cancelPendingStartGateAudio(audio);
-  const context = getAudioContext();
-  if (context && context.state !== 'running' && context.state !== 'closed') {
-    await settleWithin(context.resume(), 1_200, undefined);
+  const fallbackContext = getAudioContext();
+  if (fallbackContext && fallbackContext.state !== 'running' && fallbackContext.state !== 'closed') {
+    await settleWithin(fallbackContext.resume(), 1_200, undefined);
     if (playbackWasCancelled()) {
       return cancelledResult();
     }
   }
 
-  if (context?.state === 'running') {
-    const voiceBuffer = await settleWithin(loadUciVoiceBuffer(context), 2_500, null);
+  if (fallbackContext?.state === 'running') {
+    const voiceBuffer = await settleWithin(loadUciVoiceBuffer(fallbackContext), 2_500, null);
     if (playbackWasCancelled()) {
       return cancelledResult();
     }
@@ -800,20 +1177,26 @@ export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoi
       if (playbackWasCancelled()) {
         return cancelledResult();
       }
-      const source = context.createBufferSource();
+      const source = fallbackContext.createBufferSource();
+      const mix = createStartGateVoiceMix(fallbackContext);
       source.buffer = voiceBuffer;
-      source.connect(context.destination);
+      source.connect(mix.input);
       source.addEventListener('ended', () => {
         if (activeStartGateBufferSource === source) {
           activeStartGateBufferSource = null;
+          activeStartGateBufferNodes = [];
         }
         source.disconnect();
+        mix.nodes.forEach((node) => node.disconnect());
       }, { once: true });
       activeStartGateBufferSource = source;
+      activeStartGateBufferNodes = mix.nodes;
       const startedAt = Date.now();
       if (playbackWasCancelled()) {
         activeStartGateBufferSource = null;
+        activeStartGateBufferNodes = [];
         source.disconnect();
+        mix.nodes.forEach((node) => node.disconnect());
         return cancelledResult();
       }
       source.start();

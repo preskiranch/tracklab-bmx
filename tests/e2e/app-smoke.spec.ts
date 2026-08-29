@@ -4829,6 +4829,13 @@ test('start here race action enters fullscreen race view', async ({ page }, test
       __tracklabAmbiencePlayCount?: number;
       __tracklabAmbienceLoadCount?: number;
       __tracklabAmbienceElements?: HTMLMediaElement[];
+      __tracklabRaceAudioMix?: Array<{
+        bed: number;
+        crowd: number;
+        commentaryDucked: boolean;
+        gateDucked: boolean;
+        webAudio: boolean;
+      }>;
       __tracklabCommentaryPlaybackStarts?: Array<{
         eventKind: string;
         at: number;
@@ -4848,6 +4855,26 @@ test('start here race action enters fullscreen race view', async ({ page }, test
         {
           eventKind: detail.eventKind,
           at: Number(detail.at),
+        },
+      ];
+    });
+    window.addEventListener('tracklab-race-audio-mix', (event) => {
+      const detail = (event as CustomEvent<{
+        bed?: number;
+        crowd?: number;
+        commentaryDucked?: boolean;
+        gateDucked?: boolean;
+        webAudio?: boolean;
+      }>).detail;
+      if (!Number.isFinite(detail?.bed) || !Number.isFinite(detail?.crowd)) return;
+      audioWindow.__tracklabRaceAudioMix = [
+        ...(audioWindow.__tracklabRaceAudioMix ?? []),
+        {
+          bed: Number(detail.bed),
+          crowd: Number(detail.crowd),
+          commentaryDucked: Boolean(detail.commentaryDucked),
+          gateDucked: Boolean(detail.gateDucked),
+          webAudio: Boolean(detail.webAudio),
         },
       ];
     });
@@ -5047,11 +5074,22 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   expect(activeAmbienceLayers.every((layer) => !layer.paused)).toBe(true);
   await expect.poll(() => page.evaluate(() => {
     const audioWindow = window as typeof window & {
-      __tracklabAmbienceElements?: HTMLMediaElement[];
+      __tracklabRaceAudioMix?: Array<{
+        bed: number;
+        crowd: number;
+        commentaryDucked: boolean;
+        gateDucked: boolean;
+        webAudio: boolean;
+      }>;
     };
-    return (audioWindow.__tracklabAmbienceElements ?? [])
-      .reduce((total, ambience) => total + ambience.volume, 0);
-  }), { timeout: 3_000 }).toBeCloseTo(0.09 * 1.08, 5);
+    return [...(audioWindow.__tracklabRaceAudioMix ?? [])].reverse().find((mix) => (
+      !mix.commentaryDucked && !mix.gateDucked && mix.webAudio
+    )) ?? null;
+  }), { timeout: 3_000 }).toMatchObject({
+    bed: 0.09 * 0.42,
+    crowd: 0.09 * 0.12,
+    webAudio: true,
+  });
   await expect(riderPanel.locator('.race-rider-overlay-card.positions-pending')).toHaveCount(4);
   await expect(riderPanel.locator('.race-rider-overlay-place')).toHaveCount(0);
   await expect.poll(() => commentarySpeechRequests, { timeout: 5_000 }).toBeGreaterThan(0);
@@ -5155,6 +5193,41 @@ test('start here race action enters fullscreen race view', async ({ page }, test
       __tracklabGateToneStarts?: Array<number | string>;
     }).__tracklabGateToneStarts?.length ?? 0
   )), { timeout: 10_000 }).toBe(4);
+  await expect.poll(() => page.evaluate(() => {
+    const mixes = (window as typeof window & {
+      __tracklabRaceAudioMix?: Array<{
+        bed: number;
+        crowd: number;
+        commentaryDucked: boolean;
+        gateDucked: boolean;
+        webAudio: boolean;
+      }>;
+    }).__tracklabRaceAudioMix ?? [];
+    const mix = mixes.find((candidate) => candidate.gateDucked && candidate.webAudio);
+    return mix ? {
+      bed: mix.bed.toFixed(9),
+      crowd: mix.crowd.toFixed(9),
+      gateDucked: mix.gateDucked,
+      webAudio: mix.webAudio,
+    } : null;
+  }), { timeout: 3_000 }).toMatchObject({
+    bed: (0.09 * 0.42 * 0.025).toFixed(9),
+    crowd: (0.09 * 0.12 * 0.025).toFixed(9),
+    gateDucked: true,
+    webAudio: true,
+  });
+  await expect.poll(() => page.evaluate(() => {
+    const mixes = (window as typeof window & {
+      __tracklabRaceAudioMix?: Array<{ gateDucked: boolean; webAudio: boolean }>;
+    }).__tracklabRaceAudioMix ?? [];
+    const lastGateMixIndex = mixes.reduce(
+      (latest, mix, index) => (mix.gateDucked ? index : latest),
+      -1,
+    );
+    return lastGateMixIndex >= 0 && mixes
+      .slice(lastGateMixIndex + 1)
+      .some((mix) => !mix.gateDucked && mix.webAudio);
+  }), { timeout: 4_000 }).toBe(true);
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & { __tracklabTreeLightSequence?: string[] }).__tracklabTreeLightSequence ?? []
   )), { timeout: 3_000 }).toEqual(['Red', 'Yellow one', 'Yellow two', 'Green']);

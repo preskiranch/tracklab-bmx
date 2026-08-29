@@ -2,9 +2,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  bmxEventAmbienceLayerVolumes,
   bmxEventAmbienceProfile,
   bmxEventAmbienceSources,
   bmxEventAmbienceVariationCount,
+  raceAudioMixProfile,
 } from '../../src/lib/audioCues';
 
 describe('race ambience asset', () => {
@@ -45,5 +47,26 @@ describe('race ambience asset', () => {
       && profile.loopStartOffsetSeconds < profile.loopEndOffsetSeconds
       && profile.loopEndOffsetSeconds < bmxEventAmbienceSources[1].durationSeconds
     ))).toBe(true);
+  });
+
+  it('keeps crowd subordinate and reserves headroom for cadence and commentary', () => {
+    const normal = bmxEventAmbienceLayerVolumes(0.1);
+    const commentary = bmxEventAmbienceLayerVolumes(0.1, { commentary: true });
+    const gate = bmxEventAmbienceLayerVolumes(0.1, { gate: true });
+    const both = bmxEventAmbienceLayerVolumes(0.1, { commentary: true, gate: true });
+
+    expect(normal).toEqual({ bed: 0.042, crowd: 0.012 });
+    expect(commentary.bed).toBeCloseTo(normal.bed * 0.04, 10);
+    expect(commentary.crowd).toBeCloseTo(normal.crowd * 0.04, 10);
+    expect(gate.bed).toBeCloseTo(normal.bed * 0.025, 10);
+    expect(gate.crowd).toBeCloseTo(normal.crowd * 0.025, 10);
+    expect(both).toEqual(gate);
+    expect(raceAudioMixProfile.cadenceVoiceGain).toBeGreaterThan(2);
+    expect(raceAudioMixProfile.cadenceToneVolume).toBeGreaterThan(0.65);
+  });
+
+  it('clamps unreasonable ambience preferences before applying the fixed mix', () => {
+    expect(bmxEventAmbienceLayerVolumes(-1)).toEqual({ bed: 0, crowd: 0 });
+    expect(bmxEventAmbienceLayerVolumes(4)).toEqual({ bed: 0.084, crowd: 0.024 });
   });
 });

@@ -5013,6 +5013,9 @@ describe('cloud API trust boundaries', () => {
     const tabletHeaders = (sessionToken: string): HeadersInit => ({
       'X-TrackLab-Club-Tablet-Session': sessionToken,
     });
+    const deviceHeaders = (deviceToken: string): HeadersInit => ({
+      Authorization: `Bearer ${deviceToken}`,
+    });
 
     const trackId = `commentary-tablet-scope-${now}`;
     const track = {
@@ -5050,6 +5053,42 @@ describe('cloud API trust boundaries', () => {
     expect(baseline.status).toBe(200);
     const baselinePayload = await baseline.json() as { variableCount: number };
 
+    const demoPreRace = await api('/api/commentary/pre-race', {
+      method: 'POST',
+      headers: deviceHeaders(firstDevice.deviceToken),
+      body: JSON.stringify({ track, voicePreset: 'american-man' }),
+    });
+    expect(demoPreRace.status).toBe(200);
+    const demoPreRacePayload = await demoPreRace.json() as { variableCount: number };
+    expect(demoPreRacePayload.variableCount).toBe(baselinePayload.variableCount);
+
+    const nativeDemoPreRace = await fetch(`${baseUrl}/api/commentary/pre-race`, {
+      method: 'POST',
+      headers: {
+        Origin: 'capacitor://localhost',
+        'Content-Type': 'application/json',
+        'X-TrackLab-Native-Session': '1',
+        ...deviceHeaders(firstDevice.deviceToken),
+      },
+      body: JSON.stringify({ track, voicePreset: 'american-man' }),
+    });
+    expect(nativeDemoPreRace.status).toBe(200);
+    await expect(nativeDemoPreRace.json()).resolves.toMatchObject({
+      variableCount: demoPreRacePayload.variableCount,
+    });
+
+    const demoProtectedSpeech = await api('/api/commentary/speech', {
+      method: 'POST',
+      headers: deviceHeaders(firstDevice.deviceToken),
+      body: JSON.stringify({
+        line: `${riders[0].name} is holding 120 RPM.`,
+        voicePreset: 'american-man',
+        eventKind: 'final-push',
+        riderNames: [riders[0].name],
+      }),
+    });
+    expect(demoProtectedSpeech.status).toBe(400);
+
     const protectedSpeech = await api('/api/commentary/speech', {
       method: 'POST',
       headers: tabletHeaders(firstSession.sessionToken),
@@ -5069,6 +5108,15 @@ describe('cloud API trust boundaries', () => {
     const wrongExplicitToken = await preRace('wrong-commentary-tablet-session-token-1234567890');
     expect(wrongExplicitToken.status).toBe(401);
     cookie = '';
+    const wrongSessionWithValidDevice = await api('/api/commentary/pre-race', {
+      method: 'POST',
+      headers: {
+        ...deviceHeaders(firstDevice.deviceToken),
+        ...tabletHeaders('wrong-commentary-tablet-session-token-1234567890'),
+      },
+      body: JSON.stringify({ track, voicePreset: 'american-man' }),
+    });
+    expect(wrongSessionWithValidDevice.status).toBe(401);
     expect((await preRace()).status).toBe(401);
 
     const saveRace = (
@@ -5110,6 +5158,16 @@ describe('cloud API trust boundaries', () => {
     const selectedWithHistoryPayload = await selectedWithHistory.json() as { variableCount: number };
     expect(selectedWithHistoryPayload.variableCount).toBe(baselinePayload.variableCount + 4);
 
+    const demoAfterAthleteHistory = await api('/api/commentary/pre-race', {
+      method: 'POST',
+      headers: deviceHeaders(firstDevice.deviceToken),
+      body: JSON.stringify({ track, voicePreset: 'american-man' }),
+    });
+    expect(demoAfterAthleteHistory.status).toBe(200);
+    await expect(demoAfterAthleteHistory.json()).resolves.toMatchObject({
+      variableCount: demoPreRacePayload.variableCount,
+    });
+
     expect((await saveRace(
       secondSession.sessionToken,
       `commentary-sibling-race-${now}`,
@@ -5126,6 +5184,15 @@ describe('cloud API trust boundaries', () => {
     await expect(siblingWithHistory.json()).resolves.toMatchObject({
       variableCount: baselinePayload.variableCount + 4,
     });
+    const demoAfterSiblingHistory = await api('/api/commentary/pre-race', {
+      method: 'POST',
+      headers: deviceHeaders(firstDevice.deviceToken),
+      body: JSON.stringify({ track, voicePreset: 'american-man' }),
+    });
+    expect(demoAfterSiblingHistory.status).toBe(200);
+    await expect(demoAfterSiblingHistory.json()).resolves.toMatchObject({
+      variableCount: demoPreRacePayload.variableCount,
+    });
 
     expect((await api('/api/club-tablet/sessions', {
       method: 'DELETE',
@@ -5136,6 +5203,19 @@ describe('cloud API trust boundaries', () => {
       method: 'DELETE',
       headers: tabletHeaders(secondSession.sessionToken),
     })).status).toBe(200);
+
+    cookie = monitorCookie;
+    expect((await api('/api/club-tablet/devices', {
+      method: 'DELETE',
+      body: JSON.stringify({ deviceId: firstDevice.device.id }),
+    })).status).toBe(200);
+    cookie = '';
+    const revokedDemoPreRace = await api('/api/commentary/pre-race', {
+      method: 'POST',
+      headers: deviceHeaders(firstDevice.deviceToken),
+      body: JSON.stringify({ track, voicePreset: 'american-man' }),
+    });
+    expect(revokedDemoPreRace.status).toBe(401);
     cookie = originalCookie;
   });
 

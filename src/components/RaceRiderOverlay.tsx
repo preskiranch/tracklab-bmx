@@ -93,6 +93,16 @@ export function raceRiderOverlayMinimumHeight(
 ) {
   const scale = normalizeRiderPresentationScale(presentationScale);
   if (Math.abs(scale - 1) > 0.001) {
+    // A phone cannot display two readable rows inside the raw ~63px owner
+    // scale. Preserve the narrow saved footprint, but reserve the minimum
+    // vertical room needed to keep all four cards visible. Short landscape
+    // viewports already use the compact one-row 138px presentation.
+    if (raceRiderOverlayUsesCompactLandscape(containerWidth, containerHeight)) {
+      return 138;
+    }
+    if (containerWidth <= 600 && containerHeight > containerWidth) {
+      return Math.min(200, Math.max(1, containerHeight - 24));
+    }
     const scaledDefaultMinimum = Math.max(
       110,
       Math.round(defaultRaceRiderOverlayLayout.height * scale),
@@ -202,6 +212,13 @@ export function RaceRiderOverlay({
 }: RaceRiderOverlayProps) {
   const normalizedPresentationScale = normalizeRiderPresentationScale(presentationScale);
   const presentationScaled = Math.abs(normalizedPresentationScale - 1) > 0.001;
+  // The complete saved overlay is uniformly scaled to preserve its authored
+  // position and footprint. Counter only the typography on tablet-sized
+  // viewers so a 1366px owner layout does not turn into 9-12px race data on a
+  // 1024px studio iPad. Dedicated phone rules still cap the compact layout.
+  const presentationLegibilityScale = presentationScaled
+    ? 1 / normalizedPresentationScale
+    : 1;
   const [layout, setLayout] = useState<RaceRiderOverlayLayout>(
     () => presentationScaled && preference
       ? preference
@@ -514,6 +531,9 @@ export function RaceRiderOverlay({
         '--overlay-y': `${layout.yPct * 100}%`,
         '--overlay-width': `${layout.width}px`,
         '--overlay-height': `${layout.height}px`,
+        ...(presentationScaled ? {
+          '--rr-font': `${16 * presentationLegibilityScale}px`,
+        } : {}),
         '--race-overlay-min-height': `${raceRiderOverlayMinimumHeight(
           overlayRef.current?.parentElement?.clientWidth ?? 1366,
           overlayRef.current?.parentElement?.clientHeight ?? 1024,
