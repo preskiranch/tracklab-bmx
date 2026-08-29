@@ -563,9 +563,9 @@ export function AnalyticsPanel({
                         </span>
                         {hasHeartRate && (
                           <span className="table-metric private-heart-rate-metric">
-                            <small><HeartPulse size={12} /> Private HR avg / peak</small>
+                            <small><HeartPulse size={12} /> Peak heart rate</small>
                             <strong>{heartRateZone?.summary.sampleCount
-                              ? `${Math.round(heartRateZone.summary.averageBpm ?? 0)} / ${Math.round(heartRateZone.summary.peakBpm ?? 0)} BPM`
+                              ? `${Math.round(heartRateZone.summary.peakBpm ?? 0)} BPM`
                               : 'No heart-rate sample'}</strong>
                           </span>
                         )}

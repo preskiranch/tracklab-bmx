@@ -71,6 +71,7 @@ import {
   updateBikeRaceAudio,
 } from './lib/bikeRaceAudio';
 import { safeSetLocalStorage } from './lib/browserStorage';
+import { resolveHeartRateResultsMetricState } from './lib/heartRateMetric';
 import { trackLabServiceOrigin } from './lib/serviceOrigins';
 import {
   clubTabletRaceStartAllowed,
@@ -4431,6 +4432,20 @@ export default function App() {
     racePlayers,
     watchConnectAccountHeartRate,
   ]);
+  const heartRateMetricState = resolveHeartRateResultsMetricState({
+    enabled: Boolean(authUser || heartRateStudioInviteCode) && !clubTabletKioskMode,
+    availabilityResolved: heartRate.availability != null,
+    watchReady: Boolean(
+      heartRate.availability?.supported
+      && heartRate.availability.paired
+      && heartRate.availability.watchAppInstalled
+      && heartRate.availability.healthDataAvailable
+    ),
+    hasLiveReading: Object.keys(heartRateByPlayer).length > 0,
+    watchConnectState: heartRate.watchConnect?.state,
+    workoutState: heartRate.status?.state,
+    readingState: heartRate.readingState,
+  });
   const cloudProfileKey = authUser?.profileKey ?? multiplayer.profile.guestKey;
   const exploreRecentRouteHistoryScope = resolveExploreRecentRouteHistoryScope({
     accountProfileKey: cloudProfileKey,
@@ -13167,6 +13182,7 @@ export default function App() {
                   <SessionControlPanel
                   track={effectiveTrack}
                   selectedMetrics={selectedMetrics}
+                  heartRateMetricState={heartRateMetricState}
                   speedUnit={speedUnit}
                   distanceUnit={distanceUnit}
                   customRouteName={customRouteName}

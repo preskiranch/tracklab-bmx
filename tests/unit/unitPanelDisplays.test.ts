@@ -15,8 +15,47 @@ import {
 import { formatMultiplayerProSetMinimumSpeed } from '../../src/components/MultiplayerPanel';
 import { straightSprintConfigurationKey } from '../../src/lib/straightSprint';
 import { proSplitMinimumMph } from '../../src/lib/trackMapping';
+import { resolveHeartRateResultsMetricState } from '../../src/lib/heartRateMetric';
 
 describe('race panel unit presentation', () => {
+  it('checks heart rate automatically only while an Apple Watch feed is connected', () => {
+    expect(resolveHeartRateResultsMetricState({
+      enabled: true,
+      availabilityResolved: true,
+      watchReady: false,
+      hasLiveReading: false,
+      watchConnectState: 'connected',
+    })).toBe('connected');
+    expect(resolveHeartRateResultsMetricState({
+      enabled: true,
+      availabilityResolved: true,
+      watchReady: false,
+      hasLiveReading: true,
+    })).toBe('connected');
+    expect(resolveHeartRateResultsMetricState({
+      enabled: true,
+      availabilityResolved: false,
+      watchReady: false,
+      hasLiveReading: false,
+    })).toBe('checking');
+    expect(resolveHeartRateResultsMetricState({
+      enabled: true,
+      availabilityResolved: true,
+      watchReady: false,
+      hasLiveReading: false,
+      watchConnectState: 'inactive',
+      workoutState: 'idle',
+      readingState: 'idle',
+    })).toBe('unavailable');
+    expect(resolveHeartRateResultsMetricState({
+      enabled: true,
+      availabilityResolved: true,
+      watchReady: true,
+      hasLiveReading: false,
+      workoutState: 'idle',
+    })).toBe('connected');
+  });
+
   it('keeps the committed mapping rest gap while its editable field is empty or invalid', () => {
     expect(mappingRestSecondsFromInput('')).toBeNull();
     expect(mappingRestSecondsFromInput('invalid')).toBeNull();

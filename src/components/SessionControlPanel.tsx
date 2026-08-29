@@ -6,6 +6,7 @@ import {
   Download,
   Flag,
   Gauge,
+  HeartPulse,
   MapPinned,
   Maximize2,
   Mic2,
@@ -118,6 +119,7 @@ function splitBranchDraftPath(points: TrackPoint[], splitPoint: TrackPoint, merg
 type SessionControlPanelProps = {
   track: TrackRecord;
   selectedMetrics: MetricKey[];
+  heartRateMetricState: 'checking' | 'connected' | 'unavailable';
   speedUnit: SpeedUnit;
   distanceUnit: DistanceUnit;
   customRouteName: string;
@@ -240,6 +242,7 @@ function riderInitials(name: string) {
 export function SessionControlPanel({
   track,
   selectedMetrics,
+  heartRateMetricState,
   speedUnit,
   distanceUnit,
   customRouteName,
@@ -1567,6 +1570,33 @@ export function SessionControlPanel({
               <span><Icon size={16} /> {label}</span>
             </label>
           ))}
+          <label
+            className={`metric-option heart-rate-metric-option ${heartRateMetricState}`}
+            aria-disabled="true"
+            style={heartRateMetricState === 'connected'
+              ? undefined
+              : { color: 'var(--muted)', background: '#f2f4f6', opacity: 0.66 }}
+            title={heartRateMetricState === 'connected'
+              ? 'Apple Watch heart rate is connected and will be saved privately.'
+              : heartRateMetricState === 'checking'
+                ? 'Checking for Apple Watch heart rate.'
+                : 'Connect an Apple Watch to include private heart-rate results.'}
+          >
+            <input
+              type="checkbox"
+              checked={heartRateMetricState === 'connected'}
+              disabled
+              readOnly
+            />
+            <span className="heart-rate-metric-copy" style={{ display: 'grid' }}>
+              <span><HeartPulse size={16} /> Heart rate</span>
+              <small style={{ color: 'inherit', fontSize: 10 }}>{heartRateMetricState === 'connected'
+                ? 'Apple Watch connected · saved privately'
+                : heartRateMetricState === 'checking'
+                  ? 'Checking Apple Watch…'
+                  : 'Connect Apple Watch to enable'}</small>
+            </span>
+          </label>
         </div>
       </section>
 
