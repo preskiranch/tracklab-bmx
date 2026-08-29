@@ -526,6 +526,9 @@ test('iPhone native connecting event cannot cancel its newly created Watch conne
     document.documentElement.scrollWidth <= document.documentElement.clientWidth
   ))).toBe(true);
 
+  // Live iPhone activities are landscape-only; settings and Watch Connect
+  // remain available in portrait before the activity begins.
+  await page.setViewportSize({ width: 844, height: 390 });
   await page.getByRole('button', { name: 'Get Pulled', exact: true }).click();
   const pull = page.getByLabel('Get Pulled timed Wattbike test');
   const athlete = pull.getByRole('combobox', { name: /Athlete assigned to/ });

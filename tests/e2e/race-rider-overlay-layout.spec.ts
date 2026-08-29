@@ -42,6 +42,8 @@ test('keeps every placement fully visible with a long photographed rider name on
     { width: 1440, height: 900, columns: 4, minimumPanelHeight: 220, photoSize: 64 },
     { width: 1366, height: 1024, columns: 4, minimumPanelHeight: 220, photoSize: 64 },
     { width: 1280, height: 960, columns: 4, minimumPanelHeight: 220, photoSize: 64 },
+    { width: 1194, height: 834, columns: 4, minimumPanelHeight: 220, photoSize: 64 },
+    { width: 1180, height: 820, columns: 4, minimumPanelHeight: 220, photoSize: 64 },
     { width: 1024, height: 768, columns: 4, minimumPanelHeight: 220, photoSize: 64 },
     { width: 820, height: 1180, columns: 2, minimumPanelHeight: 340, photoSize: 60 },
   ]) {
@@ -151,9 +153,12 @@ test('keeps one and four saved iPad Pro rider cards readable on a compact studio
   ]);
   for (const viewport of [
     { width: 1024, height: 768, progressFont: 13.8, badgeFont: 11.8, placeFont: 39.5 },
+    { width: 1180, height: 820, progressFont: 13.8, badgeFont: 11.8, placeFont: 39.5 },
+    { width: 1194, height: 834, progressFont: 13.8, badgeFont: 11.8, placeFont: 39.5 },
+    { width: 1366, height: 1024, progressFont: 13.8, badgeFont: 11.8, placeFont: 39.5 },
     { width: 820, height: 1180, progressFont: 11.8, badgeFont: 10.8, placeFont: 35.5 },
   ]) {
-    const presentationScale = viewport.width / 1366;
+    const presentationScale = Math.min(viewport.width / 1366, viewport.height / 1024);
     const panelWidth = 940 * presentationScale;
     const panelHeight = 220 * presentationScale;
     const legibilityScale = 1 / presentationScale;

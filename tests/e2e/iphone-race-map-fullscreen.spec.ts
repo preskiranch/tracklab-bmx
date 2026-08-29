@@ -311,49 +311,80 @@ test('keeps satellite race controls and rider data inside iPhone portrait and la
   }
 });
 
-test('replays the iPad Pro rider panel at the same studio-tablet composition', async ({ page }) => {
-  const ownerViewport = { width: 1366, height: 1024 };
-  const studioViewport = { width: 1024, height: 768 };
-  const studioScale = studioViewport.width / ownerViewport.width;
-
-  const measure = async (viewport: { width: number; height: number }, scale: number) => {
+test('replays the iPad Pro rider panel throughout the iPad landscape matrix', async ({ page }) => {
+  const referenceViewport = { width: 1366, height: 1024 };
+  for (const viewport of [
+    { width: 1024, height: 768 },
+    { width: 1180, height: 820 },
+    { width: 1194, height: 834 },
+    { width: 1366, height: 1024 },
+  ]) {
+    const scale = Math.min(
+      viewport.width / referenceViewport.width,
+      viewport.height / referenceViewport.height,
+    );
+    const frameWidth = referenceViewport.width * scale;
+    const frameHeight = referenceViewport.height * scale;
+    const expected = {
+      left: ((viewport.width - frameWidth) / 2) + (0.04 * frameWidth),
+      top: ((viewport.height - frameHeight) / 2) + (0.7 * frameHeight),
+      width: 940 * scale,
+      height: 220 * scale,
+    };
     await page.setViewportSize(viewport);
     await page.setContent(raceMarkup(220, false, {
       scale,
-      width: 940 * scale,
-      height: 220 * scale,
-      xPct: 0.04,
-      yPct: 0.7,
+      width: expected.width,
+      height: expected.height,
+      xPct: expected.left / viewport.width,
+      yPct: expected.top / viewport.height,
     }));
     await installTrackStyles(page);
-    return page.getByLabel('Race rider positions').evaluate((panel) => {
+    const geometry = await page.getByLabel('Race rider positions').evaluate((panel) => {
       const panelBounds = panel.getBoundingClientRect();
       const avatarBounds = panel.querySelector<HTMLElement>('.race-rider-overlay-avatar')!
         .getBoundingClientRect();
+      const stageBounds = panel.parentElement!.getBoundingClientRect();
+      const contains = (outer: DOMRect, inner: DOMRect) => (
+        inner.left >= outer.left - 0.5
+        && inner.top >= outer.top - 0.5
+        && inner.right <= outer.right + 0.5
+        && inner.bottom <= outer.bottom + 0.5
+      );
+      const cards = [...panel.querySelectorAll<HTMLElement>('.race-rider-overlay-card')];
       return {
-        xPct: panelBounds.x / window.innerWidth,
-        yPct: panelBounds.y / window.innerHeight,
-        widthPct: panelBounds.width / window.innerWidth,
-        heightPct: panelBounds.height / window.innerHeight,
+        cardsContained: cards.every((card) => contains(panelBounds, card.getBoundingClientRect())),
+        mapFillsViewport: Math.abs(stageBounds.left) < 0.5
+          && Math.abs(stageBounds.top) < 0.5
+          && Math.abs(stageBounds.width - window.innerWidth) < 0.5
+          && Math.abs(stageBounds.height - window.innerHeight) < 0.5,
+        panelInsideMap: contains(stageBounds, panelBounds),
+        panelHeightRatio: panelBounds.height / stageBounds.height,
+        left: panelBounds.left,
+        top: panelBounds.top,
+        width: panelBounds.width,
+        height: panelBounds.height,
         avatarSize: avatarBounds.width,
       };
     });
-  };
-
-  const owner = await measure(ownerViewport, 1);
-  const studio = await measure(studioViewport, studioScale);
-  expect(studio.xPct).toBeCloseTo(owner.xPct, 3);
-  expect(studio.yPct).toBeCloseTo(owner.yPct, 3);
-  expect(studio.widthPct).toBeCloseTo(owner.widthPct, 3);
-  expect(studio.heightPct).toBeCloseTo(owner.heightPct, 3);
-  expect(studio.avatarSize / owner.avatarSize).toBeCloseTo(studioScale, 2);
-  await expectInsideViewport(page, page.getByLabel('Race rider positions'));
+    expect(geometry.left).toBeCloseTo(expected.left, 0);
+    expect(geometry.top).toBeCloseTo(expected.top, 0);
+    expect(geometry.width).toBeCloseTo(expected.width, 0);
+    expect(geometry.height).toBeCloseTo(expected.height, 0);
+    expect(geometry.avatarSize).toBeCloseTo(64 * scale, 0);
+    expect(geometry.panelHeightRatio).toBeLessThanOrEqual(0.216);
+    expect(geometry.mapFillsViewport).toBe(true);
+    expect(geometry.panelInsideMap).toBe(true);
+    expect(geometry.cardsContained).toBe(true);
+    await expectInsideViewport(page, page.getByLabel('Race rider positions'));
+  }
 });
 
 test('counter-scales saved rider text on iPhone portrait and landscape without growing the panel', async ({ page }) => {
   for (const viewport of [
     { width: 390, height: 844, name: 15.8, progress: 11.8, badge: 10.8, place: 19.8 },
     { width: 844, height: 390, name: 11.8, progress: 10.8, badge: 9.8, place: 16.8 },
+    { width: 932, height: 430, name: 11.8, progress: 10.8, badge: 9.8, place: 16.8 },
   ]) {
     const rawScale = Math.min(viewport.width / 1366, viewport.height / 1024);
     const presentationScale = Math.max(0.5, rawScale);

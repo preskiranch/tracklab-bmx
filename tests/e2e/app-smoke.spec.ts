@@ -5112,6 +5112,32 @@ test('start here race action enters fullscreen race view', async ({ page }, test
       }>;
     }).__tracklabCommentaryPlaybackStarts?.length ?? 0
   )), { timeout: 18_000 }).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => {
+    const audioWindow = window as typeof window & {
+      __tracklabAmbienceElements?: HTMLMediaElement[];
+      __tracklabRaceAudioMix?: Array<{
+        bed: number;
+        crowd: number;
+        commentaryDucked: boolean;
+        gateDucked: boolean;
+        webAudio: boolean;
+      }>;
+    };
+    const commentaryMix = (audioWindow.__tracklabRaceAudioMix ?? []).find((mix) => (
+      mix.commentaryDucked && !mix.gateDucked && mix.webAudio
+    ));
+    return commentaryMix ? {
+      bed: commentaryMix.bed.toFixed(9),
+      crowd: commentaryMix.crowd.toFixed(9),
+      playingAmbienceLayers: (audioWindow.__tracklabAmbienceElements ?? []).filter(
+        (ambience) => !ambience.paused,
+      ).length,
+    } : null;
+  }), { timeout: 5_000 }).toEqual({
+    bed: (0.09 * 0.42).toFixed(9),
+    crowd: (0.09 * 0.12).toFixed(9),
+    playingAmbienceLayers: 2,
+  });
   await expect.poll(
     () => commentarySpeechPayloads.some((payload) => (
       payload.eventKind === 'race-start'
@@ -8302,48 +8328,110 @@ test('club owner restores a shared tablet into stable athlete-only kiosk mode', 
       await page.locator('.workflow-step.primary-action').click();
       await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
       const earthStage = page.locator('.earth-stage');
-      await expect.poll(async () => earthStage.evaluate((stage) => {
-        const zoom = Number(stage.getAttribute('data-race-camera-zoom'));
-        const expectedZoom = 20.78 + Math.log2(Math.min(
-          stage.clientWidth / 1366,
-          stage.clientHeight / 1024,
-        ));
-        return {
-          angle: Number(stage.getAttribute('data-race-camera-angle')),
-          heading: Number(stage.getAttribute('data-race-camera-heading')),
-          latitude: Number(stage.getAttribute('data-race-camera-lat')),
-          referenceHeight: Number(stage.getAttribute('data-race-camera-reference-height')),
-          referenceWidth: Number(stage.getAttribute('data-race-camera-reference-width')),
-          zoomMatches: Number.isFinite(zoom) && Math.abs(zoom - expectedZoom) < 0.01,
-        };
-      })).toEqual({
-        angle: expectedCamera.angle,
-        heading: expectedCamera.heading,
-        latitude: expectedCamera.latitude,
-        referenceHeight: 1024,
-        referenceWidth: 1366,
-        zoomMatches: true,
-      });
       const riderPanel = page.locator('.race-rider-overlay');
       await expect(riderPanel).toBeVisible();
-      const geometry = await riderPanel.evaluate((panel) => {
-        const panelRect = panel.getBoundingClientRect();
-        const stageRect = panel.parentElement?.getBoundingClientRect();
-        return {
-          height: panelRect.height,
-          insideStage: Boolean(stageRect)
-            && panelRect.left >= stageRect!.left - 1
-            && panelRect.top >= stageRect!.top - 1
-            && panelRect.right <= stageRect!.right + 1
-            && panelRect.bottom <= stageRect!.bottom + 1,
-          width: panelRect.width,
-        };
+      const presentationViewports = activity.camera
+        ? [
+            { width: 1_024, height: 768 },
+            { width: 1_180, height: 820 },
+            { width: 1_194, height: 834 },
+            { width: 1_366, height: 1_024 },
+            { width: 844, height: 390 },
+            { width: 932, height: 430 },
+          ]
+        : [{ width: 1_024, height: 768 }];
+      await page.evaluate(async () => {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+        }
       });
-      expect(geometry.width).toBeGreaterThan(680);
-      expect(geometry.width).toBeLessThan(730);
-      expect(geometry.height).toBeGreaterThan(138);
-      expect(geometry.height).toBeLessThan(148);
-      expect(geometry.insideStage).toBe(true);
+      for (const viewport of presentationViewports) {
+        await page.setViewportSize(viewport);
+        await expect.poll(async () => earthStage.evaluate((stage) => {
+          const referenceWidth = 1366;
+          const referenceHeight = 1024;
+          const authoredPanelWidth = 940;
+          const authoredPanelHeight = 190;
+          const stageRect = stage.getBoundingClientRect();
+          const panel = stage.querySelector<HTMLElement>('.race-rider-overlay');
+          if (!panel) return null;
+          const panelRect = panel.getBoundingClientRect();
+          const scale = Math.min(
+            stage.clientWidth / referenceWidth,
+            stage.clientHeight / referenceHeight,
+          );
+          const compactLandscape = stage.clientWidth > stage.clientHeight
+            && stage.clientWidth <= 1000
+            && stage.clientHeight <= 500;
+          const normalizedPresentationScale = Math.max(0.5, Math.min(1.5, scale));
+          const expectedPanelHeight = compactLandscape
+            ? Math.max(138, authoredPanelHeight * scale)
+            : Math.abs(normalizedPresentationScale - 1) > 0.001
+              ? Math.min(
+                  Math.max(110, 220 * normalizedPresentationScale),
+                  authoredPanelHeight * scale,
+                )
+              : Math.max(220, authoredPanelHeight);
+          const zoom = Number(stage.getAttribute('data-race-camera-zoom'));
+          const expectedZoom = 20.78 + Math.log2(scale);
+          const contains = (outer: DOMRect, inner: DOMRect) => (
+            inner.left >= outer.left - 1
+            && inner.top >= outer.top - 1
+            && inner.right <= outer.right + 1
+            && inner.bottom <= outer.bottom + 1
+          );
+          const cards = [...panel.querySelectorAll<HTMLElement>('.race-rider-overlay-card')];
+          const contentSelectors = [
+            '.race-rider-overlay-summary',
+            '.race-rider-overlay-avatar',
+            '.race-rider-overlay-badge',
+            '.race-rider-overlay-identity',
+            '.race-rider-overlay-identity strong',
+            '.race-rider-overlay-progress',
+            '.race-rider-overlay-heart-rate',
+            '.race-rider-overlay-place',
+          ];
+          return {
+            angle: Number(stage.getAttribute('data-race-camera-angle')),
+            cardContentContained: cards.length > 0 && cards.every((card) => {
+              const cardRect = card.getBoundingClientRect();
+              const content = contentSelectors.flatMap((selector) => (
+                [...card.querySelectorAll<HTMLElement>(selector)]
+              ));
+              return contains(panelRect, cardRect)
+                && card.scrollWidth <= card.clientWidth + 1
+                && card.scrollHeight <= card.clientHeight + 1
+                && content.every((element) => contains(cardRect, element.getBoundingClientRect()));
+            }),
+            heading: Number(stage.getAttribute('data-race-camera-heading')),
+            latitude: Number(stage.getAttribute('data-race-camera-lat')),
+            mapFillsViewport: Math.abs(stageRect.left) < 1
+              && Math.abs(stageRect.top) < 1
+              && Math.abs(stageRect.width - window.innerWidth) < 1
+              && Math.abs(stageRect.height - window.innerHeight) < 1,
+            panelHeightRatioOk: panelRect.height / stageRect.height <= (compactLandscape ? 0.36 : 0.22),
+            panelInsideMap: contains(stageRect, panelRect),
+            panelSizeMatches: Math.abs(panelRect.width - (authoredPanelWidth * scale)) < 1
+              && Math.abs(panelRect.height - expectedPanelHeight) < 1,
+            referenceHeight: Number(stage.getAttribute('data-race-camera-reference-height')),
+            referenceWidth: Number(stage.getAttribute('data-race-camera-reference-width')),
+            zoomMatches: Number.isFinite(zoom) && Math.abs(zoom - expectedZoom) < 0.01,
+          };
+        })).toEqual({
+          angle: expectedCamera.angle,
+          cardContentContained: true,
+          heading: expectedCamera.heading,
+          latitude: expectedCamera.latitude,
+          mapFillsViewport: true,
+          panelHeightRatioOk: true,
+          panelInsideMap: true,
+          panelSizeMatches: true,
+          referenceHeight: 1024,
+          referenceWidth: 1366,
+          zoomMatches: true,
+        });
+      }
+      await page.setViewportSize({ width: 1_024, height: 768 });
       await page.getByRole('button', { name: 'Exit demo activity', exact: true }).click();
       await expect(page.locator('.platform-shell')).not.toHaveClass(/race-fullscreen/);
     } else if (activity.start) {

@@ -47,4 +47,37 @@ describe('personal Explore route cloud client', () => {
     expect(request.method).toBe('POST');
     expect(JSON.parse(String(request.body))).toEqual({ routes: [route] });
   });
+
+  it('uses the exact athlete-session credential without putting it in the URL or body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ routes: [route] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await saveCloudExploreRoutes([route], {
+      clubTabletSessionToken: 'selected-athlete-session-secret',
+      clubTabletDeviceToken: 'must-not-win-device-secret',
+    });
+
+    const [url, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = new Headers(request.headers);
+    expect(headers.get('X-TrackLab-Club-Tablet-Session')).toBe('selected-athlete-session-secret');
+    expect(headers.has('Authorization')).toBe(false);
+    expect(url).not.toContain('selected-athlete-session-secret');
+    expect(String(request.body)).not.toContain('selected-athlete-session-secret');
+  });
+
+  it('uses the enrolled device bearer for history-free demo reads', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ routes: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await loadCloudExploreRoutes({ clubTabletDeviceToken: 'enrolled-demo-device-secret' });
+
+    const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(request.headers).get('Authorization')).toBe('Bearer enrolled-demo-device-secret');
+  });
 });

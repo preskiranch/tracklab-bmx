@@ -76,7 +76,6 @@ const raceCrowdLoopEndSeconds = 68;
 export const raceAudioMixProfile = Object.freeze({
   ambienceBedMix: 0.42,
   ambienceCrowdMix: 0.12,
-  ambienceCommentaryDuckMix: 0.04,
   ambienceGateDuckMix: 0.025,
   cadenceVoiceGain: 2.35,
   cadenceVoiceHighPassHz: 125,
@@ -95,11 +94,10 @@ export function bmxEventAmbienceLayerVolumes(
   priority: { commentary?: boolean; gate?: boolean } = {},
 ) {
   const masterVolume = Math.max(0, Math.min(0.2, volume));
-  const priorityMix = priority.gate
-    ? raceAudioMixProfile.ambienceGateDuckMix
-    : priority.commentary
-      ? raceAudioMixProfile.ambienceCommentaryDuckMix
-      : 1;
+  // Natural commentary is mixed over the listener's configured ambience.
+  // Keep the commentary flag for playback lifecycle telemetry, but reserve
+  // ambience attenuation for the safety-critical gate cadence and tones.
+  const priorityMix = priority.gate ? raceAudioMixProfile.ambienceGateDuckMix : 1;
   return {
     bed: masterVolume * priorityMix * raceAudioMixProfile.ambienceBedMix,
     crowd: masterVolume * priorityMix * raceAudioMixProfile.ambienceCrowdMix,
@@ -562,7 +560,7 @@ function setRaceAmbienceVolume(volume: number) {
   applyRaceAmbienceVolume();
 }
 
-/** Keeps the announcer intelligible without stopping or reloading ambience. */
+/** Records commentary playback while preserving the configured ambience mix. */
 export function setBmxEventAmbienceCommentaryDucked(ducked: boolean) {
   if (raceAmbienceCommentaryDucked === ducked) return;
   raceAmbienceCommentaryDucked = ducked;

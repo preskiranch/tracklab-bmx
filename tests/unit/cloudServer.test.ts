@@ -3242,6 +3242,91 @@ describe('cloud API trust boundaries', () => {
     expect(secondSelected.status).toBe(201);
     let secondSelectedPayload = await secondSelected.json();
 
+    const firstAthleteExploreRoute = exploreRoute('EXPLORE-TABLET-ATHLETE-ONE');
+    const savedFirstAthleteRoute = await api('/api/explore/recent-routes', {
+      method: 'POST',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: JSON.stringify({ routes: [firstAthleteExploreRoute] }),
+    });
+    expect(savedFirstAthleteRoute.status).toBe(200);
+    await expect(savedFirstAthleteRoute.json()).resolves.toMatchObject({
+      routes: [{ id: firstAthleteExploreRoute.id }],
+    });
+    const firstAthleteRoutes = await api('/api/explore/recent-routes', {
+      headers: athleteHeaders(selectedPayload.sessionToken),
+    });
+    await expect(firstAthleteRoutes.json()).resolves.toMatchObject({
+      routes: [{ id: firstAthleteExploreRoute.id }],
+    });
+    const siblingAthleteRoutes = await api('/api/explore/recent-routes', {
+      headers: athleteHeaders(secondSelectedPayload.sessionToken),
+    });
+    await expect(siblingAthleteRoutes.json()).resolves.toEqual({ routes: [] });
+
+    const demoRoutes = await api('/api/explore/recent-routes', {
+      headers: deviceHeaders(firstDevice.deviceToken),
+    });
+    expect(demoRoutes.status).toBe(200);
+    await expect(demoRoutes.json()).resolves.toEqual({ routes: [] });
+    const demoRouteSave = await api('/api/explore/recent-routes', {
+      method: 'POST',
+      headers: deviceHeaders(firstDevice.deviceToken),
+      body: JSON.stringify({ routes: [exploreRoute('EXPLORE-DEMO-MUST-NOT-SAVE')] }),
+    });
+    expect(demoRouteSave.status).toBe(403);
+
+    const expiredAthleteWithOwnerCookie = await api('/api/explore/recent-routes', {
+      headers: athleteHeaders('expired-athlete-session-token-that-must-not-fallback'),
+    });
+    expect(expiredAthleteWithOwnerCookie.status).toBe(401);
+    const revokedDeviceWithOwnerCookie = await api('/api/explore/recent-routes', {
+      headers: deviceHeaders('revoked-device-token-that-must-not-fallback-to-owner'),
+    });
+    expect(revokedDeviceWithOwnerCookie.status).toBe(401);
+
+    cookie = '';
+    const demoRouteCompute = await api('/api/explore/route', {
+      method: 'POST',
+      headers: deviceHeaders(firstDevice.deviceToken),
+      body: JSON.stringify({
+        origin: { lat: 38.5, lng: -120.2 },
+        destination: { lat: 38.6, lng: -120.1 },
+        travelMode: 'bicycle',
+      }),
+    });
+    expect(demoRouteCompute.status).toBe(503);
+    const athleteRouteCompute = await api('/api/explore/route', {
+      method: 'POST',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: JSON.stringify({
+        origin: { lat: 38.5, lng: -120.2 },
+        destination: { lat: 38.6, lng: -120.1 },
+        travelMode: 'bicycle',
+      }),
+    });
+    expect(athleteRouteCompute.status).toBe(503);
+    const athleteSmartRoute = await api('/api/explore/smart-route', {
+      method: 'POST',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: JSON.stringify({ description: 'A detailed coastal ride near San Francisco' }),
+    });
+    expect(athleteSmartRoute.status).toBe(503);
+    const demoSmartRoute = await api('/api/explore/smart-route', {
+      method: 'POST',
+      headers: deviceHeaders(firstDevice.deviceToken),
+      body: JSON.stringify({ description: 'A detailed coastal ride near San Francisco' }),
+    });
+    expect(demoSmartRoute.status).toBe(503);
+    const demoElevation = await api('/api/explore/elevation', {
+      method: 'POST',
+      headers: deviceHeaders(firstDevice.deviceToken),
+      body: JSON.stringify({
+        encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+        distanceMeters: 1_000,
+      }),
+    });
+    expect(demoElevation.status).toBe(503);
+
     cookie = monitorCookie;
     const privateDragStrip = {
       ...customSprintTrack('private-drag-strip'),
@@ -4307,6 +4392,12 @@ describe('cloud API trust boundaries', () => {
       body: JSON.stringify({ token: invite.token, fullName: 'Tablet Athlete Claimed' }),
     });
     expect(claim.status).toBe(200);
+    const claimedAccountExploreRoute = exploreRoute('EXPLORE-CLAIMED-ACCOUNT');
+    const claimedAccountRouteSave = await api('/api/explore/recent-routes', {
+      method: 'POST',
+      body: JSON.stringify({ routes: [claimedAccountExploreRoute] }),
+    });
+    expect(claimedAccountRouteSave.status).toBe(200);
     const claimedHistory = await api(`/api/training-sessions?from=${now - 5_000}&to=${Date.now() + 1_000}`);
     const claimedHistoryPayload = await claimedHistory.json();
     const claimedTrainingSession = claimedHistoryPayload.sessions.find(
@@ -4350,6 +4441,13 @@ describe('cloud API trust boundaries', () => {
     );
     expect(claimedTabletSession.status).toBe(201);
     const claimedTabletSessionPayload = await claimedTabletSession.json();
+    const claimedTabletRoutes = await api('/api/explore/recent-routes', {
+      headers: athleteHeaders(claimedTabletSessionPayload.sessionToken),
+    });
+    expect(claimedTabletRoutes.status).toBe(200);
+    await expect(claimedTabletRoutes.json()).resolves.toMatchObject({
+      routes: [{ id: claimedAccountExploreRoute.id }],
+    });
     const claimedTabletGhosts = await api(
       `/api/club-tablet/ghosts?trackId=${encodeURIComponent(tabletTrackId)}`,
       { headers: athleteHeaders(claimedTabletSessionPayload.sessionToken) },

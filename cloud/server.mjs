@@ -1768,6 +1768,67 @@ async function requireCurrentCommentaryAccess(access, response) {
   return false;
 }
 
+async function loadExploreRequestAccess(request, response) {
+  // Explore uses the same three explicit trust boundaries as natural audio:
+  // personal account, exact selected-athlete session, or enrolled demo device.
+  return loadCommentaryRequestAccess(request, response);
+}
+
+function exploreAccessRateLimitScope(access, endpoint) {
+  return commentaryAccessRateLimitScope(access, endpoint);
+}
+
+async function requireCurrentExploreAccess(access, response) {
+  return requireCurrentCommentaryAccess(access, response);
+}
+
+async function requireExploreComputeAccess(
+  access,
+  response,
+  accountError = 'Racer access is required for Explore rides.',
+) {
+  if (access.kind === 'account') {
+    if (membershipForAccount(access.authSession.user).tier === 'racer') return true;
+    writeJson(response, 403, { error: accountError });
+    return false;
+  }
+
+  if (!await requireCurrentExploreAccess(access, response)) return false;
+  if (access.kind === 'club-tablet') {
+    // Loading a current tablet session already re-checks the owner subscription,
+    // roster membership, device enrollment, and the exact Wattbike lease.
+    return true;
+  }
+
+  const bikeAccess = await clubBikeAccessForOwnerProfileKey(access.device.ownerProfileKey);
+  if (bikeAccess.active) return true;
+  writeJson(response, 403, {
+    error: 'The club owner needs active Wattbike access for Explore demo routes.',
+  }, { 'Cache-Control': 'no-store' });
+  return false;
+}
+
+async function exploreRouteHistoryIdentity(access, response) {
+  if (access.kind === 'account') {
+    return { kind: 'profile', profileKey: authProfileKey(access.authSession.user) };
+  }
+  if (access.kind === 'club-tablet-device') {
+    // Demo mode may spend the owner's server entitlement to calculate a route,
+    // but it never inherits the owner's or a former athlete's private history.
+    return { kind: 'demo', profileKey: null };
+  }
+  const identity = await clubTabletMemberAndProfile(access.tabletSession);
+  if (identity && await requireCurrentExploreAccess(access, response)) {
+    return { kind: 'profile', profileKey: identity.profileKey };
+  }
+  if (!response.writableEnded) {
+    writeJson(response, 401, {
+      error: 'This club tablet athlete session expired or ended.',
+    }, { 'Cache-Control': 'no-store' });
+  }
+  return null;
+}
+
 async function commentaryPreRaceProfileKeys(access, response) {
   if (access.kind === 'account') {
     const profileKey = authProfileKey(access.authSession.user);
@@ -14915,22 +14976,38 @@ async function serveStatic(request, response) {
   }
 
   if (requestUrl.pathname === '/api/explore/recent-routes') {
-    const session = await requireAuthSession(request, response);
-    if (!session) {
-      return;
-    }
-    const profileKey = authProfileKey(session.user);
+    const access = await loadExploreRequestAccess(request, response);
+    if (!access) return;
+    const identity = await exploreRouteHistoryIdentity(access, response);
+    if (!identity) return;
 
     if (request.method === 'GET') {
-      const userData = await persistence.loadUserData(profileKey);
+      if (identity.kind === 'demo') {
+        writeJson(response, 200, { routes: [] }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      const userData = await persistence.loadUserData(identity.profileKey);
+      if (!await requireCurrentExploreAccess(access, response)) return;
       writeJson(response, 200, {
         routes: sanitizeExploreRouteHistory(userData?.exploreRoutes),
-      });
+      }, { 'Cache-Control': 'no-store' });
       return;
     }
 
     if (request.method === 'POST') {
-      if (!enforceRateLimit(request, response, exploreRouteRateLimiter, 120, 'explore-route-history')) {
+      if (identity.kind === 'demo') {
+        writeJson(response, 403, {
+          error: 'Demo routes are temporary and are not saved to a private athlete history.',
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (!enforceRateLimit(
+        request,
+        response,
+        exploreRouteRateLimiter,
+        120,
+        exploreAccessRateLimitScope(access, 'explore-route-history'),
+      )) {
         return;
       }
       const payload = await readJsonBody(request, 1_100_000);
@@ -14939,14 +15016,16 @@ async function serveStatic(request, response) {
         writeJson(response, 400, { error: 'At least one valid Explore route is required.' });
         return;
       }
-      const userData = await saveMergedUserData(profileKey, { exploreRoutes: routes });
+      if (!await requireCurrentExploreAccess(access, response)) return;
+      const userData = await saveMergedUserData(identity.profileKey, { exploreRoutes: routes });
       if (!userData) {
-        writeJson(response, 503, { error: 'Personal Explore route storage is temporarily unavailable.' });
+        writeJson(response, 503, { error: 'Explore route history storage is temporarily unavailable.' });
         return;
       }
+      if (!await requireCurrentExploreAccess(access, response)) return;
       writeJson(response, 200, {
         routes: sanitizeExploreRouteHistory(userData.exploreRoutes),
-      });
+      }, { 'Cache-Control': 'no-store' });
       return;
     }
 
@@ -14959,15 +15038,19 @@ async function serveStatic(request, response) {
       writeJson(response, 405, { error: 'Method not allowed' });
       return;
     }
-    const session = await requireAuthSession(request, response);
-    if (!session) {
-      return;
-    }
-    if (membershipForAccount(session.user).tier !== 'racer') {
-      writeJson(response, 403, { error: 'Racer access is required for Smart Routes.' });
-      return;
-    }
-    if (!enforceRateLimit(request, response, smartExploreRouteRateLimiter, 12, 'smart-explore-route')) {
+    const access = await loadExploreRequestAccess(request, response);
+    if (!access || !await requireExploreComputeAccess(
+      access,
+      response,
+      'Racer access is required for Smart Routes.',
+    )) return;
+    if (!enforceRateLimit(
+      request,
+      response,
+      smartExploreRouteRateLimiter,
+      12,
+      exploreAccessRateLimitScope(access, 'smart-explore-route'),
+    )) {
       return;
     }
     const payload = await readJsonBody(request, 4_000);
@@ -14995,15 +15078,15 @@ async function serveStatic(request, response) {
       writeJson(response, 405, { error: 'Method not allowed' });
       return;
     }
-    const session = await requireAuthSession(request, response);
-    if (!session) {
-      return;
-    }
-    if (membershipForAccount(session.user).tier !== 'racer') {
-      writeJson(response, 403, { error: 'Racer access is required for Explore rides.' });
-      return;
-    }
-    if (!enforceRateLimit(request, response, exploreRouteRateLimiter, 120, 'explore-route')) {
+    const access = await loadExploreRequestAccess(request, response);
+    if (!access || !await requireExploreComputeAccess(access, response)) return;
+    if (!enforceRateLimit(
+      request,
+      response,
+      exploreRouteRateLimiter,
+      120,
+      exploreAccessRateLimitScope(access, 'explore-route'),
+    )) {
       return;
     }
 
@@ -15028,15 +15111,15 @@ async function serveStatic(request, response) {
       writeJson(response, 405, { error: 'Method not allowed' });
       return;
     }
-    const session = await requireAuthSession(request, response);
-    if (!session) {
-      return;
-    }
-    if (membershipForAccount(session.user).tier !== 'racer') {
-      writeJson(response, 403, { error: 'Racer access is required for Explore rides.' });
-      return;
-    }
-    if (!enforceRateLimit(request, response, exploreRouteRateLimiter, 120, 'explore-elevation')) {
+    const access = await loadExploreRequestAccess(request, response);
+    if (!access || !await requireExploreComputeAccess(access, response)) return;
+    if (!enforceRateLimit(
+      request,
+      response,
+      exploreRouteRateLimiter,
+      120,
+      exploreAccessRateLimitScope(access, 'explore-elevation'),
+    )) {
       return;
     }
 

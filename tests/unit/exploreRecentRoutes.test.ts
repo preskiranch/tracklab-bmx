@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   loadRecentExploreRoutes,
   mergeRecentExploreRoutes,
+  reconcileCloudExploreRouteHistory,
   rememberRecentExploreRoute,
   resolveExploreRecentRouteHistoryScope,
 } from '../../src/lib/exploreRecentRoutes';
@@ -95,6 +96,20 @@ describe('recent Explore routes', () => {
     ]);
   });
 
+  it('treats selected-athlete cloud history as authoritative over a stale tablet cache', () => {
+    expect(reconcileCloudExploreRouteHistory(
+      [route(7)],
+      [route(1)],
+      true,
+    ).map((candidate) => candidate.id)).toEqual(['EXPLORE-7']);
+
+    expect(reconcileCloudExploreRouteHistory(
+      [route(7)],
+      [route(1)],
+      false,
+    ).map((candidate) => candidate.id)).toEqual(['EXPLORE-7', 'EXPLORE-1']);
+  });
+
   it('ignores a stale owner key during kiosk takeover and disables owner cloud history', () => {
     expect(resolveExploreRecentRouteHistoryScope({
       accountProfileKey: 'owner@example.com',
@@ -102,7 +117,7 @@ describe('recent Explore routes', () => {
       kioskMode: true,
       clubTabletDeviceId: 'tablet-1',
       studioRiderId: null,
-    })).toEqual({ profileKey: null, cloudEnabled: false });
+    })).toEqual({ profileKey: null, cloudEnabled: false, cloudAuthoritative: false });
 
     expect(resolveExploreRecentRouteHistoryScope({
       accountProfileKey: 'owner@example.com',
@@ -112,7 +127,8 @@ describe('recent Explore routes', () => {
       studioRiderId: 'athlete-a',
     })).toEqual({
       profileKey: 'club-tablet-route-history-v1:tablet-1:athlete-a',
-      cloudEnabled: false,
+      cloudEnabled: true,
+      cloudAuthoritative: true,
     });
   });
 

@@ -1,5 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
-import { upgradeExploreRoutesToBicycleRoads } from '../../src/lib/exploreRoutes';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  fetchExploreElevationProfile,
+  fetchExploreRoute,
+  fetchSmartExploreRoutePlan,
+  upgradeExploreRoutesToBicycleRoads,
+} from '../../src/lib/exploreRoutes';
 import type { ExploreRoute } from '../../src/types';
 
 function savedRoute(id: string, travelMode: ExploreRoute['travelMode']): ExploreRoute {
@@ -24,6 +29,10 @@ function savedRoute(id: string, travelMode: ExploreRoute['travelMode']): Explore
     createdAt: 1_700_000_000_000,
   };
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('saved Explore route upgrades', () => {
   it('rebuilds driving geometry as a bicycle route without duplicating the saved route', async () => {
@@ -72,5 +81,70 @@ describe('saved Explore route upgrades', () => {
     );
 
     expect(result).toEqual({ routes: [legacy], upgradedCount: 0, failedCount: 1 });
+  });
+});
+
+describe('Club Tablet Explore request access', () => {
+  it('threads athlete and demo credentials through every server-backed route request', async () => {
+    const route = savedRoute('generated-route', 'bicycle');
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith('/smart-route')) {
+        return new Response(JSON.stringify({
+          plan: {
+            name: 'Coastal ride',
+            summary: 'A test ride',
+            originQuery: 'Start',
+            destinationQuery: 'Finish',
+            waypointQueries: [],
+            targetDistanceMiles: 5,
+            routeKind: 'point-to-point',
+            disclaimer: 'Indoor ride',
+            sources: [],
+          },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/elevation')) {
+        return new Response(JSON.stringify({
+          elevation: {
+            elevationSamples: [
+              { distanceMeters: 0, elevationMeters: 10 },
+              { distanceMeters: route.distanceMeters, elevationMeters: 20 },
+            ],
+            elevationGainMeters: 10,
+            elevationLossMeters: 0,
+          },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ route }), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchExploreRoute({
+      origin: route.origin,
+      destination: route.destination,
+      originLabel: route.originLabel,
+      destinationLabel: route.destinationLabel,
+      travelMode: 'bicycle',
+    }, { clubTabletSessionToken: 'athlete-session-secret' });
+    await fetchSmartExploreRoutePlan('A detailed coastal ride', {
+      clubTabletDeviceToken: 'demo-device-secret',
+    });
+    await fetchExploreElevationProfile(route, undefined, {
+      clubTabletSessionToken: 'athlete-session-secret',
+    });
+
+    const calls = fetchMock.mock.calls as [string, RequestInit][];
+    expect(new Headers(calls[0][1].headers).get('X-TrackLab-Club-Tablet-Session'))
+      .toBe('athlete-session-secret');
+    expect(new Headers(calls[1][1].headers).get('Authorization'))
+      .toBe('Bearer demo-device-secret');
+    expect(new Headers(calls[2][1].headers).get('X-TrackLab-Club-Tablet-Session'))
+      .toBe('athlete-session-secret');
+    expect(JSON.stringify(calls)).not.toContain('clubTabletSessionToken');
+    expect(JSON.stringify(calls.map(([url, init]) => [url, init.body])))
+      .not.toContain('athlete-session-secret');
   });
 });
