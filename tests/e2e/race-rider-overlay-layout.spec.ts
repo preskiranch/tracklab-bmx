@@ -32,9 +32,10 @@ function riderCardMarkup(card: typeof riderCards[number]) {
 }
 
 test('keeps every placement fully visible with a long photographed rider name on iPad layouts', async ({ page }) => {
-  const [styles, heartRateStyles] = await Promise.all([
+  const [styles, heartRateStyles, mobileStyles] = await Promise.all([
     readFile(new URL('../../src/styles.css', import.meta.url), 'utf8'),
     readFile(new URL('../../src/components/HeartRateMetric.css', import.meta.url), 'utf8'),
+    readFile(new URL('../../src/components/EarthTrackView.mobile.css', import.meta.url), 'utf8'),
   ]);
 
   for (const viewport of [
@@ -62,6 +63,7 @@ test('keeps every placement fully visible with a long photographed rider name on
     `);
     await page.addStyleTag({ content: styles });
     await page.addStyleTag({ content: heartRateStyles });
+    await page.addStyleTag({ content: mobileStyles });
 
     const panel = page.locator('.race-rider-overlay');
     const layout = await panel.evaluate((element) => {
@@ -137,6 +139,137 @@ test('keeps every placement fully visible with a long photographed rider name on
       expect(card.placeHeight).toBeGreaterThanOrEqual(46);
       expect(card.placeTextFits).toBe(true);
       expect(card.rowsDoNotOverlap).toBe(true);
+    }
+  }
+});
+
+test('keeps one and four saved iPad Pro rider cards readable on a compact studio iPad without enlarging the panel', async ({ page }) => {
+  const [styles, heartRateStyles, mobileStyles] = await Promise.all([
+    readFile(new URL('../../src/styles.css', import.meta.url), 'utf8'),
+    readFile(new URL('../../src/components/HeartRateMetric.css', import.meta.url), 'utf8'),
+    readFile(new URL('../../src/components/EarthTrackView.mobile.css', import.meta.url), 'utf8'),
+  ]);
+  for (const viewport of [
+    { width: 1024, height: 768, progressFont: 13.8, badgeFont: 11.8, placeFont: 39.5 },
+    { width: 820, height: 1180, progressFont: 11.8, badgeFont: 10.8, placeFont: 35.5 },
+  ]) {
+    const presentationScale = viewport.width / 1366;
+    const panelWidth = 940 * presentationScale;
+    const panelHeight = 220 * presentationScale;
+    const legibilityScale = 1 / presentationScale;
+
+    for (const riderCount of [1, 4]) {
+      await page.setViewportSize(viewport);
+    await page.setContent(`
+      <main class="earth-stage" style="position:relative;width:100vw;height:100dvh;overflow:hidden">
+        <div
+          class="race-rider-overlay locked presentation-scaled"
+          aria-label="Race rider positions"
+          style="--overlay-x:2%;--overlay-y:70%;--overlay-width:${panelWidth}px;--overlay-height:${panelHeight}px;--race-overlay-min-height:${panelHeight}px;--rr-font:${16 * legibilityScale}px"
+        >
+          <div
+            class="race-rider-overlay-presentation"
+            style="width:940px;height:220px;display:grid;grid-template-rows:auto minmax(0,1fr);transform:scale(${presentationScale});transform-origin:top left"
+          >
+            <div class="race-rider-overlay-toolbar">
+              <div class="race-rider-overlay-handle"><span>Rider positions</span></div>
+              <span class="race-rider-overlay-lock"><span>Locked</span></span>
+            </div>
+            <div class="race-rider-overlay-grid">${riderCards.slice(0, riderCount).map(riderCardMarkup).join('')}</div>
+          </div>
+        </div>
+      </main>
+    `);
+    await page.addStyleTag({ content: styles });
+    await page.addStyleTag({ content: heartRateStyles });
+    await page.addStyleTag({ content: mobileStyles });
+
+    const panel = page.getByLabel('Race rider positions');
+    const panelBounds = await panel.boundingBox();
+    expect(panelBounds?.height).toBeCloseTo(panelHeight, 0);
+    expect(panelBounds!.height / viewport.height).toBeLessThanOrEqual(panelHeight / viewport.height + 0.001);
+    const presentation = panel.locator('.race-rider-overlay-presentation');
+    const renderedScale = panelBounds!.width / await presentation.evaluate((element) => (
+      (element as HTMLElement).offsetWidth
+    ));
+    const toolbarFonts = await panel.locator('.race-rider-overlay-handle, .race-rider-overlay-lock')
+      .evaluateAll((elements) => elements.map((element) => (
+        Number.parseFloat(getComputedStyle(element).fontSize)
+      )));
+    expect(Math.min(...toolbarFonts) * renderedScale).toBeGreaterThanOrEqual(11.8);
+    const columnCount = await panel.locator('.race-rider-overlay-grid').evaluate((element) => (
+      getComputedStyle(element).gridTemplateColumns.split(' ').length
+    ));
+    expect(columnCount).toBe(4);
+
+    const cards = await panel.locator('.race-rider-overlay-card').evaluateAll((elements) => elements.map((card) => {
+      const panel = card.closest<HTMLElement>('.race-rider-overlay')!;
+      const presentation = card.closest<HTMLElement>('.race-rider-overlay-presentation')!;
+      const scale = panel.getBoundingClientRect().width / presentation.offsetWidth;
+      const name = card.querySelector<HTMLElement>('.race-rider-overlay-identity strong')!;
+      const progress = card.querySelector<HTMLElement>('.race-rider-overlay-progress')!;
+      const heartRate = card.querySelector<HTMLElement>('.race-rider-overlay-heart-rate')!;
+      const heartIcon = heartRate.querySelector<HTMLElement>('b')!;
+      const badge = card.querySelector<HTMLElement>('.race-rider-overlay-badge')!;
+      const place = card.querySelector<HTMLElement>('.race-rider-overlay-place')!;
+      const summary = card.querySelector<HTMLElement>('.race-rider-overlay-summary')!;
+      const fontSize = (element: HTMLElement) => Number.parseFloat(getComputedStyle(element).fontSize) * scale;
+      const panelBox = panel.getBoundingClientRect();
+      const cardBox = card.getBoundingClientRect();
+      const summaryBox = summary.getBoundingClientRect();
+      const placeBox = place.getBoundingClientRect();
+      const contains = (outer: DOMRect, inner: DOMRect) => (
+        inner.left >= outer.left - 0.5
+        && inner.right <= outer.right + 0.5
+        && inner.top >= outer.top - 0.5
+        && inner.bottom <= outer.bottom + 0.5
+      );
+      const summaryContent = [
+        card.querySelector<HTMLElement>('.race-rider-overlay-avatar')!,
+        badge,
+        name,
+        progress,
+        heartRate,
+      ];
+      const placeContent = [...place.children] as HTMLElement[];
+      return {
+        nameFont: fontSize(name),
+        progressFont: fontSize(progress),
+        heartRateFont: fontSize(heartRate),
+        heartIconFont: fontSize(heartIcon),
+        badgeFont: fontSize(badge),
+        placeFont: fontSize(place.querySelector<HTMLElement>('strong')!),
+        identityFits: name.parentElement!.scrollHeight <= name.parentElement!.clientHeight + 1,
+        cardContentFits: card.scrollHeight <= card.clientHeight + 1,
+        summaryContained: contains(cardBox, summaryBox),
+        placeContained: contains(cardBox, placeBox),
+        summaryContentContained: summaryContent.map((child) => contains(summaryBox, child.getBoundingClientRect())),
+        placeContentContained: placeContent.map((child) => contains(placeBox, child.getBoundingClientRect())),
+        summaryClearsPlace: summaryBox.bottom <= placeBox.top + 0.5,
+        cardContained: cardBox.left >= panelBox.left - 0.5
+          && cardBox.right <= panelBox.right + 0.5
+          && cardBox.top >= panelBox.top - 0.5
+          && cardBox.bottom <= panelBox.bottom + 0.5,
+      };
+    }));
+
+    expect(cards).toHaveLength(riderCount);
+    for (const card of cards) {
+      expect(card.nameFont).toBeGreaterThanOrEqual(15.8);
+      expect(card.progressFont).toBeGreaterThanOrEqual(viewport.progressFont);
+      expect(card.heartRateFont).toBeGreaterThanOrEqual(11.8);
+      expect(card.heartIconFont).toBeGreaterThanOrEqual(13.8);
+      expect(card.badgeFont).toBeGreaterThanOrEqual(viewport.badgeFont);
+      expect(card.placeFont).toBeGreaterThanOrEqual(viewport.placeFont);
+      expect(card.identityFits).toBe(true);
+      expect(card.cardContentFits).toBe(true);
+      expect(card.summaryContained).toBe(true);
+      expect(card.placeContained).toBe(true);
+      expect(card.summaryContentContained).toEqual([true, true, true, true, true]);
+      expect(card.placeContentContained).toEqual([true, true]);
+      expect(card.summaryClearsPlace).toBe(true);
+      expect(card.cardContained).toBe(true);
+    }
     }
   }
 });

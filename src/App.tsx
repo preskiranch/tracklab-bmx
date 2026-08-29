@@ -58,6 +58,7 @@ import {
   playStartGateTone,
   playUciRandomStartVoice,
   primeAudioCues,
+  releaseBmxEventAmbienceGateDuck,
   startBmxEventAmbience,
   stopBmxEventAmbience,
   stopRaceAudioKeepAlive,
@@ -4854,6 +4855,12 @@ export default function App() {
     clubTabletSessionToken: clubTabletSessionActive
       ? clubTabletSession?.sessionToken
       : null,
+    clubTabletDeviceId: clubTabletDeviceActive
+      ? clubTabletDevice?.device.id
+      : null,
+    clubTabletDeviceToken: clubTabletDeviceActive
+      ? clubTabletDevice?.deviceToken
+      : null,
     accountProfileKey: cloudProfileKey,
     raceState,
     startGateActive: startGateStatus.active,
@@ -8992,6 +8999,7 @@ export default function App() {
         // Always silence stale cadence media before the decisive green cue.
         stopStartGateAudio();
         if (playTone) playStartGateTone('uci-green');
+        else releaseBmxEventAmbienceGateDuck();
         beginRaceAtGateDrop(startingTrackId, sequenceId, gateDropLocalAt);
       },
     });

@@ -36,6 +36,11 @@ describe('race rider responsive layout', () => {
     expect(raceRiderOverlayMinimumHeight(1366, 1024, 1)).toBe(220);
   });
 
+  it('reserves readable card height when a saved owner panel reaches a phone', () => {
+    expect(raceRiderOverlayMinimumHeight(390, 844, 0.5, 63)).toBe(200);
+    expect(raceRiderOverlayMinimumHeight(844, 390, 0.5, 84)).toBe(138);
+  });
+
   it('does not save phone-only presentation dimensions over the shared layout', () => {
     const requested = { xPct: 0.04, yPct: 0.7, width: 940, height: 220, locked: false };
     const presented = { xPct: 0.01, yPct: 0.58, width: 784, height: 133, locked: true };

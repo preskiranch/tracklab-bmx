@@ -1704,6 +1704,27 @@ async function loadCommentaryRequestAccess(request, response) {
     return { kind: 'club-tablet', tabletSession };
   }
 
+  // Club Tablet enrollment deliberately retires the owner's personal session.
+  // Demo riders therefore have no athlete-session credential, but the exact
+  // non-revoked tablet remains entitled to natural race audio. Validate its
+  // device-bound Bearer credential on every request. A native personal token
+  // can also arrive as a Bearer token, so only treat it as a tablet when it
+  // resolves to an enrolled device; ordinary browser Bearer credentials stay
+  // authoritative and may never fall through to an ambient owner cookie.
+  const bearerPresented = /^Bearer\s+/iu.test(String(request.headers.authorization || ''));
+  if (bearerPresented) {
+    const device = await loadClubTabletDeviceFromRequest(request, { requireAvailable: true });
+    if (device) {
+      return { kind: 'club-tablet-device', device };
+    }
+    if (nonPersonalBearerCredentialPresented(request)) {
+      writeJson(response, 401, {
+        error: 'This club tablet authorization expired or was revoked.',
+      }, { 'Cache-Control': 'no-store' });
+      return null;
+    }
+  }
+
   const authSession = await currentAuthSession(request);
   if (!authSession?.user) {
     writeJson(response, 401, { error: 'Sign in to continue.' });
@@ -1715,21 +1736,34 @@ async function loadCommentaryRequestAccess(request, response) {
 function commentaryAccessRateLimitScope(access, endpoint) {
   const credentialHash = access.kind === 'club-tablet'
     ? access.tabletSession.tokenHash
-    : tokenHash(access.authSession.token);
+    : access.kind === 'club-tablet-device'
+      ? access.device.tokenHash
+      : tokenHash(access.authSession.token);
   // Keep reusable credentials out of limiter keys and telemetry labels while
   // preventing four legitimate studio tablets from sharing one IP-only quota.
   return `${endpoint}:${access.kind}:${credentialHash.slice(0, 24)}`;
 }
 
-function commentaryAccessIsCurrent(access, now = Date.now()) {
-  return access.kind !== 'club-tablet'
-    || clubTabletSessionIsCurrent(access.tabletSession, now);
+async function commentaryAccessIsCurrent(access, now = Date.now()) {
+  if (access.kind === 'club-tablet') {
+    return clubTabletSessionIsCurrent(access.tabletSession, now);
+  }
+  if (access.kind === 'club-tablet-device') {
+    const device = await persistence.loadClubTabletDeviceByTokenHash(
+      access.device.tokenHash,
+      { requireAvailable: true },
+    );
+    return Boolean(device && device.id === access.device.id && !device.revokedAt);
+  }
+  return true;
 }
 
-function requireCurrentCommentaryAccess(access, response) {
-  if (commentaryAccessIsCurrent(access)) return true;
+async function requireCurrentCommentaryAccess(access, response) {
+  if (await commentaryAccessIsCurrent(access)) return true;
   writeJson(response, 401, {
-    error: 'This club tablet athlete session expired or ended.',
+    error: access.kind === 'club-tablet-device'
+      ? 'This club tablet authorization expired or was revoked.'
+      : 'This club tablet athlete session expired or ended.',
   }, { 'Cache-Control': 'no-store' });
   return false;
 }
@@ -1741,8 +1775,15 @@ async function commentaryPreRaceProfileKeys(access, response) {
     return [profileKey, ...clubTabletHistoricalProfileKeys(clubState)];
   }
 
+  if (access.kind === 'club-tablet-device') {
+    // Device-only access is the shared tablet's demo mode. It may generate a
+    // public track briefing and natural voice, but it must never inherit the
+    // owner's or any previously selected athlete's private result history.
+    return [];
+  }
+
   const identity = await clubTabletMemberAndProfile(access.tabletSession);
-  if (!identity || !requireCurrentCommentaryAccess(access, response)) {
+  if (!identity || !await requireCurrentCommentaryAccess(access, response)) {
     if (!response.writableEnded) {
       writeJson(response, 401, {
         error: 'This club tablet athlete session expired or ended.',
@@ -15216,7 +15257,7 @@ async function serveStatic(request, response) {
       source: report.source,
       weather: weather.available ? 'available' : 'unavailable',
     });
-    if (!requireCurrentCommentaryAccess(commentaryAccess, response)) return;
+    if (!await requireCurrentCommentaryAccess(commentaryAccess, response)) return;
     writeJson(response, 200, {
       line,
       source: report.source,
@@ -15277,7 +15318,7 @@ async function serveStatic(request, response) {
     );
     const deliveryStyle = commentaryDeliveryStyleForEvent(event);
     cloudTelemetry.increment('tracklab_commentary_lines_total', { model, voicePreset });
-    if (!requireCurrentCommentaryAccess(commentaryAccess, response)) return;
+    if (!await requireCurrentCommentaryAccess(commentaryAccess, response)) return;
     writeJson(
       response,
       200,
@@ -15336,7 +15377,7 @@ async function serveStatic(request, response) {
     }
     const voicePreset = sanitizeCommentaryVoicePreset(payload?.voicePreset);
     const deliveryStyle = sanitizeCommentaryDeliveryStyle(payload?.deliveryStyle);
-    if (!requireCurrentCommentaryAccess(commentaryAccess, response)) return;
+    if (!await requireCurrentCommentaryAccess(commentaryAccess, response)) return;
     const speechCacheKey = commentarySpeechCacheKey(
       line,
       voicePreset,
@@ -15364,7 +15405,7 @@ async function serveStatic(request, response) {
     if (response.destroyed || response.writableEnded) {
       return;
     }
-    if (!requireCurrentCommentaryAccess(commentaryAccess, response)) return;
+    if (!await requireCurrentCommentaryAccess(commentaryAccess, response)) return;
     cloudTelemetry.increment('tracklab_commentary_speech_total', { voicePreset, eventKind });
     response.writeHead(200, {
       'Content-Type': 'audio/wav',

@@ -86,7 +86,7 @@ function raceMarkup(
   },
 ) {
   const overlayStyle = presentation
-    ? `--overlay-x:${presentation.xPct * 100}%;--overlay-y:${presentation.yPct * 100}%;--overlay-width:${presentation.width}px;--overlay-height:${presentation.height}px;--race-overlay-min-height:${presentation.height}px`
+    ? `--overlay-x:${presentation.xPct * 100}%;--overlay-y:${presentation.yPct * 100}%;--overlay-width:${presentation.width}px;--overlay-height:${presentation.height}px;--race-overlay-min-height:${presentation.height}px;--rr-font:${16 / presentation.scale}px`
     : `--overlay-x:4%;--overlay-y:70%;--overlay-width:940px;--overlay-height:${overlayHeight}px`;
   return `
     <main class="platform-shell race-fullscreen">
@@ -348,6 +348,99 @@ test('replays the iPad Pro rider panel at the same studio-tablet composition', a
   expect(studio.heightPct).toBeCloseTo(owner.heightPct, 3);
   expect(studio.avatarSize / owner.avatarSize).toBeCloseTo(studioScale, 2);
   await expectInsideViewport(page, page.getByLabel('Race rider positions'));
+});
+
+test('counter-scales saved rider text on iPhone portrait and landscape without growing the panel', async ({ page }) => {
+  for (const viewport of [
+    { width: 390, height: 844, name: 15.8, progress: 11.8, badge: 10.8, place: 19.8 },
+    { width: 844, height: 390, name: 11.8, progress: 10.8, badge: 9.8, place: 16.8 },
+  ]) {
+    const rawScale = Math.min(viewport.width / 1366, viewport.height / 1024);
+    const presentationScale = Math.max(0.5, rawScale);
+    const panelWidth = 940 * rawScale;
+    const rawPanelHeight = 220 * rawScale;
+    const panelHeight = viewport.width > viewport.height
+      ? Math.max(138, rawPanelHeight)
+      : Math.max(200, rawPanelHeight);
+    await page.setViewportSize(viewport);
+    await page.setContent(raceMarkup(panelHeight, false, {
+      scale: presentationScale,
+      width: panelWidth,
+      height: panelHeight,
+      xPct: 0.04,
+      yPct: 0.5,
+    }));
+    await installTrackStyles(page);
+
+    const panel = page.getByLabel('Race rider positions');
+    const panelBounds = await panel.boundingBox();
+    expect(panelBounds?.height).toBeCloseTo(panelHeight, 0);
+    await expectInsideViewport(page, panel);
+    const typography = await panel.evaluate((element) => {
+      const presentation = element.querySelector<HTMLElement>('.race-rider-overlay-presentation')!;
+      const scale = element.getBoundingClientRect().width / presentation.offsetWidth;
+      const fontSize = (selector: string) => (
+        Number.parseFloat(getComputedStyle(element.querySelector<HTMLElement>(selector)!).fontSize) * scale
+      );
+      return {
+        toolbar: fontSize('.race-rider-overlay-handle'),
+        name: fontSize('.race-rider-overlay-identity strong'),
+        progress: fontSize('.race-rider-overlay-progress'),
+        heartRate: fontSize('.race-rider-overlay-heart-rate'),
+        heartIcon: fontSize('.race-rider-overlay-heart-rate b'),
+        badge: fontSize('.race-rider-overlay-badge'),
+        place: fontSize('.race-rider-overlay-place strong'),
+      };
+    });
+    expect(typography.toolbar).toBeGreaterThanOrEqual(11.8);
+    expect(typography.name).toBeGreaterThanOrEqual(viewport.name);
+    expect(typography.progress).toBeGreaterThanOrEqual(viewport.progress);
+    expect(typography.heartRate).toBeGreaterThanOrEqual(11.8);
+    expect(typography.heartIcon).toBeGreaterThanOrEqual(13.8);
+    expect(typography.badge).toBeGreaterThanOrEqual(viewport.badge);
+    expect(typography.place).toBeGreaterThanOrEqual(viewport.place);
+
+    const contentFits = await panel.evaluate((element) => {
+      const panelBounds = element.getBoundingClientRect();
+      const contains = (outer: DOMRect, inner: DOMRect) => (
+        inner.left >= outer.left - 0.5
+        && inner.right <= outer.right + 0.5
+        && inner.top >= outer.top - 0.5
+        && inner.bottom <= outer.bottom + 0.5
+      );
+      return [...element.querySelectorAll<HTMLElement>('.race-rider-overlay-card')].map((card) => {
+        const cardBounds = card.getBoundingClientRect();
+        const summary = card.querySelector<HTMLElement>('.race-rider-overlay-summary')!;
+        const summaryBounds = summary.getBoundingClientRect();
+        const placeBounds = card.querySelector<HTMLElement>('.race-rider-overlay-place')!
+          .getBoundingClientRect();
+        const content = [
+          card.querySelector<HTMLElement>('.race-rider-overlay-avatar')!,
+          card.querySelector<HTMLElement>('.race-rider-overlay-badge')!,
+          card.querySelector<HTMLElement>('.race-rider-overlay-identity strong')!,
+          card.querySelector<HTMLElement>('.race-rider-overlay-progress')!,
+          card.querySelector<HTMLElement>('.race-rider-overlay-heart-rate')!,
+        ];
+        return {
+          card: contains(panelBounds, cardBounds),
+          summary: contains(cardBounds, summaryBounds),
+          place: contains(cardBounds, placeBounds),
+          rows: summaryBounds.bottom <= placeBounds.top + 0.5,
+          content: content.map((child) => contains(summaryBounds, child.getBoundingClientRect())),
+          placeContent: [...card.querySelectorAll<HTMLElement>('.race-rider-overlay-place > *')]
+            .map((child) => contains(placeBounds, child.getBoundingClientRect())),
+        };
+      });
+    });
+    expect(contentFits).toEqual(contentFits.map(() => ({
+      card: true,
+      summary: true,
+      place: true,
+      rows: true,
+      content: [true, true, true, true, true],
+      placeContent: [true, true],
+    })));
+  }
 });
 
 test('locks map editing to the dynamic viewport through phone rotation without overflow or shaking', async ({ page }) => {
