@@ -335,7 +335,7 @@ test('iPhone portrait shell is fixed-width with readable navigation and headers'
   expect(stickyTop).toBeGreaterThanOrEqual(0);
 });
 
-test('iPhone activities cover portrait with a rotation guard and reveal the app in landscape', async ({ page }) => {
+test('iPhone activities stay active and usable through portrait and landscape rotation', async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'userAgent', {
       configurable: true,
@@ -347,59 +347,38 @@ test('iPhone activities cover portrait with a rotation guard and reveal the app 
   await page.goto('/?track=air-time-bmx');
   await openSignedInApp(page);
 
-  const guard = page.getByRole('dialog', { name: 'Rotate your iPhone' });
-  await expect(guard).toBeHidden();
-
-  // Orientation enforcement starts with the live activity, not the dashboard,
-  // so Watch Connect, settings, and the activity picker remain accessible.
   await page.setViewportSize(iphonePortrait);
-  await expect(guard).toBeHidden();
+  await expect(page.getByRole('dialog', { name: 'Rotate your iPhone' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'More', exact: true })).toBeVisible();
 
-  await page.setViewportSize({ width: 844, height: 390 });
   await page.getByRole('button', { name: /Demo/i }).first().click();
   const startAction = page.locator('.workflow-step.primary-action');
   await expect(startAction).toContainText('Start Demo Race');
   await startAction.click();
   await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
-  await expect(guard).toBeHidden();
+  await expect(page.getByRole('dialog', { name: 'Rotate your iPhone' })).toHaveCount(0);
   await page.evaluate(async () => {
     if (document.fullscreenElement) await document.exitFullscreen();
   });
 
-  await page.setViewportSize(iphonePortrait);
-  await expect(guard).toBeVisible();
-  await expect(guard).toContainText(
-    'Activities play in landscape so the course and live metrics stay visible.',
-  );
-  const portraitGuardLayout = await guard.evaluate((element) => {
-    const bounds = element.getBoundingClientRect();
-    const style = getComputedStyle(element);
-    return {
-      bottom: Math.round(bounds.bottom),
-      height: Math.round(bounds.height),
-      left: Math.round(bounds.left),
-      position: style.position,
-      right: Math.round(bounds.right),
-      top: Math.round(bounds.top),
-      width: Math.round(bounds.width),
-      zIndex: Number(style.zIndex),
-    };
-  });
-  expect(portraitGuardLayout).toEqual({
-    bottom: iphonePortrait.height,
-    height: iphonePortrait.height,
-    left: 0,
-    position: 'fixed',
-    right: iphonePortrait.width,
-    top: 0,
-    width: iphonePortrait.width,
-    zIndex: 2_147_483_647,
-  });
-
-  await page.setViewportSize({ width: 844, height: 390 });
-  await expect(guard).toBeHidden();
-  await expect(page.locator('.earth-stage')).toBeVisible();
+  for (const viewport of [
+    { label: 'portrait', ...iphonePortrait },
+    { label: 'landscape', width: 844, height: 390 },
+    { label: 'portrait again', ...iphonePortrait },
+  ]) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await expect(page.locator('.platform-shell'), viewport.label).toHaveClass(/race-fullscreen/);
+    await expect(page.locator('.earth-stage'), viewport.label).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'Rotate your iPhone' }), viewport.label)
+      .toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => ({
+      documentWidth: document.documentElement.scrollWidth,
+      viewportWidth: document.documentElement.clientWidth,
+    })), { message: `${viewport.label}: no page-level horizontal overflow` }).toEqual({
+      documentWidth: viewport.width,
+      viewportWidth: viewport.width,
+    });
+  }
 });
 
 test('Recovery Alert stays simple, readable, and available in all three sprint programs', async ({ page }) => {

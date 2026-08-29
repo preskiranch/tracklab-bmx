@@ -335,6 +335,16 @@ describe('Explore automatic map layouts', () => {
     expect(css).toMatch(/\.explore-air-instruction\s*\{[^}]*display:\s*none;/s);
     expect(css).toMatch(/\.explore-elevation-status\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;[^}]*white-space:\s*nowrap;/s);
   });
+
+  it('caps the fullscreen rider rail and keeps portrait cards inside a horizontal rail', () => {
+    const css = readFileSync(new URL('../../src/components/ExploreView.css', import.meta.url), 'utf8');
+    expect(css).toMatch(/--explore-rider-card-height:\s*64px;/);
+    expect(css).toMatch(/--explore-rider-strip-height:\s*calc\(var\(--explore-rider-card-height\) \+ 10px\);/);
+    expect(css).toMatch(/\.explore-rider-strip\s*\{[^}]*block-size:\s*var\(--explore-rider-strip-height\);[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(190px,\s*1fr\)\);[^}]*max-block-size:\s*var\(--explore-rider-strip-height\);[^}]*overflow-y:\s*hidden;/s);
+    expect(css).toMatch(/\.explore-rider-strip article\s*\{[^}]*block-size:\s*var\(--explore-rider-card-height\);[^}]*max-inline-size:\s*360px;[^}]*max-block-size:\s*var\(--explore-rider-card-height\);[^}]*overflow:\s*hidden;/s);
+    expect(css).toMatch(/@media \(orientation:\s*portrait\)[\s\S]*?\.explore-rider-strip\s*\{[^}]*grid-auto-flow:\s*column;/);
+    expect(css).toMatch(/@media \(max-height:\s*500px\) and \(orientation:\s*landscape\)[\s\S]*?--explore-rider-card-height:\s*56px;/);
+  });
 });
 
 describe('Explore follow camera', () => {
