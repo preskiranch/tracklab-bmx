@@ -2,14 +2,18 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const iphonePortrait = { width: 390, height: 844 };
 
-async function mockSignedInRacer(page: Page, activeRecoveryEpisode: Record<string, unknown> | null = null) {
+async function mockSignedInRacer(
+  page: Page,
+  activeRecoveryEpisode: Record<string, unknown> | null = null,
+  admin = false,
+) {
   const now = Date.now();
   const user = {
     id: 'mobile-shell-racer',
     profileKey: 'user:mobile-shell-racer',
     email: 'mobile-shell@tracklab.test',
     name: 'Mobile Shell Racer',
-    admin: false,
+    admin,
     membership: { tier: 'racer', bikeSeats: 1, updatedAt: now },
   };
 
@@ -219,6 +223,73 @@ test('iPhone portrait shell is fixed-width with readable navigation and headers'
     navigation.getBoundingClientRect().top
   ));
   expect(stickyTop).toBeGreaterThanOrEqual(0);
+});
+
+test('iPhone activities cover portrait with a rotation guard and reveal the app in landscape', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      get: () => 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148',
+    });
+  });
+  await page.setViewportSize({ width: 844, height: 390 });
+  await mockSignedInRacer(page, null, true);
+  await page.goto('/?track=air-time-bmx');
+  await openSignedInApp(page);
+
+  const guard = page.getByRole('dialog', { name: 'Rotate your iPhone' });
+  await expect(guard).toBeHidden();
+
+  // Orientation enforcement starts with the live activity, not the dashboard,
+  // so Watch Connect, settings, and the activity picker remain accessible.
+  await page.setViewportSize(iphonePortrait);
+  await expect(guard).toBeHidden();
+  await expect(page.getByRole('button', { name: 'More', exact: true })).toBeVisible();
+
+  await page.setViewportSize({ width: 844, height: 390 });
+  await page.getByRole('button', { name: /Demo/i }).first().click();
+  const startAction = page.locator('.workflow-step.primary-action');
+  await expect(startAction).toContainText('Start Demo Race');
+  await startAction.click();
+  await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
+  await expect(guard).toBeHidden();
+  await page.evaluate(async () => {
+    if (document.fullscreenElement) await document.exitFullscreen();
+  });
+
+  await page.setViewportSize(iphonePortrait);
+  await expect(guard).toBeVisible();
+  await expect(guard).toContainText(
+    'Activities play in landscape so the course and live metrics stay visible.',
+  );
+  const portraitGuardLayout = await guard.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return {
+      bottom: Math.round(bounds.bottom),
+      height: Math.round(bounds.height),
+      left: Math.round(bounds.left),
+      position: style.position,
+      right: Math.round(bounds.right),
+      top: Math.round(bounds.top),
+      width: Math.round(bounds.width),
+      zIndex: Number(style.zIndex),
+    };
+  });
+  expect(portraitGuardLayout).toEqual({
+    bottom: iphonePortrait.height,
+    height: iphonePortrait.height,
+    left: 0,
+    position: 'fixed',
+    right: iphonePortrait.width,
+    top: 0,
+    width: iphonePortrait.width,
+    zIndex: 2_147_483_647,
+  });
+
+  await page.setViewportSize({ width: 844, height: 390 });
+  await expect(guard).toBeHidden();
+  await expect(page.locator('.earth-stage')).toBeVisible();
 });
 
 test('Recovery Alert stays simple, readable, and available in all three sprint programs', async ({ page }) => {

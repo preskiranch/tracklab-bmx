@@ -5,6 +5,21 @@ import type {
   ExploreTravelMode,
   TrackPoint,
 } from '../types';
+import { clubTabletSessionHeader } from './clubTabletStorage';
+
+export type ExploreRequestAccess = Readonly<{
+  clubTabletSessionToken?: string | null;
+  clubTabletDeviceToken?: string | null;
+}>;
+
+export function exploreRequestHeaders(access?: ExploreRequestAccess | null): Record<string, string> {
+  const sessionToken = access?.clubTabletSessionToken?.trim() ?? '';
+  if (sessionToken) {
+    return { [clubTabletSessionHeader]: sessionToken };
+  }
+  const deviceToken = access?.clubTabletDeviceToken?.trim() ?? '';
+  return deviceToken ? { Authorization: `Bearer ${deviceToken}` } : {};
+}
 
 type ExploreRouteRequest = {
   origin: TrackPoint;
@@ -42,12 +57,16 @@ export type ExploreElevationProfile = {
   elevationLossMeters: number;
 };
 
-export async function fetchExploreRoute(request: ExploreRouteRequest) {
+export async function fetchExploreRoute(
+  request: ExploreRouteRequest,
+  access?: ExploreRequestAccess | null,
+) {
   const response = await fetch('/api/explore/route', {
     method: 'POST',
     credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json',
+      ...exploreRequestHeaders(access),
     },
     body: JSON.stringify(request),
   });
@@ -103,11 +122,17 @@ export async function upgradeExploreRoutesToBicycleRoads(
   return { routes: upgradedRoutes, upgradedCount, failedCount };
 }
 
-export async function fetchSmartExploreRoutePlan(description: string) {
+export async function fetchSmartExploreRoutePlan(
+  description: string,
+  access?: ExploreRequestAccess | null,
+) {
   const response = await fetch('/api/explore/smart-route', {
     method: 'POST',
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...exploreRequestHeaders(access),
+    },
     body: JSON.stringify({ description }),
   });
   const payload = await response.json().catch(() => null) as {
@@ -123,12 +148,14 @@ export async function fetchSmartExploreRoutePlan(description: string) {
 export async function fetchExploreElevationProfile(
   route: Pick<ExploreRoute, 'encodedPolyline' | 'distanceMeters'>,
   signal?: AbortSignal,
+  access?: ExploreRequestAccess | null,
 ) {
   const response = await fetch('/api/explore/elevation', {
     method: 'POST',
     credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json',
+      ...exploreRequestHeaders(access),
     },
     body: JSON.stringify({
       encodedPolyline: route.encodedPolyline,

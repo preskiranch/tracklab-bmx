@@ -53,11 +53,12 @@ import {
   fetchSmartExploreRoutePlan,
   upgradeExploreRoutesToBicycleRoads,
   type ExploreElevationProfile,
+  type ExploreRequestAccess,
   type ExploreSmartRoutePlan,
 } from '../lib/exploreRoutes';
 import {
   loadRecentExploreRoutes,
-  mergeRecentExploreRoutes,
+  reconcileCloudExploreRouteHistory,
   rememberRecentExploreRoute,
   writeRecentExploreRoutes,
 } from '../lib/exploreRecentRoutes';
@@ -146,6 +147,8 @@ type ExploreViewProps = {
   currentUserId: string | null;
   accountProfileKey: string | null;
   cloudRecentRoutesEnabled: boolean;
+  cloudRecentRoutesAuthoritative: boolean;
+  requestAccess?: ExploreRequestAccess | null;
   inviteUrl: string;
   remoteStates: MultiplayerExploreState[];
   voiceEnabled: boolean;
@@ -362,6 +365,8 @@ export function ExploreView({
   currentUserId,
   accountProfileKey,
   cloudRecentRoutesEnabled,
+  cloudRecentRoutesAuthoritative,
+  requestAccess = null,
   inviteUrl,
   remoteStates,
   voiceEnabled,
@@ -395,6 +400,12 @@ export function ExploreView({
   heartRateByPlayer = {},
 }: ExploreViewProps) {
   const recentProfileKey = accountProfileKey?.trim() || null;
+  const exploreRequestAccess = useMemo<ExploreRequestAccess | null>(() => {
+    const clubTabletSessionToken = requestAccess?.clubTabletSessionToken?.trim() ?? '';
+    if (clubTabletSessionToken) return { clubTabletSessionToken };
+    const clubTabletDeviceToken = requestAccess?.clubTabletDeviceToken?.trim() ?? '';
+    return clubTabletDeviceToken ? { clubTabletDeviceToken } : null;
+  }, [requestAccess?.clubTabletDeviceToken, requestAccess?.clubTabletSessionToken]);
   const initialCheckpointRef = useRef<ExploreRideCheckpoint | null>(
     recentProfileKey && !demoMode ? loadExploreRideCheckpoint(recentProfileKey) : null,
   );
@@ -459,8 +470,12 @@ export function ExploreView({
     routes: ExploreRoute[];
   }>(() => ({
     profileKey: recentProfileKey,
-    routes: recentProfileKey ? loadRecentExploreRoutes(recentProfileKey) : [],
+    routes: recentProfileKey && !(cloudRecentRoutesEnabled && cloudRecentRoutesAuthoritative)
+      ? loadRecentExploreRoutes(recentProfileKey)
+      : [],
   }));
+  const recentRouteStateRef = useRef(recentRouteState);
+  recentRouteStateRef.current = recentRouteState;
   // Fail closed during an athlete/device switch. Effects load the new scope
   // after paint, so never render routes retained in state for the old scope.
   const recentRoutes = recentRouteState.profileKey === recentProfileKey
@@ -611,6 +626,12 @@ export function ExploreView({
   recentRouteProfileRef.current = recentProfileKey;
 
   useEffect(() => {
+    // Athlete/device changes are identity boundaries. A route request started
+    // by the previous identity must never populate the next rider's screen.
+    routeRequestRef.current += 1;
+  }, [exploreRequestAccess, recentProfileKey]);
+
+  useEffect(() => {
     if (loadedCheckpointProfileRef.current === recentProfileKey) {
       return;
     }
@@ -691,7 +712,10 @@ export function ExploreView({
       };
     }
     const cachedRoutes = loadRecentExploreRoutes(recentProfileKey);
-    setRecentRouteState({ profileKey: recentProfileKey, routes: cachedRoutes });
+    setRecentRouteState({
+      profileKey: recentProfileKey,
+      routes: cloudRecentRoutesEnabled && cloudRecentRoutesAuthoritative ? [] : cachedRoutes,
+    });
 
     if (!cloudRecentRoutesEnabled) {
       void upgradeExploreRoutesToBicycleRoads(cachedRoutes)
@@ -719,13 +743,20 @@ export function ExploreView({
       };
     }
 
-    void loadCloudExploreRoutes()
+    void loadCloudExploreRoutes(exploreRequestAccess)
       .then(async (cloudRoutes) => {
         if (cancelled || recentRouteProfileRef.current !== recentProfileKey) {
           return;
         }
-        const mergedRoutes = mergeRecentExploreRoutes(cloudRoutes, cachedRoutes);
-        const migration = await upgradeExploreRoutesToBicycleRoads(mergedRoutes);
+        const sourceRoutes = reconcileCloudExploreRouteHistory(
+          cloudRoutes,
+          cachedRoutes,
+          cloudRecentRoutesAuthoritative,
+        );
+        const migration = await upgradeExploreRoutesToBicycleRoads(
+          sourceRoutes,
+          (request) => fetchExploreRoute(request, exploreRequestAccess),
+        );
         if (cancelled || recentRouteProfileRef.current !== recentProfileKey) {
           return;
         }
@@ -735,7 +766,7 @@ export function ExploreView({
         const cloudIds = cloudRoutes.map((route) => route.id).join('|');
         const nextIds = nextRoutes.map((route) => route.id).join('|');
         if (migration.upgradedCount > 0 || cloudIds !== nextIds) {
-          const savedRoutes = await saveCloudExploreRoutes(nextRoutes);
+          const savedRoutes = await saveCloudExploreRoutes(nextRoutes, exploreRequestAccess);
           if (!cancelled && recentRouteProfileRef.current === recentProfileKey) {
             const synchronizedRoutes = writeRecentExploreRoutes(recentProfileKey, savedRoutes);
             setRecentRouteState({ profileKey: recentProfileKey, routes: synchronizedRoutes });
@@ -752,19 +783,35 @@ export function ExploreView({
         }
       })
       .catch((error: Error) => {
-        console.warn(`Could not load personal Explore routes from TrackLab cloud: ${error.message}`);
+        console.warn(`Could not load Explore routes from TrackLab cloud: ${error.message}`);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [cloudRecentRoutesEnabled, recentProfileKey]);
+  }, [
+    cloudRecentRoutesAuthoritative,
+    cloudRecentRoutesEnabled,
+    exploreRequestAccess,
+    recentProfileKey,
+  ]);
 
   const rememberExploreRoute = useCallback((nextRoute: ExploreRoute) => {
     if (!recentProfileKey) {
       return;
     }
-    const cachedRoutes = rememberRecentExploreRoute(recentProfileKey, nextRoute);
+    const cachedRoutes = cloudRecentRoutesAuthoritative
+      ? writeRecentExploreRoutes(
+        recentProfileKey,
+        reconcileCloudExploreRouteHistory(
+          [nextRoute],
+          recentRouteStateRef.current.profileKey === recentProfileKey
+            ? recentRouteStateRef.current.routes
+            : [],
+          false,
+        ),
+      )
+      : rememberRecentExploreRoute(recentProfileKey, nextRoute);
     setRecentRouteState({ profileKey: recentProfileKey, routes: cachedRoutes });
     if (!cloudRecentRoutesEnabled) {
       return;
@@ -772,7 +819,7 @@ export function ExploreView({
 
     const saveSequence = recentRouteSaveSequenceRef.current + 1;
     recentRouteSaveSequenceRef.current = saveSequence;
-    void saveCloudExploreRoutes([nextRoute])
+    void saveCloudExploreRoutes([nextRoute], exploreRequestAccess)
       .then((cloudRoutes) => {
         if (
           saveSequence !== recentRouteSaveSequenceRef.current
@@ -784,9 +831,14 @@ export function ExploreView({
         setRecentRouteState({ profileKey: recentProfileKey, routes: synchronizedRoutes });
       })
       .catch((error: Error) => {
-        console.warn(`Could not save this personal Explore route to TrackLab cloud: ${error.message}`);
+        console.warn(`Could not save this Explore route to TrackLab cloud: ${error.message}`);
       });
-  }, [cloudRecentRoutesEnabled, recentProfileKey]);
+  }, [
+    cloudRecentRoutesAuthoritative,
+    cloudRecentRoutesEnabled,
+    exploreRequestAccess,
+    recentProfileKey,
+  ]);
 
   const closeLandmark = useCallback(() => {
     landmarkRequestRef.current += 1;
@@ -899,7 +951,7 @@ export function ExploreView({
     const recoverElevation = () => {
       controller = new AbortController();
       setElevationRecoveryStatus('loading');
-      void fetchExploreElevationProfile(sourceRoute, controller.signal)
+      void fetchExploreElevationProfile(sourceRoute, controller.signal, exploreRequestAccess)
         .then((profile) => {
           if (cancelled || controller?.signal.aborted) {
             return;
@@ -942,6 +994,7 @@ export function ExploreView({
   }, [
     onSyncRoute,
     playMode,
+    exploreRequestAccess,
     rememberExploreRoute,
     roomHost,
     serverControlledExplore,
@@ -1358,7 +1411,7 @@ export function ExploreView({
           || destinationText.trim(),
         travelMode: exploreTravelMode,
         routeName: routeName.trim(),
-      });
+      }, exploreRequestAccess);
       if (routeRequestRef.current !== requestId) {
         return;
       }
@@ -1387,7 +1440,7 @@ export function ExploreView({
     setRouteMessage('Smart Route is researching locations and matching your ride…');
     setSmartRoutePlan(null);
     try {
-      const plan = await fetchSmartExploreRoutePlan(smartRoutePrompt.trim());
+      const plan = await fetchSmartExploreRoutePlan(smartRoutePrompt.trim(), exploreRequestAccess);
       const origin = await resolveLocationText(plan.originQuery);
       const waypointLocations = [];
       for (const query of plan.waypointQueries) {
@@ -1403,7 +1456,7 @@ export function ExploreView({
         travelMode: exploreTravelMode,
         routeName: plan.name,
         waypoints: waypointLocations,
-      });
+      }, exploreRequestAccess);
       if (routeRequestRef.current !== requestId) {
         return;
       }
@@ -1448,7 +1501,7 @@ export function ExploreView({
         travelMode: exploreTravelMode,
         routeName: route.name ? `${route.name} — Reverse` : '',
         waypoints: [...(route.waypoints ?? [])].reverse(),
-      });
+      }, exploreRequestAccess);
       if (routeRequestRef.current !== requestId) {
         return;
       }

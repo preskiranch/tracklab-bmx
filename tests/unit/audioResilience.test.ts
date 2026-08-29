@@ -755,7 +755,7 @@ describe('race audio resilience', () => {
     expect(crowd!.currentTime).toBeLessThan(68);
   });
 
-  it('ducks both ambience layers for commentary and restores the exact mix', async () => {
+  it('keeps both ambience layers at the configured mix throughout commentary', async () => {
     StalledAudio.stallPlayback = false;
     const {
       bmxEventAmbienceSources,
@@ -771,7 +771,7 @@ describe('race audio resilience', () => {
 
     setBmxEventAmbienceCommentaryDucked(true);
     layers.forEach((audio, index) => {
-      expect(audio.volume).toBeCloseTo(normalVolumes[index] * 0.04, 8);
+      expect(audio.volume).toBeCloseTo(normalVolumes[index], 8);
     });
 
     setBmxEventAmbienceCommentaryDucked(false);
@@ -839,8 +839,8 @@ describe('race audio resilience', () => {
     expect(layers.map((audio) => audio.volume)).toEqual([1, 1]);
 
     setBmxEventAmbienceCommentaryDucked(true);
-    expect(gainNodes[0].gain.value).toBeCloseTo(0.042 * 0.04, 10);
-    expect(gainNodes[1].gain.value).toBeCloseTo(0.012 * 0.04, 10);
+    expect(gainNodes[0].gain.value).toBeCloseTo(0.042, 10);
+    expect(gainNodes[1].gain.value).toBeCloseTo(0.012, 10);
     expect(layers.map((audio) => audio.volume)).toEqual([1, 1]);
   });
 

@@ -289,6 +289,11 @@ import type {
   ClubLiveExploreState,
 } from './components/ClubLiveAthleteBridge';
 import { clearNativeClubTabletCredential } from './lib/nativeClubTabletCredential';
+import {
+  activityRequiresIPhoneLandscape,
+  currentDeviceIsIPhone,
+  setNativeActivityLandscape,
+} from './lib/activityOrientation';
 import { authenticatedRacerBikeSeatLimit, shouldStopAdvancedConnector } from './lib/advancedConnectorPolicy';
 import {
   loginAuthUser,
@@ -2065,6 +2070,7 @@ export default function App() {
       ? 'club-tablet'
       : initialTrack.countryCode === 'CUSTOM' ? 'straight-sprint' : 'race',
   );
+  const iPhoneClient = useRef(currentDeviceIsIPhone()).current;
   const lastRaceWasSprintRef = useRef(false);
   const raceWorkspaceActive = appMode === 'race' || appMode === 'straight-sprint';
   if (raceWorkspaceActive) {
@@ -4918,6 +4924,23 @@ export default function App() {
     || finishingAnnouncementsActive
     || straightSprintGhostFinishPending
   );
+  const liveActivityFullscreen = (
+    raceViewFullscreen
+    || exploreRideFullscreen
+    || (appMode === 'get-pulled' && utilityFullscreen)
+  );
+  const iPhoneActivityLandscape = iPhoneClient
+    && !showMembershipLanding
+    && (accountProfileComplete || clubTabletKioskMode)
+    && activityRequiresIPhoneLandscape(appMode)
+    && liveActivityFullscreen;
+  useEffect(() => {
+    if (!iPhoneClient) return undefined;
+    void setNativeActivityLandscape(iPhoneActivityLandscape).catch(() => undefined);
+    return () => {
+      void setNativeActivityLandscape(false).catch(() => undefined);
+    };
+  }, [iPhoneActivityLandscape, iPhoneClient]);
   const finishCountdownSeconds = finishWindowEndsAt != null && raceState === 'racing'
     ? Math.min(raceFinishCountdownMs / 1000, Math.max(1, countdownSeconds(finishWindowEndsAt, now)))
     : null;
@@ -11761,6 +11784,29 @@ export default function App() {
       className={`platform-shell${raceViewFullscreen ? ' race-fullscreen' : ''}${mappingFullscreen ? ' map-fullscreen' : ''}${exploreRideFullscreen ? ' explore-fullscreen' : ''}${utilityFullscreen ? ' utility-fullscreen' : ''}`}
       ref={raceShellRef}
     >
+      {iPhoneActivityLandscape && (
+        <>
+          <style>{`
+            .iphone-activity-landscape-guard{display:none}
+            @media(orientation:portrait) and (max-width:600px){
+              .iphone-activity-landscape-guard{position:fixed;z-index:2147483647;inset:0;display:flex;box-sizing:border-box;align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:max(28px,env(safe-area-inset-top)) max(28px,env(safe-area-inset-right)) max(28px,env(safe-area-inset-bottom)) max(28px,env(safe-area-inset-left));background:radial-gradient(circle at 50% 35%,rgba(91,255,38,.16),transparent 40%),#050b08;color:#f7fff4;text-align:center}
+              .iphone-activity-landscape-guard svg{color:#75ff2b;transform:rotate(90deg)}
+              .iphone-activity-landscape-guard strong{font-size:clamp(1.75rem,8vw,2.35rem);line-height:1.02;letter-spacing:-.035em}
+              .iphone-activity-landscape-guard span{max-width:30ch;color:#c5d4c7;font-size:1rem;line-height:1.45}
+            }
+          `}</style>
+          <div
+            aria-labelledby="iphone-landscape-title"
+            aria-modal="true"
+            className="iphone-activity-landscape-guard"
+            role="dialog"
+          >
+            <TabletSmartphone aria-hidden="true" size={48} />
+            <strong id="iphone-landscape-title">Rotate your iPhone</strong>
+            <span>Activities play in landscape so the course and live metrics stay visible.</span>
+          </div>
+        </>
+      )}
       {utilityFullscreen && <style>{`
         .platform-shell.utility-fullscreen{position:fixed;inset:0;z-index:2147480000;display:block;width:100vw;height:100vh;height:100dvh;min-height:0;overflow:hidden;background:#07100b}
         .utility-fullscreen .sidebar,.utility-fullscreen .platform-topbar{display:none}
@@ -12953,6 +12999,12 @@ export default function App() {
                 currentUserId: multiplayer.clientId,
                 accountProfileKey: exploreRecentRouteHistoryScope.profileKey,
                 cloudRecentRoutesEnabled: exploreRecentRouteHistoryScope.cloudEnabled,
+                cloudRecentRoutesAuthoritative: exploreRecentRouteHistoryScope.cloudAuthoritative,
+                requestAccess: clubTabletSessionActive && clubTabletSession
+                  ? { clubTabletSessionToken: clubTabletSession.sessionToken }
+                  : clubTabletKioskMode && demoMode && clubTabletDeviceActive && clubTabletDevice
+                    ? { clubTabletDeviceToken: clubTabletDevice.deviceToken }
+                    : null,
                 inviteUrl: multiplayer.inviteUrl,
                 remoteStates: multiplayer.roomExploreStates,
                 voiceEnabled: roomVoice.enabled,

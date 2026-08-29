@@ -12,6 +12,7 @@ const clubTabletExploreRouteScopePrefix = 'club-tablet-route-history-v1:';
 export type ExploreRecentRouteHistoryScope = {
   profileKey: string | null;
   cloudEnabled: boolean;
+  cloudAuthoritative: boolean;
 };
 
 export function resolveExploreRecentRouteHistoryScope({
@@ -31,11 +32,14 @@ export function resolveExploreRecentRouteHistoryScope({
     const deviceId = clubTabletDeviceId?.trim() ?? '';
     const athleteId = studioRiderId?.trim() ?? '';
     if (!deviceId || !athleteId) {
-      return { profileKey: null, cloudEnabled: false };
+      return { profileKey: null, cloudEnabled: false, cloudAuthoritative: false };
     }
     return {
       profileKey: `${clubTabletExploreRouteScopePrefix}${encodeURIComponent(deviceId)}:${encodeURIComponent(athleteId)}`,
-      cloudEnabled: false,
+      cloudEnabled: true,
+      // The cloud resolves this opaque tablet session to the selected athlete.
+      // Never merge an older device cache into that server-owned identity.
+      cloudAuthoritative: true,
     };
   }
 
@@ -43,6 +47,7 @@ export function resolveExploreRecentRouteHistoryScope({
   return {
     profileKey: profileKey || null,
     cloudEnabled: Boolean(profileKey && accountCloudEnabled),
+    cloudAuthoritative: false,
   };
 }
 
@@ -199,6 +204,16 @@ export function mergeRecentExploreRoutes(
   fallback: readonly ExploreRoute[],
 ) {
   return sanitizeRecentExploreRoutes([...preferred, ...fallback]);
+}
+
+export function reconcileCloudExploreRouteHistory(
+  cloudRoutes: readonly ExploreRoute[],
+  cachedRoutes: readonly ExploreRoute[],
+  cloudAuthoritative: boolean,
+) {
+  return cloudAuthoritative
+    ? sanitizeRecentExploreRoutes(cloudRoutes)
+    : mergeRecentExploreRoutes(cloudRoutes, cachedRoutes);
 }
 
 export function writeRecentExploreRoutes(profileKey: string, routes: readonly ExploreRoute[]) {

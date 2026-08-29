@@ -1,12 +1,16 @@
 import type { ExploreRoute } from '../types';
 import { sanitizeRecentExploreRoutes } from './exploreRecentRoutes';
+import { exploreRequestHeaders, type ExploreRequestAccess } from './exploreRoutes';
 
 type ExploreRouteHistoryResponse = {
   routes?: unknown;
   error?: string;
 };
 
-async function routeHistoryRequest(options?: RequestInit) {
+async function routeHistoryRequest(
+  options?: RequestInit,
+  access?: ExploreRequestAccess | null,
+) {
   const response = await fetch('/api/explore/recent-routes', {
     ...options,
     credentials: 'same-origin',
@@ -14,6 +18,7 @@ async function routeHistoryRequest(options?: RequestInit) {
     headers: {
       Accept: 'application/json',
       ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...exploreRequestHeaders(access),
       ...options?.headers,
     },
   });
@@ -24,13 +29,16 @@ async function routeHistoryRequest(options?: RequestInit) {
   return sanitizeRecentExploreRoutes(payload.routes);
 }
 
-export function loadCloudExploreRoutes() {
-  return routeHistoryRequest();
+export function loadCloudExploreRoutes(access?: ExploreRequestAccess | null) {
+  return routeHistoryRequest(undefined, access);
 }
 
-export function saveCloudExploreRoutes(routes: readonly ExploreRoute[]) {
+export function saveCloudExploreRoutes(
+  routes: readonly ExploreRoute[],
+  access?: ExploreRequestAccess | null,
+) {
   return routeHistoryRequest({
     method: 'POST',
     body: JSON.stringify({ routes }),
-  });
+  }, access);
 }

@@ -49,15 +49,14 @@ describe('race ambience asset', () => {
     ))).toBe(true);
   });
 
-  it('keeps crowd subordinate and reserves headroom for cadence and commentary', () => {
+  it('keeps configured ambience under commentary while reserving cadence headroom', () => {
     const normal = bmxEventAmbienceLayerVolumes(0.1);
     const commentary = bmxEventAmbienceLayerVolumes(0.1, { commentary: true });
     const gate = bmxEventAmbienceLayerVolumes(0.1, { gate: true });
     const both = bmxEventAmbienceLayerVolumes(0.1, { commentary: true, gate: true });
 
     expect(normal).toEqual({ bed: 0.042, crowd: 0.012 });
-    expect(commentary.bed).toBeCloseTo(normal.bed * 0.04, 10);
-    expect(commentary.crowd).toBeCloseTo(normal.crowd * 0.04, 10);
+    expect(commentary).toEqual(normal);
     expect(gate.bed).toBeCloseTo(normal.bed * 0.025, 10);
     expect(gate.crowd).toBeCloseTo(normal.crowd * 0.025, 10);
     expect(both).toEqual(gate);
