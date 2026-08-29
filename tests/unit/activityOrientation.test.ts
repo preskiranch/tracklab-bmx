@@ -38,6 +38,9 @@ describe('iPhone activity orientation', () => {
     expect(bridge).toContain('guard required, let windowScene = view.window?.windowScene else { return }');
     expect(bridge).toContain('UIViewController.attemptRotationToDeviceOrientation()');
     expect(bridge).toContain('bridge?.registerPluginInstance(activityOrientationPlugin)');
+    expect(bridge).toContain('webView?.scrollView.alwaysBounceHorizontal = false');
+    expect(bridge).toContain('webView?.scrollView.showsHorizontalScrollIndicator = false');
+    expect(bridge).toContain('webView?.scrollView.isDirectionalLockEnabled = true');
     expect(infoPlist).toContain('<string>UIInterfaceOrientationLandscapeLeft</string>');
     expect(infoPlist).toContain('<string>UIInterfaceOrientationLandscapeRight</string>');
     expect(app).toContain('className="iphone-activity-landscape-guard"');

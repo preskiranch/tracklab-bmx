@@ -36,6 +36,12 @@
   gap: 2px;
 }
 
+.recovery-alert-heading > span:nth-child(2) {
+  flex: 1 1 auto;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 .recovery-alert-heading strong,
 .recovery-alert-status strong {
   font-size: 17px;
