@@ -11776,12 +11776,6 @@ export default function App() {
       {heartRateAccountBlockCoordinator}
       {watchConnectCoordinator}
       {appleBillingCoordinator}
-      {clubTabletKioskMode && demoMode && appMode !== 'club-tablet' && (
-        <div className="club-tablet-demo-banner" role="status" aria-label="Club Tablet demo mode active">
-          <Activity size={22} />
-          <span><strong>DEMO MODE</strong><small>Simulated rider · nothing is saved to athletes or Club Live</small></span>
-        </div>
-      )}
       {!clubTabletKioskMode && (
         raceViewFullscreen || mappingFullscreen || exploreRideFullscreen || utilityFullscreen
       ) && <div className="watch-connect-indicator-slot fullscreen" id="watch-connect-indicator-slot" />}
