@@ -4645,6 +4645,16 @@ describe('cloud API trust boundaries', () => {
               updatedAt: 750,
             },
           },
+          riderOverlaysByTrack: {
+            'north-bay-bmx': {
+              xPct: 0.04,
+              yPct: 0.64,
+              width: 940,
+              height: 190,
+              locked: true,
+            },
+          },
+          riderOverlayUpdatedAtByTrack: { 'north-bay-bmx': 750 },
           demoRiderNames: { 1: 'Must stay private' },
         },
       }),
@@ -4662,6 +4672,16 @@ describe('cloud API trust boundaries', () => {
             updatedAt: 750,
           },
         },
+        riderOverlaysByTrack: {
+          'north-bay-bmx': {
+            xPct: 0.04,
+            yPct: 0.64,
+            width: 940,
+            height: 190,
+            locked: true,
+          },
+        },
+        riderOverlayUpdatedAtByTrack: { 'north-bay-bmx': 750 },
       },
     });
 
@@ -4673,6 +4693,15 @@ describe('cloud API trust boundaries', () => {
       cameraLocked: true,
       earthCamerasByTrack: {
         'north-bay-bmx': { angle: 53, heading: 215, zoom: 20 },
+      },
+      riderOverlaysByTrack: {
+        'north-bay-bmx': {
+          xPct: 0.04,
+          yPct: 0.64,
+          width: 940,
+          height: 190,
+          locked: true,
+        },
       },
     });
     expect(publicPayload.raceViewPreferences).not.toHaveProperty('demoRiderNames');

@@ -85,6 +85,10 @@ function raceRiderOverlayUsesCompactLandscape(containerWidth: number, containerH
     && containerHeight <= 500;
 }
 
+function raceRiderOverlayUsesPhonePortrait(containerWidth: number, containerHeight: number) {
+  return containerHeight > containerWidth && containerWidth <= 600;
+}
+
 export function raceRiderOverlayMinimumHeight(
   containerWidth: number,
   containerHeight: number,
@@ -93,15 +97,14 @@ export function raceRiderOverlayMinimumHeight(
 ) {
   const scale = normalizeRiderPresentationScale(presentationScale);
   if (Math.abs(scale - 1) > 0.001) {
-    // A phone cannot display two readable rows inside the raw ~63px owner
-    // scale. Preserve the narrow saved footprint, but reserve the minimum
-    // vertical room needed to keep all four cards visible. Short landscape
-    // viewports already use the compact one-row 138px presentation.
+    // Keep the phone card strip readable without letting it consume the
+    // playable map. Landscape uses one compact row; portrait uses two rows.
+    // Both are deliberately bounded to leave most of the screen to the race.
     if (raceRiderOverlayUsesCompactLandscape(containerWidth, containerHeight)) {
-      return 138;
+      return 114;
     }
-    if (containerWidth <= 600 && containerHeight > containerWidth) {
-      return Math.min(200, Math.max(1, containerHeight - 24));
+    if (raceRiderOverlayUsesPhonePortrait(containerWidth, containerHeight)) {
+      return Math.min(248, Math.max(1, containerHeight - 24));
     }
     const scaledDefaultMinimum = Math.max(
       110,
@@ -115,19 +118,22 @@ export function raceRiderOverlayMinimumHeight(
       : Math.min(scaledDefaultMinimum, Math.max(1, requestedPresentationHeight));
   }
   if (raceRiderOverlayUsesCompactLandscape(containerWidth, containerHeight)) {
-    return 138;
+    return 114;
   }
-  if (containerWidth <= 600) {
-    return 368;
+  if (raceRiderOverlayUsesPhonePortrait(containerWidth, containerHeight)) {
+    return Math.min(248, Math.max(1, containerHeight - 24));
   }
-  return containerWidth <= 900 ? 340 : 220;
+  return containerWidth <= 900 ? Math.min(300, Math.round(containerHeight * 0.28)) : 220;
 }
 
 export function raceRiderOverlayMaximumHeight(containerWidth: number, containerHeight: number) {
-  if (!raceRiderOverlayUsesCompactLandscape(containerWidth, containerHeight)) {
-    return Number.POSITIVE_INFINITY;
+  if (raceRiderOverlayUsesCompactLandscape(containerWidth, containerHeight)) {
+    return Math.max(114, Math.min(128, Math.round(containerHeight * 0.3)));
   }
-  return Math.max(138, Math.min(156, Math.round(containerHeight * 0.36)));
+  if (raceRiderOverlayUsesPhonePortrait(containerWidth, containerHeight)) {
+    return Math.max(248, Math.min(272, Math.round(containerHeight * 0.32)));
+  }
+  return Number.POSITIVE_INFINITY;
 }
 
 export function raceRiderOverlayPreferenceForViewport(
@@ -163,13 +169,33 @@ function clampLayout(
     scale,
     layout.height,
   );
-  const maximumHeight = presentationScaled
-    ? Number.POSITIVE_INFINITY
-    : raceRiderOverlayMaximumHeight(container.clientWidth, container.clientHeight);
+  const maximumHeight = raceRiderOverlayMaximumHeight(
+    container.clientWidth,
+    container.clientHeight,
+  );
   const scaledMinimumWidth = Math.max(220, Math.round(320 * scale));
-  const minimumWidth = presentationScaled
-    ? Math.min(scaledMinimumWidth, Math.max(1, layout.width))
-    : 320;
+  const compactLandscape = raceRiderOverlayUsesCompactLandscape(
+    container.clientWidth,
+    container.clientHeight,
+  );
+  const phonePortrait = raceRiderOverlayUsesPhonePortrait(
+    container.clientWidth,
+    container.clientHeight,
+  );
+  const responsiveMinimumWidth = compactLandscape
+    ? Math.round(container.clientWidth * 0.68)
+    : phonePortrait
+      ? container.clientWidth - 16
+      : 0;
+  const minimumWidth = Math.min(
+    Math.max(1, container.clientWidth - 16),
+    Math.max(
+      responsiveMinimumWidth,
+      presentationScaled
+        ? Math.min(scaledMinimumWidth, Math.max(1, layout.width))
+        : 320,
+    ),
+  );
   const width = Math.max(
     minimumWidth,
     Math.min(layout.width, Math.max(minimumWidth, container.clientWidth - 24)),
@@ -180,12 +206,13 @@ function clampLayout(
   );
   const maxX = Math.max(0, 1 - (width / Math.max(1, container.clientWidth)));
   const maxY = Math.max(0, 1 - (height / Math.max(1, container.clientHeight)));
+  const responsiveBottomAligned = compactLandscape || phonePortrait;
   return {
     ...layout,
     width,
     height,
     xPct: Math.max(0, Math.min(maxX, layout.xPct)),
-    yPct: Math.max(0, Math.min(maxY, layout.yPct)),
+    yPct: responsiveBottomAligned ? maxY : Math.max(0, Math.min(maxY, layout.yPct)),
     locked: layout.locked,
   };
 }
@@ -533,6 +560,16 @@ export function RaceRiderOverlay({
         '--overlay-height': `${layout.height}px`,
         ...(presentationScaled ? {
           '--rr-font': `${16 * presentationLegibilityScale}px`,
+          '--rr-compact-avatar': `${28 / normalizedPresentationScale}px`,
+          '--rr-compact-toolbar': `${20 / normalizedPresentationScale}px`,
+          '--rr-compact-place': `${21 / normalizedPresentationScale}px`,
+          '--rr-compact-gap': `${3 / normalizedPresentationScale}px`,
+          '--rr-compact-padding': `${3 / normalizedPresentationScale}px`,
+          '--rr-portrait-avatar': `${44 / normalizedPresentationScale}px`,
+          '--rr-portrait-toolbar': `${28 / normalizedPresentationScale}px`,
+          '--rr-portrait-place': `${34 / normalizedPresentationScale}px`,
+          '--rr-portrait-gap': `${4 / normalizedPresentationScale}px`,
+          '--rr-portrait-padding': `${4 / normalizedPresentationScale}px`,
         } : {}),
         '--race-overlay-min-height': `${raceRiderOverlayMinimumHeight(
           overlayRef.current?.parentElement?.clientWidth ?? 1366,

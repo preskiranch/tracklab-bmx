@@ -32,6 +32,14 @@ export function applyGlobalRaceViewPreferences(
       ...account.earthCamerasByTrack,
       ...global.earthCamerasByTrack,
     },
+    riderOverlaysByTrack: {
+      ...account.riderOverlaysByTrack,
+      ...global.riderOverlaysByTrack,
+    },
+    riderOverlayUpdatedAtByTrack: {
+      ...account.riderOverlayUpdatedAtByTrack,
+      ...global.riderOverlayUpdatedAtByTrack,
+    },
   });
 }
 

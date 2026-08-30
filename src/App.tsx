@@ -8647,23 +8647,41 @@ export default function App() {
     if (!developerRaceLayoutActive) {
       return;
     }
-    setRiderOverlaysByTrack((current) => {
-      const updatedAt = Date.now();
-      const next = {
-        ...current,
+    const updatedAt = Date.now();
+    const nextPreferences = normalizeRaceViewPreferences({
+      ...raceViewPreferencesRef.current,
+      riderOverlaysByTrack: {
+        ...raceViewPreferencesRef.current.riderOverlaysByTrack,
         [trackId]: layout,
-      };
-      persistRaceViewPreferences({
-        ...raceViewPreferencesRef.current,
-        riderOverlaysByTrack: next,
-        riderOverlayUpdatedAtByTrack: {
-          ...raceViewPreferencesRef.current.riderOverlayUpdatedAtByTrack,
-          [trackId]: updatedAt,
-        },
-      });
-      return next;
+      },
+      riderOverlayUpdatedAtByTrack: {
+        ...raceViewPreferencesRef.current.riderOverlayUpdatedAtByTrack,
+        [trackId]: updatedAt,
+      },
     });
-  }, [developerRaceLayoutActive, persistRaceViewPreferences]);
+    setRiderOverlaysByTrack(nextPreferences.riderOverlaysByTrack);
+    persistRaceViewPreferences(nextPreferences);
+    if (raceCameraLocked && Object.keys(nextPreferences.earthCamerasByTrack).length > 0) {
+      void saveGlobalRaceViewPreferences(nextPreferences)
+        .then((savedGlobalPreferences) => {
+          const globallyLockedPreferences = applyGlobalRaceViewPreferences(
+            raceViewPreferencesRef.current,
+            savedGlobalPreferences,
+          );
+          applyRaceViewPreferences(globallyLockedPreferences);
+          writeStoredRaceViewPreferences(cloudProfileKey, globallyLockedPreferences);
+        })
+        .catch((error: Error) => {
+          console.warn(`Could not publish the locked rider layout globally: ${error.message}`);
+        });
+    }
+  }, [
+    applyRaceViewPreferences,
+    cloudProfileKey,
+    developerRaceLayoutActive,
+    persistRaceViewPreferences,
+    raceCameraLocked,
+  ]);
 
   useEffect(() => () => clearStartGateSequence(), [clearStartGateSequence]);
 

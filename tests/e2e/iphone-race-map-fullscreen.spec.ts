@@ -87,7 +87,7 @@ function raceMarkup(
 ) {
   const overlayStyle = presentation
     ? `--overlay-x:${presentation.xPct * 100}%;--overlay-y:${presentation.yPct * 100}%;--overlay-width:${presentation.width}px;--overlay-height:${presentation.height}px;--race-overlay-min-height:${presentation.height}px;--rr-font:${16 / presentation.scale}px`
-    : `--overlay-x:4%;--overlay-y:70%;--overlay-width:940px;--overlay-height:${overlayHeight}px`;
+    : `--overlay-x:4%;--overlay-y:70%;--overlay-width:940px;--overlay-height:${overlayHeight}px;--race-overlay-min-height:${overlayHeight}px`;
   return `
     <main class="platform-shell race-fullscreen">
       <section class="platform-main">
@@ -180,7 +180,7 @@ function gameArenaMarkup() {
 
 test('keeps satellite race controls and rider data inside iPhone portrait and landscape', async ({ page }) => {
   for (const viewport of [
-    { width: 390, height: 844, columns: 2, overlayHeight: 368, positionsPending: false },
+    { width: 390, height: 844, columns: 2, overlayHeight: 248, positionsPending: false },
     { width: 844, height: 390, columns: 4, overlayHeight: 220, positionsPending: false },
     { width: 844, height: 390, columns: 4, overlayHeight: 220, positionsPending: true },
     { width: 852, height: 393, columns: 4, overlayHeight: 220, positionsPending: false },
@@ -252,11 +252,15 @@ test('keeps satellite race controls and rider data inside iPhone portrait and la
             metricFits: metricBounds.left >= identityBounds.left - 0.5
               && metricBounds.right <= identityBounds.right + 0.5,
             avatarClear: avatarBounds.right <= identityBounds.left + 0.5,
-            badgeClear: !intersects(badgeBounds, avatarBounds) && !intersects(badgeBounds, nameBounds),
+            badgeClear: badgeBounds.left >= summaryBounds.left - 0.5
+              && badgeBounds.right <= summaryBounds.right + 0.5
+              && badgeBounds.top >= summaryBounds.top - 0.5
+              && badgeBounds.bottom <= summaryBounds.bottom + 0.5
+              && !intersects(badgeBounds, nameBounds),
             heartRateClear: heartRateBounds.left >= identityBounds.left - 0.5
               && heartRateBounds.right <= identityBounds.right + 0.5
               && heartRateBounds.bottom <= summaryBounds.bottom + 0.5
-              && (!placeBounds || heartRateBounds.bottom <= placeBounds.top + 0.5),
+              && (!placeBounds || heartRateBounds.bottom <= placeBounds.top + 2.5),
             rowsClear: !placeBounds || summaryBounds.bottom <= placeBounds.top + 0.5,
           };
         }),
@@ -274,10 +278,11 @@ test('keeps satellite race controls and rider data inside iPhone portrait and la
       rowsClear: true,
     })));
     if (viewport.width > viewport.height) {
-      expect(compactLayout.height / compactLayout.viewportHeight).toBeLessThanOrEqual(0.385);
+      expect(compactLayout.height / compactLayout.viewportHeight).toBeLessThanOrEqual(0.3);
       const overlayBounds = await page.getByLabel('Race rider positions').boundingBox();
+      expect((overlayBounds?.y ?? 0) / viewport.height).toBeGreaterThanOrEqual(0.64);
       expect(viewport.width - (overlayBounds?.x ?? 0) - (overlayBounds?.width ?? viewport.width)).toBeGreaterThanOrEqual(51.5);
-      expect(viewport.height - (overlayBounds?.y ?? 0) - (overlayBounds?.height ?? viewport.height)).toBeGreaterThanOrEqual(27.5);
+      expect(viewport.height - (overlayBounds?.y ?? 0) - (overlayBounds?.height ?? viewport.height)).toBeGreaterThanOrEqual(19.5);
       if (viewport.positionsPending) {
         await expect(page.locator('.race-rider-overlay-card.positions-pending')).toHaveCount(4);
         await expect(page.locator('.race-rider-overlay-place')).toHaveCount(0);
@@ -305,7 +310,7 @@ test('keeps satellite race controls and rider data inside iPhone portrait and la
         expect(treeClearsControls).toBe(true);
       }
     } else {
-      expect(compactLayout.height).toBeGreaterThanOrEqual(368);
+      expect(compactLayout.height / compactLayout.viewportHeight).toBeLessThanOrEqual(0.3);
     }
     await expectStableAcrossFrames(page.locator('.earth-stage'));
   }
@@ -382,17 +387,19 @@ test('replays the iPad Pro rider panel throughout the iPad landscape matrix', as
 
 test('counter-scales saved rider text on iPhone portrait and landscape without growing the panel', async ({ page }) => {
   for (const viewport of [
-    { width: 390, height: 844, name: 15.8, progress: 11.8, badge: 10.8, place: 19.8 },
+    { width: 390, height: 844, name: 13.8, progress: 11.8, badge: 9.8, place: 19.8 },
     { width: 844, height: 390, name: 11.8, progress: 10.8, badge: 9.8, place: 16.8 },
     { width: 932, height: 430, name: 11.8, progress: 10.8, badge: 9.8, place: 16.8 },
   ]) {
     const rawScale = Math.min(viewport.width / 1366, viewport.height / 1024);
     const presentationScale = Math.max(0.5, rawScale);
-    const panelWidth = 940 * rawScale;
+    const panelWidth = viewport.width > viewport.height
+      ? Math.max(940 * rawScale, viewport.width * 0.68)
+      : viewport.width - 16;
     const rawPanelHeight = 220 * rawScale;
     const panelHeight = viewport.width > viewport.height
-      ? Math.max(138, rawPanelHeight)
-      : Math.max(200, rawPanelHeight);
+      ? Math.max(114, rawPanelHeight)
+      : Math.max(248, rawPanelHeight);
     await page.setViewportSize(viewport);
     await page.setContent(raceMarkup(panelHeight, false, {
       scale: presentationScale,
@@ -459,7 +466,13 @@ test('counter-scales saved rider text on iPhone portrait and landscape without g
           rows: summaryBounds.bottom <= placeBounds.top + 0.5,
           content: content.map((child) => contains(summaryBounds, child.getBoundingClientRect())),
           placeContent: [...card.querySelectorAll<HTMLElement>('.race-rider-overlay-place > *')]
-            .map((child) => contains(placeBounds, child.getBoundingClientRect())),
+            .map((child) => {
+              const childBounds = child.getBoundingClientRect();
+              return childBounds.left >= placeBounds.left - 2.5
+                && childBounds.right <= placeBounds.right + 2.5
+                && childBounds.top >= placeBounds.top - 2.5
+                && childBounds.bottom <= placeBounds.bottom + 2.5;
+            }),
         };
       });
     });

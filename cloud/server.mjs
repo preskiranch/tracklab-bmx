@@ -4121,6 +4121,8 @@ function sanitizeGlobalRaceViewPreferences(value) {
       newestCameraRevision,
     ),
     earthCamerasByTrack: preferences.earthCamerasByTrack,
+    riderOverlaysByTrack: preferences.riderOverlaysByTrack,
+    riderOverlayUpdatedAtByTrack: preferences.riderOverlayUpdatedAtByTrack,
   };
 }
 
