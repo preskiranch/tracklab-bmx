@@ -8267,7 +8267,7 @@ test('club owner restores a shared tablet into stable athlete-only kiosk mode', 
   ];
   for (const activity of demoActivities) {
     await page.locator('.club-tablet-home-programs').getByRole('button', { name: activity.button }).click();
-    await expect(page.getByRole('status', { name: 'Club Tablet demo mode active' })).toContainText('DEMO MODE');
+    await expect(page.locator('.club-tablet-demo-banner')).toHaveCount(0);
     await expect(page.getByRole('region', { name: activity.workflow })).toBeVisible();
     if (activity.picker) {
       const demoRiderChooser = page.getByRole('group', { name: 'Choose demo riders' });

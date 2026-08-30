@@ -133,13 +133,6 @@
 .club-tablet-start > span { display: inline-flex; align-items: center; gap: 8px; }
 .club-tablet-message { margin-top: 13px !important; padding: 11px 13px; border-radius: 11px; background: #eaf7e3; color: #245b16 !important; font-weight: 800; }
 
-.club-tablet-demo-banner { position: fixed; z-index: 2147481000; top: max(10px, env(safe-area-inset-top)); left: 50%; display: flex; max-width: min(620px, calc(100vw - 24px)); align-items: center; gap: 10px; padding: 10px 14px; border: 2px solid #8eef42; border-radius: 14px; background: rgba(12, 24, 15, 0.96); color: #fff; box-shadow: 0 12px 36px rgba(0, 0, 0, 0.34); transform: translateX(-50%); }
-.club-tablet-demo-banner > svg { flex: 0 0 auto; color: #8eef42; }
-.club-tablet-demo-banner strong,
-.club-tablet-demo-banner small { display: block; }
-.club-tablet-demo-banner strong { color: #8eef42; letter-spacing: 0.08em; }
-.club-tablet-demo-banner small { margin-top: 1px; color: #e4ece0; }
-
 .club-tablet-active-card { padding: clamp(18px, 2.5vw, 29px); border-top: 6px solid #78dc38; border-radius: 21px; }
 .club-tablet-active-avatar { width: 80px; height: 80px; flex: 0 0 auto; font-size: 24px; }
 .club-tablet-active-card > div { flex: 1; }
