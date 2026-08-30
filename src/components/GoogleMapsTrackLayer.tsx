@@ -462,23 +462,124 @@ type EarthCameraRef = {
 };
 
 type RepaintTimerScheduler = (callback: () => void, delayMs: number) => number;
+type RepaintTimerCanceller = (timer: number) => void;
 
 const satelliteRepaintDelaysMs = [0, 90, 260, 700, 1400];
+const satelliteRepaintReleaseDelayMs = satelliteRepaintDelaysMs[satelliteRepaintDelaysMs.length - 1] + 160;
 
 export function scheduleSatelliteTileRepaints(
   google: GoogleMapsRuntime,
   map: GoogleMap,
   cameraRef: EarthCameraRef,
-  track: TrackRecord,
+  viewRef: Readonly<{ current: DeferredSatelliteMapView }>,
   scheduleTimer: RepaintTimerScheduler,
-  preserveExact = false,
 ) {
   return satelliteRepaintDelaysMs.map((delayMs) => scheduleTimer(() => {
     // Rotation can update the authoritative camera between repaint passes. Read
-    // the ref inside each callback so an older pass cannot restore stale map
-    // center, zoom, heading, or tilt after the newer camera has been applied.
-    refreshSatelliteTiles(google, map, cameraRef.current, track, preserveExact);
+    // both refs inside each callback so an older pass cannot restore a stale
+    // camera, course, or lock mode after the newer render has been applied.
+    const latestView = viewRef.current;
+    refreshSatelliteTiles(
+      google,
+      map,
+      cameraRef.current,
+      latestView.track,
+      latestView.cameraLocked,
+    );
   }, delayMs));
+}
+
+export function restartSatelliteTileRepaints(
+  previousTimers: readonly number[],
+  google: GoogleMapsRuntime,
+  map: GoogleMap,
+  cameraRef: EarthCameraRef,
+  viewRef: Readonly<{ current: DeferredSatelliteMapView }>,
+  cancelTimer: RepaintTimerCanceller,
+  scheduleTimer: RepaintTimerScheduler,
+) {
+  previousTimers.forEach(cancelTimer);
+  return scheduleSatelliteTileRepaints(google, map, cameraRef, viewRef, scheduleTimer);
+}
+
+type SatelliteFitFinalizationHandle = Readonly<{
+  frameRequest: number;
+  releaseTimer: number;
+  cancel: () => void;
+}>;
+
+type AnimationFrameScheduler = (callback: () => void) => number;
+type AnimationFrameCanceller = (frameRequest: number) => void;
+
+/**
+ * Google Maps can finish fitBounds after React has already selected another
+ * course. Keep both a cancellation flag and a render generation check so even
+ * a callback that was already dequeued cannot restore the previous course.
+ */
+export function scheduleSatelliteFitFinalization(
+  generationRef: Readonly<{ current: number }>,
+  generation: number,
+  applyLatestCamera: () => void,
+  releaseCameraSync: () => void,
+  requestFrame: AnimationFrameScheduler,
+  cancelFrame: AnimationFrameCanceller,
+  scheduleTimer: RepaintTimerScheduler,
+  cancelTimer: RepaintTimerCanceller,
+): SatelliteFitFinalizationHandle {
+  let active = true;
+  const isCurrent = () => active && generationRef.current === generation;
+  const frameRequest = requestFrame(() => {
+    if (isCurrent()) {
+      applyLatestCamera();
+    }
+  });
+  const releaseTimer = scheduleTimer(() => {
+    if (!isCurrent()) {
+      return;
+    }
+    applyLatestCamera();
+    releaseCameraSync();
+  }, 220);
+
+  return {
+    frameRequest,
+    releaseTimer,
+    cancel: () => {
+      active = false;
+      cancelFrame(frameRequest);
+      cancelTimer(releaseTimer);
+    },
+  };
+}
+
+type EarthCameraChangeRef = Readonly<{
+  current: ((camera: Partial<EarthCamera>) => void) | undefined;
+}>;
+
+export function createSatelliteCameraSyncHandler(
+  map: GoogleMap,
+  cameraRef: EarthCameraRef,
+  viewRef: Readonly<{ current: DeferredSatelliteMapView }>,
+  suppressCameraSyncRef: Readonly<{ current: boolean }>,
+  onEarthCameraChangeRef: EarthCameraChangeRef,
+  now: () => number = Date.now,
+) {
+  return () => {
+    const latestView = viewRef.current;
+    if (suppressCameraSyncRef.current || latestView.cameraLocked) {
+      return;
+    }
+
+    const nextCamera = {
+      angle: Math.round(map.getTilt?.() ?? latestView.camera.angle ?? 0),
+      heading: normalizeHeading(Math.round(map.getHeading?.() ?? latestView.camera.heading ?? 0)),
+      center: map.getCenter?.()?.toJSON(),
+      zoom: map.getZoom?.(),
+      updatedAt: now(),
+    };
+    cameraRef.current = nextCamera;
+    onEarthCameraChangeRef.current?.(nextCamera);
+  };
 }
 
 function distanceLabelIcon(text: string) {
@@ -1332,12 +1433,15 @@ export function GoogleMapsTrackLayer({
       ...(earthZoom != null ? { zoom: earthZoom } : {}),
     },
   };
+  const onEarthCameraChangeRef = useRef(onEarthCameraChange);
+  onEarthCameraChangeRef.current = onEarthCameraChange;
   const cameraRef = useRef<Partial<EarthCamera>>(
     resolveDeferredSatelliteMapView(latestMapViewRef).camera,
   );
   const suppressCameraSyncRef = useRef(false);
   const cameraSyncReleaseTimerRef = useRef<number | null>(null);
-  const lastFitKeyRef = useRef('');
+  const satelliteFitGenerationRef = useRef(0);
+  const satelliteFitFinalizationRef = useRef<SatelliteFitFinalizationHandle | null>(null);
   const isProSetZoneMapping = mappingMode
     && mappingEditMode === 'zones'
     && mappingZoneBranchChoice === 'b'
@@ -1350,6 +1454,7 @@ export function GoogleMapsTrackLayer({
     distanceMeters: number;
   } | null>(null);
   const draftRouteColor = routeVariantColors[mappingRouteVariantId];
+  const trackFitKey = `${track.id}:${track.routeStatus ?? 'locator'}:${track.centerline?.length ?? 0}:${track.splitSections?.length ?? 0}`;
 
   useEffect(() => {
     setSelectedPathPointIndex(null);
@@ -1360,7 +1465,6 @@ export function GoogleMapsTrackLayer({
     let cancelled = false;
     setStatus('loading');
     setError('');
-    lastFitKeyRef.current = '';
 
     loadGoogleMaps()
       .then((google) => {
@@ -1455,6 +1559,9 @@ export function GoogleMapsTrackLayer({
       ghostMarkerRefs.current.clear();
       remoteMarkerRefs.current.clear();
       mapRef.current = null;
+      satelliteFitGenerationRef.current += 1;
+      satelliteFitFinalizationRef.current?.cancel();
+      satelliteFitFinalizationRef.current = null;
       if (cameraSyncReleaseTimerRef.current != null) {
         window.clearTimeout(cameraSyncReleaseTimerRef.current);
         cameraSyncReleaseTimerRef.current = null;
@@ -1506,9 +1613,8 @@ export function GoogleMapsTrackLayer({
       google,
       map,
       cameraRef,
-      track,
+      latestMapViewRef,
       (callback, delayMs) => window.setTimeout(callback, delayMs),
-      cameraLocked,
     );
 
     return () => {
@@ -1526,6 +1632,7 @@ export function GoogleMapsTrackLayer({
 
     let frameRequest: number | null = null;
     let releaseTimer: number | null = null;
+    let repaintTimers: number[] = [];
     let previousWidth = container.clientWidth;
     let previousHeight = container.clientHeight;
     const observer = new ResizeObserver((entries) => {
@@ -1548,7 +1655,15 @@ export function GoogleMapsTrackLayer({
       frameRequest = window.requestAnimationFrame(() => {
         frameRequest = null;
         suppressCameraSyncRef.current = true;
-        refreshSatelliteTiles(google, map, cameraRef.current, track, cameraLocked);
+        repaintTimers = restartSatelliteTileRepaints(
+          repaintTimers,
+          google,
+          map,
+          cameraRef,
+          latestMapViewRef,
+          (timer) => window.clearTimeout(timer),
+          (callback, delayMs) => window.setTimeout(callback, delayMs),
+        );
         if (cameraSyncReleaseTimerRef.current != null) {
           window.clearTimeout(cameraSyncReleaseTimerRef.current);
         }
@@ -1558,7 +1673,7 @@ export function GoogleMapsTrackLayer({
             suppressCameraSyncRef.current = false;
           }
           releaseTimer = null;
-        }, 160);
+        }, satelliteRepaintReleaseDelayMs);
         cameraSyncReleaseTimerRef.current = releaseTimer;
       });
     });
@@ -1569,6 +1684,7 @@ export function GoogleMapsTrackLayer({
       if (frameRequest != null) {
         window.cancelAnimationFrame(frameRequest);
       }
+      repaintTimers.forEach((timer) => window.clearTimeout(timer));
       if (releaseTimer != null) {
         if (cameraSyncReleaseTimerRef.current === releaseTimer) {
           window.clearTimeout(releaseTimer);
@@ -1579,29 +1695,21 @@ export function GoogleMapsTrackLayer({
         suppressCameraSyncRef.current = false;
       }
     };
-  }, [cameraLocked, status, track]);
+  }, [status]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || status !== 'ready' || !onEarthCameraChange) {
+    if (!map || status !== 'ready') {
       return undefined;
     }
 
-    const syncCamera = () => {
-      if (suppressCameraSyncRef.current || cameraLocked) {
-        return;
-      }
-
-      const nextCamera = {
-        angle: Math.round(map.getTilt?.() ?? earthAngle),
-        heading: normalizeHeading(Math.round(map.getHeading?.() ?? earthHeading)),
-        center: map.getCenter?.()?.toJSON(),
-        zoom: map.getZoom?.(),
-        updatedAt: Date.now(),
-      };
-      cameraRef.current = nextCamera;
-      onEarthCameraChange(nextCamera);
-    };
+    const syncCamera = createSatelliteCameraSyncHandler(
+      map,
+      cameraRef,
+      latestMapViewRef,
+      suppressCameraSyncRef,
+      onEarthCameraChangeRef,
+    );
 
     const listeners = [
       map.addListener('tilt_changed', syncCamera),
@@ -1611,7 +1719,90 @@ export function GoogleMapsTrackLayer({
     ];
 
     return () => listeners.forEach((listener) => listener?.remove?.());
-  }, [cameraLocked, earthAngle, earthHeading, onEarthCameraChange, status]);
+  }, [status]);
+
+  useEffect(() => {
+    const google = googleRef.current;
+    const map = mapRef.current;
+    if (!google || !map || status !== 'ready') {
+      return undefined;
+    }
+
+    const generation = satelliteFitGenerationRef.current + 1;
+    satelliteFitGenerationRef.current = generation;
+    const fitView = latestMapViewRef.current;
+    const fitTrack = fitView.track;
+    const savedTrackCamera = cameraForTrack(
+      cameraRef.current,
+      fitTrack,
+      fitView.cameraLocked,
+    );
+    const hasSavedView = Boolean(
+      savedTrackCamera.center && typeof savedTrackCamera.zoom === 'number',
+    );
+
+    suppressCameraSyncRef.current = true;
+    if (cameraSyncReleaseTimerRef.current != null) {
+      window.clearTimeout(cameraSyncReleaseTimerRef.current);
+      cameraSyncReleaseTimerRef.current = null;
+    }
+
+    if (hasSavedView) {
+      applyCamera(map, savedTrackCamera);
+    } else {
+      const bounds = new google.maps.LatLngBounds();
+      trackBoundsPoints(fitTrack).forEach((point) => bounds.extend(point));
+      map.fitBounds(bounds, 58);
+      applyCamera(map, {
+        angle: cameraRef.current.angle,
+        heading: cameraRef.current.heading,
+      });
+    }
+
+    const applyLatestCamera = () => {
+      const latestView = latestMapViewRef.current;
+      applyCamera(
+        map,
+        cameraForTrack(cameraRef.current, latestView.track, latestView.cameraLocked),
+      );
+    };
+    let finalization: SatelliteFitFinalizationHandle | null = null;
+    const releaseCameraSync = () => {
+      if (finalization && cameraSyncReleaseTimerRef.current === finalization.releaseTimer) {
+        cameraSyncReleaseTimerRef.current = null;
+        suppressCameraSyncRef.current = false;
+      }
+      if (satelliteFitFinalizationRef.current === finalization) {
+        satelliteFitFinalizationRef.current = null;
+      }
+    };
+    finalization = scheduleSatelliteFitFinalization(
+      satelliteFitGenerationRef,
+      generation,
+      applyLatestCamera,
+      releaseCameraSync,
+      (callback) => window.requestAnimationFrame(callback),
+      (frameRequest) => window.cancelAnimationFrame(frameRequest),
+      (callback, delayMs) => window.setTimeout(callback, delayMs),
+      (timer) => window.clearTimeout(timer),
+    );
+    satelliteFitFinalizationRef.current = finalization;
+    cameraSyncReleaseTimerRef.current = finalization.releaseTimer;
+
+    return () => {
+      if (satelliteFitGenerationRef.current === generation) {
+        satelliteFitGenerationRef.current += 1;
+      }
+      finalization?.cancel();
+      if (satelliteFitFinalizationRef.current === finalization) {
+        satelliteFitFinalizationRef.current = null;
+      }
+      if (finalization && cameraSyncReleaseTimerRef.current === finalization.releaseTimer) {
+        cameraSyncReleaseTimerRef.current = null;
+        suppressCameraSyncRef.current = false;
+      }
+    };
+  }, [status, trackFitKey]);
 
   useEffect(() => {
     const google = googleRef.current;
@@ -1636,36 +1827,6 @@ export function GoogleMapsTrackLayer({
     startLineRefs.current = [];
     finishLineRefs.current = [];
     finishMarkerRef.current = null;
-
-    const fitKey = `${track.id}:${track.routeStatus ?? 'locator'}:${track.centerline?.length ?? 0}:${track.splitSections?.length ?? 0}`;
-    if (lastFitKeyRef.current !== fitKey) {
-      suppressCameraSyncRef.current = true;
-      const savedTrackCamera = cameraForTrack(cameraRef.current, track, cameraLocked);
-      const hasSavedView = Boolean(savedTrackCamera.center && typeof savedTrackCamera.zoom === 'number');
-      if (hasSavedView) {
-        applyCamera(map, savedTrackCamera);
-        window.requestAnimationFrame(() => {
-          applyCamera(map, cameraForTrack(cameraRef.current, track, cameraLocked));
-        });
-      } else {
-        const bounds = new google.maps.LatLngBounds();
-        trackBoundsPoints(track).forEach((point) => bounds.extend(point));
-        map.fitBounds(bounds, 58);
-        const restoreCamera = () => {
-          applyCamera(map, {
-            angle: cameraRef.current.angle,
-            heading: cameraRef.current.heading,
-          });
-        };
-        restoreCamera();
-        window.requestAnimationFrame(restoreCamera);
-      }
-      window.setTimeout(() => {
-        applyCamera(map, cameraForTrack(cameraRef.current, track, cameraLocked));
-        suppressCameraSyncRef.current = false;
-      }, 220);
-      lastFitKeyRef.current = fitKey;
-    }
 
     const savedRoute = mappedTrackRoute(track);
     if (savedRoute.length < 2) {
