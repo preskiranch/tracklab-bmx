@@ -6,19 +6,26 @@ import {
 } from '../../src/components/RaceRiderOverlay';
 
 describe('race rider responsive layout', () => {
-  it('keeps the readable two-row panel in phone and iPad portrait', () => {
-    expect(raceRiderOverlayMinimumHeight(390, 844)).toBe(368);
-    expect(raceRiderOverlayMinimumHeight(820, 1180)).toBe(340);
+  it('keeps a readable two-row panel without taking over phone and iPad portrait', () => {
+    expect(raceRiderOverlayMinimumHeight(390, 844)).toBe(248);
+    expect(raceRiderOverlayMaximumHeight(390, 844)).toBe(270);
+    expect(raceRiderOverlayMinimumHeight(375, 667)).toBe(200);
+    expect(raceRiderOverlayMaximumHeight(375, 667)).toBe(200);
+    expect(raceRiderOverlayMinimumHeight(820, 1180)).toBe(300);
+    expect(raceRiderOverlayMinimumHeight(390, 844) / 844).toBeLessThan(0.3);
+    expect(raceRiderOverlayMinimumHeight(820, 1180) / 1180).toBeLessThan(0.26);
   });
 
   it('uses the compact one-row panel on short phone landscape viewports', () => {
-    expect(raceRiderOverlayMinimumHeight(844, 390)).toBe(138);
-    expect(raceRiderOverlayMaximumHeight(844, 390)).toBe(140);
-    expect(raceRiderOverlayMinimumHeight(852, 393)).toBe(138);
-    expect(raceRiderOverlayMaximumHeight(852, 393)).toBe(141);
-    expect(raceRiderOverlayMinimumHeight(667, 375)).toBe(138);
-    expect(raceRiderOverlayMaximumHeight(667, 375)).toBe(138);
-    expect(raceRiderOverlayMaximumHeight(932, 430)).toBe(155);
+    expect(raceRiderOverlayMinimumHeight(844, 390)).toBe(110);
+    expect(raceRiderOverlayMaximumHeight(844, 390)).toBe(117);
+    expect(raceRiderOverlayMinimumHeight(852, 393)).toBe(110);
+    expect(raceRiderOverlayMaximumHeight(852, 393)).toBe(118);
+    expect(raceRiderOverlayMinimumHeight(667, 375)).toBe(110);
+    expect(raceRiderOverlayMaximumHeight(667, 375)).toBe(113);
+    expect(raceRiderOverlayMaximumHeight(932, 430)).toBe(128);
+    expect(raceRiderOverlayMinimumHeight(844, 390) / 390).toBeLessThan(0.3);
+    expect(raceRiderOverlayMinimumHeight(667, 375) / 375).toBeLessThan(0.3);
   });
 
   it('keeps enough iPad and desktop landscape height for photos, metrics, and heart rate', () => {
@@ -37,8 +44,8 @@ describe('race rider responsive layout', () => {
   });
 
   it('reserves readable card height when a saved owner panel reaches a phone', () => {
-    expect(raceRiderOverlayMinimumHeight(390, 844, 0.5, 63)).toBe(200);
-    expect(raceRiderOverlayMinimumHeight(844, 390, 0.5, 84)).toBe(138);
+    expect(raceRiderOverlayMinimumHeight(390, 844, 0.5, 63)).toBe(248);
+    expect(raceRiderOverlayMinimumHeight(844, 390, 0.5, 84)).toBe(110);
   });
 
   it('does not save phone-only presentation dimensions over the shared layout', () => {

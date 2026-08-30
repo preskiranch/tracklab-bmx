@@ -208,6 +208,9 @@ describe('race view preferences', () => {
         north: { angle: 20, heading: 40, zoom: 18, updatedAt: 400 },
         south: { angle: 30, heading: 90, zoom: 19, updatedAt: 300 },
       },
+      riderOverlaysByTrack: {
+        north: { xPct: 0.1, yPct: 0.7, width: 900, height: 220, locked: true },
+      },
       demoRiderNames: { 1: 'Maya Torres' },
       demoRiderNamesUpdatedAt: 500,
       commentary: { ...defaultRaceCommentaryPreferences, ambientEnabled: false },
@@ -219,6 +222,10 @@ describe('race view preferences', () => {
       earthCamerasByTrack: {
         north: { angle: 55, heading: 225, zoom: 21, updatedAt: 900 },
       },
+      riderOverlaysByTrack: {
+        north: { xPct: 0.04, yPct: 0.64, width: 940, height: 190, locked: true },
+      },
+      riderOverlayUpdatedAtByTrack: { north: 900 },
     });
 
     const applied = applyGlobalRaceViewPreferences(account, global);
@@ -233,6 +240,14 @@ describe('race view preferences', () => {
       angle: 30,
       heading: 90,
     });
+    expect(applied.riderOverlaysByTrack.north).toMatchObject({
+      xPct: 0.04,
+      yPct: 0.64,
+      width: 940,
+      height: 190,
+      locked: true,
+    });
+    expect(applied.riderOverlayUpdatedAtByTrack.north).toBe(900);
     expect(applied.demoRiderNames).toEqual({ 1: 'Maya Torres' });
     expect(applied.commentary.ambientEnabled).toBe(false);
   });

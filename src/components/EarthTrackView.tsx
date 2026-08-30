@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   Box,
   ChevronDown,
@@ -278,22 +278,21 @@ export function EarthTrackView({
   const googleMapsConfigured = hasGoogleMapsApiKey();
   const googleMapsUrl = trackGoogleMapsUrl(track);
   const stageRef = useRef<HTMLDivElement | null>(null);
-  const [presentationViewport, setPresentationViewport] = useState<RacePresentationViewport | null>(() => (
-    typeof window === 'undefined'
-      ? null
-      : normalizeRacePresentationViewport({
-          width: window.innerWidth,
-          height: window.innerHeight,
+  const [presentationViewport, setPresentationViewport] = useState<RacePresentationViewport | null>(null);
+  const measurePresentationViewport = () => {
+    const stage = stageRef.current;
+    return stage
+      ? normalizeRacePresentationViewport({
+          width: stage.clientWidth,
+          height: stage.clientHeight,
         })
-  ));
-  useEffect(() => {
+      : null;
+  };
+  useLayoutEffect(() => {
     const stage = stageRef.current;
     if (!stage) return undefined;
     const syncViewport = () => {
-      const viewport = normalizeRacePresentationViewport({
-        width: stage.clientWidth,
-        height: stage.clientHeight,
-      });
+      const viewport = measurePresentationViewport();
       setPresentationViewport((current) => (
         current?.width === viewport?.width && current?.height === viewport?.height
           ? current
@@ -767,7 +766,10 @@ export function EarthTrackView({
           <button
             className={`race-camera-lock-overlay${raceCameraLocked ? ' locked' : ''}`}
             type="button"
-            onClick={() => onRaceCameraLockedChange(!raceCameraLocked, presentationViewport)}
+            onClick={() => onRaceCameraLockedChange(
+              !raceCameraLocked,
+              measurePresentationViewport() ?? presentationViewport,
+            )}
             aria-pressed={raceCameraLocked}
             title={raceCameraLocked ? 'Unlock satellite view' : 'Lock camera angle and track position'}
           >
