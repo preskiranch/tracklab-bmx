@@ -1,52 +1,55 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import {
-  activityRequiresIPhoneLandscape,
-  userAgentIsIPhone,
-} from '../../src/lib/activityOrientation';
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
-describe('iPhone activity orientation', () => {
-  it('requires landscape for every rider activity and not for setup or account screens', () => {
-    for (const mode of ['race', 'straight-sprint', 'get-pulled', 'explore'] as const) {
-      expect(activityRequiresIPhoneLandscape(mode)).toBe(true);
-    }
-    for (const mode of ['profile', 'settings', 'results', 'club-tablet', 'monitor'] as const) {
-      expect(activityRequiresIPhoneLandscape(mode)).toBe(false);
-    }
-  });
-
-  it('targets iPhones and iPods without treating iPads or Macs as phones', () => {
-    expect(userAgentIsIPhone('Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X)')).toBe(true);
-    expect(userAgentIsIPhone('Mozilla/5.0 (iPod touch; CPU iPhone OS 17_0 like Mac OS X)')).toBe(true);
-    expect(userAgentIsIPhone('Mozilla/5.0 (iPad; CPU OS 18_5 like Mac OS X)')).toBe(false);
-    expect(userAgentIsIPhone('Mozilla/5.0 (Macintosh; Intel Mac OS X 15_5)')).toBe(false);
-  });
-
-  it('locks only native iPhone activities and keeps a portrait web rotation guard', () => {
-    const bridge = read('../../ios/App/App/TrackLabBridgeViewController.swift');
+describe('activity orientation choice', () => {
+  it('advertises portrait and both landscape orientations on iPhone and iPad', () => {
     const infoPlist = read('../../ios/App/App/Info.plist');
-    const app = read('../../src/App.tsx');
+    const phoneOrientations = infoPlist.match(
+      /<key>UISupportedInterfaceOrientations<\/key>[\s\S]*?<\/array>/u,
+    )?.[0];
+    const tabletOrientations = infoPlist.match(
+      /<key>UISupportedInterfaceOrientations~ipad<\/key>[\s\S]*?<\/array>/u,
+    )?.[0];
 
-    expect(bridge).toContain('public let jsName = "TrackLabActivityOrientation"');
-    expect(bridge).toContain('UIDevice.current.userInterfaceIdiom == .phone');
-    expect(bridge).toContain('return .landscape');
+    for (const orientations of [phoneOrientations, tabletOrientations]) {
+      expect(orientations).toContain('UIInterfaceOrientationPortrait');
+      expect(orientations).toContain('UIInterfaceOrientationLandscapeLeft');
+      expect(orientations).toContain('UIInterfaceOrientationLandscapeRight');
+    }
+  });
+
+  it('never asks UIKit to rotate or restrict an activity', () => {
+    const bridge = read('../../ios/App/App/TrackLabBridgeViewController.swift');
+
     expect(bridge).toContain('return UIDevice.current.userInterfaceIdiom == .pad ? .all : .allButUpsideDown');
-    expect(bridge).toContain('interfaceOrientations: .landscape');
-    expect(bridge).toContain('setNeedsUpdateOfSupportedInterfaceOrientations()');
-    expect(bridge).toContain('guard required, let windowScene = view.window?.windowScene else { return }');
-    expect(bridge).toContain('UIViewController.attemptRotationToDeviceOrientation()');
-    expect(bridge).toContain('bridge?.registerPluginInstance(activityOrientationPlugin)');
+    expect(bridge).not.toContain('TrackLabActivityOrientation');
+    expect(bridge).not.toContain('activityLandscapeRequired');
+    expect(bridge).not.toContain('requestGeometryUpdate');
+    expect(bridge).not.toContain('attemptRotationToDeviceOrientation');
+    expect(bridge).not.toContain('interfaceOrientations: .landscape');
     expect(bridge).toContain('webView?.scrollView.alwaysBounceHorizontal = false');
     expect(bridge).toContain('webView?.scrollView.showsHorizontalScrollIndicator = false');
     expect(bridge).toContain('webView?.scrollView.isDirectionalLockEnabled = true');
-    expect(infoPlist).toContain('<string>UIInterfaceOrientationLandscapeLeft</string>');
-    expect(infoPlist).toContain('<string>UIInterfaceOrientationLandscapeRight</string>');
-    expect(app).toContain('className="iphone-activity-landscape-guard"');
-    expect(app).toContain('Rotate your iPhone');
-    expect(app).toContain('void setNativeActivityLandscape(false).catch(() => undefined)');
-    expect(app).toContain('@media(orientation:portrait) and (max-width:600px)');
-    expect(app).toMatch(/\.iphone-activity-landscape-guard\{position:fixed/u);
+  });
+
+  it('keeps every native activity in the rotatable UIKit surface without a portrait blocker', () => {
+    const app = read('../../src/App.tsx');
+    const requestRaceFullscreen = app.match(
+      /const requestRaceFullscreen = useCallback\(\(\) => \{[\s\S]*?\n  \}, \[raceViewFullscreen\]\);/u,
+    )?.[0];
+    const startRace = app.match(
+      /setDemoSignalsStopped\(false\);[\s\S]*?if \(!demoMode\) bridge\.sendControlCommand\('race-arm'\);/u,
+    )?.[0];
+
+    expect(app).not.toContain('iphone-activity-landscape-guard');
+    expect(app).not.toContain('Rotate your iPhone');
+    expect(app).not.toContain('setNativeActivityLandscape');
+    expect(app).not.toContain("from './lib/activityOrientation'");
+    expect(requestRaceFullscreen).toContain('raceViewFullscreen && !isNativeTrackLabShell()');
+    expect(startRace).toContain(
+      'if (!isNativeTrackLabShell()) requestBrowserFullscreen(raceShellRef.current);',
+    );
   });
 });

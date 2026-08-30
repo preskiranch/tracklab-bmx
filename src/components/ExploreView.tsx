@@ -2629,16 +2629,16 @@ export function ExploreView({
                       {rider.photoUrl
                         ? <img src={rider.photoUrl} alt={`${rider.name} profile`} />
                         : <span className="explore-rider-initials">{profileInitials(rider.name)}</span>}
-                      <div>
-                        <strong>{rider.name}</strong>
-                        <span>
+                      <div className="explore-rider-details">
+                        <strong className="explore-rider-name">{rider.name}</strong>
+                        <span className="explore-rider-speed">
                           {formatExploreDistanceMeters(rider.distanceMeters, exploreDistanceUnit)}
                           {' · '}
                           {formatSpeedFromKph(rider.velocityMps * 3.6, speedUnit)}
                           {' '}
                           {speedUnitLabel(speedUnit)}
                         </span>
-                        <span>
+                        <span className="explore-rider-average">
                           Avg{' '}
                           {formatSpeedFromKph(
                             exploreAverageSpeedMph(rider.distanceMeters, ride.elapsedMs) * 1.609344,
@@ -2663,7 +2663,7 @@ export function ExploreView({
                           aria-live="polite"
                           aria-label={`Recommended Wattbike air setting ${recommendedAirSetting}. ${airInstruction}.`}
                         >
-                          <strong style={{ color: rider.accent, fontSize: 16 }}>
+                          <strong>
                             AIR {recommendedAirSetting}
                           </strong>
                           <span className="explore-air-instruction">
@@ -2684,7 +2684,9 @@ export function ExploreView({
                           <span className="explore-elevation-status" aria-label={gradeStatus}>{gradeStatus}</span>
                         )}
                       </div>
-                      <b>{route.distanceMeters > 0 ? Math.round(rider.distanceMeters / route.distanceMeters * 100) : 0}%</b>
+                      <b className="explore-rider-progress">
+                        {route.distanceMeters > 0 ? Math.round(rider.distanceMeters / route.distanceMeters * 100) : 0}%
+                      </b>
                     </article>
                   );
                 }) : <p>Connect at least one Wattbike to begin.</p>}
