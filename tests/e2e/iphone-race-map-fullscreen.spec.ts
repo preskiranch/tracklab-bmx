@@ -398,7 +398,7 @@ test('counter-scales saved rider text on iPhone portrait and landscape without g
       : viewport.width - 16;
     const rawPanelHeight = 220 * rawScale;
     const panelHeight = viewport.width > viewport.height
-      ? Math.max(114, rawPanelHeight)
+      ? Math.max(110, rawPanelHeight)
       : Math.max(248, rawPanelHeight);
     await page.setViewportSize(viewport);
     await page.setContent(raceMarkup(panelHeight, false, {

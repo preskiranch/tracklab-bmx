@@ -89,6 +89,11 @@ function raceRiderOverlayUsesPhonePortrait(containerWidth: number, containerHeig
   return containerHeight > containerWidth && containerWidth <= 600;
 }
 
+function raceRiderOverlayUsesShortPhonePortrait(containerWidth: number, containerHeight: number) {
+  return raceRiderOverlayUsesPhonePortrait(containerWidth, containerHeight)
+    && containerHeight <= 700;
+}
+
 export function raceRiderOverlayMinimumHeight(
   containerWidth: number,
   containerHeight: number,
@@ -101,10 +106,13 @@ export function raceRiderOverlayMinimumHeight(
     // playable map. Landscape uses one compact row; portrait uses two rows.
     // Both are deliberately bounded to leave most of the screen to the race.
     if (raceRiderOverlayUsesCompactLandscape(containerWidth, containerHeight)) {
-      return 114;
+      return 110;
     }
     if (raceRiderOverlayUsesPhonePortrait(containerWidth, containerHeight)) {
-      return Math.min(248, Math.max(1, containerHeight - 24));
+      const portraitMinimum = raceRiderOverlayUsesShortPhonePortrait(containerWidth, containerHeight)
+        ? 200
+        : 248;
+      return Math.min(portraitMinimum, Math.max(1, containerHeight - 24));
     }
     const scaledDefaultMinimum = Math.max(
       110,
@@ -118,19 +126,25 @@ export function raceRiderOverlayMinimumHeight(
       : Math.min(scaledDefaultMinimum, Math.max(1, requestedPresentationHeight));
   }
   if (raceRiderOverlayUsesCompactLandscape(containerWidth, containerHeight)) {
-    return 114;
+    return 110;
   }
   if (raceRiderOverlayUsesPhonePortrait(containerWidth, containerHeight)) {
-    return Math.min(248, Math.max(1, containerHeight - 24));
+    const portraitMinimum = raceRiderOverlayUsesShortPhonePortrait(containerWidth, containerHeight)
+      ? 200
+      : 248;
+    return Math.min(portraitMinimum, Math.max(1, containerHeight - 24));
   }
   return containerWidth <= 900 ? Math.min(300, Math.round(containerHeight * 0.28)) : 220;
 }
 
 export function raceRiderOverlayMaximumHeight(containerWidth: number, containerHeight: number) {
   if (raceRiderOverlayUsesCompactLandscape(containerWidth, containerHeight)) {
-    return Math.max(114, Math.min(128, Math.round(containerHeight * 0.3)));
+    return Math.max(110, Math.min(128, Math.round(containerHeight * 0.3)));
   }
   if (raceRiderOverlayUsesPhonePortrait(containerWidth, containerHeight)) {
+    if (raceRiderOverlayUsesShortPhonePortrait(containerWidth, containerHeight)) {
+      return 200;
+    }
     return Math.max(248, Math.min(272, Math.round(containerHeight * 0.32)));
   }
   return Number.POSITIVE_INFINITY;
@@ -570,6 +584,11 @@ export function RaceRiderOverlay({
           '--rr-portrait-place': `${34 / normalizedPresentationScale}px`,
           '--rr-portrait-gap': `${4 / normalizedPresentationScale}px`,
           '--rr-portrait-padding': `${4 / normalizedPresentationScale}px`,
+          '--rr-short-portrait-avatar': `${40 / normalizedPresentationScale}px`,
+          '--rr-short-portrait-toolbar': `${20 / normalizedPresentationScale}px`,
+          '--rr-short-portrait-place': `${26 / normalizedPresentationScale}px`,
+          '--rr-short-portrait-gap': `${2 / normalizedPresentationScale}px`,
+          '--rr-short-portrait-padding': `${2 / normalizedPresentationScale}px`,
         } : {}),
         '--race-overlay-min-height': `${raceRiderOverlayMinimumHeight(
           overlayRef.current?.parentElement?.clientWidth ?? 1366,
