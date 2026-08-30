@@ -299,7 +299,7 @@ async function applySavedComposition(page: Page, viewport: Viewport) {
     panel.style.setProperty('--rr-compact-place', `${21 / overlay.scale}px`);
     panel.style.setProperty('--rr-compact-gap', `${3 / overlay.scale}px`);
     panel.style.setProperty('--rr-compact-padding', `${3 / overlay.scale}px`);
-    panel.style.setProperty('--rr-portrait-avatar', `${44 / overlay.scale}px`);
+    panel.style.setProperty('--rr-portrait-avatar', `${52 / overlay.scale}px`);
     panel.style.setProperty('--rr-portrait-toolbar', `${28 / overlay.scale}px`);
     panel.style.setProperty('--rr-portrait-place', `${34 / overlay.scale}px`);
     panel.style.setProperty('--rr-portrait-gap', `${4 / overlay.scale}px`);

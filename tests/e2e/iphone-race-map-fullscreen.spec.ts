@@ -63,7 +63,7 @@ function riderCards(positionsPending = false) {
       <article class="race-rider-overlay-card${positionsPending ? ' positions-pending' : ''}" style="--player-color:${['#2aa8ff', '#ffd83d', '#7ade36', '#ff4d4d'][index]}">
         <div class="race-rider-overlay-summary">
           <span class="race-rider-overlay-portrait"><span class="rider-avatar race-rider-overlay-avatar has-photo"><img alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' fill='%23253862'/%3E%3C/svg%3E"></span><span class="race-rider-overlay-badge">P${index + 1}</span></span>
-          <span class="race-rider-overlay-identity">
+          <span class="race-rider-overlay-identity${name.length > 18 ? ' has-long-name' : ''}">
             <strong>${name}</strong>
             <span class="race-rider-overlay-progress">76% track / 21 MPH</span>
             <span class="race-rider-overlay-heart-rate" aria-label="Simulated heart rate ${158 + index} beats per minute"><b aria-hidden="true">♥</b><span class="race-rider-overlay-heart-rate-source" aria-hidden="true">Sim ·</span><span aria-hidden="true">${158 + index} BPM</span></span>
@@ -86,7 +86,7 @@ function raceMarkup(
   },
 ) {
   const overlayStyle = presentation
-    ? `--overlay-x:${presentation.xPct * 100}%;--overlay-y:${presentation.yPct * 100}%;--overlay-width:${presentation.width}px;--overlay-height:${presentation.height}px;--race-overlay-min-height:${presentation.height}px;--rr-font:${16 / presentation.scale}px`
+    ? `--overlay-x:${presentation.xPct * 100}%;--overlay-y:${presentation.yPct * 100}%;--overlay-width:${presentation.width}px;--overlay-height:${presentation.height}px;--race-overlay-min-height:${presentation.height}px;--rr-font:${16 / presentation.scale}px;--rr-compact-avatar:${28 / presentation.scale}px;--rr-compact-toolbar:${20 / presentation.scale}px;--rr-compact-place:${21 / presentation.scale}px;--rr-compact-gap:${3 / presentation.scale}px;--rr-compact-padding:${3 / presentation.scale}px;--rr-portrait-avatar:${52 / presentation.scale}px;--rr-portrait-toolbar:${28 / presentation.scale}px;--rr-portrait-place:${34 / presentation.scale}px;--rr-portrait-gap:${4 / presentation.scale}px;--rr-portrait-padding:${4 / presentation.scale}px;--rr-short-portrait-avatar:${40 / presentation.scale}px;--rr-short-portrait-toolbar:${20 / presentation.scale}px;--rr-short-portrait-place:${26 / presentation.scale}px;--rr-short-portrait-gap:${2 / presentation.scale}px;--rr-short-portrait-padding:${2 / presentation.scale}px`
     : `--overlay-x:4%;--overlay-y:70%;--overlay-width:940px;--overlay-height:${overlayHeight}px;--race-overlay-min-height:${overlayHeight}px`;
   return `
     <main class="platform-shell race-fullscreen">

@@ -354,6 +354,7 @@ export function RecoveryAlertCard({
   onStop,
 }: RecoveryAlertCardProps) {
   const [invalidDurationInputs, setInvalidDurationInputs] = useState<ReadonlySet<string>>(() => new Set());
+  const saveGestureBlockedRef = useRef(false);
   const onDurationInputValidityChange = useCallback((field: string, valid: boolean) => {
     setInvalidDurationInputs((current) => {
       if (current.has(field) === !valid) return current;
@@ -378,6 +379,10 @@ export function RecoveryAlertCard({
       || draft.minimumSeconds !== savedPreferences.minimumSeconds
       || draft.maximumSeconds !== savedPreferences.maximumSeconds
     ));
+  const saveDisabled = loading
+    || saving
+    || !preferencesChanged
+    || invalidDurationInputs.size > 0;
 
   return (
     <section className={`recovery-alert-card${episode ? ' has-active' : ''}${display?.ready ? ' is-ready' : ''}`} aria-label="Recovery Alert">
@@ -571,8 +576,23 @@ export function RecoveryAlertCard({
             <button
               className="primary"
               type="button"
-              disabled={loading || saving || !preferencesChanged || invalidDurationInputs.size > 0}
-              onClick={onSave}
+              disabled={saveDisabled}
+              onPointerDownCapture={() => {
+                // Preserve the state at the start of the gesture. Blurring an
+                // invalid minute field restores its committed display value;
+                // that blur must not turn the same blocked gesture into a save.
+                saveGestureBlockedRef.current = saveDisabled;
+              }}
+              onKeyDownCapture={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  saveGestureBlockedRef.current = saveDisabled;
+                }
+              }}
+              onClick={() => {
+                const blocked = saveGestureBlockedRef.current || saveDisabled;
+                saveGestureBlockedRef.current = false;
+                if (!blocked) onSave();
+              }}
             >
               {saving ? 'Saving…' : draft.mode === 'off' ? 'Save Off' : 'Save Recovery Alert'}
             </button>

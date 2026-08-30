@@ -263,11 +263,6 @@
     display: none;
   }
 
-  .race-fullscreen .race-rider-overlay.presentation-scaled .race-rider-overlay-place strong {
-    font-size: 1.25em;
-    line-height: 1;
-  }
-
   .race-fullscreen .race-staging-countdown {
     top: 48%;
     width: min(220px, calc(100% - 32px));
@@ -361,15 +356,15 @@
   }
 
   .race-fullscreen .race-rider-overlay .race-rider-overlay-avatar {
-    width: var(--rr-portrait-avatar, 44px);
-    height: var(--rr-portrait-avatar, 44px);
+    width: var(--rr-portrait-avatar, 52px);
+    height: var(--rr-portrait-avatar, 52px);
   }
 
   .race-fullscreen .race-rider-overlay-portrait {
     position: relative;
     display: block;
-    width: var(--rr-portrait-avatar, 44px);
-    height: var(--rr-portrait-avatar, 44px);
+    width: var(--rr-portrait-avatar, 52px);
+    height: var(--rr-portrait-avatar, 52px);
   }
 
   .race-fullscreen .race-rider-overlay-badge {
@@ -386,10 +381,16 @@
   .race-fullscreen .race-rider-overlay-identity strong {
     display: -webkit-box;
     overflow: hidden;
-    font-size: 0.875em;
+    font-size: 1em;
     line-height: 1;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
+  }
+
+  .race-fullscreen .race-rider-overlay-identity.has-long-name strong {
+    font-size: 0.8125em;
+    line-height: 0.92;
+    -webkit-line-clamp: 3;
   }
 
   .race-fullscreen .race-rider-overlay-identity {
@@ -401,8 +402,12 @@
   }
 
   .race-fullscreen .race-rider-overlay-place strong {
-    font-size: 1.5em;
+    font-size: 2.125em;
     line-height: 0.9;
+  }
+
+  .race-fullscreen .race-rider-overlay.presentation-scaled .race-rider-overlay-place strong {
+    font-size: 2.125em;
   }
 }
 
@@ -434,7 +439,7 @@
   }
 
   .race-fullscreen .race-rider-overlay-identity strong {
-    font-size: 0.75em;
+    font-size: 0.875em;
     line-height: 0.95;
   }
 

@@ -579,7 +579,7 @@ export function RaceRiderOverlay({
           '--rr-compact-place': `${21 / normalizedPresentationScale}px`,
           '--rr-compact-gap': `${3 / normalizedPresentationScale}px`,
           '--rr-compact-padding': `${3 / normalizedPresentationScale}px`,
-          '--rr-portrait-avatar': `${44 / normalizedPresentationScale}px`,
+          '--rr-portrait-avatar': `${52 / normalizedPresentationScale}px`,
           '--rr-portrait-toolbar': `${28 / normalizedPresentationScale}px`,
           '--rr-portrait-place': `${34 / normalizedPresentationScale}px`,
           '--rr-portrait-gap': `${4 / normalizedPresentationScale}px`,
@@ -662,7 +662,7 @@ export function RaceRiderOverlay({
                 />
                 <span className="race-rider-overlay-badge">{entry.badge}</span>
               </div>
-              <div className="race-rider-overlay-identity">
+              <div className={`race-rider-overlay-identity${entry.name.trim().length > 18 ? ' has-long-name' : ''}`}>
                 <strong>{entry.name}</strong>
                 <span className="race-rider-overlay-progress">
                   {entry.disqualified

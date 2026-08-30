@@ -8334,7 +8334,10 @@ test('club owner restores a shared tablet into stable athlete-only kiosk mode', 
             && stage.clientHeight <= 500;
           const normalizedPresentationScale = Math.max(0.5, Math.min(1.5, scale));
           const expectedPanelHeight = compactLandscape
-            ? Math.max(138, authoredPanelHeight * scale)
+            ? Math.max(110, Math.min(
+                authoredPanelHeight * scale,
+                Math.max(110, Math.min(128, Math.round(stage.clientHeight * 0.3))),
+              ))
             : Math.abs(normalizedPresentationScale - 1) > 0.001
               ? Math.min(
                   Math.max(110, 220 * normalizedPresentationScale),
@@ -8378,9 +8381,13 @@ test('club owner restores a shared tablet into stable athlete-only kiosk mode', 
               && Math.abs(stageRect.top) < 1
               && Math.abs(stageRect.width - window.innerWidth) < 1
               && Math.abs(stageRect.height - window.innerHeight) < 1,
-            panelHeightRatioOk: panelRect.height / stageRect.height <= (compactLandscape ? 0.36 : 0.22),
+            panelHeightRatioOk: panelRect.height / stageRect.height <= (compactLandscape ? 0.3 : 0.22),
             panelInsideMap: contains(stageRect, panelRect),
-            panelSizeMatches: Math.abs(panelRect.width - (authoredPanelWidth * scale)) < 1
+            panelSizeMatches: Math.abs(panelRect.width - (
+              compactLandscape
+                ? Math.max(authoredPanelWidth * scale, stage.clientWidth * 0.68)
+                : authoredPanelWidth * scale
+            )) < 1
               && Math.abs(panelRect.height - expectedPanelHeight) < 1,
             referenceHeight: Number(stage.getAttribute('data-race-camera-reference-height')),
             referenceWidth: Number(stage.getAttribute('data-race-camera-reference-width')),
