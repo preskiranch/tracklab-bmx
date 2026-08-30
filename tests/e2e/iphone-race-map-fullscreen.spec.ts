@@ -261,6 +261,8 @@ test('keeps satellite race controls and rider data inside iPhone portrait and la
               && heartRateBounds.right <= identityBounds.right + 0.5
               && heartRateBounds.bottom <= summaryBounds.bottom + 0.5
               && (!placeBounds || heartRateBounds.bottom <= placeBounds.top + 2.5),
+            heartRateFits: heartRate.scrollWidth <= heartRate.clientWidth + 1
+              && heartRate.scrollHeight <= heartRate.clientHeight + 1,
             rowsClear: !placeBounds || summaryBounds.bottom <= placeBounds.top + 0.5,
           };
         }),
@@ -275,6 +277,7 @@ test('keeps satellite race controls and rider data inside iPhone portrait and la
       avatarClear: true,
       badgeClear: true,
       heartRateClear: true,
+      heartRateFits: true,
       rowsClear: true,
     })));
     if (viewport.width > viewport.height) {
@@ -311,6 +314,12 @@ test('keeps satellite race controls and rider data inside iPhone portrait and la
       }
     } else {
       expect(compactLayout.height / compactLayout.viewportHeight).toBeLessThanOrEqual(0.3);
+      const longNameTypography = await page.locator('.race-rider-overlay-identity.has-long-name strong').first().evaluate((name) => ({
+        fontSize: Number.parseFloat(getComputedStyle(name).fontSize),
+        lineClamp: getComputedStyle(name).webkitLineClamp,
+      }));
+      expect(longNameTypography.fontSize).toBeGreaterThanOrEqual(12);
+      expect(longNameTypography.lineClamp).toBe('3');
     }
     await expectStableAcrossFrames(page.locator('.earth-stage'));
   }

@@ -388,17 +388,22 @@
   }
 
   .race-fullscreen .race-rider-overlay-identity.has-long-name strong {
-    font-size: 0.8125em;
-    line-height: 0.92;
+    font-size: 0.75em;
+    line-height: 0.9;
     -webkit-line-clamp: 3;
   }
 
   .race-fullscreen .race-rider-overlay-identity {
-    gap: 1px;
+    gap: 0;
   }
 
   .race-fullscreen .race-rider-overlay-identity span {
     font-size: 0.75em;
+    line-height: 1;
+  }
+
+  .race-fullscreen .race-rider-overlay-heart-rate {
+    width: 100%;
   }
 
   .race-fullscreen .race-rider-overlay-place strong {
@@ -590,11 +595,12 @@
   }
 
   .race-fullscreen .race-rider-overlay-identity {
-    gap: 1px;
+    gap: 0;
   }
 
   .race-fullscreen .race-rider-overlay-identity span {
     font-size: 0.6875em;
+    line-height: 1;
   }
 
   .race-fullscreen .race-rider-overlay-heart-rate {
