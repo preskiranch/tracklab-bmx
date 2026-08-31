@@ -141,11 +141,58 @@
   overscroll-behavior: contain;
 }
 
+.platform-shell.map-fullscreen.player-card-editor-active .control-panel {
+  display: none;
+}
+
+.platform-shell.player-card-editor-active .map-edit-toolbar {
+  z-index: 1190;
+}
+
+.map-fullscreen .recovery-alert-card {
+  display: none;
+}
+
 .map-fullscreen .map-edit-toolbar {
   top: max(8px, calc(env(safe-area-inset-top, 0px) + 8px));
   left: max(8px, calc(env(safe-area-inset-left, 0px) + 8px));
   max-width: calc(100% - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - 16px);
   flex-wrap: wrap;
+}
+
+.race-rider-overlay.editor-preview .race-rider-overlay-lock {
+  order: -1;
+  min-height: calc(44px * var(--rr-presentation-legibility-scale, 1));
+  margin-right: 0;
+  margin-left: 5px;
+}
+
+.race-rider-overlay.editor-preview .race-rider-overlay-lock span {
+  display: inline;
+}
+
+.race-rider-overlay-publish-status {
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.68em;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.race-rider-overlay-publish-status.saved {
+  color: #d8ff3e;
+}
+
+.race-rider-overlay-publish-status.error {
+  color: #ffd2a8;
+}
+
+.race-rider-overlay.editor-preview .race-rider-overlay-resize {
+  right: auto;
+  left: 2px;
+  z-index: 5;
 }
 
 .map-fullscreen .map-camera-pad {
@@ -160,6 +207,32 @@
 }
 
 .race-fullscreen .race-rider-overlay {
+  --race-overlay-safe-width: calc(
+    100% - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - 16px
+  );
+  --race-overlay-safe-height: calc(
+    100% - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 16px
+  );
+  left: clamp(
+    calc(env(safe-area-inset-left, 0px) + 8px),
+    var(--overlay-x),
+    calc(100% - min(var(--overlay-width), var(--race-overlay-safe-width)) - env(safe-area-inset-right, 0px) - 8px)
+  );
+  top: clamp(
+    calc(env(safe-area-inset-top, 0px) + 8px),
+    var(--overlay-y),
+    calc(100% - min(var(--overlay-height), var(--race-overlay-safe-height)) - env(safe-area-inset-bottom, 0px) - 8px)
+  );
+  width: min(var(--overlay-width), var(--race-overlay-safe-width));
+  height: min(var(--overlay-height), var(--race-overlay-safe-height));
+  max-width: var(--race-overlay-safe-width);
+  max-height: var(--race-overlay-safe-height);
+}
+
+/* The Edit Map preview lives in map-fullscreen rather than race-fullscreen.
+   Keep it inside the playable stage with CSS immediately during rotation;
+   React then persists the matching clamped geometry on the same layout pass. */
+.map-fullscreen .race-rider-overlay.editor-preview {
   --race-overlay-safe-width: calc(
     100% - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - 16px
   );
@@ -334,42 +407,63 @@
 @media (orientation: portrait) and (max-width: 600px) {
   .race-fullscreen .race-rider-overlay-toolbar,
   .race-fullscreen .race-rider-overlay-handle {
-    min-height: var(--rr-portrait-toolbar, 28px);
+    /* Linux and iOS use slightly different bold-font metrics. Keep the
+       controls readable while reserving enough height for a three-line rider
+       name plus progress and heart rate in each fixed portrait card row. */
+    min-height: var(--rr-short-portrait-toolbar, 20px);
+  }
+
+  .race-fullscreen .race-rider-overlay:not(.editor-preview) .race-rider-overlay-lock {
+    min-height: var(--rr-short-portrait-toolbar, 20px);
+    margin-right: 2px;
+    padding: 0 4px;
   }
 
   .race-fullscreen .race-rider-overlay-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-rows: repeat(2, minmax(0, 1fr));
     grid-auto-rows: minmax(0, 1fr);
-    gap: var(--rr-portrait-gap, 4px);
-    padding: var(--rr-portrait-padding, 4px);
+    gap: var(--rr-short-portrait-gap, 2px);
+    padding: var(--rr-short-portrait-padding, 2px);
   }
 
   .race-fullscreen .race-rider-overlay-card {
+    /* Reserve the full summary height for three-line names and both live
+       metrics. Card borders still separate the compact 2-by-2 portrait grid. */
     grid-template-rows: minmax(0, 1fr) var(--rr-portrait-place, 34px);
-    gap: 2px;
-    padding: 3px 4px;
+    gap: 0;
+    padding: 0 1px;
   }
 
   .race-fullscreen .race-rider-overlay-card.positions-pending {
     grid-template-rows: minmax(0, 1fr);
   }
 
+  .race-fullscreen .race-rider-overlay-summary {
+    gap: 1px;
+  }
+
   .race-fullscreen .race-rider-overlay .race-rider-overlay-avatar {
-    width: var(--rr-portrait-avatar, 52px);
-    height: var(--rr-portrait-avatar, 52px);
+    /* Trade a little portrait-photo width for full-size rider names and all
+       three metric rows. The counter-scaled variable keeps this 40px on every
+       saved-reference viewport instead of shrinking again after transform. */
+    width: var(--rr-short-portrait-avatar, 40px);
+    height: var(--rr-short-portrait-avatar, 40px);
   }
 
   .race-fullscreen .race-rider-overlay-portrait {
     position: relative;
     display: block;
-    width: var(--rr-portrait-avatar, 52px);
-    height: var(--rr-portrait-avatar, 52px);
+    width: var(--rr-short-portrait-avatar, 40px);
+    height: var(--rr-short-portrait-avatar, 40px);
   }
 
   .race-fullscreen .race-rider-overlay-badge {
     position: absolute;
-    right: -2px;
+    /* Keep the badge inside the fixed portrait column. Letting it hang two
+       pixels into the identity column can touch a three-line rider name on
+       Linux even though the same font clears it on iOS. */
+    right: 0;
     bottom: -2px;
     width: 22px;
     min-width: 22px;
@@ -388,8 +482,9 @@
   }
 
   .race-fullscreen .race-rider-overlay-identity.has-long-name strong {
-    font-size: 0.75em;
-    line-height: 0.9;
+    /* Long names get an extra line instead of becoming unreadably small. */
+    font-size: 1em;
+    line-height: 1;
     -webkit-line-clamp: 3;
   }
 

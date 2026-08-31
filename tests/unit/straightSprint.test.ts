@@ -4,6 +4,7 @@ import {
   normalizeStraightSprintAirSetting,
   normalizeStraightSprintDistance,
   resolveStraightSprintCamera,
+  resolveStraightSprintRiderOverlay,
   straightSprintCameraPreferenceKey,
   straightSprintDistanceOptions,
   straightSprintFeetToMeters,
@@ -45,6 +46,49 @@ describe('straight sprint configurations', () => {
       .toBe('custom-drag-strip:sprint:145ft');
     expect(straightSprintCameraPreferenceKey('custom-drag-strip', 500))
       .toBe('custom-drag-strip:sprint:500ft');
+  });
+
+  it('resolves the rider panel from the exact sprint-distance key first', () => {
+    const base = {
+      xPct: 0.02,
+      yPct: 0.7,
+      width: 900,
+      height: 220,
+      locked: true,
+    };
+    const exact = {
+      xPct: 0.08,
+      yPct: 0.64,
+      width: 720,
+      height: 190,
+      locked: true,
+    };
+
+    expect(resolveStraightSprintRiderOverlay({
+      'la-salle-university': base,
+      'la-salle-university:sprint:100ft': exact,
+    }, 'la-salle-university', 100)).toBe(exact);
+  });
+
+  it('falls back to the legacy track rider panel when no distance layout exists', () => {
+    const legacy = {
+      xPct: 0.04,
+      yPct: 0.72,
+      width: 960,
+      height: 210,
+      locked: true,
+    };
+
+    expect(resolveStraightSprintRiderOverlay({
+      'nelson-road': legacy,
+      'nelson-road:sprint:300ft': {
+        xPct: 0.1,
+        yPct: 0.6,
+        width: 700,
+        height: 190,
+        locked: true,
+      },
+    }, 'nelson-road', 100)).toBe(legacy);
   });
 
   it('keeps exact sprint angles while restoring a complete venue composition', () => {

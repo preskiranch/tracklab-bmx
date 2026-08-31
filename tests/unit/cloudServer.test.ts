@@ -2935,6 +2935,17 @@ describe('cloud API trust boundaries', () => {
               updatedAt: 750,
             },
           },
+          riderOverlaysByTrack: {
+            'chula-vista-elite-bmx': {
+              xPct: 0.06,
+              yPct: 0.7,
+              width: 880,
+              height: 196,
+              locked: true,
+              referenceViewport: { width: 1366, height: 1024 },
+            },
+          },
+          riderOverlayUpdatedAtByTrack: { 'chula-vista-elite-bmx': 780 },
         },
       }),
     });
@@ -2969,6 +2980,8 @@ describe('cloud API trust boundaries', () => {
           },
           riderOverlaysByTrack: {
             'chula-vista-elite-bmx': {
+              // Deliberately stale/conflicting. The developer-global rider
+              // panel must win exactly as its camera does.
               xPct: 0.02,
               yPct: 0.76,
               width: 1240,
@@ -3183,12 +3196,15 @@ describe('cloud API trust boundaries', () => {
       },
       riderOverlaysByTrack: {
         'chula-vista-elite-bmx': {
-          width: 1240,
-          height: 210,
+          xPct: 0.06,
+          yPct: 0.7,
+          width: 880,
+          height: 196,
           locked: true,
           referenceViewport: { width: 1366, height: 1024 },
         },
       },
+      riderOverlayUpdatedAtByTrack: { 'chula-vista-elite-bmx': 780 },
     });
     expect(rosterPayload.racePresentation).not.toHaveProperty('demoRiderNames');
     expect(rosterPayload.racePresentation).not.toHaveProperty('commentary');
@@ -4685,6 +4701,7 @@ describe('cloud API trust boundaries', () => {
       },
     });
 
+    const globalRaceViewDeveloperCookie = cookie;
     cookie = '';
     const publicView = await api('/api/global-race-view');
     expect(publicView.status).toBe(200);
@@ -4705,6 +4722,45 @@ describe('cloud API trust boundaries', () => {
       },
     });
     expect(publicPayload.raceViewPreferences).not.toHaveProperty('demoRiderNames');
+
+    cookie = globalRaceViewDeveloperCookie;
+    const overlayOnlySave = await api('/api/global-race-view', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        raceViewPreferences: {
+          cameraLocked: false,
+          cameraLockedUpdatedAt: 0,
+          earthCamerasByTrack: {},
+          riderOverlaysByTrack: {
+            'new-custom-sprint:straight-sprint:100ft': {
+              xPct: 0.08,
+              yPct: 0.7,
+              width: 820,
+              height: 190,
+              locked: true,
+            },
+          },
+          riderOverlayUpdatedAtByTrack: {
+            'new-custom-sprint:straight-sprint:100ft': 900,
+          },
+        },
+      }),
+    });
+    expect(overlayOnlySave.status).toBe(200);
+    await expect(overlayOnlySave.json()).resolves.toMatchObject({
+      raceViewPreferences: {
+        cameraLocked: true,
+        cameraLockedUpdatedAt: 900,
+        earthCamerasByTrack: {},
+        riderOverlaysByTrack: {
+          'new-custom-sprint:straight-sprint:100ft': {
+            width: 820,
+            height: 190,
+            locked: true,
+          },
+        },
+      },
+    });
     cookie = nonAdminCookie;
   });
 

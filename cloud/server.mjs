@@ -4105,7 +4105,13 @@ function mergeSavedUnitPreferences(currentValue, incomingValue) {
 
 function sanitizeGlobalRaceViewPreferences(value) {
   const preferences = sanitizeRaceViewPreferences(value);
-  if (!preferences || Object.keys(preferences.earthCamerasByTrack).length === 0) {
+  if (
+    !preferences
+    || (
+      Object.keys(preferences.earthCamerasByTrack).length === 0
+      && Object.keys(preferences.riderOverlaysByTrack).length === 0
+    )
+  ) {
     return null;
   }
 
@@ -4114,11 +4120,17 @@ function sanitizeGlobalRaceViewPreferences(value) {
     ...Object.values(preferences.earthCamerasByTrack)
       .map((camera) => sanitizedPreferenceRevision(camera?.updatedAt)),
   );
+  const newestOverlayRevision = Math.max(
+    0,
+    ...Object.values(preferences.riderOverlayUpdatedAtByTrack)
+      .map((revision) => sanitizedPreferenceRevision(revision)),
+  );
   return {
     cameraLocked: true,
     cameraLockedUpdatedAt: Math.max(
       preferences.cameraLockedUpdatedAt,
       newestCameraRevision,
+      newestOverlayRevision,
     ),
     earthCamerasByTrack: preferences.earthCamerasByTrack,
     riderOverlaysByTrack: preferences.riderOverlaysByTrack,
@@ -4171,12 +4183,14 @@ function mergeClubTabletRacePresentations(globalPresentation, ownerPresentation)
       ...(globalPresentation?.earthCamerasByTrack ?? {}),
     },
     riderOverlaysByTrack: {
-      ...(globalPresentation?.riderOverlaysByTrack ?? {}),
       ...(ownerPresentation?.riderOverlaysByTrack ?? {}),
+      // Match signed-in clients: developer-published rider panels are the
+      // authoritative cross-device composition, just like global cameras.
+      ...(globalPresentation?.riderOverlaysByTrack ?? {}),
     },
     riderOverlayUpdatedAtByTrack: {
-      ...(globalPresentation?.riderOverlayUpdatedAtByTrack ?? {}),
       ...(ownerPresentation?.riderOverlayUpdatedAtByTrack ?? {}),
+      ...(globalPresentation?.riderOverlayUpdatedAtByTrack ?? {}),
     },
   };
 }
@@ -15210,7 +15224,7 @@ async function serveStatic(request, response) {
         payload?.raceViewPreferences,
       );
       if (!raceViewPreferences) {
-        writeJson(response, 400, { error: 'At least one saved track camera is required.' });
+        writeJson(response, 400, { error: 'At least one saved track camera or player-card layout is required.' });
         return;
       }
       const saved = await persistence.saveUserData(globalRaceViewProfileKey, {

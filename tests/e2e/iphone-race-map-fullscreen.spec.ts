@@ -318,7 +318,7 @@ test('keeps satellite race controls and rider data inside iPhone portrait and la
         fontSize: Number.parseFloat(getComputedStyle(name).fontSize),
         lineClamp: getComputedStyle(name).webkitLineClamp,
       }));
-      expect(longNameTypography.fontSize).toBeGreaterThanOrEqual(12);
+      expect(longNameTypography.fontSize).toBeGreaterThanOrEqual(16);
       expect(longNameTypography.lineClamp).toBe('3');
     }
     await expectStableAcrossFrames(page.locator('.earth-stage'));

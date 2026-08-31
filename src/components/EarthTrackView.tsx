@@ -15,6 +15,7 @@ import {
   MicOff,
   Minimize2,
   Pause,
+  PanelBottom,
   Play,
   RotateCcw,
   RotateCw,
@@ -126,6 +127,7 @@ type EarthTrackViewProps = {
   raceCameraSnapshot?: Partial<EarthCamera>;
   canEditRaceLayout: boolean;
   riderOverlayPreference?: RaceRiderOverlayLayout;
+  riderOverlayPreferenceKey?: string;
   activeZones: TrackZone[];
   raceViewMode: TrackRaceViewMode;
   canCancelRace: boolean;
@@ -152,7 +154,11 @@ type EarthTrackViewProps = {
     referenceViewport?: RacePresentationViewport | null,
     editableCamera?: Partial<EarthCamera>,
   ) => void;
-  onRiderOverlayPreferenceChange: (trackId: string, layout: RaceRiderOverlayLayout) => void;
+  onRiderOverlayPreferenceChange: (
+    trackId: string,
+    layout: RaceRiderOverlayLayout,
+    publishGlobally?: boolean,
+  ) => Promise<void> | void;
   onRaceFullscreenInteraction: () => void;
   onStartCountdownPauseToggle: () => void;
   onStartCountdownForceStart: () => void;
@@ -237,6 +243,7 @@ export function EarthTrackView({
   raceCameraSnapshot,
   canEditRaceLayout,
   riderOverlayPreference,
+  riderOverlayPreferenceKey,
   activeZones,
   raceViewMode,
   canCancelRace,
@@ -311,6 +318,7 @@ export function EarthTrackView({
     return () => observer.disconnect();
   }, [raceViewFullscreen, track.id]);
   const [race3DFallbackTrackId, setRace3DFallbackTrackId] = useState<string | null>(null);
+  const [editingPlayerCards, setEditingPlayerCards] = useState(false);
   useEffect(() => {
     setRace3DFallbackTrackId(null);
   }, [raceViewMode, track.id]);
@@ -457,6 +465,25 @@ export function EarthTrackView({
         ? 'Supplemental locator'
         : 'Source pending verification';
   const showMappingUi = mappingMode && !raceViewFullscreen;
+  const showPlayerCardEditor = showMappingUi
+    && canEditRaceLayout
+    && editingPlayerCards
+    && mappingFullscreen
+    && !showingGameArena
+    && !showingPedalZone3D;
+  useEffect(() => {
+    if (!showMappingUi || !canEditRaceLayout || !mappingFullscreen || showingGameArena || showingPedalZone3D) {
+      setEditingPlayerCards(false);
+    }
+  }, [canEditRaceLayout, mappingFullscreen, showMappingUi, showingGameArena, showingPedalZone3D, track.id]);
+  useEffect(() => {
+    const platformShell = stageRef.current?.closest('.platform-shell');
+    if (!(platformShell instanceof HTMLElement)) {
+      return undefined;
+    }
+    platformShell.classList.toggle('player-card-editor-active', showPlayerCardEditor);
+    return () => platformShell.classList.remove('player-card-editor-active');
+  }, [showPlayerCardEditor]);
   const mapCameraControlsLocked = raceCameraImmutable || (
     raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)
   );
@@ -858,13 +885,13 @@ export function EarthTrackView({
         {!showingGameArena && (
           <Suspense fallback={null}>
             <RaceRiderOverlay
-              trackId={track.id}
+              trackId={riderOverlayPreferenceKey ?? track.id}
               riders={displayRaceState.riders}
               ghostRiders={displayRaceState.ghostRiders}
               remoteRaceStates={displayRaceState.remoteRaceStates}
               players={players}
               raceState={raceState}
-              visible={raceViewFullscreen && !mappingMode}
+              visible={(raceViewFullscreen && !mappingMode) || showPlayerCardEditor}
               speedUnit={speedUnit}
               trackLengthMeters={progressLengthMeters}
               preference={presentedRiderOverlayPreference}
@@ -872,8 +899,10 @@ export function EarthTrackView({
                 ? riderOverlayPresentationFrame?.uniformScale ?? 1
                 : 1}
               canEditLayout={canEditRaceLayout}
+              editorPreview={showPlayerCardEditor}
+              showPreviewPlaceholders={showPlayerCardEditor}
               onPreferenceChange={onRiderOverlayPreferenceChange}
-              onFullscreenInteraction={onRaceFullscreenInteraction}
+              onFullscreenInteraction={showPlayerCardEditor ? () => undefined : onRaceFullscreenInteraction}
               newPersonalRecordsByPlayer={newPersonalRecordsByPlayer}
               disqualifiedPlayerIds={disqualifiedPlayerIds}
               heartRateByPlayer={heartRateByPlayer}
@@ -895,6 +924,25 @@ export function EarthTrackView({
               >
                 {showingPedalZone3D ? <Satellite size={16} /> : <Box size={16} />}
                 <span>{showingPedalZone3D ? 'Satellite' : '3D jumps'}</span>
+              </button>
+            )}
+            {canEditRaceLayout && !showingGameArena && !showingPedalZone3D && (
+              <button
+                className={editingPlayerCards ? 'active' : ''}
+                type="button"
+                onClick={() => {
+                  const next = !editingPlayerCards;
+                  setEditingPlayerCards(next);
+                  if (next && !mappingFullscreen) {
+                    onMappingFullscreenChange(true);
+                  }
+                }}
+                aria-label="Edit player cards"
+                aria-pressed={editingPlayerCards}
+                title="Preview, move, and resize the player cards shown during a race"
+              >
+                <PanelBottom size={16} />
+                <span>Edit player cards</span>
               </button>
             )}
             {canEditRaceLayout && !showingGameArena && !showingPedalZone3D && (

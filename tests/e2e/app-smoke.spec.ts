@@ -5359,9 +5359,13 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   expect(mobileRiderText.name).toBeGreaterThanOrEqual(16);
   expect(mobileRiderText.metrics).toBeGreaterThanOrEqual(12);
   expect(mobileRiderText.place).toBeGreaterThanOrEqual(34);
+  const mobileNameFontSizes = await riderPanel
+    .locator('.race-rider-overlay-identity strong')
+    .evaluateAll((names) => names.map((name) => Number.parseFloat(getComputedStyle(name).fontSize)));
+  expect(Math.min(...mobileNameFontSizes)).toBeGreaterThanOrEqual(16);
   const mobileAvatarBounds = await riderPanel.locator('.race-rider-overlay-avatar').first().boundingBox();
-  expect(mobileAvatarBounds?.width).toBe(52);
-  expect(mobileAvatarBounds?.height).toBe(52);
+  expect(mobileAvatarBounds?.width).toBe(40);
+  expect(mobileAvatarBounds?.height).toBe(40);
   const mobileCardsFit = await riderPanel.evaluate((panel) => {
     const panelBounds = panel.getBoundingClientRect();
     return [...panel.querySelectorAll('.race-rider-overlay-card')].every((card) => {
@@ -6268,7 +6272,7 @@ test('live race with mapped pedal zones stays active through UCI gate cadence', 
     profileKey: 'user:pedal-zone-live-racer',
     email: 'pedal-zone-live@tracklab.test',
     name: 'Pedal Zone Live Rider',
-    admin: true,
+    admin: false,
     membership: {
       tier: 'racer',
       bikeSeats: 1,

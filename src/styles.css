@@ -2924,17 +2924,14 @@ input:focus {
   position: absolute;
   right: 2px;
   bottom: 2px;
-  width: 24px;
-  height: 24px;
-  border: 0;
-  border-right: 2px solid rgba(255, 255, 255, 0.55);
-  border-bottom: 2px solid rgba(255, 255, 255, 0.55);
-  background: transparent;
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 2px solid #d8ff3e;
+  background: #08111d;
+  color: #d8ff3e;
   cursor: nwse-resize;
-}
-
-.race-rider-overlay-resize:disabled {
-  display: none;
 }
 
 @media (max-width: 900px) {

@@ -154,6 +154,7 @@ import {
 } from './lib/cloudUserData';
 import {
   applyGlobalRaceViewPreferences,
+  globalRaceViewNeedsPublication,
   readGlobalRaceViewPreferences,
   saveGlobalRaceViewPreferences,
 } from './lib/globalRaceView';
@@ -179,6 +180,7 @@ import {
   normalizeStraightSprintAirSetting,
   normalizeStraightSprintDistance,
   resolveStraightSprintCamera,
+  resolveStraightSprintRiderOverlay,
   straightSprintCameraPreferenceKey,
   straightSprintDistanceOptions,
   straightSprintFeetToMeters,
@@ -302,7 +304,6 @@ import {
   benchmarkDemoTrackId,
   clampAppleWattbikeConnections,
   createMembership,
-  isAdminAccountEmail,
   normalizeAccountEmail,
   readStoredMembership,
   writeStoredMembership,
@@ -2358,7 +2359,6 @@ export default function App() {
     clubTabletSessionActive,
     demoMode,
   ]);
-  const accountEmail = normalizeAccountEmail(authUser?.email ?? '');
   const accountProfileComplete = authStatus === 'signed-in' && Boolean(authUser);
   const adminProfileActive = !clubTabletKioskMode && Boolean(authUser?.admin);
   const canManageStudioRiders = adminProfileActive || Boolean(
@@ -3025,7 +3025,10 @@ export default function App() {
     : serverAuthorizedWattbikeConnectionLimit;
   const liveBikeAccessLocked = !bluetoothAccessGranted;
   const developerUiActive = !clubTabletKioskMode && adminProfileActive && !regularUserPreview;
-  const developerRaceLayoutActive = !clubTabletKioskMode && isAdminAccountEmail(accountEmail);
+  // The authenticated server response is the source of truth for developer
+  // race-layout access. Email matching here could expose controls before the
+  // account's server-authoritative admin claim has been verified.
+  const developerRaceLayoutActive = adminProfileActive;
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     { id: 1, author: 'System', text: "Private room opened for today's session.", at: '10:25 AM' },
   ]);
@@ -3524,6 +3527,7 @@ export default function App() {
   const raceCameraPreferenceKey = raceWorkspaceMode === 'straight-sprint'
     ? straightSprintCameraPreferenceKey(selectedTrack.id, straightSprintDistanceFeet)
     : selectedTrack.id;
+  const riderOverlayPreferenceKey = raceCameraPreferenceKey;
   const accountRaceCamera = useMemo(
     () => (raceWorkspaceMode === 'straight-sprint'
       ? resolveStraightSprintCamera(
@@ -3533,6 +3537,16 @@ export default function App() {
         )
       : earthCamerasByTrack[selectedTrack.id]),
     [earthCamerasByTrack, raceWorkspaceMode, selectedTrack.id, straightSprintDistanceFeet],
+  );
+  const accountRiderOverlay = useMemo(
+    () => (raceWorkspaceMode === 'straight-sprint'
+      ? resolveStraightSprintRiderOverlay(
+          riderOverlaysByTrack,
+          selectedTrack.id,
+          straightSprintDistanceFeet,
+        )
+      : riderOverlaysByTrack[selectedTrack.id]),
+    [raceWorkspaceMode, riderOverlaysByTrack, selectedTrack.id, straightSprintDistanceFeet],
   );
   const clubTabletRacePresentation = clubTabletKioskMode
     && clubTabletRoster?.device.id === clubTabletDevice?.device.id
@@ -3547,6 +3561,18 @@ export default function App() {
             straightSprintDistanceFeet,
           )
         : clubTabletRacePresentation.earthCamerasByTrack[selectedTrack.id]
+      : undefined),
+    [clubTabletRacePresentation, raceWorkspaceMode, selectedTrack.id, straightSprintDistanceFeet],
+  );
+  const clubTabletRiderOverlay = useMemo(
+    () => (clubTabletRacePresentation
+      ? raceWorkspaceMode === 'straight-sprint'
+        ? resolveStraightSprintRiderOverlay(
+            clubTabletRacePresentation.riderOverlaysByTrack,
+            selectedTrack.id,
+            straightSprintDistanceFeet,
+          )
+        : clubTabletRacePresentation.riderOverlaysByTrack[selectedTrack.id]
       : undefined),
     [clubTabletRacePresentation, raceWorkspaceMode, selectedTrack.id, straightSprintDistanceFeet],
   );
@@ -5781,9 +5807,15 @@ export default function App() {
           const accountRaceViewPreferences = data.raceViewPreferences
             ? mergeRaceViewPreferences(localRaceViewPreferences, data.raceViewPreferences)
             : localRaceViewPreferences;
+          const globalPublicationPending = developerRaceLayoutActive
+            && globalRaceViewNeedsPublication(
+              accountRaceViewPreferences,
+              globalRaceViewPreferences,
+            );
           const mergedRaceViewPreferences = applyGlobalRaceViewPreferences(
             accountRaceViewPreferences,
             globalRaceViewPreferences,
+            { preserveNewerLockedAccountEntries: globalPublicationPending },
           );
           applyRaceViewPreferences(mergedRaceViewPreferences);
           writeStoredRaceViewPreferences(cloudProfileKey, mergedRaceViewPreferences);
@@ -5799,13 +5831,11 @@ export default function App() {
               console.warn(`Could not reconcile race view preferences with TrackLab cloud: ${error.message}`);
             });
           }
-          if (
-            !globalRaceViewPreferences
-            && developerRaceLayoutActive
-            && accountRaceViewPreferences.cameraLocked
-            && Object.keys(accountRaceViewPreferences.earthCamerasByTrack).length > 0
-          ) {
-            void saveGlobalRaceViewPreferences(accountRaceViewPreferences)
+          if (globalPublicationPending) {
+            // Include the existing global tracks alongside the pending edit so
+            // the replacement-style global endpoint cannot drop an unrelated
+            // published presentation during recovery.
+            void saveGlobalRaceViewPreferences(mergedRaceViewPreferences)
               .then((savedGlobalPreferences) => {
                 if (cancelled) {
                   return;
@@ -8654,7 +8684,11 @@ export default function App() {
     raceCameraPreferenceKey,
   ]);
 
-  const handleRiderOverlayPreferenceChange = useCallback((trackId: string, layout: RaceRiderOverlayLayout) => {
+  const handleRiderOverlayPreferenceChange = useCallback((
+    trackId: string,
+    layout: RaceRiderOverlayLayout,
+    publishGlobally = false,
+  ) => {
     if (!developerRaceLayoutActive) {
       return;
     }
@@ -8672,26 +8706,27 @@ export default function App() {
     });
     setRiderOverlaysByTrack(nextPreferences.riderOverlaysByTrack);
     persistRaceViewPreferences(nextPreferences);
-    if (raceCameraLocked && Object.keys(nextPreferences.earthCamerasByTrack).length > 0) {
-      void saveGlobalRaceViewPreferences(nextPreferences)
-        .then((savedGlobalPreferences) => {
-          const globallyLockedPreferences = applyGlobalRaceViewPreferences(
-            raceViewPreferencesRef.current,
-            savedGlobalPreferences,
-          );
-          applyRaceViewPreferences(globallyLockedPreferences);
-          writeStoredRaceViewPreferences(cloudProfileKey, globallyLockedPreferences);
-        })
-        .catch((error: Error) => {
-          console.warn(`Could not publish the locked rider layout globally: ${error.message}`);
-        });
+    if (!publishGlobally) {
+      return undefined;
     }
+    return saveGlobalRaceViewPreferences(nextPreferences)
+      .then((savedGlobalPreferences) => {
+        const globallyLockedPreferences = applyGlobalRaceViewPreferences(
+          raceViewPreferencesRef.current,
+          savedGlobalPreferences,
+        );
+        applyRaceViewPreferences(globallyLockedPreferences);
+        writeStoredRaceViewPreferences(cloudProfileKey, globallyLockedPreferences);
+      })
+      .catch((error: Error) => {
+        console.warn(`Could not publish the rider layout globally: ${error.message}`);
+        throw error;
+      });
   }, [
     applyRaceViewPreferences,
     cloudProfileKey,
     developerRaceLayoutActive,
     persistRaceViewPreferences,
-    raceCameraLocked,
   ]);
 
   useEffect(() => () => clearStartGateSequence(), [clearStartGateSequence]);
@@ -11608,6 +11643,7 @@ export default function App() {
         bikeActivityAt={demoMode ? 0 : clubTabletBikeActivityAt}
         connectedBike={demoMode ? null : bluetooth.devices.find((bike) => bike.connected) ?? null}
         onDeviceReady={handleClubTabletDeviceReady}
+        onRosterRefresh={handleClubTabletRosterChange}
         onDeviceError={handleClubTabletDeviceError}
         onDeviceRevoked={handleClubTabletDeviceRevoked}
         onSessionRenewed={setClubTabletSession}
@@ -13143,6 +13179,7 @@ export default function App() {
                         ? accountRaceCamera
                         : undefined}
                   canEditRaceLayout={developerRaceLayoutActive && !regularUserPreview}
+                  riderOverlayPreferenceKey={riderOverlayPreferenceKey}
                   riderOverlayPreference={clubEventRaceViewApplies
                     ? activeClubEventRaceView?.riderOverlay ?? {
                         ...defaultRaceRiderOverlayLayout,
@@ -13150,12 +13187,12 @@ export default function App() {
                           ?? legacyRacePresentationViewport,
                       }
                     : clubTabletRaceViewApplies
-                      ? clubTabletRacePresentation?.riderOverlaysByTrack[effectiveTrack.id] ?? {
+                      ? clubTabletRiderOverlay ?? {
                           ...defaultRaceRiderOverlayLayout,
                           referenceViewport: clubTabletRaceCamera?.referenceViewport
                             ?? legacyRacePresentationViewport,
                         }
-                      : riderOverlaysByTrack[effectiveTrack.id]}
+                      : accountRiderOverlay}
                   activeZones={activeZones}
                   canCancelRace={canCancelRace}
                   mappingMode={mappingMode}

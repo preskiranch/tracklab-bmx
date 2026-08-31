@@ -9,7 +9,10 @@ import {
   normalizeRaceRiderOverlayLayout,
   normalizeRaceViewPreferences,
 } from '../../src/lib/raceViewPreferences';
-import { applyGlobalRaceViewPreferences } from '../../src/lib/globalRaceView';
+import {
+  applyGlobalRaceViewPreferences,
+  globalRaceViewNeedsPublication,
+} from '../../src/lib/globalRaceView';
 
 describe('race view preferences', () => {
   it('uses a larger two-axis rider panel by default', () => {
@@ -18,6 +21,128 @@ describe('race view preferences', () => {
       height: 220,
       locked: false,
     });
+  });
+
+  it('retries newer locked player-card layouts without requiring a saved camera', () => {
+    const account = normalizeRaceViewPreferences({
+      cameraLocked: false,
+      earthCamerasByTrack: {},
+      riderOverlaysByTrack: {
+        'la-salle:sprint:100ft': {
+          xPct: 0.04,
+          yPct: 0.7,
+          width: 820,
+          height: 190,
+          locked: true,
+        },
+      },
+      riderOverlayUpdatedAtByTrack: { 'la-salle:sprint:100ft': 200 },
+    });
+    const staleGlobal = normalizeRaceViewPreferences({
+      riderOverlaysByTrack: {
+        'la-salle:sprint:100ft': {
+          xPct: 0.04,
+          yPct: 0.7,
+          width: 940,
+          height: 220,
+          locked: true,
+        },
+      },
+      riderOverlayUpdatedAtByTrack: { 'la-salle:sprint:100ft': 100 },
+    });
+
+    expect(globalRaceViewNeedsPublication(account, null)).toBe(true);
+    expect(globalRaceViewNeedsPublication(account, staleGlobal)).toBe(true);
+    expect(globalRaceViewNeedsPublication(account, account)).toBe(false);
+    expect(globalRaceViewNeedsPublication(normalizeRaceViewPreferences({
+      ...account,
+      riderOverlaysByTrack: {
+        'la-salle:sprint:100ft': {
+          ...account.riderOverlaysByTrack['la-salle:sprint:100ft'],
+          locked: false,
+        },
+      },
+    }), staleGlobal)).toBe(false);
+  });
+
+  it('keeps newer locked camera and player-card edits applied while a global retry is pending', () => {
+    const account = normalizeRaceViewPreferences({
+      cameraLocked: true,
+      cameraLockedUpdatedAt: 300,
+      earthCamerasByTrack: {
+        'la-salle:sprint:100ft': {
+          angle: 42,
+          heading: 120,
+          zoom: 20,
+          updatedAt: 300,
+        },
+      },
+      riderOverlaysByTrack: {
+        'la-salle:sprint:100ft': {
+          xPct: 0.08,
+          yPct: 0.72,
+          width: 800,
+          height: 190,
+          locked: true,
+        },
+      },
+      riderOverlayUpdatedAtByTrack: { 'la-salle:sprint:100ft': 300 },
+    });
+    const staleGlobal = normalizeRaceViewPreferences({
+      cameraLocked: true,
+      cameraLockedUpdatedAt: 100,
+      earthCamerasByTrack: {
+        'la-salle:sprint:100ft': {
+          angle: 10,
+          heading: 20,
+          zoom: 17,
+          updatedAt: 100,
+        },
+        'nelson-road:sprint:100ft': {
+          angle: 30,
+          heading: 90,
+          zoom: 19,
+          updatedAt: 250,
+        },
+      },
+      riderOverlaysByTrack: {
+        'la-salle:sprint:100ft': {
+          xPct: 0.04,
+          yPct: 0.7,
+          width: 940,
+          height: 220,
+          locked: true,
+        },
+      },
+      riderOverlayUpdatedAtByTrack: { 'la-salle:sprint:100ft': 100 },
+    });
+
+    expect(globalRaceViewNeedsPublication(account, staleGlobal)).toBe(true);
+    const pendingRetryView = applyGlobalRaceViewPreferences(account, staleGlobal, {
+      preserveNewerLockedAccountEntries: true,
+    });
+
+    expect(pendingRetryView.earthCamerasByTrack['la-salle:sprint:100ft']).toMatchObject({
+      angle: 42,
+      heading: 120,
+      updatedAt: 300,
+    });
+    expect(pendingRetryView.riderOverlaysByTrack['la-salle:sprint:100ft']).toMatchObject({
+      width: 800,
+      height: 190,
+      locked: true,
+    });
+    expect(pendingRetryView.riderOverlayUpdatedAtByTrack['la-salle:sprint:100ft']).toBe(300);
+    expect(pendingRetryView.earthCamerasByTrack['nelson-road:sprint:100ft']).toMatchObject({
+      angle: 30,
+      heading: 90,
+      updatedAt: 250,
+    });
+
+    // This is the snapshot App keeps if the retry rejects. Without the pending
+    // option, the authoritative global behavior for ordinary clients is intact.
+    expect(applyGlobalRaceViewPreferences(account, staleGlobal)
+      .riderOverlaysByTrack['la-salle:sprint:100ft'].width).toBe(940);
   });
 
   it('normalizes saved panel size, position, and lock state', () => {
