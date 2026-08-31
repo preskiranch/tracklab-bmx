@@ -407,15 +407,18 @@
 @media (orientation: portrait) and (max-width: 600px) {
   .race-fullscreen .race-rider-overlay-toolbar,
   .race-fullscreen .race-rider-overlay-handle {
-    min-height: var(--rr-portrait-toolbar, 28px);
+    /* Linux and iOS use slightly different bold-font metrics. Keep the
+       controls readable while reserving enough height for a three-line rider
+       name plus progress and heart rate in each fixed portrait card row. */
+    min-height: var(--rr-short-portrait-toolbar, 20px);
   }
 
   .race-fullscreen .race-rider-overlay-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-rows: repeat(2, minmax(0, 1fr));
     grid-auto-rows: minmax(0, 1fr);
-    gap: var(--rr-portrait-gap, 4px);
-    padding: var(--rr-portrait-padding, 4px);
+    gap: var(--rr-short-portrait-gap, 2px);
+    padding: var(--rr-short-portrait-padding, 2px);
   }
 
   .race-fullscreen .race-rider-overlay-card {
