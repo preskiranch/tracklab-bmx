@@ -51,6 +51,8 @@
 	<string>TrackLab BMX saves the indoor cycling workout you start in TrackLab to Apple Health.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>TrackLab BMX uses your location only when you choose your current position as the start of an Explore the World ride.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>TrackLab BMX uses your studio network to send an athlete's visible activity screen directly to the authenticated club owner monitor.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>TrackLab BMX uses the microphone only when you choose to join voice chat in a private multiplayer room.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

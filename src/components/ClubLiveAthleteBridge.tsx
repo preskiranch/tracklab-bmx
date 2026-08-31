@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   loadClubLiveAccess,
   publishClubLiveScreenFrame,
@@ -12,6 +12,7 @@ import {
   captureNativeClubLiveScreenMirror,
   nativeClubLiveScreenMirrorAvailable,
 } from '../lib/nativeClubLiveScreenMirror';
+import { startClubLiveVideoPublisher } from '../lib/clubLiveVideo';
 import { bikeMetricIsLive, bikeSampleIsLive } from '../lib/liveBikeRegistry';
 import { acceptedTrainingSpeedKph, cleanBikeCadenceRpm } from '../lib/bikeSampleSanity';
 import { liveBikeTimeoutMs } from '../data';
@@ -26,6 +27,7 @@ import type {
   RaceState,
   RiderState,
 } from '../types';
+import './ClubLiveAthleteBridge.css';
 
 export type ScopedClubLiveAccess = ClubLiveAccess & {
   profileKey: string;
@@ -142,6 +144,17 @@ export function clubLiveScreenFrameMatchesVisibleActivity(
     && snapshot.studioRiderId === selection.studioRiderId
     && (!sessionId || snapshot.sessionId === sessionId)
   );
+}
+
+export function clubLiveStreamSnapshotRevision(snapshot: ClubLiveSnapshot | null) {
+  if (!snapshot?.sessionId) return '';
+  return [
+    snapshot.clubId,
+    snapshot.studioRiderId,
+    snapshot.sessionId,
+    snapshot.activityType,
+    snapshot.multiplayer ? 'shared-event' : 'individual',
+  ].join(':');
 }
 
 export function buildClubLiveSnapshot({
@@ -321,6 +334,8 @@ export function ClubLiveAthleteBridge({
   onAccessStatusChange,
 }: ClubLiveAthleteBridgeProps) {
   const accessGenerationRef = useRef(0);
+  const [activityVideoStreaming, setActivityVideoStreaming] = useState(false);
+  const [publishedStreamRevision, setPublishedStreamRevision] = useState('');
   const activityScreenVisibleRef = useRef(activityScreenVisible);
   activityScreenVisibleRef.current = activityScreenVisible;
   const racePreviewRef = useRef<ClubLiveRacePreviewSession | null>(null);
@@ -362,6 +377,7 @@ export function ClubLiveAthleteBridge({
   ]);
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
+  const streamRevision = clubLiveStreamSnapshotRevision(snapshot);
 
   useEffect(() => {
     const generation = ++accessGenerationRef.current;
@@ -428,6 +444,7 @@ export function ClubLiveAthleteBridge({
 
   useEffect(() => {
     if (!profileKey || demoMode) return undefined;
+    setPublishedStreamRevision('');
     let disposed = false;
     let publishedSessionId = '';
     let syncRequested = false;
@@ -448,15 +465,22 @@ export function ClubLiveAthleteBridge({
         && currentSnapshot.studioRiderId === selection.studioRiderId
       ) {
         const requestedSessionId = currentSnapshot.sessionId;
+        const requestedStreamRevision = clubLiveStreamSnapshotRevision(currentSnapshot);
         operation = publishClubLiveSession(currentSnapshot, controller.signal).then(() => {
-          if (!disposed) publishedSessionId = requestedSessionId;
+          if (!disposed) {
+            publishedSessionId = requestedSessionId;
+            setPublishedStreamRevision(requestedStreamRevision);
+          }
         });
       } else if (publishedSessionId) {
         const stoppedSessionId = publishedSessionId;
         operation = stopClubLiveSession({ ...selection, sessionId: stoppedSessionId }, {
           signal: controller.signal,
         }).then(() => {
-          if (publishedSessionId === stoppedSessionId) publishedSessionId = '';
+          if (publishedSessionId === stoppedSessionId) {
+            publishedSessionId = '';
+            setPublishedStreamRevision('');
+          }
         });
       } else {
         controller = null;
@@ -495,7 +519,48 @@ export function ClubLiveAthleteBridge({
   ]);
 
   useEffect(() => {
-    if (!profileKey || demoMode || !nativeClubLiveScreenMirrorAvailable()) return undefined;
+    const sessionId = snapshot?.sessionId ?? '';
+    if (
+      !profileKey
+      || demoMode
+      || !tabletSessionActive
+      || !activityScreenVisible
+      || !sessionId
+      || !streamRevision
+      || publishedStreamRevision !== streamRevision
+    ) {
+      setActivityVideoStreaming(false);
+      return undefined;
+    }
+    return startClubLiveVideoPublisher({
+      sessionId,
+      activityVisible: () => clubLiveScreenFrameMatchesVisibleActivity(
+        activityScreenVisibleRef.current,
+        snapshotRef.current,
+        selection,
+        sessionId,
+      ),
+      onState: (state) => setActivityVideoStreaming(state === 'streaming'),
+    });
+  }, [
+    activityScreenVisible,
+    demoMode,
+    profileKey,
+    publishedStreamRevision,
+    selection.clubId,
+    selection.studioRiderId,
+    snapshot?.sessionId,
+    streamRevision,
+    tabletSessionActive,
+  ]);
+
+  useEffect(() => {
+    if (
+      !profileKey
+      || demoMode
+      || activityVideoStreaming
+      || !nativeClubLiveScreenMirrorAvailable()
+    ) return undefined;
     let disposed = false;
     let operationActive = false;
     let publishedSessionId = '';
@@ -602,13 +667,18 @@ export function ClubLiveAthleteBridge({
       }
     };
   }, [
+    activityVideoStreaming,
     demoMode,
     profileKey,
     selection.clubId,
     selection.studioRiderId,
   ]);
 
-  return null;
+  return activityVideoStreaming ? (
+    <div className="club-live-sharing-indicator" role="status" aria-live="polite">
+      <i aria-hidden="true" /> Activity screen shared with club owner
+    </div>
+  ) : null;
 }
 
 export default ClubLiveAthleteBridge;

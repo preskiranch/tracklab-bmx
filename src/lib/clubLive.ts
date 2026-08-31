@@ -47,6 +47,10 @@ export type ClubLiveSession = ClubLiveSnapshot & {
   athleteName: string | null;
   updatedAt: number;
   expiresAt: number;
+  /** Opaque, server-normalized identity for one shared activity screen. */
+  sharedViewId?: string;
+  /** Server-normalized owner-display policy. Missing values stay individual. */
+  presentation?: 'shared' | 'individual';
 };
 
 export type ClubLiveScreenFrame = Pick<
@@ -140,6 +144,10 @@ export function normalizeClubLiveSession(value: unknown): ClubLiveSession | null
   const sessionId = optionalText(candidate.sessionId);
   const trackName = optionalText(candidate.trackName);
   const destinationLabel = optionalText(candidate.destinationLabel);
+  const sharedViewId = optionalText(candidate.sharedViewId)?.slice(0, 160);
+  const presentation = candidate.presentation === 'shared' || candidate.presentation === 'individual'
+    ? candidate.presentation
+    : undefined;
   const startedAt = Number(candidate.startedAt);
   const metrics = normalizeMetrics(candidate.metrics);
   if (!metrics) return null;
@@ -157,6 +165,8 @@ export function normalizeClubLiveSession(value: unknown): ClubLiveSession | null
     updatedAt,
     expiresAt,
     multiplayer: candidate.multiplayer === true,
+    ...(sharedViewId ? { sharedViewId } : {}),
+    ...(presentation ? { presentation } : {}),
     ...(sessionId ? { sessionId } : {}),
     ...(trackName ? { trackName } : {}),
     ...(destinationLabel ? { destinationLabel } : {}),

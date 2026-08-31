@@ -106,6 +106,71 @@ async function clubTabletSocketTicket(sessionToken: string) {
   return response.json() as Promise<{ ticket: string; expiresAt: number }>;
 }
 
+async function authWebSocketTicket(authCookie: string, scope: string) {
+  const response = await api('/api/auth/websocket-ticket', {
+    method: 'POST',
+    headers: { Cookie: authCookie },
+    body: JSON.stringify({ scope }),
+  });
+  expect(response.status).toBe(201);
+  return response.json() as Promise<{ ticket: string; expiresAt: number }>;
+}
+
+async function clubLiveStreamTabletTicket(sessionToken: string) {
+  const response = await api('/api/club-tablet/club-live-stream-ticket', {
+    method: 'POST',
+    headers: { 'X-TrackLab-Club-Tablet-Session': sessionToken },
+  });
+  expect(response.status).toBe(201);
+  return response.json() as Promise<{ ticket: string; expiresAt: number; sessionId: string }>;
+}
+
+async function openClubLiveStreamSocket(
+  query: { authTicket: string } | { clubTabletTicket: string },
+): Promise<TestSocket> {
+  const [name, token] = 'authTicket' in query
+    ? ['authTicket', query.authTicket]
+    : ['clubTabletTicket', query.clubTabletTicket];
+  const socket = new WebSocket(
+    `${baseUrl.replace(/^http/, 'ws')}/club-live-stream?${name}=${encodeURIComponent(token)}`,
+    { headers: { Origin: baseUrl } },
+  );
+  const messages: Array<Record<string, any>> = [];
+  socket.on('message', (data) => {
+    try {
+      messages.push(JSON.parse(data.toString()));
+    } catch {
+      // Tests only inspect JSON protocol messages.
+    }
+  });
+  await new Promise<void>((resolve, reject) => {
+    socket.once('open', resolve);
+    socket.once('error', reject);
+  });
+  testSockets.add(socket);
+  return { socket, messages };
+}
+
+async function expectWebSocketTicketRejected(
+  pathname: '/multiplayer' | '/club-live-stream',
+  parameter: 'authTicket' | 'clubTabletTicket',
+  ticket: string,
+) {
+  const socket = new WebSocket(
+    `${baseUrl.replace(/^http/, 'ws')}${pathname}?${parameter}=${encodeURIComponent(ticket)}`,
+    { headers: { Origin: baseUrl } },
+  );
+  await new Promise<void>((resolve, reject) => {
+    socket.once('open', () => reject(new Error('A ticket was accepted on the wrong WebSocket scope or path.')));
+    socket.once('unexpected-response', (_request, response) => {
+      expect(response.statusCode).toBe(401);
+      response.resume();
+      resolve();
+    });
+    socket.once('error', () => resolve());
+  });
+}
+
 async function openClubTabletSocketWithTicket(ticket: string, authCookie = ''): Promise<TestSocket> {
   const socket = new WebSocket(
     `${baseUrl.replace(/^http/, 'ws')}/multiplayer?clubTabletTicket=${encodeURIComponent(ticket)}`,
@@ -346,6 +411,7 @@ beforeAll(async () => {
     cwd: process.cwd(),
     env: {
       ...process.env,
+      NODE_ENV: 'test',
       PORT: String(port),
       DATABASE_URL: '',
       TRACKLAB_ADMIN_EMAILS: 'admin-only@tracklab.test,usage-admin@tracklab.test,global-view-admin@tracklab.test,club-owner-admin@tracklab.test,overlay-only-admin@tracklab.test,capacity-admin@tracklab.test,tablet-capacity-admin@tracklab.test',
@@ -354,7 +420,10 @@ beforeAll(async () => {
       TRACKLAB_3D_FREE_LOAD_CAP: '5000',
       TRACKLAB_CLUB_LIVE_SESSION_TTL_MS: '600',
       TRACKLAB_CLUB_LIVE_FRAME_TTL_MS: '300',
-      TRACKLAB_CLUB_TABLET_WS_TICKET_TTL_MS: '120',
+      TRACKLAB_CLUB_TABLET_WS_TICKET_TTL_MS: '300',
+      TRACKLAB_CLUB_LIVE_STREAM_SIGNAL_LIMIT: '8',
+      TRACKLAB_TEST_CLUB_LIVE_STREAM_PRESENTATION_DELAY_MS: '200',
+      TRACKLAB_TEST_CLUB_LIVE_STREAM_VIEWER_DELAY_MS: '200',
       TRACKLAB_CLUB_EVENT_START_LEAD_MS: '3000',
       OPENAI_API_KEY: '',
     },
@@ -3852,6 +3921,489 @@ describe('cloud API trust boundaries', () => {
       expect.objectContaining({ deviceId: firstDevice.device.id, status: 'ready' }),
       expect.objectContaining({ deviceId: secondDevice.device.id, status: 'ready' }),
     ]));
+
+    const verifyClubLiveStreamProtocol = async () => {
+    cookie = '';
+    const liveStreamSessionId = `club-live-stream-${Date.now()}`;
+    let liveStreamBody = {
+      sessionId: liveStreamSessionId,
+      activityType: 'straight-sprint',
+      status: 'active',
+      progress: 0.1,
+      metrics: { watts: 500, cadence: 90, speedKph: 25 },
+    };
+    const nonOwnerViewerTicket = await api('/api/auth/websocket-ticket', {
+      method: 'POST',
+      headers: { Cookie: secondaryCookie },
+      body: JSON.stringify({ scope: 'club-live-stream' }),
+    });
+    expect(nonOwnerViewerTicket.status).toBe(403);
+    const ticketBeforeActivity = await api('/api/club-tablet/club-live-stream-ticket', {
+      method: 'POST',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+    });
+    expect(ticketBeforeActivity.status).toBe(409);
+    const liveStreamPublish = await api('/api/club-tablet/live', {
+      method: 'PUT',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: JSON.stringify(liveStreamBody),
+    });
+    expect(liveStreamPublish.status).toBe(200);
+    const publishLiveStreamHeartbeat = () => {
+      void api('/api/club-tablet/live', {
+        method: 'PUT',
+        headers: athleteHeaders(selectedPayload.sessionToken),
+        body: JSON.stringify(liveStreamBody),
+      });
+    };
+    let liveStreamHeartbeat = setInterval(publishLiveStreamHeartbeat, 200);
+    let liveStreamPublisher: TestSocket | null = null;
+    let liveStreamViewer: TestSocket | null = null;
+    let liveStreamCapacityViewer: TestSocket | null = null;
+    try {
+      const heldTicketResponses = await Promise.all(Array.from({ length: 8 }, () => (
+        api('/api/club-tablet/club-live-stream-ticket', {
+          method: 'POST',
+          headers: athleteHeaders(selectedPayload.sessionToken),
+        })
+      )));
+      expect(heldTicketResponses.map((response) => response.status)).toEqual(Array(8).fill(201));
+      expect(heldTicketResponses[0].headers.get('ratelimit-limit')).toBe('30');
+      await Promise.all(heldTicketResponses.map((response) => response.json()));
+      const sessionTicketCapacity = await api('/api/club-tablet/club-live-stream-ticket', {
+        method: 'POST',
+        headers: athleteHeaders(selectedPayload.sessionToken),
+      });
+      expect(sessionTicketCapacity.status).toBe(503);
+      await new Promise((resolve) => setTimeout(resolve, 360));
+      const ticketAfterPrune = await api('/api/club-tablet/club-live-stream-ticket', {
+        method: 'POST',
+        headers: athleteHeaders(selectedPayload.sessionToken),
+      });
+      expect(ticketAfterPrune.status).toBe(201);
+      const ticketAfterPrunePayload = await ticketAfterPrune.json();
+      await expectWebSocketTicketRejected(
+        '/multiplayer',
+        'clubTabletTicket',
+        ticketAfterPrunePayload.ticket,
+      );
+
+      const wrongPathOwnerTicket = await authWebSocketTicket(monitorCookie, 'club-live-stream');
+      await expectWebSocketTicketRejected('/multiplayer', 'authTicket', wrongPathOwnerTicket.ticket);
+      const wrongPathTabletTicket = await clubLiveStreamTabletTicket(selectedPayload.sessionToken);
+      await expectWebSocketTicketRejected(
+        '/multiplayer',
+        'clubTabletTicket',
+        wrongPathTabletTicket.ticket,
+      );
+
+      const viewerTicket = await authWebSocketTicket(monitorCookie, 'club-live-stream');
+      liveStreamViewer = await openClubLiveStreamSocket({ authTicket: viewerTicket.ticket });
+      const viewerConnected = await waitForSocketMessage(
+        liveStreamViewer,
+        (message) => message.type === 'connected',
+      );
+      expect(viewerConnected.websocketPath).toBe('/club-live-stream');
+      const forgedViewerIndex = liveStreamViewer.messages.length;
+      liveStreamViewer.socket.send(JSON.stringify({
+        type: 'club-live-stream-register-viewer',
+        clubId: 'client-forged-club',
+      }));
+      await waitForSocketMessage(
+        liveStreamViewer,
+        (message) => message.type === 'club-live-stream-error'
+          && message.code === 'invalid-registration',
+        forgedViewerIndex,
+      );
+      liveStreamViewer.socket.send(JSON.stringify({ type: 'club-live-stream-register-viewer' }));
+      await waitForSocketMessage(
+        liveStreamViewer,
+        (message) => message.type === 'club-live-stream-registered' && message.role === 'viewer',
+      );
+
+      const capacityViewerTicket = await authWebSocketTicket(monitorCookie, 'club-live-stream');
+      liveStreamCapacityViewer = await openClubLiveStreamSocket({
+        authTicket: capacityViewerTicket.ticket,
+      });
+      liveStreamCapacityViewer.socket.send(JSON.stringify({
+        type: 'club-live-stream-register-viewer',
+      }));
+      await waitForSocketMessage(
+        liveStreamCapacityViewer,
+        (message) => message.type === 'club-live-stream-registered' && message.role === 'viewer',
+      );
+      const rejectedViewerTicket = await authWebSocketTicket(monitorCookie, 'club-live-stream');
+      const rejectedViewer = await openClubLiveStreamSocket({
+        authTicket: rejectedViewerTicket.ticket,
+      });
+      const rejectedViewerClosed = new Promise<number>((resolve) => {
+        rejectedViewer.socket.once('close', (code) => resolve(code));
+      });
+      rejectedViewer.socket.send(JSON.stringify({ type: 'club-live-stream-register-viewer' }));
+      await waitForSocketMessage(
+        rejectedViewer,
+        (message) => message.type === 'club-live-stream-error'
+          && message.code === 'viewer-capacity',
+      );
+      await expect(rejectedViewerClosed).resolves.toBe(1013);
+
+      const closingRegistrationTicket = await clubLiveStreamTabletTicket(
+        selectedPayload.sessionToken,
+      );
+      const closingRegistrationPublisher = await openClubLiveStreamSocket({
+        clubTabletTicket: closingRegistrationTicket.ticket,
+      });
+      const closingRegistrationConnected = await waitForSocketMessage(
+        closingRegistrationPublisher,
+        (message) => message.type === 'connected',
+      );
+      const closingRegistrationPublisherId = closingRegistrationConnected.clientId as string;
+      const closingRegistrationViewerIndex = liveStreamViewer.messages.length;
+      await new Promise<void>((resolve, reject) => {
+        closingRegistrationPublisher.socket.send(JSON.stringify({
+          type: 'club-live-stream-register-publisher',
+          sessionId: liveStreamSessionId,
+        }), (error) => error ? reject(error) : resolve());
+      });
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      const closingRegistrationClosed = new Promise<void>((resolve) => {
+        closingRegistrationPublisher.socket.once('close', () => resolve());
+      });
+      closingRegistrationPublisher.socket.close();
+      await closingRegistrationClosed;
+      await new Promise((resolve) => setTimeout(resolve, 260));
+      expect(liveStreamViewer.messages.slice(closingRegistrationViewerIndex).some((message) => (
+        (message.type === 'club-live-stream-publisher-added'
+          && message.publisher?.publisherId === closingRegistrationPublisherId)
+        || (message.type === 'club-live-stream-publisher-removed'
+          && message.publisherId === closingRegistrationPublisherId)
+      ))).toBe(false);
+
+      const closingAnnouncementTicket = await clubLiveStreamTabletTicket(
+        selectedPayload.sessionToken,
+      );
+      const closingAnnouncementPublisher = await openClubLiveStreamSocket({
+        clubTabletTicket: closingAnnouncementTicket.ticket,
+      });
+      const closingAnnouncementViewerIndex = liveStreamViewer.messages.length;
+      closingAnnouncementPublisher.socket.send(JSON.stringify({
+        type: 'club-live-stream-register-publisher',
+        sessionId: liveStreamSessionId,
+      }));
+      const closingAnnouncementRegistration = await waitForSocketMessage(
+        closingAnnouncementPublisher,
+        (message) => message.type === 'club-live-stream-registered'
+          && message.role === 'publisher',
+      );
+      const closingAnnouncementPublisherId = (
+        closingAnnouncementRegistration.publisher.publisherId as string
+      );
+      const closingAnnouncementClosed = new Promise<void>((resolve) => {
+        closingAnnouncementPublisher.socket.once('close', () => resolve());
+      });
+      closingAnnouncementPublisher.socket.close();
+      await closingAnnouncementClosed;
+      const closingAnnouncementRemoved = await waitForSocketMessage(
+        liveStreamViewer,
+        (message) => message.type === 'club-live-stream-publisher-removed'
+          && message.publisherId === closingAnnouncementPublisherId,
+        closingAnnouncementViewerIndex,
+      );
+      const closingAnnouncementRemovedIndex = liveStreamViewer.messages.indexOf(
+        closingAnnouncementRemoved,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 260));
+      expect(liveStreamViewer.messages.slice(closingAnnouncementRemovedIndex + 1).some(
+        (message) => message.type === 'club-live-stream-publisher-added'
+          && message.publisher?.publisherId === closingAnnouncementPublisherId,
+      )).toBe(false);
+
+      const publisherTicket = await clubLiveStreamTabletTicket(selectedPayload.sessionToken);
+      liveStreamPublisher = await openClubLiveStreamSocket({
+        clubTabletTicket: publisherTicket.ticket,
+      });
+      const wrongSessionIndex = liveStreamPublisher.messages.length;
+      liveStreamPublisher.socket.send(JSON.stringify({
+        type: 'club-live-stream-register-publisher',
+        sessionId: 'client-forged-live-session',
+      }));
+      await waitForSocketMessage(
+        liveStreamPublisher,
+        (message) => message.type === 'club-live-stream-error'
+          && message.code === 'session-mismatch',
+        wrongSessionIndex,
+      );
+      const forgedRegistrationIndex = liveStreamPublisher.messages.length;
+      liveStreamPublisher.socket.send(JSON.stringify({
+        type: 'club-live-stream-register-publisher',
+        sessionId: liveStreamSessionId,
+        sharedViewId: 'client-forged-group',
+      }));
+      await waitForSocketMessage(
+        liveStreamPublisher,
+        (message) => message.type === 'club-live-stream-error'
+          && message.code === 'invalid-registration',
+        forgedRegistrationIndex,
+      );
+      liveStreamPublisher.socket.send(JSON.stringify({
+        type: 'club-live-stream-register-publisher',
+        sessionId: liveStreamSessionId,
+      }));
+      const independentPublisherRegistration = await waitForSocketMessage(
+        liveStreamPublisher,
+        (message) => message.type === 'club-live-stream-registered'
+          && message.role === 'publisher',
+      );
+      expect(independentPublisherRegistration.publisher).toMatchObject({
+        presentation: 'individual',
+        presentationMetadata: { activityType: 'straight-sprint' },
+      });
+      expect(independentPublisherRegistration.publisher).not.toHaveProperty('sharedViewId');
+
+      // The production bridge serializes heartbeats. Pause this synthetic
+      // interval and let its final independent request settle so this assertion
+      // isolates the exact independent -> shared server refresh instead of
+      // racing two test-only PUTs in opposite modes.
+      clearInterval(liveStreamHeartbeat);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      liveStreamBody = { ...liveStreamBody, multiplayer: true };
+      const presentationRefreshIndex = liveStreamViewer.messages.length;
+      const multiplayerLiveStreamPublish = await api('/api/club-tablet/live', {
+        method: 'PUT',
+        headers: athleteHeaders(selectedPayload.sessionToken),
+        body: JSON.stringify(liveStreamBody),
+      });
+      expect(multiplayerLiveStreamPublish.status).toBe(200);
+      liveStreamHeartbeat = setInterval(publishLiveStreamHeartbeat, 200);
+      await waitForSocketMessage(
+        liveStreamViewer,
+        (message) => message.type === 'club-live-stream-publisher-added'
+          && message.publisher?.publisherId
+            === independentPublisherRegistration.publisher.publisherId
+          && message.publisher?.presentation === 'shared',
+        presentationRefreshIndex,
+      );
+      const sharedRegistrationIndex = liveStreamPublisher.messages.length;
+      liveStreamPublisher.socket.send(JSON.stringify({
+        type: 'club-live-stream-register-publisher',
+        sessionId: liveStreamSessionId,
+      }));
+      const publisherRegistration = await waitForSocketMessage(
+        liveStreamPublisher,
+        (message) => message.type === 'club-live-stream-registered'
+          && message.role === 'publisher',
+        sharedRegistrationIndex,
+      );
+      expect(publisherRegistration.publisher).toMatchObject({
+        deviceId: firstDevice.device.id,
+        studioRiderId: 'shared-tablet-rider-one',
+        sessionId: liveStreamSessionId,
+        activityType: 'straight-sprint',
+        presentation: 'shared',
+        sharedViewId: expect.stringMatching(/^CLUBVIEW_[A-Za-z0-9_-]{24}$/),
+        presentationMetadata: {
+          activityType: 'straight-sprint',
+          eventId,
+          startAt: eventStartedPayload.event.startAt,
+          seatNumber: expect.any(Number),
+        },
+      });
+      expect(JSON.stringify(publisherRegistration)).not.toContain('client-forged-group');
+      const publisherId = publisherRegistration.publisher.publisherId as string;
+      const negotiationId = 'NEGOTIATION_test_1';
+
+      let ticketRateLimited = false;
+      for (let attempt = 0; attempt < 32; attempt += 1) {
+        const response = await api('/api/club-tablet/club-live-stream-ticket', {
+          method: 'POST',
+          headers: athleteHeaders(selectedPayload.sessionToken),
+        });
+        if (response.status === 429) {
+          expect(response.headers.get('ratelimit-limit')).toBe('30');
+          expect(response.headers.get('retry-after')).toBeTruthy();
+          expect(response.headers.get('cache-control')).toContain('no-store');
+          ticketRateLimited = true;
+          break;
+        }
+        expect(response.status).toBe(201);
+        const payload = await response.json();
+        await expectWebSocketTicketRejected('/multiplayer', 'clubTabletTicket', payload.ticket);
+      }
+      expect(ticketRateLimited).toBe(true);
+
+      await waitForSocketMessage(
+        liveStreamViewer,
+        (message) => message.type === 'club-live-stream-publisher-added'
+          && message.publisher?.publisherId === publisherId,
+      );
+
+      const subscribeIndex = liveStreamViewer.messages.length;
+      liveStreamViewer.socket.send(JSON.stringify({
+        type: 'club-live-stream-subscribe',
+        publisherId: 'RIDER-other-club-or-forged',
+        subscribed: true,
+      }));
+      await waitForSocketMessage(
+        liveStreamViewer,
+        (message) => message.type === 'club-live-stream-error'
+          && message.code === 'publisher-unavailable',
+        subscribeIndex,
+      );
+      const validSubscribeIndex = liveStreamViewer.messages.length;
+      liveStreamViewer.socket.send(JSON.stringify({
+        type: 'club-live-stream-subscribe',
+        publisherId,
+        subscribed: true,
+      }));
+      await waitForSocketMessage(
+        liveStreamViewer,
+        (message) => message.type === 'club-live-stream-subscription'
+          && message.publisherId === publisherId
+          && message.subscribed === true,
+        validSubscribeIndex,
+      );
+      const viewerSubscription = await waitForSocketMessage(
+        liveStreamPublisher,
+        (message) => message.type === 'club-live-stream-viewer'
+          && message.subscribed === true,
+      );
+
+      const offerIndex = liveStreamViewer.messages.length;
+      liveStreamPublisher.socket.send(JSON.stringify({
+        type: 'club-live-stream-signal',
+        targetId: viewerSubscription.viewerId,
+        signal: {
+          type: 'offer',
+          sdp: 'v=0\r\no=tracklab-publisher 1 1 IN IP4 127.0.0.1',
+          negotiationId,
+        },
+      }));
+      const relayedOffer = await waitForSocketMessage(
+        liveStreamViewer,
+        (message) => message.type === 'club-live-stream-signal'
+          && message.fromId === publisherId
+          && message.signal?.type === 'offer',
+        offerIndex,
+      );
+      expect(relayedOffer.signal.negotiationId).toBe(negotiationId);
+
+      const missingNegotiationIndex = liveStreamPublisher.messages.length;
+      liveStreamPublisher.socket.send(JSON.stringify({
+        type: 'club-live-stream-signal',
+        targetId: viewerSubscription.viewerId,
+        signal: { type: 'offer', sdp: 'v=0\r\no=missing-negotiation-id' },
+      }));
+      await waitForSocketMessage(
+        liveStreamPublisher,
+        (message) => message.type === 'club-live-stream-error'
+          && message.code === 'invalid-signal',
+        missingNegotiationIndex,
+      );
+
+      const answerIndex = liveStreamPublisher.messages.length;
+      liveStreamViewer.socket.send(JSON.stringify({
+        type: 'club-live-stream-signal',
+        targetId: publisherId,
+        signal: {
+          type: 'answer',
+          sdp: 'v=0\r\no=tracklab-viewer 1 1 IN IP4 127.0.0.1',
+          negotiationId,
+        },
+      }));
+      const relayedAnswer = await waitForSocketMessage(
+        liveStreamPublisher,
+        (message) => message.type === 'club-live-stream-signal'
+          && message.fromId === viewerConnected.clientId
+          && message.signal?.type === 'answer',
+        answerIndex,
+      );
+      expect(relayedAnswer.signal.negotiationId).toBe(negotiationId);
+
+      const candidateIndex = liveStreamPublisher.messages.length;
+      liveStreamViewer.socket.send(JSON.stringify({
+        type: 'club-live-stream-signal',
+        targetId: publisherId,
+        signal: {
+          type: 'candidate',
+          negotiationId,
+          candidate: 'candidate:1 1 UDP 2122252543 192.0.2.1 5000 typ host',
+          sdpMid: '0',
+          sdpMLineIndex: 0,
+        },
+      }));
+      const relayedCandidate = await waitForSocketMessage(
+        liveStreamPublisher,
+        (message) => message.type === 'club-live-stream-signal'
+          && message.signal?.type === 'candidate',
+        candidateIndex,
+      );
+      expect(relayedCandidate.signal.negotiationId).toBe(negotiationId);
+
+      const oversizedSignalIndex = liveStreamPublisher.messages.length;
+      liveStreamPublisher.socket.send(JSON.stringify({
+        type: 'club-live-stream-signal',
+        targetId: viewerConnected.clientId,
+        signal: {
+          type: 'offer',
+          sdp: 'x'.repeat((64 * 1024) + 1),
+          negotiationId,
+        },
+      }));
+      await waitForSocketMessage(
+        liveStreamPublisher,
+        (message) => message.type === 'club-live-stream-error'
+          && message.code === 'invalid-signal',
+        oversizedSignalIndex,
+      );
+
+      const rateLimitIndex = liveStreamViewer.messages.length;
+      for (let index = 0; index < 7; index += 1) {
+        liveStreamViewer.socket.send(JSON.stringify({
+          type: 'club-live-stream-signal',
+          targetId: publisherId,
+          signal: {
+            type: 'candidate',
+            negotiationId,
+            candidate: `candidate:${index + 2} 1 UDP 2122252543 192.0.2.1 ${5001 + index} typ host`,
+            sdpMid: '0',
+            sdpMLineIndex: 0,
+          },
+        }));
+      }
+      await waitForSocketMessage(
+        liveStreamViewer,
+        (message) => message.type === 'club-live-stream-error'
+          && message.code === 'rate-limit',
+        rateLimitIndex,
+      );
+    } finally {
+      clearInterval(liveStreamHeartbeat);
+      const publisherClosed = liveStreamPublisher
+        ? new Promise<void>((resolve) => {
+            if (liveStreamPublisher!.socket.readyState === WebSocket.CLOSED) resolve();
+            else liveStreamPublisher!.socket.once('close', () => resolve());
+          })
+        : Promise.resolve();
+      const stoppedLiveStream = await api('/api/club-tablet/live', {
+        method: 'DELETE',
+        headers: athleteHeaders(selectedPayload.sessionToken),
+        body: JSON.stringify({ sessionId: liveStreamSessionId }),
+      });
+      expect(stoppedLiveStream.status).toBe(200);
+      if (liveStreamPublisher) await publisherClosed;
+      if (liveStreamViewer) {
+        await waitForSocketMessage(
+          liveStreamViewer,
+          (message) => message.type === 'club-live-stream-publisher-removed'
+            && message.reason === 'activity-ended',
+        );
+        liveStreamViewer.socket.close();
+      }
+      liveStreamCapacityViewer?.socket.close();
+    }
+    };
+
+    cookie = monitorCookie;
     const replayedStart = await api('/api/club-events/current/start', {
       method: 'POST',
       body: JSON.stringify({ eventId }),
@@ -3963,6 +4515,7 @@ describe('cloud API trust boundaries', () => {
       purpose: 'club-event',
       racerCount: 2,
     });
+    await verifyClubLiveStreamProtocol();
     testSockets.delete(replacedEventSocketOne.socket);
     eventSocketOne = reconnectedEventSocketOne;
 
@@ -4536,7 +5089,7 @@ describe('cloud API trust boundaries', () => {
     await expectClubTabletTicketRejected(tabletTicket.ticket, monitorCookie);
     await expectClubTabletTicketRejected(selectedPayload.sessionToken);
     const expiringTabletTicket = await clubTabletSocketTicket(selectedPayload.sessionToken);
-    await new Promise((resolve) => setTimeout(resolve, 180));
+    await new Promise((resolve) => setTimeout(resolve, 360));
     await expectClubTabletTicketRejected(expiringTabletTicket.ticket);
     const tabletConnected = await waitForSocketMessage(tabletSocket, (message) => message.type === 'connected');
     tabletSocket.socket.send(JSON.stringify({ type: 'hello', available: true, bikeCount: 4 }));

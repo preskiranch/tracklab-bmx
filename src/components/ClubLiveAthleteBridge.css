@@ -1,0 +1,30 @@
+.club-live-sharing-indicator {
+  position: fixed;
+  z-index: 10050;
+  right: max(10px, env(safe-area-inset-right));
+  bottom: max(10px, env(safe-area-inset-bottom));
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: min(260px, calc(100vw - 20px));
+  padding: 7px 10px;
+  border: 1px solid rgb(121 255 54 / 65%);
+  border-radius: 999px;
+  background: rgb(5 17 12 / 88%);
+  box-shadow: 0 4px 18px rgb(0 0 0 / 25%);
+  color: #f7fff3;
+  font-size: clamp(11px, 1.25vw, 13px);
+  font-weight: 800;
+  line-height: 1.2;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+}
+
+.club-live-sharing-indicator i {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #79ff36;
+  box-shadow: 0 0 0 3px rgb(121 255 54 / 18%);
+}

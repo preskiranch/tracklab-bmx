@@ -87,6 +87,32 @@ describe('Club Live Monitor client state', () => {
     })).toEqual([]);
   });
 
+  it('preserves only valid server-normalized presentation metadata', () => {
+    expect(normalizeClubLiveSessions({
+      sessions: [{
+        ...baseSession,
+        id: 'shared-view',
+        multiplayer: true,
+        sharedViewId: 'verified-shared-view',
+        presentation: 'shared',
+      }],
+    })[0]).toMatchObject({
+      sharedViewId: 'verified-shared-view',
+      presentation: 'shared',
+    });
+
+    const invalid = normalizeClubLiveSessions({
+      sessions: [{
+        ...baseSession,
+        id: 'invalid-presentation',
+        sharedViewId: '   ',
+        presentation: 'shared-if-track-names-match',
+      }],
+    })[0];
+    expect(invalid).not.toHaveProperty('sharedViewId');
+    expect(invalid).not.toHaveProperty('presentation');
+  });
+
   it('expires monitor tiles from the independent client clock', () => {
     const expired = { ...baseSession, id: 'expired', expiresAt: 9_999 };
     const live = { ...baseSession, id: 'live', studioRiderId: 'rider-2', expiresAt: 10_001 };
