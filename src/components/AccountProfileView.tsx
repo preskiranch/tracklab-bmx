@@ -1186,7 +1186,21 @@ export function AccountProfileView({
           {clubState.memberships.map((membership) => (
             <div className="club-athlete-access" key={`${membership.clubId}:${membership.studioRiderId}`}>
               <ShieldCheck size={21} />
-              <div><strong>Connected to {membership.clubName}</strong><p>Studio rider: {membership.riderName}. Viewing and downloading your studio data is free. Choosing “Training at {membership.clubName}” shares the saved session with the club and lets you use one available bike seat from the club membership. The owner may optionally open Club Live Monitor to view your program, live status, progress, track or destination, cadence, speed, and current live watts. Watts stay out of public leaderboards, shared ghosts, multiplayer displays, and shared exports; saved power history remains in your own rider record. Club access ends when you leave club training.</p></div>
+              <div>
+                <strong>Connected to {membership.clubName}</strong>
+                <p>
+                  Studio rider: {membership.riderName}. Viewing and downloading your studio data is free. Choosing
+                  “Training at {membership.clubName}” shares the saved session with the club and lets you use one
+                  available bike seat from the club membership. The owner may optionally open Club Live Monitor to
+                  view your program, live status, progress, track or destination, cadence, speed, and current live
+                  watts. While you are actively sharing a Club Live session, the owner can also view a temporary,
+                  read-only image of the visible TrackLab activity screen. Screen sharing does not capture your device
+                  camera, microphone, taps, notifications, other apps, or content outside TrackLab. Frames expire and
+                  are deleted when Club Live sharing ends. Watts stay out of public leaderboards, shared ghosts,
+                  multiplayer displays, and shared exports; saved power history remains in your own rider record. Club
+                  access ends when you leave club training.
+                </p>
+              </div>
               <span>Club Athlete</span>
             </div>
           ))}

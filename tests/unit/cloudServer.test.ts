@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { request as httpRequest } from 'node:http';
 import { createServer } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
@@ -7,8 +8,10 @@ let child: ChildProcess;
 let baseUrl = '';
 let cookie = '';
 let secondaryCookie = '';
+let secondaryEmail = '';
 const testSockets = new Set<WebSocket>();
 const testEventStreams = new Set<AbortController>();
+const onePixelJpegDataUrl = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABD/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/EH//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/EH//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/EH//2Q==';
 
 type TestSocket = {
   socket: WebSocket;
@@ -200,6 +203,60 @@ function api(pathname: string, init: RequestInit = {}) {
   });
 }
 
+async function beginHeldJsonRequest(
+  pathname: string,
+  {
+    body,
+    headers = {},
+    authCookie = cookie,
+  }: {
+    body: unknown;
+    headers?: Record<string, string>;
+    authCookie?: string;
+  },
+) {
+  const payload = Buffer.from(JSON.stringify(body));
+  const leadingBody = payload.subarray(0, Math.max(0, payload.length - 1));
+  const finalByte = payload.subarray(Math.max(0, payload.length - 1));
+  let release!: () => void;
+  let requestError: unknown = null;
+  const responsePromise = new Promise<{ status: number; json: () => Promise<unknown> }>((resolve, reject) => {
+    const request = httpRequest(`${baseUrl}${pathname}`, {
+      method: 'PUT',
+      headers: {
+        Origin: baseUrl,
+        ...(authCookie ? { Cookie: authCookie } : {}),
+        'Content-Type': 'application/json',
+        'Content-Length': String(payload.byteLength),
+        ...headers,
+      },
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      response.on('end', () => {
+        const responseBody = Buffer.concat(chunks);
+        resolve({
+          status: response.statusCode ?? 500,
+          json: async () => JSON.parse(responseBody.toString('utf8')),
+        });
+      });
+    });
+    request.once('error', (error) => {
+      requestError = error;
+      reject(error);
+    });
+    request.write(leadingBody);
+    release = () => {
+      if (!requestError) request.end(finalByte);
+    };
+  });
+  // Keep the final JSON byte back while the server authenticates and blocks in
+  // readJsonBody. This deterministic half-request lets an end/revoke request
+  // complete first without relying on a slow persistence implementation.
+  await new Promise((resolve) => setTimeout(resolve, 75));
+  return { release, responsePromise };
+}
+
 function trackMapping(trackId: string) {
   const startGate = { lat: 38.244, lng: -122.283 };
   const finishLine = { lat: 38.245, lng: -122.282 };
@@ -296,6 +353,7 @@ beforeAll(async () => {
       TRACKLAB_METRICS_TOKEN: 'test-metrics-token',
       TRACKLAB_3D_FREE_LOAD_CAP: '5000',
       TRACKLAB_CLUB_LIVE_SESSION_TTL_MS: '600',
+      TRACKLAB_CLUB_LIVE_FRAME_TTL_MS: '300',
       TRACKLAB_CLUB_TABLET_WS_TICKET_TTL_MS: '120',
       TRACKLAB_CLUB_EVENT_START_LEAD_MS: '3000',
       OPENAI_API_KEY: '',
@@ -1346,11 +1404,12 @@ describe('cloud API trust boundaries', () => {
     });
 
     const firstAccountCookie = cookie;
+    secondaryEmail = `other-${Date.now()}@tracklab.test`;
     const secondRegistration = await api('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify({
         name: 'Other Rider',
-        email: `other-${Date.now()}@tracklab.test`,
+        email: secondaryEmail,
         password: 'correct-horse-battery-staple',
       }),
     });
@@ -2407,6 +2466,66 @@ describe('cloud API trust boundaries', () => {
     expect(JSON.stringify(livePublishPayload)).not.toContain('PRIVATE-JOIN-SECRET');
     expect(JSON.stringify(livePublishPayload)).not.toContain('Forged rider name');
 
+    const liveScreenFrame = {
+      clubId: claimedMembership.clubId,
+      studioRiderId: claimedMembership.studioRiderId,
+      sessionId: livePublishPayload.session.sessionId,
+      jpegDataUrl: onePixelJpegDataUrl,
+      width: 1,
+      height: 1,
+      capturedAt: Date.now(),
+    };
+    const publishedFrame = await api('/api/club-live/frames', {
+      method: 'PUT',
+      body: JSON.stringify(liveScreenFrame),
+    });
+    expect(publishedFrame.status).toBe(200);
+    expect(publishedFrame.headers.get('cache-control')).toBe('no-store');
+    await expect(publishedFrame.json()).resolves.toMatchObject({
+      frame: {
+        clubId: claimedMembership.clubId,
+        studioRiderId: claimedMembership.studioRiderId,
+        riderName: 'Maya Torres',
+        sessionId: 'live-straight-sprint-1',
+        activityType: 'straight-sprint',
+        contentType: 'image/jpeg',
+        jpegDataUrl: onePixelJpegDataUrl,
+        width: 1,
+        height: 1,
+        byteLength: expect.any(Number),
+      },
+      heartbeatTtlMs: 300,
+    });
+
+    const wrongFrameSession = await api('/api/club-live/frames', {
+      method: 'PUT',
+      body: JSON.stringify({ ...liveScreenFrame, sessionId: 'another-session' }),
+    });
+    expect(wrongFrameSession.status).toBe(409);
+    const oversizedFrameDimensions = await api('/api/club-live/frames', {
+      method: 'PUT',
+      body: JSON.stringify({ ...liveScreenFrame, width: 1_281 }),
+    });
+    expect(oversizedFrameDimensions.status).toBe(400);
+    const oversizedJpegBytes = Buffer.alloc((350 * 1024) + 1);
+    oversizedJpegBytes.set([0xff, 0xd8, 0xff], 0);
+    oversizedJpegBytes.set([0xff, 0xd9], oversizedJpegBytes.length - 2);
+    const oversizedFrame = await api('/api/club-live/frames', {
+      method: 'PUT',
+      body: JSON.stringify({
+        ...liveScreenFrame,
+        jpegDataUrl: `data:image/jpeg;base64,${oversizedJpegBytes.toString('base64')}`,
+      }),
+    });
+    expect(oversizedFrame.status).toBe(413);
+    const crossAthleteFrame = await api('/api/club-live/frames', {
+      method: 'PUT',
+      body: JSON.stringify({ ...liveScreenFrame, studioRiderId: 'studio-jordan' }),
+    });
+    expect(crossAthleteFrame.status).toBe(409);
+    const athleteFrameRead = await api('/api/club-live/frames');
+    expect(athleteFrameRead.status).toBe(403);
+
     cookie = ownerCookie;
     const ownerLiveSessions = await api('/api/club-live/sessions');
     const ownerLivePayload = await ownerLiveSessions.json();
@@ -2418,16 +2537,82 @@ describe('cloud API trust boundaries', () => {
       multiplayer: true,
     });
     expect(JSON.stringify(ownerLivePayload)).not.toContain('PRIVATE-JOIN-SECRET');
+    const ownerLiveFrames = await api('/api/club-live/frames');
+    expect(ownerLiveFrames.status).toBe(200);
+    expect(ownerLiveFrames.headers.get('cache-control')).toBe('no-store');
+    const ownerFramePayload = await ownerLiveFrames.json();
+    expect(ownerFramePayload.frames).toHaveLength(1);
+    expect(ownerFramePayload.frames[0]).toMatchObject({
+      clubId: claimedMembership.clubId,
+      studioRiderId: 'studio-maya',
+      sessionId: 'live-straight-sprint-1',
+      jpegDataUrl: onePixelJpegDataUrl,
+    });
+    expect(JSON.stringify(ownerFramePayload)).not.toMatch(/_publisher|Maya Alexandria/u);
+    const ownerFramesEtag = ownerLiveFrames.headers.get('etag');
+    expect(ownerFramesEtag).toMatch(/^"[A-Za-z0-9_-]{32}"$/u);
+    const unchangedOwnerFrames = await api('/api/club-live/frames', {
+      headers: { 'If-None-Match': ownerFramesEtag! },
+    });
+    expect(unchangedOwnerFrames.status).toBe(304);
+
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    const expiredOwnerFrames = await api('/api/club-live/frames');
+    await expect(expiredOwnerFrames.json()).resolves.toMatchObject({ frames: [] });
 
     cookie = athleteCookie;
-    const stoppedLiveSession = await api('/api/club-live/sessions', {
+    const frameCascadeHeartbeat = await api('/api/club-live/sessions', {
+      method: 'PUT',
+      body: JSON.stringify({
+        clubId: claimedMembership.clubId,
+        studioRiderId: claimedMembership.studioRiderId,
+        sessionId: 'live-straight-sprint-1',
+        activityType: 'straight-sprint',
+        status: 'active',
+        progress: 0.5,
+        metrics: { watts: 1_050, cadence: 145, speedKph: 41 },
+      }),
+    });
+    expect(frameCascadeHeartbeat.status).toBe(200);
+    const cascadeFrame = await api('/api/club-live/frames', {
+      method: 'PUT',
+      body: JSON.stringify({ ...liveScreenFrame, capturedAt: Date.now() }),
+    });
+    expect(cascadeFrame.status).toBe(200);
+    const staleLiveSessionStop = await api('/api/club-live/sessions', {
+      method: 'DELETE',
+      body: JSON.stringify({
+        clubId: claimedMembership.clubId,
+        studioRiderId: claimedMembership.studioRiderId,
+        sessionId: 'older-personal-activity-session',
+      }),
+    });
+    await expect(staleLiveSessionStop.json()).resolves.toEqual({ stopped: false });
+    const missingLiveSessionStop = await api('/api/club-live/sessions', {
       method: 'DELETE',
       body: JSON.stringify({
         clubId: claimedMembership.clubId,
         studioRiderId: claimedMembership.studioRiderId,
       }),
     });
+    expect(missingLiveSessionStop.status).toBe(400);
+    cookie = ownerCookie;
+    await expect((await api('/api/club-live/frames')).json()).resolves.toMatchObject({
+      frames: [expect.objectContaining({ sessionId: 'live-straight-sprint-1' })],
+    });
+    cookie = athleteCookie;
+    const stoppedLiveSession = await api('/api/club-live/sessions', {
+      method: 'DELETE',
+      body: JSON.stringify({
+        clubId: claimedMembership.clubId,
+        studioRiderId: claimedMembership.studioRiderId,
+        sessionId: 'live-straight-sprint-1',
+      }),
+    });
     await expect(stoppedLiveSession.json()).resolves.toEqual({ stopped: true });
+    cookie = ownerCookie;
+    await expect((await api('/api/club-live/frames')).json()).resolves.toMatchObject({ frames: [] });
+    cookie = athleteCookie;
     const passiveExpiryStart = primarySocket.messages.length;
     const accessBeforePassiveExpiry = await api(
       `/api/club-live/access?clubId=${claimedMembership.clubId}`,
@@ -2438,6 +2623,7 @@ describe('cloud API trust boundaries', () => {
       body: JSON.stringify({
         clubId: claimedMembership.clubId,
         studioRiderId: claimedMembership.studioRiderId,
+        sessionId: 'restored-explore-session',
         activityType: 'explore',
         status: 'active',
         progress: 0.2,
@@ -2484,11 +2670,74 @@ describe('cloud API trust boundaries', () => {
       expiresAt: expect.any(Number),
       bikeSeats: 4,
     });
+    const heldPersonalEndSessionId = 'held-personal-end-session';
+    const heldPersonalEndPublish = await beginHeldJsonRequest('/api/club-live/sessions', {
+      authCookie: athleteCookie,
+      body: {
+        clubId: claimedMembership.clubId,
+        studioRiderId: claimedMembership.studioRiderId,
+        sessionId: heldPersonalEndSessionId,
+        activityType: 'explore',
+        status: 'active',
+        progress: 0.25,
+        metrics: { speedKph: 20, distanceMeters: 550 },
+      },
+    });
+    const heldPersonalEnd = await api('/api/club-live/sessions', {
+      method: 'DELETE',
+      body: JSON.stringify({
+        clubId: claimedMembership.clubId,
+        studioRiderId: claimedMembership.studioRiderId,
+        sessionId: heldPersonalEndSessionId,
+      }),
+    });
+    await expect(heldPersonalEnd.json()).resolves.toEqual({ stopped: false });
+    heldPersonalEndPublish.release();
+    expect((await heldPersonalEndPublish.responsePromise).status).toBe(409);
+
+    const secondAthleteLogin = await api('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: secondaryEmail,
+        password: 'correct-horse-battery-staple',
+      }),
+    });
+    expect(secondAthleteLogin.status).toBe(200);
+    const secondAthleteCookie = String(secondAthleteLogin.headers.get('set-cookie')).split(';')[0];
+    cookie = secondAthleteCookie;
+    expect((await api(`/api/club-live/access?clubId=${claimedMembership.clubId}`)).status).toBe(200);
+    const heldPersonalLogoutSessionId = 'held-personal-logout-session';
+    const heldPersonalLogoutPublish = await beginHeldJsonRequest('/api/club-live/sessions', {
+      authCookie: secondAthleteCookie,
+      body: {
+        clubId: claimedMembership.clubId,
+        studioRiderId: claimedMembership.studioRiderId,
+        sessionId: heldPersonalLogoutSessionId,
+        activityType: 'explore',
+        status: 'active',
+        progress: 0.27,
+        metrics: { speedKph: 20.5, distanceMeters: 575 },
+      },
+    });
+    expect((await api('/api/auth/logout', { method: 'POST' })).status).toBe(200);
+    heldPersonalLogoutPublish.release();
+    expect([401, 409]).toContain((await heldPersonalLogoutPublish.responsePromise).status);
+    cookie = athleteCookie;
+    expect((await api(`/api/club-live/access?clubId=${claimedMembership.clubId}`)).status).toBe(200);
+
+    cookie = ownerCookie;
+    const sessionsAfterHeldPersonalStops = await api('/api/club-live/sessions').then((response) => response.json());
+    expect(sessionsAfterHeldPersonalStops.sessions).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ sessionId: heldPersonalEndSessionId }),
+      expect.objectContaining({ sessionId: heldPersonalLogoutSessionId }),
+    ]));
+    cookie = athleteCookie;
     const restoredPublish = await api('/api/club-live/sessions', {
       method: 'PUT',
       body: JSON.stringify({
         clubId: claimedMembership.clubId,
         studioRiderId: claimedMembership.studioRiderId,
+        sessionId: 'restored-explore-session',
         activityType: 'explore',
         status: 'active',
         progress: 0.3,
@@ -2507,6 +2756,7 @@ describe('cloud API trust boundaries', () => {
       body: JSON.stringify({
         clubId: claimedMembership.clubId,
         studioRiderId: claimedMembership.studioRiderId,
+        sessionId: 'restored-explore-session',
       }),
     });
     expect(finalStop.status).toBe(200);
@@ -2654,11 +2904,51 @@ describe('cloud API trust boundaries', () => {
     });
     expect(reusedClaim.status).toBe(409);
 
+    cookie = athleteCookie;
+    expect((await api(`/api/club-live/access?clubId=${claimedMembership.clubId}`)).status).toBe(200);
+    const visibleBeforeMembershipRevoke = await api('/api/club-live/sessions', {
+      method: 'PUT',
+      body: JSON.stringify({
+        clubId: claimedMembership.clubId,
+        studioRiderId: claimedMembership.studioRiderId,
+        sessionId: 'visible-before-membership-revoke',
+        activityType: 'straight-sprint',
+        status: 'active',
+        progress: 0.4,
+        metrics: { watts: 900 },
+      }),
+    });
+    expect(visibleBeforeMembershipRevoke.status).toBe(200);
+    expect((await api('/api/club-live/frames', {
+      method: 'PUT',
+      body: JSON.stringify({
+        ...liveScreenFrame,
+        sessionId: 'visible-before-membership-revoke',
+        capturedAt: Date.now(),
+      }),
+    })).status).toBe(200);
+    const heldMembershipRevokePublish = await beginHeldJsonRequest('/api/club-live/sessions', {
+      authCookie: athleteCookie,
+      body: {
+        clubId: claimedMembership.clubId,
+        studioRiderId: claimedMembership.studioRiderId,
+        sessionId: 'held-membership-revoke-session',
+        activityType: 'straight-sprint',
+        status: 'active',
+        progress: 0.45,
+        metrics: { watts: 950 },
+      },
+    });
+    cookie = ownerCookie;
     const revoked = await api('/api/club-connect/revoke', {
       method: 'POST',
       body: JSON.stringify({ studioRiderId: 'studio-maya' }),
     });
     expect(revoked.status).toBe(200);
+    heldMembershipRevokePublish.release();
+    expect([403, 409]).toContain((await heldMembershipRevokePublish.responsePromise).status);
+    await expect((await api('/api/club-live/sessions')).json()).resolves.toMatchObject({ sessions: [] });
+    await expect((await api('/api/club-live/frames')).json()).resolves.toMatchObject({ frames: [] });
 
     cookie = athleteCookie;
     const revokedLiveAccess = await api(`/api/club-live/access?clubId=${claimedMembership.clubId}`);
@@ -2777,6 +3067,7 @@ describe('cloud API trust boundaries', () => {
         body: JSON.stringify({
           clubId,
           studioRiderId: rider.id,
+          sessionId: `capacity-session-${index}`,
           activityType: rider.id.endsWith('1') ? 'explore' : 'bmx-race',
           status: 'active',
           progress: 0.25,
@@ -2815,7 +3106,11 @@ describe('cloud API trust boundaries', () => {
       const rider = riders[index];
       const stopped = await api('/api/club-live/sessions', {
         method: 'DELETE',
-        body: JSON.stringify({ clubId, studioRiderId: rider.id }),
+        body: JSON.stringify({
+          clubId,
+          studioRiderId: rider.id,
+          sessionId: `capacity-session-${index}`,
+        }),
       });
       expect(stopped.status).toBe(200);
       expect((await api('/api/club-live/access?clubId=club-not-mine')).status).toBe(403);
@@ -3963,6 +4258,17 @@ describe('cloud API trust boundaries', () => {
       headers: deviceHeaders(secondDevice.deviceToken),
       body: JSON.stringify({ bikeDeviceId: 43_951, bikeLabel: 'WattbikePM25043951' }),
     })).status).toBe(200);
+    const heldTabletRevokePublish = await beginHeldJsonRequest('/api/club-tablet/live', {
+      authCookie: '',
+      headers: athleteHeaders(secondSelectedPayload.sessionToken),
+      body: {
+        sessionId: 'held-tablet-device-revoke-session',
+        activityType: 'bmx-race',
+        status: 'active',
+        progress: 0.15,
+        metrics: { watts: 650, cadence: 100, speedKph: 25 },
+      },
+    });
     cookie = monitorCookie;
     const [concurrentRejoin, revokeSecond] = await Promise.all([
       api('/api/club-events/current/join', {
@@ -3977,6 +4283,8 @@ describe('cloud API trust boundaries', () => {
     ]);
     expect([200, 401]).toContain(concurrentRejoin.status);
     expect(revokeSecond.status).toBe(200);
+    heldTabletRevokePublish.release();
+    expect([401, 409]).toContain((await heldTabletRevokePublish.responsePromise).status);
     cookie = '';
     expect((await api('/api/club-tablet/bike-presence', {
       method: 'PUT',
@@ -4031,6 +4339,145 @@ describe('cloud API trust boundaries', () => {
       },
     });
     expect(livePublishPayload.athleteSessionExpiresAt).toBe(stillSelectedPayload.session.expiresAt);
+
+    const tabletFrame = {
+      clubId: 'forged-club',
+      studioRiderId: 'forged-rider',
+      sessionId: livePublishPayload.session.sessionId,
+      jpegDataUrl: onePixelJpegDataUrl,
+      width: 1,
+      height: 1,
+      capturedAt: Date.now(),
+    };
+    const tabletFrameBurst = await Promise.all(Array.from({ length: 7 }, (_, index) => (
+      api('/api/club-live/frames', {
+        method: 'PUT',
+        headers: {
+          ...athleteHeaders(selectedPayload.sessionToken),
+          'X-Forwarded-For': `198.51.100.${index + 1}`,
+        },
+        body: JSON.stringify(tabletFrame),
+      })
+    )));
+    expect(tabletFrameBurst.filter((result) => result.status === 200)).toHaveLength(6);
+    expect(tabletFrameBurst.filter((result) => result.status === 429)).toHaveLength(1);
+    const acceptedTabletFrame = await tabletFrameBurst.find((result) => result.status === 200)!.json();
+    expect(acceptedTabletFrame).toMatchObject({
+      frame: {
+        clubId: firstDevice.device.clubId,
+        studioRiderId: 'shared-tablet-rider-one',
+        riderName: 'Tablet Rider One',
+        deviceId: firstDevice.device.id,
+        contentType: 'image/jpeg',
+        byteLength: expect.any(Number),
+      },
+    });
+
+    cookie = monitorCookie;
+    const monitoredTabletFrames = await api('/api/club-live/frames');
+    await expect(monitoredTabletFrames.json()).resolves.toMatchObject({
+      frames: [expect.objectContaining({
+        studioRiderId: 'shared-tablet-rider-one',
+        deviceId: firstDevice.device.id,
+      })],
+    });
+    const tabletCredentialWithOwnerCookie = await api('/api/club-live/frames', {
+      headers: athleteHeaders(selectedPayload.sessionToken),
+    });
+    expect(tabletCredentialWithOwnerCookie.status).toBe(403);
+    const invalidTabletCredentialWithOwnerCookie = await api('/api/club-live/frames', {
+      headers: athleteHeaders('invalid-tablet-session-that-must-not-fall-back'),
+    });
+    expect(invalidTabletCredentialWithOwnerCookie.status).toBe(401);
+    const deviceCredentialWithOwnerCookie = await api('/api/club-live/frames', {
+      headers: deviceHeaders(firstDevice.deviceToken),
+    });
+    expect(deviceCredentialWithOwnerCookie.status).toBe(403);
+    const devicePublishWithOwnerCookie = await api('/api/club-live/frames', {
+      method: 'PUT',
+      headers: deviceHeaders(firstDevice.deviceToken),
+      body: JSON.stringify(tabletFrame),
+    });
+    expect(devicePublishWithOwnerCookie.status).toBe(403);
+    const deviceDeleteWithOwnerCookie = await api('/api/club-live/frames', {
+      method: 'DELETE',
+      headers: deviceHeaders(firstDevice.deviceToken),
+    });
+    expect(deviceDeleteWithOwnerCookie.status).toBe(403);
+    const invalidDeviceCredentialWithOwnerCookie = await api('/api/club-live/frames', {
+      headers: deviceHeaders('invalid-device-token-that-must-not-fall-back'),
+    });
+    expect(invalidDeviceCredentialWithOwnerCookie.status).toBe(401);
+    cookie = '';
+
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    const resumedTabletLive = await api('/api/club-tablet/live', {
+      method: 'PUT',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: JSON.stringify({
+        sessionId: 'tablet-frame-delete-session',
+        activityType: 'straight-sprint',
+        status: 'active',
+        progress: 0.5,
+        metrics: { watts: 800, cadence: 120, speedKph: 36 },
+      }),
+    });
+    expect(resumedTabletLive.status).toBe(200);
+    const resumedTabletLivePayload = await resumedTabletLive.json();
+    const resumedTabletFrame = await api('/api/club-live/frames', {
+      method: 'PUT',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: JSON.stringify({
+        ...tabletFrame,
+        sessionId: resumedTabletLivePayload.session.sessionId,
+        capturedAt: Date.now(),
+      }),
+    });
+    expect(resumedTabletFrame.status).toBe(200);
+    const headerOnlyJpegFrame = await api('/api/club-live/frames', {
+      method: 'PUT',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: JSON.stringify({
+        ...tabletFrame,
+        sessionId: resumedTabletLivePayload.session.sessionId,
+        jpegDataUrl: 'data:image/jpeg;base64,/9j/wAAICAABAAEA/9k=',
+        capturedAt: Date.now(),
+      }),
+    });
+    expect(headerOnlyJpegFrame.status).toBe(400);
+    const staleTabletLiveStop = await api('/api/club-tablet/live', {
+      method: 'DELETE',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: JSON.stringify({ sessionId: 'older-tablet-activity-session' }),
+    });
+    await expect(staleTabletLiveStop.json()).resolves.toEqual({ stopped: false });
+    const missingTabletLiveStop = await api('/api/club-tablet/live', {
+      method: 'DELETE',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+    });
+    expect(missingTabletLiveStop.status).toBe(400);
+    const staleTabletCleanup = await api('/api/club-live/frames', {
+      method: 'DELETE',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: JSON.stringify({ sessionId: 'older-tablet-activity-session' }),
+    });
+    await expect(staleTabletCleanup.json()).resolves.toEqual({ stopped: false });
+    const missingSessionCleanup = await api('/api/club-live/frames', {
+      method: 'DELETE',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+    });
+    expect(missingSessionCleanup.status).toBe(400);
+    const stoppedTabletFrame = await api('/api/club-live/frames', {
+      method: 'DELETE',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: JSON.stringify({ sessionId: resumedTabletLivePayload.session.sessionId }),
+    });
+    expect(stoppedTabletFrame.status).toBe(200);
+    await expect(stoppedTabletFrame.json()).resolves.toEqual({ stopped: true });
+    cookie = monitorCookie;
+    await expect((await api('/api/club-live/frames')).json()).resolves.toMatchObject({ frames: [] });
+    cookie = '';
+
     await new Promise((resolve) => setTimeout(resolve, 5));
     const explicitAthleteHeartbeat = await api('/api/club-tablet/sessions/current', {
       headers: athleteHeaders(selectedPayload.sessionToken),
@@ -4053,6 +4500,34 @@ describe('cloud API trust boundaries', () => {
         deviceId: firstDevice.device.id,
       })],
     });
+    cookie = '';
+    const heldTabletEndSessionId = 'held-tablet-live-end-session';
+    const heldTabletEndPublish = await beginHeldJsonRequest('/api/club-tablet/live', {
+      authCookie: '',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: {
+        sessionId: heldTabletEndSessionId,
+        activityType: 'straight-sprint',
+        status: 'active',
+        progress: 0.55,
+        metrics: { watts: 825, cadence: 122, speedKph: 37 },
+      },
+    });
+    const heldTabletEnd = await api('/api/club-tablet/live', {
+      method: 'DELETE',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: JSON.stringify({ sessionId: heldTabletEndSessionId }),
+    });
+    await expect(heldTabletEnd.json()).resolves.toEqual({ stopped: false });
+    heldTabletEndPublish.release();
+    expect((await heldTabletEndPublish.responsePromise).status).toBe(409);
+    const stoppedTabletLive = await api('/api/club-tablet/live', {
+      method: 'DELETE',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: JSON.stringify({ sessionId: resumedTabletLivePayload.session.sessionId }),
+    });
+    await expect(stoppedTabletLive.json()).resolves.toEqual({ stopped: true });
+    cookie = monitorCookie;
 
     const tabletTicket = await clubTabletSocketTicket(selectedPayload.sessionToken);
     // The explicit tablet ticket remains authoritative even though this test
@@ -4362,11 +4837,24 @@ describe('cloud API trust boundaries', () => {
       headers: athleteHeaders(siblingSessionPayload.sessionToken),
     });
 
+    const heldTabletIdentityEndPublish = await beginHeldJsonRequest('/api/club-tablet/live', {
+      authCookie: '',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: {
+        sessionId: 'held-tablet-identity-end-session',
+        activityType: 'explore',
+        status: 'active',
+        progress: 0.2,
+        metrics: { speedKph: 19, distanceMeters: 400 },
+      },
+    });
     const ended = await api('/api/club-tablet/sessions', {
       method: 'DELETE',
       headers: athleteHeaders(selectedPayload.sessionToken),
     });
     expect(ended.status).toBe(200);
+    heldTabletIdentityEndPublish.release();
+    expect([401, 409]).toContain((await heldTabletIdentityEndPublish.responsePromise).status);
     const replay = await api('/api/club-tablet/sessions/current', {
       headers: athleteHeaders(selectedPayload.sessionToken),
     });

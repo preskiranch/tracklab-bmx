@@ -662,11 +662,15 @@ export function GetPulledView({
   }, [phase, sessionDemoMode]);
 
   useEffect(() => {
-    if (!sessionPlayer || phase === 'setup') {
+    const sessionId = result?.id
+      ?? sessionStartRef.current?.sessionId
+      ?? sessionArmRef.current?.sessionId;
+    if (!sessionPlayer || !sessionId || phase === 'setup') {
       onLiveStateChange(null);
       return;
     }
     onLiveStateChange({
+      sessionId,
       phase,
       playerId: sessionPlayer.id,
       ...(sessionPlayer.riderId ? { riderId: sessionPlayer.riderId } : {}),

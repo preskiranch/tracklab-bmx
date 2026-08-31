@@ -203,6 +203,7 @@ describe('Club Live Monitor client state', () => {
     const snapshot: ClubLiveSnapshot = {
       clubId: 'club-1',
       studioRiderId: 'rider-1',
+      sessionId: 'explore-session-1',
       activityType: 'explore',
       status: 'active',
       progress: { fraction: 0.25 },
@@ -224,6 +225,11 @@ describe('Club Live Monitor client state', () => {
     expect(put?.[0]).toBe('/api/club-live/sessions');
     expect(JSON.parse(String(put?.[1]?.body))).not.toHaveProperty('roomId');
     expect(remove?.[1]).toMatchObject({ method: 'DELETE', keepalive: true });
+    expect(JSON.parse(String(remove?.[1]?.body))).toEqual({
+      clubId: 'club-1',
+      studioRiderId: 'rider-1',
+      sessionId: 'explore-session-1',
+    });
     expect(String(fetchMock.mock.calls.at(-1)?.[0])).toBe('/api/club-live/access?clubId=club-1');
   });
 

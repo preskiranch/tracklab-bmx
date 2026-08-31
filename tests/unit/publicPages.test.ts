@@ -48,5 +48,9 @@ describe('public App Store pages', () => {
     expect(markup).toContain('cannot accept an invitation, join live audio, or enable the microphone');
     expect(markup).toContain('iOS Keychain using device-only storage');
     expect(markup).toContain('does not register personal push alerts in Club Tablet kiosk mode');
+    expect(markup).toContain('temporary, read-only image of the visible');
+    expect(markup).toContain('does not capture the device camera, microphone, taps,');
+    expect(markup).toContain('notifications, other apps, or content outside TrackLab');
+    expect(markup).toContain('Frames expire and are deleted when Club Live sharing ends');
   });
 });

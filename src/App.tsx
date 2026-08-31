@@ -9516,7 +9516,6 @@ export default function App() {
     setHeartRateHydratedAccountId(null);
     setLiveHeartRateByRider({});
     heartRate.clearSamples();
-    const liveClubSelection = clubTrainingSelection;
     const pendingHeartRateStarts = [...heartRateRelayStartPromisesRef.current.entries()];
     const pendingWatchConnectActions = [...watchConnectActionPromisesRef.current];
     pendingHeartRateStarts.forEach(([sessionId]) => {
@@ -9665,11 +9664,9 @@ export default function App() {
     heartRateConsentUpdateRevisionRef.current += 1;
     setHeartRateStudioConsent({ live: false, session: false });
 
-    if (liveClubSelection) {
-      await import('./lib/clubLive')
-        .then(({ stopClubLiveSession }) => stopClubLiveSession(liveClubSelection, { keepalive: true }))
-        .catch(() => undefined);
-    }
+    // The server removes any personal Club Live session as part of the exact
+    // authenticated logout boundary. Do not send an unscoped client cleanup:
+    // a delayed request must never remove a newly started activity session.
     // Recovery notifications are device-local and can also be scheduled on an
     // iPad, independently of the iPhone heart-rate writer. Clear them after
     // relay shutdown and immediately before logout so an in-flight A response
@@ -11614,9 +11611,18 @@ export default function App() {
       samplesByDevice,
       startGateActive: startGateStatus.active,
       state: raceState,
+      trackId: effectiveTrack.id,
       trackName: effectiveTrack.name,
     },
   };
+  const clubLiveActivityScreenVisible = !showMembershipLanding
+    && accountProfileComplete
+    && (
+      appMode === 'race'
+      || appMode === 'straight-sprint'
+      || appMode === 'get-pulled'
+      || appMode === 'explore'
+    );
   const clubLiveAthleteBridge = clubLiveProfileKey
     && clubTrainingSelection
     && selectedClubTrainingMembershipActive ? (
@@ -11624,6 +11630,7 @@ export default function App() {
         <ClubLiveAthleteBridge
           accessActive={clubLiveAccessActive}
           activity={clubLiveActivity}
+          activityScreenVisible={clubLiveActivityScreenVisible}
           demoMode={demoMode}
           profileKey={clubLiveProfileKey}
           selection={clubTrainingSelection}
@@ -11827,6 +11834,7 @@ export default function App() {
   return (
     <div
       className={`platform-shell${raceViewFullscreen ? ' race-fullscreen' : ''}${mappingFullscreen ? ' map-fullscreen' : ''}${exploreRideFullscreen ? ' explore-fullscreen' : ''}${utilityFullscreen ? ' utility-fullscreen' : ''}`}
+      data-club-live-activity-screen={clubLiveActivityScreenVisible ? 'visible' : undefined}
       ref={raceShellRef}
     >
       {utilityFullscreen && <style>{`

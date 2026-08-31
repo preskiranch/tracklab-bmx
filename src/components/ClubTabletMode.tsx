@@ -1025,7 +1025,18 @@ export default function ClubTabletMode({
         </div>
 
         <div className="club-tablet-info-grid">
-          <div><Radio /><span><strong>Club Live display is optional</strong><small>This tablet securely publishes the chosen program so the owner can open the central monitor when desired. The laptop does not connect to this bike.</small></span></div>
+          <div>
+            <Radio />
+            <span>
+              <strong>Club Live display is optional</strong>
+              <small>
+                While the athlete is actively sharing a Club Live session, the owner can view a temporary, read-only
+                image of the visible TrackLab activity screen. Screen sharing does not capture the device camera,
+                microphone, taps, notifications, other apps, or content outside TrackLab. Frames expire and are deleted
+                when Club Live sharing ends. The owner&apos;s monitor does not connect to this bike.
+              </small>
+            </span>
+          </div>
           <div><Bluetooth /><span><strong>Bike pairing stays saved</strong><small>Ending this athlete session clears only the student identity. It never erases the Wattbike pairing.</small></span></div>
           <div><UserRoundCheck /><span><strong>Records follow the athlete</strong><small>Completed sessions save to the selected athlete and club history, including profiles that have not been claimed yet.</small></span></div>
         </div>

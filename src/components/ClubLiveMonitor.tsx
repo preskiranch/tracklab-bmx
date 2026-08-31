@@ -5,6 +5,7 @@ import {
   Clock3,
   Compass,
   Gauge,
+  Maximize2,
   Minimize2,
   RadioTower,
   RefreshCw,
@@ -14,6 +15,7 @@ import {
   Users,
   Wifi,
   WifiOff,
+  X,
   Zap,
 } from 'lucide-react';
 import {
@@ -46,6 +48,144 @@ type ClubLiveMonitorProps = {
   fullscreen?: boolean;
   onFullscreenChange?: (enabled: boolean) => void;
 };
+
+type ClubLiveFrame = {
+  id: string;
+  clubId: string;
+  studioRiderId: string;
+  riderName: string;
+  sessionId: string;
+  activityType: ClubLiveSession['activityType'];
+  contentType: 'image/jpeg';
+  jpegDataUrl: `data:image/jpeg;base64,${string}`;
+  width: number;
+  height: number;
+  capturedAt: number;
+  updatedAt: number;
+  expiresAt: number;
+  byteLength: number;
+  deviceId?: string;
+};
+
+function requiredText(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function normalizeClubLiveFrame(value: unknown): ClubLiveFrame | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Partial<ClubLiveFrame>;
+  const clubId = requiredText(candidate.clubId);
+  const studioRiderId = requiredText(candidate.studioRiderId);
+  const riderName = requiredText(candidate.riderName);
+  const sessionId = requiredText(candidate.sessionId);
+  const deviceId = requiredText(candidate.deviceId);
+  const jpegDataUrl = requiredText(candidate.jpegDataUrl);
+  const width = Number(candidate.width);
+  const height = Number(candidate.height);
+  const capturedAt = Number(candidate.capturedAt);
+  const updatedAt = Number(candidate.updatedAt);
+  const expiresAt = Number(candidate.expiresAt);
+  const byteLength = Number(candidate.byteLength);
+  const activityType = candidate.activityType;
+  const encodedJpeg = jpegDataUrl?.slice('data:image/jpeg;base64,'.length) ?? '';
+  if (
+    !clubId
+    || !studioRiderId
+    || !riderName
+    || !sessionId
+    || candidate.contentType !== 'image/jpeg'
+    || !jpegDataUrl?.startsWith('data:image/jpeg;base64,')
+    || !encodedJpeg
+    || encodedJpeg.length > Math.ceil((350 * 1_024) / 3) * 4
+    || !/^[A-Za-z0-9+/]+={0,2}$/u.test(encodedJpeg)
+    || !Number.isInteger(width)
+    || width < 1
+    || width > 1_280
+    || !Number.isInteger(height)
+    || height < 1
+    || height > 1_280
+    || !Number.isInteger(byteLength)
+    || byteLength < 4
+    || byteLength > 350 * 1_024
+    || !Number.isFinite(capturedAt)
+    || capturedAt <= 0
+    || !Number.isFinite(updatedAt)
+    || updatedAt <= 0
+    || !Number.isFinite(expiresAt)
+    || expiresAt <= 0
+    || (activityType !== 'bmx-race'
+      && activityType !== 'straight-sprint'
+      && activityType !== 'get-pulled'
+      && activityType !== 'explore'
+      && activityType !== 'monitor-sprint')
+  ) {
+    return null;
+  }
+  return {
+    id: `${clubId}:${studioRiderId}:${sessionId}`,
+    clubId,
+    studioRiderId,
+    riderName,
+    sessionId,
+    activityType,
+    contentType: 'image/jpeg',
+    jpegDataUrl: jpegDataUrl as `data:image/jpeg;base64,${string}`,
+    width,
+    height,
+    capturedAt,
+    updatedAt,
+    expiresAt,
+    byteLength,
+    ...(deviceId ? { deviceId } : {}),
+  };
+}
+
+export function normalizeClubLiveFrames(value: unknown) {
+  const candidate = value && typeof value === 'object'
+    ? value as { frames?: unknown }
+    : {};
+  if (!Array.isArray(candidate.frames)) return [];
+  const newestByAthlete = new Map<string, ClubLiveFrame>();
+  candidate.frames.forEach((frame) => {
+    const normalized = normalizeClubLiveFrame(frame);
+    if (!normalized) return;
+    const key = `${normalized.clubId}:${normalized.studioRiderId}`;
+    const current = newestByAthlete.get(key);
+    if (!current || normalized.updatedAt > current.updatedAt) newestByAthlete.set(key, normalized);
+  });
+  return [...newestByAthlete.values()]
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, 4);
+}
+
+async function loadClubLiveFrames() {
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (clubLiveFrameEtag) headers['If-None-Match'] = clubLiveFrameEtag;
+  const response = await fetch('/api/club-live/frames', {
+    cache: 'no-store',
+    headers,
+  });
+  if (response.status === 304) return cachedClubLiveFrames;
+  if (!response.ok) throw new ClubLiveRequestError('Live activity screens are temporarily unavailable.', response.status);
+  const frames = normalizeClubLiveFrames(await response.json().catch(() => ({})));
+  clubLiveFrameEtag = response.headers.get('ETag') ?? '';
+  cachedClubLiveFrames = frames;
+  return frames;
+}
+
+let clubLiveFrameEtag = '';
+let cachedClubLiveFrames: ClubLiveFrame[] = [];
+
+export function unexpiredClubLiveFrames(frames: readonly ClubLiveFrame[], now: number) {
+  return frames.filter((frame) => frame.expiresAt > now);
+}
+
+export function frameMatchesSession(frame: ClubLiveFrame, session: ClubLiveSession) {
+  return frame.clubId === session.clubId
+    && frame.studioRiderId === session.studioRiderId
+    && frame.sessionId === session.sessionId
+    && (!session.deviceId || frame.deviceId === session.deviceId);
+}
 
 function activityLabel(activityType: ClubLiveSession['activityType']) {
   if (activityType === 'get-pulled') return 'Get Pulled';
@@ -163,6 +303,8 @@ export function ClubLiveMonitor({
   const requestGenerationRef = useRef(0);
   const lastTabletRefreshAtRef = useRef(0);
   const [sessions, setSessions] = useState<ClubLiveSession[]>([]);
+  const [frames, setFrames] = useState<ClubLiveFrame[]>([]);
+  const [enlargedFrameId, setEnlargedFrameId] = useState<string | null>(null);
   const [tablets, setTablets] = useState<ClubTabletDevice[]>([]);
   const [tabletFeedError, setTabletFeedError] = useState<string | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -175,6 +317,20 @@ export function ClubLiveMonitor({
   const liveSessions = useMemo(
     () => activeClubLiveSessions(sessions, now),
     [now, sessions],
+  );
+  const liveFrames = useMemo(
+    () => unexpiredClubLiveFrames(frames, now),
+    [frames, now],
+  );
+  const enlargedFrame = useMemo(
+    () => liveFrames.find((frame) => frame.id === enlargedFrameId) ?? null,
+    [enlargedFrameId, liveFrames],
+  );
+  const enlargedSession = useMemo(
+    () => enlargedFrame
+      ? liveSessions.find((session) => frameMatchesSession(enlargedFrame, session)) ?? null
+      : null,
+    [enlargedFrame, liveSessions],
   );
   const connectedBikeCount = useMemo(
     () => tablets.filter((tablet) => clubTabletMonitorConnectedBike(tablet, tabletFeedError == null)).length,
@@ -202,15 +358,17 @@ export function ClubLiveMonitor({
       const refreshTablets = forceTabletFeed || Date.now() - lastTabletRefreshAtRef.current >= 5_000;
       if (refreshTablets) lastTabletRefreshAtRef.current = Date.now();
       let nextTabletFeedError: string | null = null;
-      const [next, nextTablets] = await Promise.all([
+      const [next, nextTablets, nextFrames] = await Promise.all([
         loadClubLiveSessions(),
         refreshTablets ? loadClubTabletDevices().catch((error: unknown) => {
           nextTabletFeedError = clubTabletDeviceFeedErrorMessage(error);
           return null;
         }) : Promise.resolve(null),
+        loadClubLiveFrames().catch(() => null),
       ]);
       if (generation !== requestGenerationRef.current) return;
       setSessions(next);
+      if (nextFrames) setFrames(nextFrames);
       if (refreshTablets) {
         if (nextTablets) setTablets(nextTablets);
         setTabletFeedError(nextTabletFeedError);
@@ -222,6 +380,7 @@ export function ClubLiveMonitor({
       if (generation !== requestGenerationRef.current) return;
       if (error instanceof ClubLiveRequestError && (error.status === 401 || error.status === 403)) {
         setSessions([]);
+        setFrames([]);
       }
       setStatus('error');
       setMessage(error instanceof Error ? error.message : 'The club live feed is temporarily unavailable.');
@@ -252,9 +411,29 @@ export function ClubLiveMonitor({
   }, [refresh]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 500);
+    const timer = window.setInterval(() => {
+      const currentNow = Date.now();
+      setNow(currentNow);
+      setFrames((current) => {
+        const active = unexpiredClubLiveFrames(current, currentNow);
+        return active.length === current.length ? current : active;
+      });
+    }, 500);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (enlargedFrameId && !enlargedFrame) setEnlargedFrameId(null);
+  }, [enlargedFrame, enlargedFrameId]);
+
+  useEffect(() => {
+    if (!enlargedFrame) return undefined;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setEnlargedFrameId(null);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [enlargedFrame]);
 
   return (
     <main className="club-live-monitor" aria-label="Club Live Monitor">
@@ -352,6 +531,8 @@ export function ClubLiveMonitor({
           {liveSessions.map((session) => {
             const stale = now > session.expiresAt || now - session.updatedAt > 4_000;
             const displayName = session.athleteName || session.riderName;
+            const frame = liveFrames.find((candidate) => frameMatchesSession(candidate, session)) ?? null;
+            const frameStale = Boolean(frame && (now > frame.expiresAt || now - frame.updatedAt > 4_000));
             const subtitle = session.athleteName && session.athleteName !== session.riderName
               ? `Studio rider: ${session.riderName}`
               : 'Club athlete';
@@ -377,6 +558,37 @@ export function ClubLiveMonitor({
                     <i /> {stale ? 'Reconnecting' : statusLabel(session.status)}
                   </span>
                 </div>
+
+                {frame && (
+                  <div className={`club-live-screen${frameStale ? ' stale' : ''}${session.status === 'paused' ? ' paused' : ''}`}>
+                    <div className="club-live-screen-toolbar">
+                      <span className="club-live-screen-label">
+                        {frameStale ? 'Screen reconnecting' : session.status === 'paused' ? 'Screen paused' : 'Live activity screen'}
+                      </span>
+                      <button
+                        type="button"
+                        className="club-live-screen-enlarge"
+                        onClick={() => setEnlargedFrameId(frame.id)}
+                        aria-label={`Enlarge live activity screen for ${displayName}`}
+                      >
+                        <Maximize2 size={17} /> Enlarge
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      className="club-live-screen-open"
+                      style={{ aspectRatio: `${frame.width} / ${frame.height}` }}
+                      onClick={() => setEnlargedFrameId(frame.id)}
+                      aria-label={`Open full-screen live activity screen for ${displayName}`}
+                    >
+                      <img
+                        src={frame.jpegDataUrl}
+                        alt={`Live TrackLab activity screen for ${displayName}`}
+                        draggable={false}
+                      />
+                    </button>
+                  </div>
+                )}
 
                 <div className="club-live-activity">
                   <span><ActivityIcon activityType={session.activityType} /></span>
@@ -434,6 +646,53 @@ export function ClubLiveMonitor({
           <p>{message || 'No club athletes are sharing a live training session right now.'}</p>
           {status === 'error' && <button type="button" onClick={() => void refresh()}>Try again</button>}
         </section>
+      )}
+
+      {enlargedFrame && enlargedSession && (
+        <div
+          className="club-live-screen-dialog-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setEnlargedFrameId(null);
+          }}
+        >
+          <section
+            className="club-live-screen-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Live activity screen for ${enlargedSession.athleteName || enlargedSession.riderName}`}
+          >
+            <header>
+              <div>
+                <span>Read-only live activity screen</span>
+                <strong>{enlargedSession.athleteName || enlargedSession.riderName}</strong>
+              </div>
+              {now - enlargedFrame.updatedAt > 4_000 ? (
+                <span className="club-live-screen-dialog-status">Screen reconnecting</span>
+              ) : enlargedSession.status === 'paused' && (
+                <span className="club-live-screen-dialog-status">Screen paused</span>
+              )}
+              <button
+                type="button"
+                autoFocus
+                onClick={() => setEnlargedFrameId(null)}
+                aria-label="Close full-screen live activity screen"
+              >
+                <X size={22} />
+              </button>
+            </header>
+            <div
+              className="club-live-screen-dialog-frame"
+              style={{ aspectRatio: `${enlargedFrame.width} / ${enlargedFrame.height}` }}
+            >
+              <img
+                src={enlargedFrame.jpegDataUrl}
+                alt={`Full-screen live TrackLab activity screen for ${enlargedSession.athleteName || enlargedSession.riderName}`}
+                draggable={false}
+              />
+            </div>
+          </section>
+        </div>
       )}
     </main>
   );
