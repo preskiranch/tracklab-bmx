@@ -32,6 +32,8 @@ describe('race rider responsive layout', () => {
     expect(raceRiderOverlayMinimumHeight(1024, 768)).toBe(220);
     expect(raceRiderOverlayMinimumHeight(1366, 1024)).toBe(220);
     expect(raceRiderOverlayMinimumHeight(1280, 500)).toBe(220);
+    expect(raceRiderOverlayMinimumHeight(1024, 768, 1, 220, true)).toBe(190);
+    expect(raceRiderOverlayMinimumHeight(1366, 1024, 1, 220, true)).toBe(190);
     expect(raceRiderOverlayMaximumHeight(1024, 768)).toBe(Number.POSITIVE_INFINITY);
     expect(raceRiderOverlayMaximumHeight(1280, 500)).toBe(Number.POSITIVE_INFINITY);
   });

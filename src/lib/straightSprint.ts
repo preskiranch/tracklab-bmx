@@ -1,4 +1,4 @@
-import type { EarthCamera, TrackPoint } from '../types';
+import type { EarthCamera, RaceRiderOverlayLayout, TrackPoint } from '../types';
 import { distanceBetweenTrackPoints, pointAtRouteMeter } from './trackMapping';
 
 export const straightSprintMaximumFeet = 1500;
@@ -29,6 +29,20 @@ export function straightSprintFeetToMeters(feet: number) {
 
 export function straightSprintCameraPreferenceKey(trackId: string, distanceFeet: number) {
   return `${trackId}:sprint:${normalizeStraightSprintDistance(distanceFeet)}ft`;
+}
+
+/**
+ * Rider panels share the same per-distance key as the Straight Sprint camera.
+ * Fall back to the original track-only record so layouts saved before distance
+ * specific panels were introduced continue to render on every device.
+ */
+export function resolveStraightSprintRiderOverlay(
+  overlays: Record<string, RaceRiderOverlayLayout>,
+  trackId: string,
+  distanceFeet: number,
+) {
+  return overlays[straightSprintCameraPreferenceKey(trackId, distanceFeet)]
+    ?? overlays[trackId];
 }
 
 function completeCameraComposition(camera: EarthCamera | undefined) {

@@ -5,6 +5,16 @@ type GlobalRaceViewPayload = {
   raceViewPreferences?: RaceViewPreferences | null;
 };
 
+type ApplyGlobalRaceViewOptions = {
+  /**
+   * A developer may have a newer locked edit saved locally/cloud-side while
+   * the global PATCH is offline. Keep only those publishable entries visible
+   * until the retry succeeds; ordinary clients still receive the global view
+   * unconditionally.
+   */
+  preserveNewerLockedAccountEntries?: boolean;
+};
+
 function normalizeGlobalRaceView(value: unknown) {
   if (!value || typeof value !== 'object') {
     return null;
@@ -15,13 +25,14 @@ function normalizeGlobalRaceView(value: unknown) {
 export function applyGlobalRaceViewPreferences(
   accountPreferences: RaceViewPreferences,
   globalPreferences: RaceViewPreferences | null,
+  options: ApplyGlobalRaceViewOptions = {},
 ) {
   const account = normalizeRaceViewPreferences(accountPreferences);
   if (!globalPreferences) {
     return account;
   }
   const global = normalizeRaceViewPreferences(globalPreferences);
-  return normalizeRaceViewPreferences({
+  const applied = normalizeRaceViewPreferences({
     ...account,
     cameraLocked: true,
     cameraLockedUpdatedAt: Math.max(
@@ -41,6 +52,64 @@ export function applyGlobalRaceViewPreferences(
       ...global.riderOverlayUpdatedAtByTrack,
     },
   });
+
+  if (!options.preserveNewerLockedAccountEntries) {
+    return applied;
+  }
+
+  const newerLockedCameras = account.cameraLocked
+    ? Object.fromEntries(Object.entries(account.earthCamerasByTrack).filter(([trackId, camera]) => (
+        camera.updatedAt > (global.earthCamerasByTrack[trackId]?.updatedAt ?? -1)
+      )))
+    : {};
+  const newerLockedOverlays = Object.fromEntries(
+    Object.entries(account.riderOverlaysByTrack).filter(([trackId, layout]) => (
+      layout.locked
+      && (account.riderOverlayUpdatedAtByTrack[trackId] ?? 0)
+        > (global.riderOverlayUpdatedAtByTrack[trackId] ?? -1)
+    )),
+  );
+  const newerLockedOverlayRevisions = Object.fromEntries(
+    Object.keys(newerLockedOverlays).map((trackId) => [
+      trackId,
+      account.riderOverlayUpdatedAtByTrack[trackId] ?? 0,
+    ]),
+  );
+
+  return normalizeRaceViewPreferences({
+    ...applied,
+    earthCamerasByTrack: {
+      ...applied.earthCamerasByTrack,
+      ...newerLockedCameras,
+    },
+    riderOverlaysByTrack: {
+      ...applied.riderOverlaysByTrack,
+      ...newerLockedOverlays,
+    },
+    riderOverlayUpdatedAtByTrack: {
+      ...applied.riderOverlayUpdatedAtByTrack,
+      ...newerLockedOverlayRevisions,
+    },
+  });
+}
+
+export function globalRaceViewNeedsPublication(
+  accountPreferences: RaceViewPreferences,
+  globalPreferences: RaceViewPreferences | null,
+) {
+  const account = normalizeRaceViewPreferences(accountPreferences);
+  const global = globalPreferences ? normalizeRaceViewPreferences(globalPreferences) : null;
+  const hasNewerLockedCamera = account.cameraLocked
+    && Object.entries(account.earthCamerasByTrack).some(([trackId, camera]) => (
+      camera.updatedAt > (global?.earthCamerasByTrack[trackId]?.updatedAt ?? -1)
+    ));
+  const hasNewerLockedOverlay = Object.entries(account.riderOverlaysByTrack)
+    .some(([trackId, layout]) => (
+      layout.locked
+      && (account.riderOverlayUpdatedAtByTrack[trackId] ?? 0)
+        > (global?.riderOverlayUpdatedAtByTrack[trackId] ?? -1)
+    ));
+  return hasNewerLockedCamera || hasNewerLockedOverlay;
 }
 
 export async function readGlobalRaceViewPreferences() {
@@ -71,7 +140,7 @@ export async function saveGlobalRaceViewPreferences(preferences: RaceViewPrefere
   const payload = await response.json() as GlobalRaceViewPayload;
   const normalized = normalizeGlobalRaceView(payload.raceViewPreferences);
   if (!normalized) {
-    throw new Error('Global race view save returned no camera layout.');
+    throw new Error('Global race view save returned no track presentation.');
   }
   return normalized;
 }

@@ -27,6 +27,7 @@ import {
 export type ClubTabletDeviceStatus = 'idle' | 'checking' | 'active' | 'error' | 'revoked';
 
 export const clubTabletAuthorizationTimeoutMs = 15_000;
+export const clubTabletRosterRefreshMs = 10_000;
 
 export function expireClubTabletSessionLocallyFirst(
   session: ClubTabletSessionCredential,
@@ -48,6 +49,7 @@ type ClubTabletRuntimeProps = {
   connectedBike?: ClubTabletBikePresenceInput | null;
   bikeActivityAt: number;
   onDeviceReady: (roster: ClubTabletRoster, hasStoredSession: boolean) => void;
+  onRosterRefresh: (roster: ClubTabletRoster) => void;
   onDeviceError: () => void;
   onDeviceRevoked: () => void;
   onSessionRenewed: (session: ClubTabletSessionCredential) => void;
@@ -66,6 +68,7 @@ export default function ClubTabletRuntime({
   connectedBike = null,
   bikeActivityAt,
   onDeviceReady,
+  onRosterRefresh,
   onDeviceError,
   onDeviceRevoked,
   onSessionRenewed,
@@ -199,6 +202,64 @@ export default function ClubTabletRuntime({
       window.clearTimeout(timeout);
     };
   }, [device.device.id, device.deviceToken, onDeviceError, onDeviceReady, onDeviceRevoked]);
+
+  useEffect(() => {
+    if (!roster || roster.device.id !== device.device.id) return undefined;
+    let cancelled = false;
+    let authorizationRevoked = false;
+    let requestActive = false;
+    let controller: AbortController | null = null;
+    let timer: number | null = null;
+
+    const schedule = (delayMs = clubTabletRosterRefreshMs) => {
+      if (cancelled || authorizationRevoked) return;
+      if (timer != null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => void refresh(), delayMs);
+    };
+    const refresh = async () => {
+      if (cancelled || authorizationRevoked || requestActive) return;
+      if (document.visibilityState === 'hidden') {
+        schedule();
+        return;
+      }
+      requestActive = true;
+      controller = new AbortController();
+      const timeout = window.setTimeout(
+        () => controller?.abort(),
+        clubTabletAuthorizationTimeoutMs,
+      );
+      try {
+        const nextRoster = await loadClubTabletRoster(device, { signal: controller.signal });
+        if (!cancelled) onRosterRefresh(nextRoster);
+      } catch (error) {
+        if (!cancelled && authorizationEnded(error)) {
+          authorizationRevoked = true;
+          clearStoredClubTabletSession();
+          clearStoredClubTabletDevice();
+          void clearNativeClubTabletCredential().catch(() => undefined);
+          onDeviceRevoked();
+        }
+        // A transient refresh failure must not eject an already-authorized
+        // rider. The last verified roster remains usable until the next poll.
+      } finally {
+        window.clearTimeout(timeout);
+        requestActive = false;
+        schedule();
+      }
+    };
+
+    schedule();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') schedule(0);
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      cancelled = true;
+      controller?.abort();
+      if (timer != null) window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [device.device.id, device.deviceToken, onDeviceRevoked, onRosterRefresh, roster?.device.id]);
 
   useEffect(() => {
     if (!session) return;

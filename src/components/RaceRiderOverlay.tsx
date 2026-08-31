@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
-import { GripHorizontal, Lock, Unlock } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { GripHorizontal, Lock, Maximize2, Save, Unlock } from 'lucide-react';
 import type { BikeSample, GhostPlaybackRider, MultiplayerRaceState, PlayerSlot, RaceRiderOverlayLayout, RaceState, RiderState, SpeedUnit } from '../types';
 import { defaultRaceRiderOverlayLayout, normalizeRaceRiderOverlayLayout } from '../lib/raceViewPreferences';
 import { racePositionsAreEstablished } from '../lib/racePositionDisplay';
@@ -71,7 +71,13 @@ type RaceRiderOverlayProps = {
   preference?: RaceRiderOverlayLayout;
   presentationScale?: number;
   canEditLayout: boolean;
-  onPreferenceChange: (trackId: string, layout: RaceRiderOverlayLayout) => void;
+  editorPreview?: boolean;
+  showPreviewPlaceholders?: boolean;
+  onPreferenceChange: (
+    trackId: string,
+    layout: RaceRiderOverlayLayout,
+    publishGlobally?: boolean,
+  ) => Promise<void> | void;
   onFullscreenInteraction: () => void;
   newPersonalRecordsByPlayer: PersonalRecordAchievements;
   disqualifiedPlayerIds: PlayerSlot['id'][];
@@ -99,6 +105,7 @@ export function raceRiderOverlayMinimumHeight(
   containerHeight: number,
   presentationScale = 1,
   requestedPresentationHeight?: number,
+  editorPreview = false,
 ) {
   const scale = normalizeRiderPresentationScale(presentationScale);
   if (Math.abs(scale - 1) > 0.001) {
@@ -113,6 +120,9 @@ export function raceRiderOverlayMinimumHeight(
         ? 200
         : 248;
       return Math.min(portraitMinimum, Math.max(1, containerHeight - 24));
+    }
+    if (editorPreview) {
+      return 190;
     }
     const scaledDefaultMinimum = Math.max(
       110,
@@ -133,6 +143,12 @@ export function raceRiderOverlayMinimumHeight(
       ? 200
       : 248;
     return Math.min(portraitMinimum, Math.max(1, containerHeight - 24));
+  }
+  if (editorPreview) {
+    // Match the canonical persistence floor while the owner is authoring.
+    // Live views keep their larger readability floor, while phone layouts
+    // continue to use the responsive limits above.
+    return 190;
   }
   return containerWidth <= 900 ? Math.min(300, Math.round(containerHeight * 0.28)) : 220;
 }
@@ -170,6 +186,7 @@ function clampLayout(
   layout: RaceRiderOverlayLayout,
   container: HTMLElement | null,
   presentationScale = 1,
+  editorPreview = false,
 ) {
   if (!container) {
     return layout;
@@ -182,6 +199,7 @@ function clampLayout(
     container.clientHeight,
     scale,
     layout.height,
+    editorPreview,
   );
   const maximumHeight = raceRiderOverlayMaximumHeight(
     container.clientWidth,
@@ -244,6 +262,8 @@ export function RaceRiderOverlay({
   preference,
   presentationScale = 1,
   canEditLayout,
+  editorPreview = false,
+  showPreviewPlaceholders = false,
   onPreferenceChange,
   onFullscreenInteraction,
   newPersonalRecordsByPlayer,
@@ -265,8 +285,11 @@ export function RaceRiderOverlay({
       ? preference
       : normalizeRaceRiderOverlayLayout(preference ?? defaultRaceRiderOverlayLayout),
   );
+  const [publishStatus, setPublishStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
+  const editorDraftActiveRef = useRef(false);
+  const editorDraftTrackIdRef = useRef(trackId);
   const layoutRef = useRef(layout);
   const requestedLayoutRef = useRef(layout);
   const disqualifiedPlayerIdSet = useMemo(
@@ -279,6 +302,21 @@ export function RaceRiderOverlay({
   }, [layout]);
 
   useEffect(() => {
+    const trackChanged = editorDraftTrackIdRef.current !== trackId;
+    if (trackChanged) {
+      editorDraftTrackIdRef.current = trackId;
+      editorDraftActiveRef.current = false;
+      setPublishStatus('idle');
+    } else if (editorPreview && editorDraftActiveRef.current) {
+      // Preference refreshes can arrive while the owner is manipulating the
+      // Edit Map preview. Keep that same-track cloud response from replacing
+      // the local draft (and relocking the grip) before it is published.
+      return;
+    }
+    if (!editorPreview) {
+      editorDraftActiveRef.current = false;
+      setPublishStatus('idle');
+    }
     const next = presentationScaled && preference
       ? preference
       : normalizeRaceRiderOverlayLayout(preference ?? defaultRaceRiderOverlayLayout);
@@ -287,12 +325,13 @@ export function RaceRiderOverlay({
       next,
       overlayRef.current?.parentElement ?? null,
       normalizedPresentationScale,
+      editorPreview,
     );
     layoutRef.current = presented;
     setLayout(presented);
-  }, [normalizedPresentationScale, preference, presentationScaled, trackId]);
+  }, [editorPreview, normalizedPresentationScale, preference, presentationScaled, trackId]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!visible) {
       return undefined;
     }
@@ -307,6 +346,7 @@ export function RaceRiderOverlay({
         requestedLayoutRef.current,
         container,
         normalizedPresentationScale,
+        editorPreview,
       );
       const currentLayout = layoutRef.current;
       if (
@@ -324,15 +364,22 @@ export function RaceRiderOverlay({
     };
 
     syncLayoutToViewport();
-    if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', syncLayoutToViewport);
-      return () => window.removeEventListener('resize', syncLayoutToViewport);
-    }
-
-    const resizeObserver = new ResizeObserver(syncLayoutToViewport);
-    resizeObserver.observe(container);
-    return () => resizeObserver.disconnect();
-  }, [normalizedPresentationScale, trackId, visible]);
+    // Browser rotation changes the visual viewport before ResizeObserver is
+    // guaranteed to deliver. Listen to the window signals as well so React
+    // commits the compact/portrait clamp in the same layout cycle, while the
+    // observer still covers stage-only size changes such as sidebar toggles.
+    window.addEventListener('resize', syncLayoutToViewport);
+    window.addEventListener('orientationchange', syncLayoutToViewport);
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(syncLayoutToViewport);
+    resizeObserver?.observe(container);
+    return () => {
+      window.removeEventListener('resize', syncLayoutToViewport);
+      window.removeEventListener('orientationchange', syncLayoutToViewport);
+      resizeObserver?.disconnect();
+    };
+  }, [editorPreview, normalizedPresentationScale, trackId, visible]);
 
   const entries = useMemo<OverlayEntry[]>(() => {
     const localEntries = riders.flatMap((rider) => {
@@ -410,25 +457,64 @@ export function RaceRiderOverlay({
         || right.progressPct - left.progressPct
       ));
   }, [disqualifiedPlayerIdSet, ghostRiders, heartRateByPlayer, players, remoteRaceStates, riders, samplesByDevice, trackLengthMeters]);
+  const previewEntries = useMemo<OverlayEntry[]>(() => (
+    Array.from({ length: 4 }, (_, index) => {
+      const player = players[index];
+      const rank = index + 1;
+      return {
+        id: `preview-${player?.id ?? rank}`,
+        playerId: player?.id ?? null,
+        badge: `P${rank}`,
+        name: player?.name ?? `Player ${rank}`,
+        photoUrl: player?.photoUrl,
+        accent: player?.accent ?? ['#7cff28', '#2da8ff', '#ff5364', '#ffe05a'][index],
+        rank,
+        progressPct: 72 - (index * 9),
+        speedKph: 38 - (index * 2),
+        distanceMeters: 72 - (index * 9),
+        finishedAt: null,
+        kind: 'local' as const,
+        heartRateBpm: 126 + (index * 3),
+        heartRateSimulated: true,
+        disqualified: false,
+      };
+    })
+  ), [players]);
+  const displayedEntries = entries.length > 0 || !showPreviewPlaceholders
+    ? entries
+    : previewEntries;
   const positionsEstablished = useMemo(
-    () => racePositionsAreEstablished(raceState, entries.filter((entry) => !entry.disqualified)),
-    [entries, raceState],
+    () => editorPreview || racePositionsAreEstablished(
+      raceState,
+      displayedEntries.filter((entry) => !entry.disqualified),
+    ),
+    [displayedEntries, editorPreview, raceState],
   );
 
-  const finishDrag = useCallback(() => {
+  const finishDrag = useCallback((event: PointerEvent) => {
     const drag = dragRef.current;
+    if (!drag || event.pointerId !== drag.pointerId) {
+      return;
+    }
     if (drag) {
       const container = overlayRef.current?.parentElement ?? null;
+      // The Edit Map preview is an authoring surface, including on phones.
+      // Keep the geometry the owner actually dragged in this viewport. Live
+      // presentation still preserves the canonical authored layout when its
+      // compact phone clamp is only a responsive rendering detail.
       const nextPreference = container
-        ? raceRiderOverlayPreferenceForViewport(
-          drag.requestedLayout,
-          layoutRef.current,
-          container.clientWidth,
-          container.clientHeight,
-        )
+        ? editorPreview
+          ? layoutRef.current
+          : raceRiderOverlayPreferenceForViewport(
+              drag.requestedLayout,
+              layoutRef.current,
+              container.clientWidth,
+              container.clientHeight,
+            )
         : layoutRef.current;
       const referenceViewport = container
-        && !raceRiderOverlayUsesCompactLandscape(container.clientWidth, container.clientHeight)
+        && (editorPreview
+          || !raceRiderOverlayUsesCompactLandscape(container.clientWidth, container.clientHeight))
         ? normalizeRacePresentationViewport({
             width: container.clientWidth,
             height: container.clientHeight,
@@ -439,13 +525,15 @@ export function RaceRiderOverlay({
         ...(referenceViewport ? { referenceViewport } : {}),
       };
       requestedLayoutRef.current = savedPreference;
-      onPreferenceChange(trackId, savedPreference);
+      if (!editorPreview) {
+        void onPreferenceChange(trackId, savedPreference, false);
+      }
       if (drag.captureTarget.hasPointerCapture?.(drag.pointerId)) {
         drag.captureTarget.releasePointerCapture(drag.pointerId);
       }
     }
     dragRef.current = null;
-  }, [onPreferenceChange, trackId]);
+  }, [editorPreview, onPreferenceChange, trackId]);
 
   const moveDrag = useCallback((event: PointerEvent) => {
     const drag = dragRef.current;
@@ -464,22 +552,38 @@ export function RaceRiderOverlay({
         ...drag.layout,
         xPct: drag.layout.xPct + ((event.clientX - drag.startX) / Math.max(1, rect.width)),
         yPct: drag.layout.yPct + ((event.clientY - drag.startY) / Math.max(1, rect.height)),
-      }, container, normalizedPresentationScale);
+      }, container, normalizedPresentationScale, editorPreview);
       requestedLayoutRef.current = next;
       layoutRef.current = next;
       setLayout(next);
       return;
     }
 
-    const next = clampLayout({
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    const resized = clampLayout({
       ...drag.layout,
-      width: drag.layout.width + (event.clientX - drag.startX),
-      height: drag.layout.height + (event.clientY - drag.startY),
-    }, container, normalizedPresentationScale);
+      // The Edit Map grip sits on the left so it remains reachable while the
+      // mapping toolbar occupies the right side. Preserve the panel's right
+      // edge as that grip moves; the live-race bottom-right grip keeps its
+      // established resize direction.
+      width: drag.layout.width + (editorPreview ? -deltaX : deltaX),
+      height: drag.layout.height + deltaY,
+    }, container, normalizedPresentationScale, editorPreview);
+    const next = editorPreview
+      ? clampLayout({
+          ...resized,
+          xPct: (
+            (drag.layout.xPct * rect.width)
+            + drag.layout.width
+            - resized.width
+          ) / Math.max(1, rect.width),
+        }, container, normalizedPresentationScale, editorPreview)
+      : resized;
     requestedLayoutRef.current = next;
     layoutRef.current = next;
     setLayout(next);
-  }, [normalizedPresentationScale]);
+  }, [editorPreview, normalizedPresentationScale]);
 
   useEffect(() => {
     window.addEventListener('pointermove', moveDrag, { passive: false });
@@ -498,6 +602,9 @@ export function RaceRiderOverlay({
     }
     event.preventDefault();
     event.stopPropagation();
+    if (editorPreview) {
+      editorDraftActiveRef.current = true;
+    }
     onFullscreenInteraction();
     event.currentTarget.setPointerCapture?.(event.pointerId);
     dragRef.current = {
@@ -517,6 +624,9 @@ export function RaceRiderOverlay({
     }
     event.preventDefault();
     event.stopPropagation();
+    if (editorPreview) {
+      editorDraftActiveRef.current = true;
+    }
     onFullscreenInteraction();
     event.currentTarget.setPointerCapture?.(event.pointerId);
     dragRef.current = {
@@ -536,7 +646,7 @@ export function RaceRiderOverlay({
     }
     dragRef.current = null;
     const container = overlayRef.current?.parentElement ?? null;
-    const referenceViewport = container
+    const referenceViewport = !editorPreview && container
       ? normalizeRacePresentationViewport({
           width: container.clientWidth,
           height: container.clientHeight,
@@ -545,33 +655,57 @@ export function RaceRiderOverlay({
     const nextPreference = {
       ...requestedLayoutRef.current,
       locked: !layout.locked,
+      // An editor drag already records the viewport that gives its pixel
+      // dimensions meaning. Do not re-key those dimensions if the owner
+      // rotates between releasing the grip and pressing Save & publish.
       ...(referenceViewport ? { referenceViewport } : {}),
     };
     const nextLayout = clampLayout(
       nextPreference,
       container,
       normalizedPresentationScale,
+      editorPreview,
     );
+    if (editorPreview) {
+      editorDraftActiveRef.current = !nextPreference.locked;
+      if (!nextPreference.locked) {
+        setPublishStatus('idle');
+      }
+    }
     requestedLayoutRef.current = nextPreference;
     layoutRef.current = nextLayout;
     setLayout(nextLayout);
-    onPreferenceChange(trackId, nextPreference);
+    // Edit Map uses an explicit draft workflow. Unlocking only changes the
+    // local preview; the owner publishes the layout by pressing Save & publish.
+    if (!editorPreview || nextPreference.locked) {
+      const publishGlobally = nextPreference.locked;
+      const result = onPreferenceChange(trackId, nextPreference, publishGlobally);
+      if (editorPreview && publishGlobally) {
+        setPublishStatus('saving');
+        void Promise.resolve(result)
+          .then(() => setPublishStatus('saved'))
+          .catch(() => setPublishStatus('error'));
+      } else if (publishGlobally) {
+        void Promise.resolve(result).catch(() => undefined);
+      }
+    }
   };
 
-  if (!visible || entries.length === 0) {
+  if (!visible || displayedEntries.length === 0) {
     return null;
   }
 
   return (
     <div
-      className={`race-rider-overlay${!canEditLayout || layout.locked ? ' locked' : ''}${presentationScaled ? ' presentation-scaled' : ''}`}
+      className={`race-rider-overlay${!canEditLayout || layout.locked ? ' locked' : ''}${presentationScaled ? ' presentation-scaled' : ''}${editorPreview ? ' editor-preview' : ''}`}
       ref={overlayRef}
-      aria-label="Race rider positions"
+      aria-label={editorPreview ? 'Player card layout preview' : 'Race rider positions'}
       style={{
         '--overlay-x': `${layout.xPct * 100}%`,
         '--overlay-y': `${layout.yPct * 100}%`,
         '--overlay-width': `${layout.width}px`,
         '--overlay-height': `${layout.height}px`,
+        '--rr-presentation-legibility-scale': presentationLegibilityScale,
         ...(presentationScaled ? {
           '--rr-font': `${16 * presentationLegibilityScale}px`,
           '--rr-compact-avatar': `${28 / normalizedPresentationScale}px`,
@@ -595,6 +729,7 @@ export function RaceRiderOverlay({
           overlayRef.current?.parentElement?.clientHeight ?? 1024,
           normalizedPresentationScale,
           layout.height,
+          editorPreview,
         )}px`,
       } as CSSProperties}
     >
@@ -619,7 +754,7 @@ export function RaceRiderOverlay({
           aria-label={!canEditLayout || layout.locked ? 'Rider panel position locked' : 'Move rider panel'}
         >
           <GripHorizontal size={16} />
-          <span>Rider positions</span>
+          <span>{editorPreview ? 'Player card preview' : 'Rider positions'}</span>
           {canEditLayout && !layout.locked && <small>Drag to move / drag corner to resize</small>}
         </div>
         {canEditLayout ? (
@@ -627,16 +762,24 @@ export function RaceRiderOverlay({
             className="race-rider-overlay-lock"
             type="button"
             aria-pressed={layout.locked}
-            aria-label={layout.locked ? 'Unlock rider panel' : 'Lock rider panel position and size'}
-            title={layout.locked ? 'Unlock rider panel' : 'Lock rider panel'}
+            aria-label={editorPreview
+              ? layout.locked ? 'Resize cards' : 'Save and publish player cards'
+              : layout.locked ? 'Unlock rider panel' : 'Lock rider panel position and size'}
+            title={editorPreview
+              ? layout.locked ? 'Unlock this preview to move and resize the player cards' : 'Save and publish these player card dimensions'
+              : layout.locked ? 'Unlock rider panel' : 'Lock rider panel'}
             onPointerDown={(event) => {
               event.stopPropagation();
               onFullscreenInteraction();
             }}
             onClick={toggleLock}
           >
-            {layout.locked ? <Lock size={15} /> : <Unlock size={15} />}
-            <span>{layout.locked ? 'Locked' : 'Lock panel'}</span>
+            {editorPreview
+              ? layout.locked ? <Maximize2 size={15} /> : <Save size={15} />
+              : layout.locked ? <Lock size={15} /> : <Unlock size={15} />}
+            <span>{editorPreview
+              ? layout.locked ? 'Resize cards' : 'Save & publish'
+              : layout.locked ? 'Locked' : 'Lock panel'}</span>
           </button>
         ) : (
           <span className="race-rider-overlay-lock" aria-label="Rider panel locked">
@@ -644,9 +787,22 @@ export function RaceRiderOverlay({
             <span>Locked</span>
           </span>
         )}
+        {editorPreview && publishStatus !== 'idle' && (
+          <span
+            className={`race-rider-overlay-publish-status ${publishStatus}`}
+            role="status"
+            aria-live="polite"
+          >
+            {publishStatus === 'saving'
+              ? 'Publishing…'
+              : publishStatus === 'saved'
+                ? 'Published to every device'
+                : 'Saved here · cross-device publish will retry'}
+          </span>
+        )}
       </div>
       <div className="race-rider-overlay-grid">
-        {entries.map((entry) => (
+        {displayedEntries.map((entry) => (
           <div
             className={`race-rider-overlay-card race-rider-overlay-card-${entry.kind}${entry.disqualified ? ' disqualified' : positionsEstablished ? '' : ' positions-pending'}`}
             style={{ '--player-color': entry.accent } as CSSProperties}
@@ -708,7 +864,9 @@ export function RaceRiderOverlay({
           aria-label="Resize rider overlay"
           title="Resize rider panel horizontally and vertically"
           onPointerDown={beginResize}
-        />
+        >
+          <Maximize2 size={22} aria-hidden="true" />
+        </button>
       )}
     </div>
   );

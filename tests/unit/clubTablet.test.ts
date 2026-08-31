@@ -45,6 +45,7 @@ import {
 } from '../../src/components/ClubTabletMode';
 import {
   clubTabletAuthorizationTimeoutMs,
+  clubTabletRosterRefreshMs,
   expireClubTabletSessionLocallyFirst,
 } from '../../src/components/ClubTabletRuntime';
 import { safelyReleaseCompletedClubTabletSession } from '../../src/lib/clubTabletExerciseCompletion';
@@ -119,6 +120,17 @@ afterEach(() => {
 });
 
 describe('Club Tablet client state', () => {
+  it('refreshes an authorized roster often enough to receive published layouts', () => {
+    expect(clubTabletRosterRefreshMs).toBeGreaterThanOrEqual(5_000);
+    expect(clubTabletRosterRefreshMs).toBeLessThanOrEqual(15_000);
+    const runtimeSource = readFileSync(
+      new URL('../../src/components/ClubTabletRuntime.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(runtimeSource).toContain('onRosterRefresh(nextRoster)');
+    expect(runtimeSource).toContain("document.addEventListener('visibilitychange', handleVisibilityChange)");
+  });
+
   it('requires an explicit rider start on independent Club Tablet activities', () => {
     expect(clubTabletRaceStartAllowed({
       clubTabletKioskMode: true,
