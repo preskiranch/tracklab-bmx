@@ -428,9 +428,11 @@
   }
 
   .race-fullscreen .race-rider-overlay-card {
+    /* Reserve the full summary height for three-line names and both live
+       metrics. Card borders still separate the compact 2-by-2 portrait grid. */
     grid-template-rows: minmax(0, 1fr) var(--rr-portrait-place, 34px);
-    gap: 2px;
-    padding: 2px;
+    gap: 0;
+    padding: 0 1px;
   }
 
   .race-fullscreen .race-rider-overlay-card.positions-pending {
@@ -438,7 +440,7 @@
   }
 
   .race-fullscreen .race-rider-overlay-summary {
-    gap: 2px;
+    gap: 1px;
   }
 
   .race-fullscreen .race-rider-overlay .race-rider-overlay-avatar {
@@ -479,7 +481,7 @@
   .race-fullscreen .race-rider-overlay-identity.has-long-name strong {
     /* Long names get an extra line instead of becoming unreadably small. */
     font-size: 1em;
-    line-height: 0.95;
+    line-height: 1;
     -webkit-line-clamp: 3;
   }
 
