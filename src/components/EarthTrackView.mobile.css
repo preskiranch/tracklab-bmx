@@ -460,7 +460,10 @@
 
   .race-fullscreen .race-rider-overlay-badge {
     position: absolute;
-    right: -2px;
+    /* Keep the badge inside the fixed portrait column. Letting it hang two
+       pixels into the identity column can touch a three-line rider name on
+       Linux even though the same font clears it on iOS. */
+    right: 0;
     bottom: -2px;
     width: 22px;
     min-width: 22px;
