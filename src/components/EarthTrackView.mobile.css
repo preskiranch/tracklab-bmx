@@ -413,6 +413,12 @@
     min-height: var(--rr-short-portrait-toolbar, 20px);
   }
 
+  .race-fullscreen .race-rider-overlay:not(.editor-preview) .race-rider-overlay-lock {
+    min-height: var(--rr-short-portrait-toolbar, 20px);
+    margin-right: 2px;
+    padding: 0 4px;
+  }
+
   .race-fullscreen .race-rider-overlay-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-rows: repeat(2, minmax(0, 1fr));
@@ -424,11 +430,15 @@
   .race-fullscreen .race-rider-overlay-card {
     grid-template-rows: minmax(0, 1fr) var(--rr-portrait-place, 34px);
     gap: 2px;
-    padding: 3px 4px;
+    padding: 2px;
   }
 
   .race-fullscreen .race-rider-overlay-card.positions-pending {
     grid-template-rows: minmax(0, 1fr);
+  }
+
+  .race-fullscreen .race-rider-overlay-summary {
+    gap: 2px;
   }
 
   .race-fullscreen .race-rider-overlay .race-rider-overlay-avatar {
