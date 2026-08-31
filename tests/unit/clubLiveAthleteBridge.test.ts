@@ -3,6 +3,7 @@ import {
   advanceClubLiveRacePreviewSession,
   buildClubLiveSnapshot,
   clubLiveScreenFrameMatchesVisibleActivity,
+  clubLiveStreamSnapshotRevision,
   type ClubLiveActivityState,
 } from '../../src/components/ClubLiveAthleteBridge';
 
@@ -20,6 +21,24 @@ function snapshot(activity: ClubLiveActivityState) {
 }
 
 describe('Club Live athlete review lifecycle', () => {
+  it('changes the stream revision before switching between independent and shared event views', () => {
+    const base = {
+      clubId: selection.clubId,
+      studioRiderId: selection.studioRiderId,
+      sessionId: 'activity-session-1',
+      activityType: 'bmx-race',
+      multiplayer: false,
+    } as ReturnType<typeof buildClubLiveSnapshot>;
+
+    expect(clubLiveStreamSnapshotRevision(base)).toBe(
+      'club-1:rider-1:activity-session-1:bmx-race:individual',
+    );
+    expect(clubLiveStreamSnapshotRevision({ ...base!, multiplayer: true })).toBe(
+      'club-1:rider-1:activity-session-1:bmx-race:shared-event',
+    );
+    expect(clubLiveStreamSnapshotRevision(null)).toBe('');
+  });
+
   it('never publishes a native frame while a non-activity screen is visible', () => {
     const liveSnapshot = {
       clubId: selection.clubId,

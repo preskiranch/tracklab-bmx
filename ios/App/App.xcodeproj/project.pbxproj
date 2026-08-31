@@ -39,6 +39,8 @@
 		A9B7C1D10000000200000002 /* StoreKitPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B7C1D20000000200000002 /* StoreKitPlugin.swift */; };
 		A9B7C1D10000000300000003 /* NativeSessionPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B7C1D20000000300000003 /* NativeSessionPlugin.swift */; };
 		C1A5E0F10000000100000001 /* ClubLiveScreenMirrorPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A5E0F20000000100000001 /* ClubLiveScreenMirrorPlugin.swift */; };
+		C1A5E0F10000000200000002 /* ClubLiveVideoStreamPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A5E0F20000000200000002 /* ClubLiveVideoStreamPlugin.swift */; };
+		C1A5E0F10000000300000003 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = C1A5E0F40000000100000001 /* WebRTC */; };
 		FAC30C7438B083BF3F9CD616 /* TrackLab Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 71DBE0594E337BEF31CC810F /* TrackLab Watch App.app */; };
 /* End PBXBuildFile section */
 
@@ -99,6 +101,7 @@
 		A9B7C1D20000000200000002 /* StoreKitPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StoreKitPlugin.swift; sourceTree = "<group>"; };
 		A9B7C1D20000000300000003 /* NativeSessionPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NativeSessionPlugin.swift; sourceTree = "<group>"; };
 		C1A5E0F20000000100000001 /* ClubLiveScreenMirrorPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClubLiveScreenMirrorPlugin.swift; sourceTree = "<group>"; };
+		C1A5E0F20000000200000002 /* ClubLiveVideoStreamPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClubLiveVideoStreamPlugin.swift; sourceTree = "<group>"; };
 		F007C69B26274CBC3949C03A /* HeartRatePlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HeartRatePlugin.swift; sourceTree = "<group>"; };
 		FADA3E08274186CD24A607E4 /* HeartRateCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HeartRateCoordinator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -109,6 +112,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */,
+				C1A5E0F10000000300000003 /* WebRTC in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -174,6 +178,7 @@
 				A9B7C1D20000000200000002 /* StoreKitPlugin.swift */,
 				A9B7C1D20000000300000003 /* NativeSessionPlugin.swift */,
 				C1A5E0F20000000100000001 /* ClubLiveScreenMirrorPlugin.swift */,
+				C1A5E0F20000000200000002 /* ClubLiveVideoStreamPlugin.swift */,
 				C30ACAEF452E45D8A8D5D46D /* WatchConnectSession.swift */,
 				B57481343D689AF7667233D7 /* TrackLabBridgeViewController.swift */,
 				E9A4380DA630675844059865 /* PrivacyInfo.xcprivacy */,
@@ -216,6 +221,7 @@
 			name = App;
 			packageProductDependencies = (
 				4D22ABE82AF431CB00220026 /* CapApp-SPM */,
+				C1A5E0F40000000100000001 /* WebRTC */,
 			);
 			productName = App;
 			productReference = 504EC3041FED79650016851F /* App.app */;
@@ -289,6 +295,7 @@
 			mainGroup = 504EC2FB1FED79650016851F;
 			packageReferences = (
 				D4C12C0A2AAA248700AAC8A2 /* XCLocalSwiftPackageReference "CapApp-SPM" */,
+				C1A5E0F30000000100000001 /* XCRemoteSwiftPackageReference "WebRTC" */,
 			);
 			productRefGroup = 504EC3051FED79650016851F /* Products */;
 			projectDirPath = "";
@@ -346,6 +353,7 @@
 				A9B7C1D10000000200000002 /* StoreKitPlugin.swift in Sources */,
 				A9B7C1D10000000300000003 /* NativeSessionPlugin.swift in Sources */,
 				C1A5E0F10000000100000001 /* ClubLiveScreenMirrorPlugin.swift in Sources */,
+				C1A5E0F10000000200000002 /* ClubLiveVideoStreamPlugin.swift in Sources */,
 				0B8A3C8B39DE41A9B65D1003 /* RecoveryAlertWire.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -637,11 +645,27 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		C1A5E0F30000000100000001 /* XCRemoteSwiftPackageReference "WebRTC" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stasel/WebRTC.git";
+			requirement = {
+				kind = exactVersion;
+				version = 151.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		4D22ABE82AF431CB00220026 /* CapApp-SPM */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = D4C12C0A2AAA248700AAC8A2 /* XCLocalSwiftPackageReference "CapApp-SPM" */;
 			productName = "CapApp-SPM";
+		};
+		C1A5E0F40000000100000001 /* WebRTC */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C1A5E0F30000000100000001 /* XCRemoteSwiftPackageReference "WebRTC" */;
+			productName = WebRTC;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

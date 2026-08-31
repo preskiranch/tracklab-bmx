@@ -98,6 +98,8 @@ const rootDirectory = path.resolve(__dirname, '..');
 const distDirectory = path.join(rootDirectory, 'dist');
 const port = Number(process.env.PORT ?? 10000);
 const websocketPath = '/multiplayer';
+const clubLiveStreamWebsocketPath = '/club-live-stream';
+const clubLiveStreamWebsocketScope = 'club-live-stream';
 const databaseRequired = process.env.TRACKLAB_REQUIRE_DATABASE === '1';
 const serverInstanceId = randomUUID();
 const apnsConfiguration = apnsConfigurationFromEnv(process.env);
@@ -193,6 +195,36 @@ const clubLiveFrameUploadLimit = 6;
 const maxClubLiveFrameDecodedBytes = 350 * 1024;
 const maxClubLiveFrameDimension = 1_280;
 const maxClubLiveFrameBodyBytes = Math.ceil(maxClubLiveFrameDecodedBytes * 4 / 3) + 16_384;
+const maxClubLiveStreamPublishersPerClub = maxBillingBikeSeats;
+const maxClubLiveStreamViewersPerClub = 2;
+const maxClubLiveStreamSubscriptionsPerViewer = maxBillingBikeSeats;
+const maxClubLiveStreamSdpBytes = 64 * 1024;
+const maxClubLiveStreamIceCandidateBytes = 4 * 1024;
+const maxClubLiveStreamMessageBytes = 72 * 1024;
+const configuredClubLiveStreamSignalLimit = Number(
+  process.env.TRACKLAB_CLUB_LIVE_STREAM_SIGNAL_LIMIT,
+);
+const clubLiveStreamSignalLimit = Number.isFinite(configuredClubLiveStreamSignalLimit)
+  ? Math.max(8, Math.min(160, Math.round(configuredClubLiveStreamSignalLimit)))
+  : 96;
+const clubLiveStreamControlLimit = 24;
+const clubLiveStreamRateWindowMs = 10_000;
+const clubLiveStreamViewerVerificationTtlMs = 5_000;
+// The in-memory test persistence adapter resolves reads in microtasks. These
+// test-only delays make socket-close lifecycle races deterministic without
+// changing any production execution path.
+const clubLiveStreamTestPresentationDelayMs = process.env.NODE_ENV === 'test'
+  ? Math.max(0, Math.min(
+      1_000,
+      Math.round(Number(process.env.TRACKLAB_TEST_CLUB_LIVE_STREAM_PRESENTATION_DELAY_MS) || 0),
+    ))
+  : 0;
+const clubLiveStreamTestViewerVerificationDelayMs = process.env.NODE_ENV === 'test'
+  ? Math.max(0, Math.min(
+      1_000,
+      Math.round(Number(process.env.TRACKLAB_TEST_CLUB_LIVE_STREAM_VIEWER_DELAY_MS) || 0),
+    ))
+  : 0;
 const clubLiveJpegStartOfFrameMarkers = new Set([
   0xc0, 0xc1, 0xc2, 0xc3,
   0xc5, 0xc6, 0xc7,
@@ -237,6 +269,11 @@ const authWebSocketTicketTtlMs = Number.isFinite(configuredAuthWebSocketTicketTt
   ? Math.max(100, Math.min(60_000, Math.round(configuredAuthWebSocketTicketTtlMs)))
   : 30 * 1000;
 const maxAuthWebSocketTickets = 4_096;
+// Club Tablet grants are one-use and normally consumed immediately. Bound both
+// the process-wide store and a single authenticated tablet session so a broken
+// reconnect loop cannot retain unbounded timers or crowd out every other kiosk.
+const maxClubTabletWebSocketTickets = 4_096;
+const maxClubTabletWebSocketTicketsPerSession = 8;
 const latencyGoodMs = 90;
 const latencyOkMs = 180;
 const defaultAdminAccountEmail = 'preskiranch@gmail.com';
@@ -1517,7 +1554,12 @@ function createSessionToken() {
   return randomBytes(32).toString('base64url');
 }
 
-const authWebSocketTicketScopes = new Set(['multiplayer', 'live-audio']);
+const authWebSocketTicketScopes = new Set([
+  'multiplayer',
+  'live-audio',
+  clubLiveStreamWebsocketScope,
+]);
+const clubTabletWebSocketTicketScopes = new Set(['multiplayer', clubLiveStreamWebsocketScope]);
 const liveAudioWebSocketMessageTypes = new Set([
   'hello',
   'presence',
@@ -1527,6 +1569,14 @@ const liveAudioWebSocketMessageTypes = new Set([
   'join-room',
   'leave-room',
   'voice-signal',
+]);
+const clubLiveStreamWebSocketMessageTypes = new Set([
+  'ping',
+  'club-live-stream-register-publisher',
+  'club-live-stream-register-viewer',
+  'club-live-stream-subscribe',
+  'club-live-stream-signal',
+  'club-live-stream-stop',
 ]);
 
 function pruneAuthWebSocketTickets(now = Date.now()) {
@@ -1583,6 +1633,48 @@ function revokeAuthWebSocketTicketsForSession(sessionTokenHash) {
     if (ticket._expiryTimer) clearTimeout(ticket._expiryTimer);
     authWebSocketTicketsByHash.delete(hash);
   });
+}
+
+function pruneClubTabletWebSocketTickets(now = Date.now()) {
+  clubTabletWsTicketsByHash.forEach((ticket, hash) => {
+    if (ticket.expiresAt > now) return;
+    if (ticket._expiryTimer) clearTimeout(ticket._expiryTimer);
+    clubTabletWsTicketsByHash.delete(hash);
+  });
+}
+
+function createClubTabletWebSocketTicket(tabletSession, scope, now = Date.now(), claims = {}) {
+  pruneClubTabletWebSocketTickets(now);
+  if (
+    !tabletSession?.tokenHash
+    || !clubTabletWebSocketTicketScopes.has(scope)
+  ) return null;
+  let sessionTicketCount = 0;
+  for (const existing of clubTabletWsTicketsByHash.values()) {
+    if (existing.sessionTokenHash === tabletSession.tokenHash) sessionTicketCount += 1;
+  }
+  if (
+    clubTabletWsTicketsByHash.size >= maxClubTabletWebSocketTickets
+    || sessionTicketCount >= maxClubTabletWebSocketTicketsPerSession
+  ) return null;
+  const ticket = createSessionToken();
+  const ticketHash = tokenHash(ticket);
+  const expiresAt = now + clubTabletWsTicketTtlMs;
+  const record = {
+    ...claims,
+    sessionTokenHash: tabletSession.tokenHash,
+    scope,
+    expiresAt,
+    _expiryTimer: null,
+  };
+  record._expiryTimer = setTimeout(() => {
+    if (clubTabletWsTicketsByHash.get(ticketHash) === record) {
+      clubTabletWsTicketsByHash.delete(ticketHash);
+    }
+  }, clubTabletWsTicketTtlMs + 25);
+  record._expiryTimer.unref?.();
+  clubTabletWsTicketsByHash.set(ticketHash, record);
+  return { token: ticket, expiresAt };
 }
 
 async function hashPassword(password) {
@@ -8005,8 +8097,25 @@ function storeClubLiveFrame(key, frame) {
 }
 
 function deleteClubLiveSession(key) {
+  const session = clubLiveSessions.get(key);
   deleteClubLiveFrame(key);
-  return clubLiveSessions.delete(key);
+  const deleted = clubLiveSessions.delete(key);
+  if (deleted && session) {
+    for (const client of clients.values()) {
+      const registration = client.clubLiveStreamRegistration;
+      if (
+        client.websocketScope === clubLiveStreamWebsocketScope
+        && registration?.role === 'publisher'
+        && registration.clubId === session.clubId
+        && registration.studioRiderId === session.studioRiderId
+        && registration.sessionId === session.sessionId
+      ) {
+        unregisterClubLiveStreamClient(client, 'activity-ended');
+        client.socket?.close(1008, 'Club Live activity ended');
+      }
+    }
+  }
+  return deleted;
 }
 
 function deleteClubLiveSessionsWhere(predicate) {
@@ -9461,6 +9570,729 @@ function sanitizeVoiceSignal(value) {
   }
 
   return null;
+}
+
+function clubLiveStreamError(client, code, message) {
+  send(client, {
+    type: 'club-live-stream-error',
+    code: sanitizeText(code, 'invalid-request', 80),
+    message: sanitizeText(message, 'The live screen request is invalid.', 240),
+  });
+}
+
+function clubLiveStreamMessageHasOnlyKeys(message, allowedKeys) {
+  if (!message || typeof message !== 'object' || Array.isArray(message)) return false;
+  const allowed = new Set(allowedKeys);
+  return Object.keys(message).every((key) => allowed.has(key));
+}
+
+function sanitizeClubLiveStreamSignal(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const type = sanitizeText(value.type, '', 24);
+  const negotiationId = typeof value.negotiationId === 'string'
+    ? value.negotiationId.trim()
+    : '';
+  if (!/^[A-Za-z0-9:_-]{1,120}$/u.test(negotiationId)) return null;
+  if (type === 'offer' || type === 'answer') {
+    const sdp = typeof value.sdp === 'string' ? value.sdp : '';
+    if (
+      !sdp
+      || Buffer.byteLength(sdp, 'utf8') > maxClubLiveStreamSdpBytes
+      || !clubLiveStreamMessageHasOnlyKeys(value, ['type', 'sdp', 'negotiationId'])
+    ) return null;
+    return { type, sdp, negotiationId };
+  }
+  if (type === 'candidate') {
+    const candidate = typeof value.candidate === 'string' ? value.candidate : '';
+    const allowedCandidateKeys = [
+      'type',
+      'candidate',
+      'sdpMid',
+      'sdpMLineIndex',
+      'usernameFragment',
+      'negotiationId',
+    ];
+    if (
+      !candidate
+      || Buffer.byteLength(candidate, 'utf8') > maxClubLiveStreamIceCandidateBytes
+      || !clubLiveStreamMessageHasOnlyKeys(value, allowedCandidateKeys)
+    ) return null;
+    const sdpMid = value.sdpMid == null
+      ? null
+      : typeof value.sdpMid === 'string'
+        && Buffer.byteLength(value.sdpMid, 'utf8') <= 120
+        ? value.sdpMid
+        : undefined;
+    const rawLineIndex = value.sdpMLineIndex;
+    const sdpMLineIndex = rawLineIndex == null
+      ? null
+      : Number.isInteger(Number(rawLineIndex))
+        && Number(rawLineIndex) >= 0
+        && Number(rawLineIndex) <= 32
+        ? Number(rawLineIndex)
+        : undefined;
+    const usernameFragment = value.usernameFragment == null
+      ? undefined
+      : typeof value.usernameFragment === 'string'
+        && Buffer.byteLength(value.usernameFragment, 'utf8') <= 240
+        ? value.usernameFragment
+        : null;
+    if (sdpMid === undefined || sdpMLineIndex === undefined || usernameFragment === null) return null;
+    return {
+      type,
+      candidate,
+      negotiationId,
+      sdpMid,
+      sdpMLineIndex,
+      ...(usernameFragment === undefined ? {} : { usernameFragment }),
+    };
+  }
+  return null;
+}
+
+function currentClubLiveStreamPublisherState(client, now = Date.now()) {
+  const authorization = client?.clubLiveStreamAuthorization;
+  if (authorization?.role !== 'publisher') return null;
+  const tabletSession = clubTabletSessionsByTokenHash.get(authorization.sessionTokenHash);
+  if (
+    !clubTabletSessionIsCurrent(tabletSession, now)
+    || tabletSession.clubId !== authorization.clubId
+    || tabletSession.deviceId !== authorization.deviceId
+    || tabletSession.studioRiderId !== authorization.studioRiderId
+  ) return null;
+  const liveSession = clubLiveSessions.get(clubLiveSessionKey(
+    tabletSession.clubId,
+    tabletSession.studioRiderId,
+  ));
+  if (
+    !liveSession
+    || liveSession.expiresAt <= now
+    || liveSession.sessionId !== authorization.sessionId
+    || liveSession.clubId !== tabletSession.clubId
+    || liveSession.studioRiderId !== tabletSession.studioRiderId
+    || liveSession._publisherDeviceId !== tabletSession.deviceId
+    || liveSession._publisherClubTabletSessionHash !== tabletSession.tokenHash
+  ) return null;
+  return { tabletSession, liveSession };
+}
+
+function clearClubLiveStreamViewerVerification(client) {
+  if (!client) return;
+  client.clubLiveStreamViewerVerification = null;
+  client.clubLiveStreamViewerVerificationPromise = null;
+  client.clubLiveStreamViewerVerificationGeneration = (
+    client.clubLiveStreamViewerVerificationGeneration ?? 0
+  ) + 1;
+}
+
+async function loadCurrentClubLiveStreamViewerState(client) {
+  const authorization = client?.clubLiveStreamAuthorization;
+  if (
+    authorization?.role !== 'viewer'
+    || !client.authSessionTokenHash
+    || client.authSessionTokenHash !== authorization.authSessionTokenHash
+  ) return null;
+  if (clubLiveStreamTestViewerVerificationDelayMs > 0) {
+    await new Promise((resolve) => setTimeout(
+      resolve,
+      clubLiveStreamTestViewerVerificationDelayMs,
+    ));
+  }
+  const authSession = await currentAuthSessionByHash(client.authSessionTokenHash);
+  if (
+    !authSession?.user
+    || !canManageClubConnect(authSession.user)
+    || authProfileKey(authSession.user) !== authorization.ownerProfileKey
+  ) return null;
+  const state = await persistence.loadClubConnectState(authorization.ownerProfileKey);
+  if (state.ownedClub?.id !== authorization.clubId) return null;
+  return { authSession, club: state.ownedClub };
+}
+
+async function currentClubLiveStreamViewerState(client, { allowCached = false } = {}) {
+  const authorization = client?.clubLiveStreamAuthorization;
+  const now = Date.now();
+  if (
+    authorization?.role !== 'viewer'
+    || !client.authSessionTokenHash
+    || client.authSessionTokenHash !== authorization.authSessionTokenHash
+    || (Number.isFinite(client.authSessionExpiresAt) && client.authSessionExpiresAt <= now)
+  ) {
+    clearClubLiveStreamViewerVerification(client);
+    return null;
+  }
+  if (allowCached) {
+    const cached = client.clubLiveStreamViewerVerification;
+    if (cached?.expiresAt > now) return cached.state;
+    if (client.clubLiveStreamViewerVerificationPromise) {
+      return client.clubLiveStreamViewerVerificationPromise;
+    }
+  }
+  const verificationGeneration = client.clubLiveStreamViewerVerificationGeneration ?? 0;
+  const verification = loadCurrentClubLiveStreamViewerState(client);
+  if (allowCached) client.clubLiveStreamViewerVerificationPromise = verification;
+  try {
+    const state = await verification;
+    if (client.clubLiveStreamViewerVerificationGeneration === verificationGeneration) {
+      client.clubLiveStreamViewerVerification = state
+        ? { state, expiresAt: Date.now() + clubLiveStreamViewerVerificationTtlMs }
+        : null;
+    }
+    return state;
+  } finally {
+    if (client.clubLiveStreamViewerVerificationPromise === verification) {
+      client.clubLiveStreamViewerVerificationPromise = null;
+    }
+  }
+}
+
+function individualClubLiveStreamPresentation(liveSession) {
+  return {
+    mode: 'individual',
+    activityType: liveSession.activityType,
+  };
+}
+
+async function verifiedClubLiveStreamPresentation(
+  tabletSession,
+  liveSession,
+  { preserveOnUnavailable = false } = {},
+) {
+  const individual = individualClubLiveStreamPresentation(liveSession);
+  if (clubLiveStreamTestPresentationDelayMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, clubLiveStreamTestPresentationDelayMs));
+  }
+  let event;
+  try {
+    event = await loadCurrentClubEventOrThrow(tabletSession.clubId);
+  } catch (error) {
+    cloudTelemetry.warn('club_live_stream.presentation_unavailable', {
+      clubId: tabletSession.clubId,
+      deviceId: tabletSession.deviceId,
+      error,
+    });
+    return preserveOnUnavailable ? null : individual;
+  }
+  const participant = Array.isArray(event?.participants)
+    ? event.participants.find((candidate) => (
+      candidate.deviceId === tabletSession.deviceId
+      && candidate.studioRiderId === tabletSession.studioRiderId
+      && candidate.sessionTokenHash === tabletSession.tokenHash
+    ))
+    : null;
+  const startAt = Number(event?.startAt);
+  if (
+    event?.status !== 'active'
+    || event.clubId !== tabletSession.clubId
+    || event.activityType !== liveSession.activityType
+    || liveSession.multiplayer !== true
+    || !participant
+    || !Number.isSafeInteger(startAt)
+    || startAt <= 0
+  ) return individual;
+  const sharedViewDigest = createHash('sha256').update(JSON.stringify({
+    clubId: event.clubId,
+    eventId: event.id,
+    activityType: event.activityType,
+    startAt,
+  })).digest('base64url').slice(0, 24);
+  return {
+    mode: 'shared',
+    activityType: event.activityType,
+    sharedViewId: `CLUBVIEW_${sharedViewDigest}`,
+    eventId: event.id,
+    startAt,
+    seatNumber: Math.max(1, Math.min(
+      maxRaceBikeCount,
+      Math.round(Number(participant.seatNumber) || 1),
+    )),
+  };
+}
+
+function clubLiveStreamPresentationsEqual(left, right) {
+  return left?.mode === right?.mode
+    && left?.activityType === right?.activityType
+    && (left?.sharedViewId ?? '') === (right?.sharedViewId ?? '')
+    && (left?.eventId ?? '') === (right?.eventId ?? '')
+    && (left?.startAt ?? null) === (right?.startAt ?? null)
+    && (left?.seatNumber ?? null) === (right?.seatNumber ?? null);
+}
+
+async function refreshClubLiveStreamPublisherPresentation(tabletSession, liveSession) {
+  const publishers = [...clients.values()].filter((candidate) => (
+    candidate.websocketScope === clubLiveStreamWebsocketScope
+    && candidate.socket?.readyState === WebSocket.OPEN
+    && candidate.clubLiveStreamRegistration?.role === 'publisher'
+    && candidate.clubLiveStreamRegistration.clubId === tabletSession.clubId
+    && candidate.clubLiveStreamRegistration.deviceId === tabletSession.deviceId
+    && candidate.clubLiveStreamRegistration.studioRiderId === tabletSession.studioRiderId
+    && candidate.clubLiveStreamRegistration.sessionId === liveSession.sessionId
+  ));
+  for (const client of publishers) {
+    const registration = client.clubLiveStreamRegistration;
+    const presentation = await verifiedClubLiveStreamPresentation(
+      tabletSession,
+      liveSession,
+      // A temporary club-event storage failure must not flicker a verified
+      // shared stage back to four screens. The next heartbeat retries.
+      { preserveOnUnavailable: true },
+    );
+    const currentState = currentClubLiveStreamPublisherState(client);
+    if (
+      !presentation
+      || clients.get(client.id) !== client
+      || client.socket?.readyState !== WebSocket.OPEN
+      || client.clubLiveStreamRegistration !== registration
+      || currentState?.tabletSession.tokenHash !== tabletSession.tokenHash
+      || currentState?.liveSession !== liveSession
+    ) continue;
+    if (clubLiveStreamPresentationsEqual(registration.presentation, presentation)) continue;
+    client.clubLiveStreamRegistration = { ...registration, presentation };
+    // The same authenticated publisher ID remains subscribed, so an updated
+    // added payload changes only its server-derived grouping metadata and does
+    // not renegotiate or interrupt the media stream. Viewer verification can
+    // involve storage I/O, so it must not hold up the tablet's short heartbeat
+    // response or let a healthy live session expire while the owner is slow.
+    void notifyClubLiveStreamPublisherAdded(client).catch((error) => {
+      cloudTelemetry.warn('club_live_stream.presentation_notify_failed', {
+        clubId: tabletSession.clubId,
+        deviceId: tabletSession.deviceId,
+        error,
+      });
+    });
+  }
+}
+
+function publicClubLiveStreamPublisher(client) {
+  const registration = client?.clubLiveStreamRegistration;
+  if (registration?.role !== 'publisher') return null;
+  const presentation = registration.presentation ?? {};
+  return {
+    publisherId: client.id,
+    clubId: registration.clubId,
+    deviceId: registration.deviceId,
+    studioRiderId: registration.studioRiderId,
+    riderName: registration.riderName,
+    sessionId: registration.sessionId,
+    activityType: registration.activityType,
+    presentation: presentation.mode === 'shared' ? 'shared' : 'individual',
+    ...(presentation.sharedViewId ? { sharedViewId: presentation.sharedViewId } : {}),
+    presentationMetadata: {
+      activityType: presentation.activityType ?? registration.activityType,
+      ...(presentation.eventId ? { eventId: presentation.eventId } : {}),
+      ...(Number.isSafeInteger(presentation.startAt) ? { startAt: presentation.startAt } : {}),
+      ...(Number.isSafeInteger(presentation.seatNumber)
+        ? { seatNumber: presentation.seatNumber }
+        : {}),
+    },
+    registeredAt: registration.registeredAt,
+  };
+}
+
+function clubLiveStreamPublishersForClub(clubId) {
+  return [...clients.values()]
+    .filter((candidate) => (
+      candidate.websocketScope === clubLiveStreamWebsocketScope
+      && candidate.clubLiveStreamRegistration?.role === 'publisher'
+      && candidate.clubLiveStreamRegistration.clubId === clubId
+      && candidate.socket?.readyState === WebSocket.OPEN
+      && currentClubLiveStreamPublisherState(candidate)
+    ))
+    .map(publicClubLiveStreamPublisher)
+    .filter(Boolean)
+    .sort((left, right) => (
+      (left.presentationMetadata?.seatNumber ?? maxRaceBikeCount + 1)
+      - (right.presentationMetadata?.seatNumber ?? maxRaceBikeCount + 1)
+      || left.deviceId.localeCompare(right.deviceId)
+    ));
+}
+
+function registeredClubLiveStreamViewers(clubId) {
+  return [...clients.values()].filter((candidate) => (
+    candidate.websocketScope === clubLiveStreamWebsocketScope
+    && candidate.clubLiveStreamRegistration?.role === 'viewer'
+    && candidate.clubLiveStreamRegistration.clubId === clubId
+    && candidate.socket?.readyState === WebSocket.OPEN
+  ));
+}
+
+function consumeClubLiveStreamMessageBudget(client, signal, now = Date.now()) {
+  if (now - client.clubLiveStreamMessageWindowStartedAt >= clubLiveStreamRateWindowMs) {
+    client.clubLiveStreamMessageWindowStartedAt = now;
+    client.clubLiveStreamSignalCount = 0;
+    client.clubLiveStreamControlCount = 0;
+  }
+  const key = signal ? 'clubLiveStreamSignalCount' : 'clubLiveStreamControlCount';
+  const limit = signal ? clubLiveStreamSignalLimit : clubLiveStreamControlLimit;
+  client[key] += 1;
+  if (client[key] <= limit) return true;
+  clubLiveStreamError(
+    client,
+    'rate-limit',
+    signal
+      ? 'Too many live screen signaling messages were sent.'
+      : 'Too many live screen control messages were sent.',
+  );
+  cloudTelemetry.increment('tracklab_club_live_stream_rate_limits_total', {
+    kind: signal ? 'signal' : 'control',
+  });
+  return false;
+}
+
+async function notifyClubLiveStreamPublisherAdded(client) {
+  // Keep the exact registration object as a generation token. Authorization
+  // checks below may await storage, while a socket close/re-register can remove
+  // or replace this publisher in the meantime.
+  const registration = client?.clubLiveStreamRegistration;
+  if (registration?.role !== 'publisher') return;
+  for (const viewer of registeredClubLiveStreamViewers(registration.clubId)) {
+    const viewerState = await currentClubLiveStreamViewerState(viewer);
+    const viewerIsLive = (
+      clients.get(viewer.id) === viewer
+      && viewer.socket?.readyState === WebSocket.OPEN
+      && viewer.clubLiveStreamRegistration?.role === 'viewer'
+      && viewer.clubLiveStreamRegistration.clubId === registration.clubId
+    );
+    if (!viewerIsLive) continue;
+
+    const publisherIsLive = (
+      clients.get(client.id) === client
+      && client.socket?.readyState === WebSocket.OPEN
+      && client.clubLiveStreamRegistration === registration
+      && Boolean(currentClubLiveStreamPublisherState(client))
+    );
+    if (!publisherIsLive) return;
+
+    if (viewerState?.club.id === registration.clubId) {
+      // Build the public payload only after both sides have survived the await;
+      // this prevents a removed publisher from being announced again.
+      const publisher = publicClubLiveStreamPublisher(client);
+      if (!publisher) return;
+      send(viewer, { type: 'club-live-stream-publisher-added', publisher });
+    } else {
+      closeInvalidClubLiveStreamClient(
+        viewer,
+        'viewer-authorization-ended',
+        'This club owner session can no longer view live tablet screens.',
+      );
+    }
+  }
+}
+
+function unregisterClubLiveStreamClient(client, reason = 'stopped') {
+  const registration = client?.clubLiveStreamRegistration;
+  if (!registration) {
+    clearClubLiveStreamViewerVerification(client);
+    return;
+  }
+  if (registration.role === 'publisher') {
+    registeredClubLiveStreamViewers(registration.clubId).forEach((viewer) => {
+      viewer.clubLiveStreamSubscriptions?.delete(client.id);
+      send(viewer, {
+        type: 'club-live-stream-publisher-removed',
+        publisherId: client.id,
+        reason,
+      });
+    });
+  } else if (registration.role === 'viewer') {
+    for (const publisherId of client.clubLiveStreamSubscriptions ?? []) {
+      const publisher = clients.get(publisherId);
+      if (publisher?.clubLiveStreamRegistration?.role === 'publisher') {
+        publisher.clubLiveStreamViewerIds?.delete(client.id);
+        send(publisher, {
+          type: 'club-live-stream-viewer',
+          viewerId: client.id,
+          subscribed: false,
+          reason,
+        });
+      }
+    }
+  }
+  client.clubLiveStreamRegistration = null;
+  client.clubLiveStreamSubscriptions?.clear();
+  client.clubLiveStreamViewerIds?.clear();
+  clearClubLiveStreamViewerVerification(client);
+}
+
+function closeInvalidClubLiveStreamClient(client, code, message) {
+  clubLiveStreamError(client, code, message);
+  unregisterClubLiveStreamClient(client, code);
+  client.socket?.close(1008, message);
+}
+
+async function registerClubLiveStreamPublisher(client, message) {
+  if (!clubLiveStreamMessageHasOnlyKeys(message, ['type', 'sessionId'])) {
+    clubLiveStreamError(client, 'invalid-registration', 'Only the active server-issued session can be registered.');
+    return;
+  }
+  let state = currentClubLiveStreamPublisherState(client);
+  if (!state) {
+    closeInvalidClubLiveStreamClient(
+      client,
+      'publisher-authorization-ended',
+      'This tablet activity is no longer authorized for live screen sharing.',
+    );
+    return;
+  }
+  const sessionId = sanitizeText(message.sessionId, '', 160);
+  if (!sessionId || sessionId !== state.liveSession.sessionId) {
+    clubLiveStreamError(client, 'session-mismatch', 'Register the exact active tablet activity session.');
+    return;
+  }
+  // Presentation lookup may require storage I/O. Complete it before checking
+  // duplicate/capacity state, then revalidate the exact activity so no await
+  // can race another publisher into the gap between admission and registration.
+  const presentation = await verifiedClubLiveStreamPresentation(
+    state.tabletSession,
+    state.liveSession,
+  );
+  if (
+    clients.get(client.id) !== client
+    || client.socket?.readyState !== WebSocket.OPEN
+  ) {
+    return;
+  }
+  const currentState = currentClubLiveStreamPublisherState(client);
+  if (
+    !currentState
+    || currentState.tabletSession.tokenHash !== state.tabletSession.tokenHash
+    || currentState.liveSession.sessionId !== sessionId
+  ) {
+    closeInvalidClubLiveStreamClient(
+      client,
+      'publisher-authorization-ended',
+      'This tablet activity is no longer authorized for live screen sharing.',
+    );
+    return;
+  }
+  state = currentState;
+  const existingForSession = [...clients.values()].find((candidate) => (
+    candidate.id !== client.id
+    && candidate.websocketScope === clubLiveStreamWebsocketScope
+    && candidate.clubLiveStreamRegistration?.role === 'publisher'
+    && candidate.clubLiveStreamRegistration.clubId === state.tabletSession.clubId
+    && candidate.clubLiveStreamRegistration.deviceId === state.tabletSession.deviceId
+    && candidate.clubLiveStreamRegistration.sessionId === state.liveSession.sessionId
+  ));
+  if (existingForSession) {
+    unregisterClubLiveStreamClient(existingForSession, 'publisher-reconnected');
+    existingForSession.socket?.close(1008, 'Club Live screen publisher reconnected');
+  }
+  const activePublisherCount = clubLiveStreamPublishersForClub(state.tabletSession.clubId)
+    .filter((publisher) => publisher.publisherId !== client.id)
+    .length;
+  if (activePublisherCount >= maxClubLiveStreamPublishersPerClub) {
+    clubLiveStreamError(client, 'publisher-capacity', 'This club already has four live tablet screens.');
+    return;
+  }
+  client.clubLiveStreamRegistration = {
+    role: 'publisher',
+    clubId: state.tabletSession.clubId,
+    deviceId: state.tabletSession.deviceId,
+    studioRiderId: state.tabletSession.studioRiderId,
+    riderName: state.liveSession.riderName,
+    sessionId: state.liveSession.sessionId,
+    activityType: state.liveSession.activityType,
+    presentation,
+    registeredAt: Date.now(),
+  };
+  send(client, {
+    type: 'club-live-stream-registered',
+    role: 'publisher',
+    publisher: publicClubLiveStreamPublisher(client),
+  });
+  await notifyClubLiveStreamPublisherAdded(client);
+}
+
+async function registerClubLiveStreamViewer(client, message) {
+  if (!clubLiveStreamMessageHasOnlyKeys(message, ['type'])) {
+    clubLiveStreamError(client, 'invalid-registration', 'Viewer registration does not accept client-selected club or group identifiers.');
+    return;
+  }
+  const state = await currentClubLiveStreamViewerState(client);
+  if (!state) {
+    closeInvalidClubLiveStreamClient(
+      client,
+      'viewer-authorization-ended',
+      'This club owner session can no longer view live tablet screens.',
+    );
+    return;
+  }
+  const otherViewerCount = registeredClubLiveStreamViewers(state.club.id)
+    .filter((viewer) => viewer.id !== client.id)
+    .length;
+  if (otherViewerCount >= maxClubLiveStreamViewersPerClub) {
+    clubLiveStreamError(client, 'viewer-capacity', 'This club already has two live screen viewers.');
+    client.socket?.close(1013, 'Club Live viewer capacity reached');
+    return;
+  }
+  client.clubLiveStreamRegistration = {
+    role: 'viewer',
+    clubId: state.club.id,
+    ownerProfileKey: client.clubLiveStreamAuthorization.ownerProfileKey,
+    registeredAt: Date.now(),
+  };
+  send(client, {
+    type: 'club-live-stream-registered',
+    role: 'viewer',
+    club: { id: state.club.id, name: state.club.name },
+    publishers: clubLiveStreamPublishersForClub(state.club.id),
+    maximumSubscriptions: maxClubLiveStreamSubscriptionsPerViewer,
+  });
+}
+
+async function updateClubLiveStreamSubscription(client, message) {
+  if (
+    !clubLiveStreamMessageHasOnlyKeys(message, ['type', 'publisherId', 'subscribed'])
+    || typeof message.subscribed !== 'boolean'
+  ) {
+    clubLiveStreamError(client, 'invalid-subscription', 'Choose one server-listed live tablet screen.');
+    return;
+  }
+  const viewerState = await currentClubLiveStreamViewerState(client);
+  if (!viewerState || client.clubLiveStreamRegistration?.role !== 'viewer') {
+    closeInvalidClubLiveStreamClient(
+      client,
+      'viewer-authorization-ended',
+      'Register the active club owner viewer before subscribing.',
+    );
+    return;
+  }
+  const publisherId = sanitizeText(message.publisherId, '', 80);
+  const publisher = clients.get(publisherId);
+  const publisherState = currentClubLiveStreamPublisherState(publisher);
+  if (
+    !publisherId
+    || !publisherState
+    || publisher?.clubLiveStreamRegistration?.role !== 'publisher'
+    || publisher.clubLiveStreamRegistration.clubId !== viewerState.club.id
+  ) {
+    clubLiveStreamError(client, 'publisher-unavailable', 'That live tablet screen is not available to this club owner.');
+    return;
+  }
+  const subscribed = message.subscribed;
+  if (!subscribed) {
+    const removed = client.clubLiveStreamSubscriptions.delete(publisherId);
+    publisher.clubLiveStreamViewerIds.delete(client.id);
+    send(client, { type: 'club-live-stream-subscription', publisherId, subscribed: false });
+    if (removed) {
+      send(publisher, {
+        type: 'club-live-stream-viewer',
+        viewerId: client.id,
+        subscribed: false,
+      });
+    }
+    return;
+  }
+  if (
+    !client.clubLiveStreamSubscriptions.has(publisherId)
+    && client.clubLiveStreamSubscriptions.size >= maxClubLiveStreamSubscriptionsPerViewer
+  ) {
+    clubLiveStreamError(client, 'subscription-capacity', 'This viewer already has four tablet screens selected.');
+    return;
+  }
+  if (
+    !publisher.clubLiveStreamViewerIds.has(client.id)
+    && publisher.clubLiveStreamViewerIds.size >= maxClubLiveStreamViewersPerClub
+  ) {
+    clubLiveStreamError(client, 'publisher-viewer-capacity', 'That tablet screen already has two viewers.');
+    return;
+  }
+  client.clubLiveStreamSubscriptions.add(publisherId);
+  publisher.clubLiveStreamViewerIds.add(client.id);
+  send(client, { type: 'club-live-stream-subscription', publisherId, subscribed: true });
+  send(publisher, {
+    type: 'club-live-stream-viewer',
+    viewerId: client.id,
+    subscribed: true,
+  });
+}
+
+async function relayClubLiveStreamSignal(client, message) {
+  if (!clubLiveStreamMessageHasOnlyKeys(message, ['type', 'targetId', 'signal'])) {
+    clubLiveStreamError(client, 'invalid-signal', 'A targeted WebRTC signaling message is required.');
+    return;
+  }
+  const targetId = sanitizeText(message.targetId, '', 80);
+  const target = clients.get(targetId);
+  const signal = sanitizeClubLiveStreamSignal(message.signal);
+  if (!targetId || !target || !signal) {
+    clubLiveStreamError(client, 'invalid-signal', 'A valid bounded SDP or ICE message is required.');
+    return;
+  }
+  const registration = client.clubLiveStreamRegistration;
+  let authorized = false;
+  if (registration?.role === 'publisher') {
+    const viewerState = await currentClubLiveStreamViewerState(target, { allowCached: true });
+    authorized = Boolean(
+      currentClubLiveStreamPublisherState(client)
+      && viewerState?.club.id === registration.clubId
+      && target.clubLiveStreamRegistration?.role === 'viewer'
+      && target.clubLiveStreamRegistration.clubId === registration.clubId
+      && target.clubLiveStreamSubscriptions?.has(client.id)
+      && client.clubLiveStreamViewerIds?.has(target.id),
+    );
+  } else if (registration?.role === 'viewer') {
+    const viewerState = await currentClubLiveStreamViewerState(client, { allowCached: true });
+    authorized = Boolean(
+      viewerState
+      && target.clubLiveStreamRegistration?.role === 'publisher'
+      && target.clubLiveStreamRegistration.clubId === viewerState.club.id
+      && currentClubLiveStreamPublisherState(target)
+      && client.clubLiveStreamSubscriptions?.has(target.id)
+      && target.clubLiveStreamViewerIds?.has(client.id),
+    );
+  }
+  if (!authorized) {
+    clubLiveStreamError(client, 'signal-not-authorized', 'Subscribe to that exact same-club screen before signaling.');
+    return;
+  }
+  send(target, {
+    type: 'club-live-stream-signal',
+    fromId: client.id,
+    targetId,
+    signal,
+    at: Date.now(),
+  });
+}
+
+async function handleClubLiveStreamMessage(client, message) {
+  if (!clubLiveStreamWebSocketMessageTypes.has(message.type)) {
+    clubLiveStreamError(client, 'scope-violation', 'This connection accepts only Club Live screen signaling.');
+    client.socket?.close(1008, 'Club Live stream scope violation');
+    return;
+  }
+  if (message.type === 'ping') {
+    send(client, {
+      type: 'pong',
+      id: sanitizeText(message.id, randomId('PING', 8), 80),
+      clientSentAt: finiteNumber(message.clientSentAt, 0),
+      serverNow: Date.now(),
+    });
+    return;
+  }
+  const signal = message.type === 'club-live-stream-signal';
+  if (!consumeClubLiveStreamMessageBudget(client, signal)) return;
+  if (message.type === 'club-live-stream-register-publisher') {
+    await registerClubLiveStreamPublisher(client, message);
+    return;
+  }
+  if (message.type === 'club-live-stream-register-viewer') {
+    await registerClubLiveStreamViewer(client, message);
+    return;
+  }
+  if (message.type === 'club-live-stream-subscribe') {
+    await updateClubLiveStreamSubscription(client, message);
+    return;
+  }
+  if (message.type === 'club-live-stream-signal') {
+    await relayClubLiveStreamSignal(client, message);
+    return;
+  }
+  if (message.type === 'club-live-stream-stop') {
+    unregisterClubLiveStreamClient(client, 'stopped');
+    send(client, { type: 'club-live-stream-stopped' });
+  }
 }
 
 function sanitizeClientIdList(value, limit = maxRaceBikeCount - 1) {
@@ -10974,11 +11806,20 @@ async function handleClientMessage(client, rawMessage) {
   try {
     message = JSON.parse(rawMessage.toString());
   } catch {
-    send(client, { type: 'error', message: 'Invalid multiplayer message.' });
+    if (client.websocketScope === clubLiveStreamWebsocketScope) {
+      clubLiveStreamError(client, 'invalid-json', 'A valid Club Live signaling message is required.');
+    } else {
+      send(client, { type: 'error', message: 'Invalid multiplayer message.' });
+    }
     return;
   }
 
   if (!message || typeof message !== 'object') {
+    return;
+  }
+
+  if (client.websocketScope === clubLiveStreamWebsocketScope) {
+    await handleClubLiveStreamMessage(client, message);
     return;
   }
 
@@ -16030,6 +16871,21 @@ async function serveStatic(request, response) {
       });
       return;
     }
+    if (scope === clubLiveStreamWebsocketScope) {
+      if (!canManageClubConnect(session.user)) {
+        writeJson(response, 403, { error: 'Club owner access is required to view live tablet screens.' }, {
+          'Cache-Control': 'no-store',
+        });
+        return;
+      }
+      const ownerState = await persistence.loadClubConnectState(authProfileKey(session.user));
+      if (!ownerState.ownedClub?.id) {
+        writeJson(response, 403, { error: 'Create or own a club before viewing live tablet screens.' }, {
+          'Cache-Control': 'no-store',
+        });
+        return;
+      }
+    }
     const ticket = createAuthWebSocketTicket(session.sessionTokenHash, scope);
     if (!ticket) {
       writeJson(response, 503, { error: 'Live connection authorization is temporarily unavailable.' }, {
@@ -18370,17 +19226,82 @@ async function serveStatic(request, response) {
       writeJson(response, 401, { error: 'This club tablet athlete session expired or ended.' }, { 'Cache-Control': 'no-store' });
       return;
     }
-    const ticket = createSessionToken();
-    const ticketHash = tokenHash(ticket);
-    const expiresAt = Date.now() + clubTabletWsTicketTtlMs;
-    const record = {
-      sessionTokenHash: tabletSession.tokenHash,
-      expiresAt,
-      _expiryTimer: setTimeout(() => clubTabletWsTicketsByHash.delete(ticketHash), clubTabletWsTicketTtlMs + 25),
-    };
-    record._expiryTimer.unref?.();
-    clubTabletWsTicketsByHash.set(ticketHash, record);
-    writeJson(response, 201, { ticket, expiresAt }, { 'Cache-Control': 'no-store' });
+    const ticket = createClubTabletWebSocketTicket(tabletSession, 'multiplayer');
+    if (!ticket) {
+      writeJson(response, 503, { error: 'Live connection authorization is temporarily unavailable.' }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+    writeJson(response, 201, {
+      ticket: ticket.token,
+      expiresAt: ticket.expiresAt,
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/club-tablet/club-live-stream-ticket') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const tabletSession = await loadClubTabletSessionFromRequest(request);
+    if (!tabletSession) {
+      writeJson(response, 401, { error: 'This club tablet athlete session expired or ended.' }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+    // Use only a one-way digest of the server-verified device/session identity
+    // as the limiter key; never retain the reusable athlete-session credential.
+    const ticketRateLimitKey = tokenHash(
+      `${tabletSession.deviceId}:${tabletSession.tokenHash}`,
+    ).slice(0, 24);
+    if (!enforceCredentialNoStoreRateLimit(
+      response,
+      clubTabletRateLimiter,
+      30,
+      `club-tablet-live-stream-ticket:${ticketRateLimitKey}`,
+    )) return;
+    const now = Date.now();
+    pruneClubLiveSessions(now);
+    const liveSession = clubLiveSessions.get(clubLiveSessionKey(
+      tabletSession.clubId,
+      tabletSession.studioRiderId,
+    ));
+    if (
+      !liveSession
+      || liveSession.expiresAt <= now
+      || liveSession._publisherDeviceId !== tabletSession.deviceId
+      || liveSession._publisherClubTabletSessionHash !== tabletSession.tokenHash
+    ) {
+      writeJson(response, 409, { error: 'Start an activity on this exact tablet before sharing its live screen.' }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+    const ticket = createClubTabletWebSocketTicket(
+      tabletSession,
+      clubLiveStreamWebsocketScope,
+      now,
+      {
+        liveSessionId: liveSession.sessionId,
+        clubId: tabletSession.clubId,
+        deviceId: tabletSession.deviceId,
+        studioRiderId: tabletSession.studioRiderId,
+      },
+    );
+    if (!ticket) {
+      writeJson(response, 503, { error: 'Live screen authorization is temporarily unavailable.' }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+    writeJson(response, 201, {
+      ticket: ticket.token,
+      expiresAt: ticket.expiresAt,
+      sessionId: liveSession.sessionId,
+    }, { 'Cache-Control': 'no-store' });
     return;
   }
 
@@ -18458,6 +19379,7 @@ async function serveStatic(request, response) {
       return;
     }
     setClubLiveSession(key, liveSession);
+    await refreshClubLiveStreamPublisherPresentation(tabletSession, liveSession);
     writeJson(response, 200, {
       session: publicClubLiveSession(liveSession),
       heartbeatTtlMs: clubLiveSessionTtlMs,
@@ -19831,6 +20753,7 @@ async function serveStatic(request, response) {
       rooms: rooms.size,
       persistence: persistence.persistenceEnabled(),
       websocketPath,
+      clubLiveStreamWebsocketPath,
       billing: {
         provider: 'apple-app-store',
         enabled: appleBilling.configuration.enabled,
@@ -20035,8 +20958,8 @@ wss.on('connection', (socket, request) => {
     profileId: authUser?.id ?? tabletSession?.profileId ?? '',
     authSessionTokenHash: authUser ? request.tracklabAuthSessionTokenHash : null,
     authSessionExpiresAt: authUser ? Date.parse(request.tracklabAuthSession.expiresAt) : null,
-    websocketScope: authUser ? (request.tracklabWebSocketScope || 'multiplayer') : 'club-tablet',
-    presenceActive: Boolean(authUser),
+    websocketScope: request.tracklabWebSocketScope || (authUser ? 'multiplayer' : 'club-tablet'),
+    presenceActive: Boolean(authUser) && request.tracklabWebSocketScope !== clubLiveStreamWebsocketScope,
     blockedProfileIds: new Set(request.tracklabBlockedProfileIds ?? []),
     socket,
     name: sanitizeText(authUser?.displayName || tabletSession?.athleteName || tabletSession?.riderName, 'TrackLab Rider', 64),
@@ -20050,6 +20973,17 @@ wss.on('connection', (socket, request) => {
       expiresAt: tabletSession.expiresAt,
     } : null),
     clubTabletSessionTokenHash: tabletSession?.tokenHash ?? null,
+    clubLiveStreamAuthorization: request.tracklabClubLiveStreamAuthorization ?? null,
+    clubLiveStreamRegistration: null,
+    clubLiveStreamSubscriptions: new Set(),
+    clubLiveStreamViewerIds: new Set(),
+    clubLiveStreamViewerVerification: null,
+    clubLiveStreamViewerVerificationPromise: null,
+    clubLiveStreamViewerVerificationGeneration: 0,
+    clubLiveStreamMessageWindowStartedAt: Date.now(),
+    clubLiveStreamSignalCount: 0,
+    clubLiveStreamControlCount: 0,
+    clubLiveStreamMessageChain: Promise.resolve(),
     available: false,
     bikeCount: 0,
     wattbikeCapacityAllocationKey: '',
@@ -20077,7 +21011,7 @@ wss.on('connection', (socket, request) => {
     : null;
 
   clients.set(client.id, client);
-  if (authUser) syncFriendPresenceTransition(authUser.id);
+  if (client.presenceActive && authUser) syncFriendPresenceTransition(authUser.id);
   cloudTelemetry.increment('tracklab_websocket_connections_total');
   cloudTelemetry.setGauge('tracklab_websocket_clients', clients.size);
   cloudTelemetry.info('websocket.connected', {
@@ -20092,10 +21026,21 @@ wss.on('connection', (socket, request) => {
   send(client, {
     type: 'connected',
     clientId: client.id,
-    websocketPath,
+    websocketPath: request.tracklabWebSocketPath ?? websocketPath,
   });
 
   socket.on('message', (message) => {
+    const messageByteLength = Array.isArray(message)
+      ? message.reduce((total, chunk) => total + Buffer.byteLength(chunk), 0)
+      : Buffer.byteLength(message);
+    if (
+      client.websocketScope === clubLiveStreamWebsocketScope
+      && messageByteLength > maxClubLiveStreamMessageBytes
+    ) {
+      clubLiveStreamError(client, 'message-too-large', 'Club Live signaling messages must stay below 72 KB.');
+      socket.close(1009, 'Club Live signaling message too large');
+      return;
+    }
     const now = Date.now();
     if (now - client.messageWindowStartedAt >= 10_000) {
       client.messageWindowStartedAt = now;
@@ -20116,19 +21061,37 @@ wss.on('connection', (socket, request) => {
       return;
     }
 
-    void handleClientMessage(client, message).catch((error) => {
+    const operation = client.websocketScope === clubLiveStreamWebsocketScope
+      ? client.clubLiveStreamMessageChain.then(() => handleClientMessage(client, message))
+      : handleClientMessage(client, message);
+    if (client.websocketScope === clubLiveStreamWebsocketScope) {
+      // Subscription false→true restarts must commit in socket order even if
+      // an authorization/storage check is slow. Signaling shares the same
+      // queue so an answer or ICE candidate cannot overtake its subscription.
+      client.clubLiveStreamMessageChain = operation.catch(() => undefined);
+    }
+    void operation.catch((error) => {
       cloudTelemetry.increment('tracklab_websocket_message_errors_total');
       cloudTelemetry.warn('websocket.message_failed', { clientId: client.id, error });
-      send(client, { type: 'error', message: 'Multiplayer server could not process that action.' });
+      if (client.websocketScope === clubLiveStreamWebsocketScope) {
+        clubLiveStreamError(client, 'server-error', 'Club Live could not process that signaling action.');
+      } else {
+        send(client, { type: 'error', message: 'Multiplayer server could not process that action.' });
+      }
     });
   });
   socket.on('close', (code) => {
     const presenceWasActive = client.presenceActive !== false;
     client.cancelAuthSessionExpiry?.();
-    const friendRefresh = socialStateForClient(client)
-      .then((social) => social.friends.map((friend) => friend.guestKey))
-      .catch(() => []);
-    leaveRoom(client, 'disconnected');
+    const friendRefresh = presenceWasActive
+      ? socialStateForClient(client)
+        .then((social) => social.friends.map((friend) => friend.guestKey))
+        .catch(() => [])
+      : Promise.resolve([]);
+    unregisterClubLiveStreamClient(client, 'disconnected');
+    if (client.websocketScope !== clubLiveStreamWebsocketScope) {
+      leaveRoom(client, 'disconnected');
+    }
     client.wattbikeCapacityClosed = true;
     client.presenceActive = false;
     clients.delete(client.id);
@@ -20146,7 +21109,7 @@ wss.on('connection', (socket, request) => {
       && candidate.presenceActive !== false
       && candidate.socket?.readyState === WebSocket.OPEN
     ));
-    if (!guestKeyStillOnline) {
+    if (presenceWasActive && !guestKeyStillOnline) {
       void persistence.setProfileOffline(client);
     }
     if (presenceWasActive && client.authSessionTokenHash && client.profileId) {
@@ -20173,17 +21136,24 @@ server.on('upgrade', (request, socket, head) => {
     return;
   }
 
-  if (requestUrl.pathname !== websocketPath || !mutationOriginAllowed(request)) {
+  const isClubLiveStreamPath = requestUrl.pathname === clubLiveStreamWebsocketPath;
+  if (
+    (requestUrl.pathname !== websocketPath && !isClubLiveStreamPath)
+    || !mutationOriginAllowed(request)
+  ) {
     socket.destroy();
     return;
   }
 
   void (async () => {
+    const rejectUpgrade = (statusLine) => {
+      socket.write(`HTTP/1.1 ${statusLine}\r\nConnection: close\r\n\r\n`);
+      socket.destroy();
+    };
     const clubTicketWasPresented = requestUrl.searchParams.has('clubTabletTicket');
     const authTicketWasPresented = requestUrl.searchParams.has('authTicket');
     if (clubTicketWasPresented && authTicketWasPresented) {
-      socket.write('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
-      socket.destroy();
+      rejectUpgrade('400 Bad Request');
       return;
     }
     if (clubTicketWasPresented) {
@@ -20197,53 +21167,105 @@ server.on('upgrade', (request, socket, head) => {
         if (ticket._expiryTimer) clearTimeout(ticket._expiryTimer);
         clubTabletWsTicketsByHash.delete(presentedTicketHash);
       }
-      const tabletSession = ticket?.expiresAt > Date.now()
+      const expectedScope = isClubLiveStreamPath ? clubLiveStreamWebsocketScope : 'multiplayer';
+      const tabletSession = ticket?.expiresAt > Date.now() && ticket.scope === expectedScope
         ? await loadClubTabletSessionByHash(ticket.sessionTokenHash)
         : null;
       if (!tabletSession) {
-        socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
-        socket.destroy();
+        rejectUpgrade('401 Unauthorized');
         return;
       }
       request.tracklabClubTabletSession = tabletSession;
-      if (tabletSession.profileId) {
+      request.tracklabWebSocketPath = requestUrl.pathname;
+      if (isClubLiveStreamPath) {
+        const now = Date.now();
+        const liveSession = clubLiveSessions.get(clubLiveSessionKey(
+          tabletSession.clubId,
+          tabletSession.studioRiderId,
+        ));
+        if (
+          !liveSession
+          || ticket.liveSessionId !== liveSession.sessionId
+          || ticket.clubId !== tabletSession.clubId
+          || ticket.deviceId !== tabletSession.deviceId
+          || ticket.studioRiderId !== tabletSession.studioRiderId
+          || liveSession.expiresAt <= now
+          || liveSession._publisherDeviceId !== tabletSession.deviceId
+          || liveSession._publisherClubTabletSessionHash !== tabletSession.tokenHash
+        ) {
+          rejectUpgrade('401 Unauthorized');
+          return;
+        }
+        request.tracklabWebSocketScope = clubLiveStreamWebsocketScope;
+        request.tracklabClubLiveStreamAuthorization = {
+          role: 'publisher',
+          sessionTokenHash: tabletSession.tokenHash,
+          sessionId: liveSession.sessionId,
+          clubId: tabletSession.clubId,
+          deviceId: tabletSession.deviceId,
+          studioRiderId: tabletSession.studioRiderId,
+        };
+      } else if (tabletSession.profileId) {
         const blockedProfileIds = await persistence.loadBlockedAccountProfileIds(tabletSession.profileId);
         if (!Array.isArray(blockedProfileIds)) {
-          socket.write('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
-          socket.destroy();
+          rejectUpgrade('503 Service Unavailable');
           return;
         }
         request.tracklabBlockedProfileIds = blockedProfileIds;
       }
     } else if (authTicketWasPresented) {
       const ticket = consumeAuthWebSocketTicket(requestUrl.searchParams.get('authTicket'));
-      const session = ticket
+      const ticketMatchesPath = isClubLiveStreamPath
+        ? ticket?.scope === clubLiveStreamWebsocketScope
+        : ticket && ticket.scope !== clubLiveStreamWebsocketScope;
+      const session = ticketMatchesPath
         ? await currentAuthSessionByHash(ticket.sessionTokenHash)
         : null;
       if (!session?.user) {
-        socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
-        socket.destroy();
+        rejectUpgrade('401 Unauthorized');
         return;
       }
-      request.tracklabClubLiveAccess = await loadActiveClubLiveAccess(
-        session.user,
-        ticket.sessionTokenHash,
-      );
       request.tracklabAuthSession = session;
       request.tracklabAuthSessionTokenHash = ticket.sessionTokenHash;
       request.tracklabWebSocketScope = ticket.scope;
-      const blockedProfileIds = await persistence.loadBlockedAccountProfileIds(session.user.id);
-      if (!Array.isArray(blockedProfileIds)) {
-        socket.write('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
-        socket.destroy();
+      request.tracklabWebSocketPath = requestUrl.pathname;
+      if (isClubLiveStreamPath) {
+        if (!canManageClubConnect(session.user)) {
+          rejectUpgrade('403 Forbidden');
+          return;
+        }
+        const ownerProfileKey = authProfileKey(session.user);
+        const state = await persistence.loadClubConnectState(ownerProfileKey);
+        if (!state.ownedClub?.id) {
+          rejectUpgrade('403 Forbidden');
+          return;
+        }
+        request.tracklabClubLiveStreamAuthorization = {
+          role: 'viewer',
+          clubId: state.ownedClub.id,
+          ownerProfileKey,
+          authSessionTokenHash: ticket.sessionTokenHash,
+        };
+      } else {
+        request.tracklabClubLiveAccess = await loadActiveClubLiveAccess(
+          session.user,
+          ticket.sessionTokenHash,
+        );
+        const blockedProfileIds = await persistence.loadBlockedAccountProfileIds(session.user.id);
+        if (!Array.isArray(blockedProfileIds)) {
+          rejectUpgrade('503 Service Unavailable');
+          return;
+        }
+        request.tracklabBlockedProfileIds = blockedProfileIds;
+      }
+    } else {
+      if (isClubLiveStreamPath) {
+        rejectUpgrade('401 Unauthorized');
         return;
       }
-      request.tracklabBlockedProfileIds = blockedProfileIds;
-    } else {
       const session = await currentAuthSession(request);
       if (!session?.user) {
-        socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
-        socket.destroy();
+        rejectUpgrade('401 Unauthorized');
         return;
       }
       request.tracklabClubLiveAccess = await loadActiveClubLiveAccess(
@@ -20253,17 +21275,17 @@ server.on('upgrade', (request, socket, head) => {
       request.tracklabAuthSession = session;
       request.tracklabAuthSessionTokenHash = session.sessionTokenHash;
       request.tracklabWebSocketScope = 'multiplayer';
+      request.tracklabWebSocketPath = requestUrl.pathname;
       const blockedProfileIds = await persistence.loadBlockedAccountProfileIds(session.user.id);
       if (!Array.isArray(blockedProfileIds)) {
-        socket.write('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
-        socket.destroy();
+        rejectUpgrade('503 Service Unavailable');
         return;
       }
       request.tracklabBlockedProfileIds = blockedProfileIds;
     }
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit('connection', ws, request);
-      });
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request);
+    });
   })().catch(() => socket.destroy());
 });
 
@@ -20589,6 +21611,7 @@ server.listen(port, () => {
   cloudTelemetry.info('service.started', {
     port,
     websocketPath,
+    clubLiveStreamWebsocketPath,
     version: String(process.env.RENDER_GIT_COMMIT || 'development').slice(0, 12),
   });
   void persistence.initPersistence().finally(() => {

@@ -1,6 +1,6 @@
 import { isTrackLabNativeShell, trackLabWebSocketUrl } from './serviceOrigins';
 
-export type WebSocketTicketScope = 'multiplayer' | 'live-audio';
+export type WebSocketTicketScope = 'multiplayer' | 'live-audio' | 'club-live-stream';
 
 export async function requestWebSocketTicket(scope: WebSocketTicketScope) {
   const response = await fetch('/api/auth/websocket-ticket', {

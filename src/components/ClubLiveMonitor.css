@@ -193,6 +193,10 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.club-live-grid.has-shared.count-2 {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .club-live-grid.count-3 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -212,6 +216,10 @@
   border-radius: 22px;
   background: linear-gradient(145deg, #ffffff, #f7faf5);
   box-shadow: 0 16px 44px rgba(35, 55, 31, 0.1);
+}
+
+.club-live-tile.shared {
+  grid-column: 1 / -1;
 }
 
 .club-live-tile.paused { border-top-color: #f0ad32; }
@@ -247,12 +255,19 @@
   outline-offset: -4px;
 }
 
-.club-live-screen-open img {
+.club-live-screen-open img,
+.club-live-screen-open video {
   display: block;
   width: 100%;
   height: 100%;
+  max-height: min(72dvh, 900px);
   object-fit: contain;
   background: #03070b;
+}
+
+.club-live-screen-open video {
+  min-height: 180px;
+  aspect-ratio: auto;
 }
 
 .club-live-screen-toolbar {
@@ -374,7 +389,8 @@
   background: #000;
 }
 
-.club-live-screen-dialog-frame img {
+.club-live-screen-dialog-frame img,
+.club-live-screen-dialog-frame video {
   display: block;
   width: 100%;
   height: 100%;
@@ -404,6 +420,21 @@
   width: clamp(58px, 6vw, 82px);
   height: clamp(58px, 6vw, 82px);
   font-size: 22px;
+}
+
+.club-live-shared-avatar {
+  display: grid;
+  width: clamp(58px, 6vw, 82px);
+  height: clamp(58px, 6vw, 82px);
+  place-items: center;
+  border-radius: 18px;
+  background: #152019;
+  color: #8ee74b;
+}
+
+.club-live-shared-avatar svg {
+  width: 42%;
+  height: 42%;
 }
 
 .club-live-athlete h3 {
@@ -444,6 +475,36 @@
 .club-live-status.paused { background: #fff2d7; color: #96630a; }
 .club-live-status.staging { background: #e4f3ff; color: #176a9f; }
 .club-live-status.stale { background: #ecefeb; color: #5f695c; }
+
+.club-live-shared-participants {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 13px;
+  border: 1px solid #dce4d8;
+  border-radius: 12px;
+  background: #f7faf5;
+  color: #5d685a;
+  font-size: 12px;
+}
+
+.club-live-shared-participants strong {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  color: #2f422a;
+}
+
+.club-live-shared-participants span {
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .club-live-activity {
   display: grid;
@@ -617,4 +678,6 @@
   .club-live-screen-enlarge svg { color: #fff; }
   .club-live-screen-dialog-backdrop { padding: 0; }
   .club-live-screen-dialog { max-height: 100dvh; border: 0; border-radius: 0; }
+  .club-live-shared-participants { align-items: flex-start; flex-direction: column; }
+  .club-live-shared-participants span { width: 100%; text-align: left; white-space: normal; }
 }

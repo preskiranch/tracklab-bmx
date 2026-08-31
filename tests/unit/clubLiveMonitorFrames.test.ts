@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  clubLiveSessionWithPublisherPresentation,
   frameMatchesSession,
   normalizeClubLiveFrames,
   unexpiredClubLiveFrames,
@@ -24,6 +25,53 @@ const exactBackendFrame = {
 };
 
 describe('Club Live owner screen frames', () => {
+  it('uses shared presentation metadata only from the exact authenticated publisher', () => {
+    const session = {
+      id: 'session-row',
+      clubId: 'club-1',
+      studioRiderId: 'rider-1',
+      riderName: 'Rider One',
+      athleteName: 'Rider One',
+      sessionId: 'activity-1',
+      deviceId: 'tablet-1',
+      activityType: 'bmx-race',
+      status: 'active',
+      progress: { fraction: 0 },
+      metrics: {
+        watts: 0,
+        cadence: 0,
+        speedKph: 0,
+        distanceMeters: 0,
+        elapsedMs: 0,
+        position: 1,
+        participantCount: 4,
+      },
+      multiplayer: true,
+      updatedAt: 1,
+      expiresAt: 2,
+    } satisfies ClubLiveSession;
+    expect(clubLiveSessionWithPublisherPresentation(session, {
+      id: 'publisher-1',
+      clubId: 'club-1',
+      studioRiderId: 'rider-1',
+      sessionId: 'activity-1',
+      deviceId: 'tablet-1',
+      sharedViewId: 'server-event-1',
+      presentation: 'shared',
+    })).toMatchObject({
+      presentation: 'shared',
+      sharedViewId: 'server-event-1',
+    });
+    expect(clubLiveSessionWithPublisherPresentation(session, {
+      id: 'publisher-2',
+      clubId: 'other-club',
+      studioRiderId: 'rider-1',
+      sessionId: 'activity-1',
+      presentation: 'shared',
+      sharedViewId: 'forged-cross-club-group',
+    })).toBe(session);
+  });
+
   it('accepts the exact owner endpoint contract and derives a stable private view id', () => {
     expect(normalizeClubLiveFrames({ frames: [exactBackendFrame] })).toEqual([{
       ...exactBackendFrame,

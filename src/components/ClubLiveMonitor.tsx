@@ -24,6 +24,16 @@ import {
   loadClubLiveSessions,
   type ClubLiveSession,
 } from '../lib/clubLive';
+import {
+  clubLiveCanonicalSelections,
+  selectClubLivePresentations,
+  type ClubLiveCanonicalSelections,
+} from '../lib/clubLivePresentation';
+import {
+  ClubLiveVideoViewer,
+  type ClubLiveVideoFrame,
+  type ClubLiveVideoPublisher,
+} from '../lib/clubLiveVideo';
 import { loadClubTabletDevices, type ClubTabletDevice } from '../lib/clubTablet';
 import { wattbikeMonitorLastThree } from '../lib/bikeProfileIdentity';
 import { RiderAvatar } from './RiderAvatar';
@@ -66,6 +76,80 @@ type ClubLiveFrame = {
   byteLength: number;
   deviceId?: string;
 };
+
+type ClubLiveStreamMedia = ClubLiveVideoFrame & {
+  id: string;
+  kind: 'stream';
+  updatedAt: number;
+  expiresAt: number;
+};
+
+type ClubLiveDisplayMedia = ClubLiveFrame | ClubLiveStreamMedia;
+
+function isClubLiveStreamMedia(media: ClubLiveDisplayMedia): media is ClubLiveStreamMedia {
+  return 'kind' in media && media.kind === 'stream';
+}
+
+export function clubLiveVideoPublisherMatchesSession(
+  publisher: ClubLiveVideoPublisher,
+  session: ClubLiveSession,
+) {
+  return publisher.clubId === session.clubId
+    && publisher.studioRiderId === session.studioRiderId
+    && publisher.sessionId === session.sessionId
+    && (!session.deviceId || publisher.deviceId === session.deviceId);
+}
+
+export function clubLiveSessionWithPublisherPresentation(
+  session: ClubLiveSession,
+  publisher: ClubLiveVideoPublisher | null | undefined,
+): ClubLiveSession {
+  if (!publisher || !clubLiveVideoPublisherMatchesSession(publisher, session)) return session;
+  return {
+    ...session,
+    ...(publisher.sharedViewId ? { sharedViewId: publisher.sharedViewId } : {}),
+    ...(publisher.presentation ? { presentation: publisher.presentation } : {}),
+  };
+}
+
+function clubLiveStreamIsLive(frame: ClubLiveVideoFrame) {
+  return frame.stream.getVideoTracks().some((track) => track.readyState === 'live');
+}
+
+function ClubLiveMediaView({
+  media,
+  label,
+}: {
+  media: ClubLiveDisplayMedia;
+  label: string;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const stream = isClubLiveStreamMedia(media) ? media.stream : null;
+  useEffect(() => {
+    if (!stream) return undefined;
+    const video = videoRef.current;
+    if (!video) return undefined;
+    if (video.srcObject !== stream) video.srcObject = stream;
+    void video.play().catch(() => undefined);
+    return () => {
+      if (video.srcObject === stream) video.srcObject = null;
+    };
+  }, [stream]);
+  if (stream) {
+    return (
+      <video
+        ref={videoRef}
+        aria-label={label}
+        autoPlay
+        disablePictureInPicture
+        muted
+        playsInline
+      />
+    );
+  }
+  if (isClubLiveStreamMedia(media)) return null;
+  return <img src={media.jpegDataUrl} alt={label} draggable={false} />;
+}
 
 function requiredText(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -302,9 +386,16 @@ export function ClubLiveMonitor({
 }: ClubLiveMonitorProps) {
   const requestGenerationRef = useRef(0);
   const lastTabletRefreshAtRef = useRef(0);
+  const canonicalPresentationSourcesRef = useRef<ClubLiveCanonicalSelections>({});
+  const videoViewerRef = useRef<ClubLiveVideoViewer | null>(null);
   const [sessions, setSessions] = useState<ClubLiveSession[]>([]);
   const [frames, setFrames] = useState<ClubLiveFrame[]>([]);
-  const [enlargedFrameId, setEnlargedFrameId] = useState<string | null>(null);
+  const [videoPublishers, setVideoPublishers] = useState<ClubLiveVideoPublisher[]>([]);
+  const [videoFrames, setVideoFrames] = useState<Map<string, ClubLiveVideoFrame>>(new Map());
+  const [monitorVisible, setMonitorVisible] = useState(() => (
+    typeof document === 'undefined' || document.visibilityState !== 'hidden'
+  ));
+  const [enlargedPresentationId, setEnlargedPresentationId] = useState<string | null>(null);
   const [tablets, setTablets] = useState<ClubTabletDevice[]>([]);
   const [tabletFeedError, setTabletFeedError] = useState<string | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -322,16 +413,67 @@ export function ClubLiveMonitor({
     () => unexpiredClubLiveFrames(frames, now),
     [frames, now],
   );
-  const enlargedFrame = useMemo(
-    () => liveFrames.find((frame) => frame.id === enlargedFrameId) ?? null,
-    [enlargedFrameId, liveFrames],
+  const livePresentationSources = useMemo(
+    () => liveSessions.map((session) => {
+      const publisher = videoPublishers.find((candidate) => (
+        clubLiveVideoPublisherMatchesSession(candidate, session)
+      ));
+      // Shared-stage identity is accepted only from the authenticated stream
+      // publisher list. The tablet never chooses this grouping metadata.
+      const presentationSession = clubLiveSessionWithPublisherPresentation(session, publisher);
+      const directFrame = publisher ? videoFrames.get(publisher.id) ?? null : null;
+      const streamMedia: ClubLiveStreamMedia | null = directFrame && clubLiveStreamIsLive(directFrame)
+        ? {
+            ...directFrame,
+            id: `stream:${directFrame.publisherId}`,
+            kind: 'stream',
+            updatedAt: directFrame.connectedAt,
+            expiresAt: Number.POSITIVE_INFINITY,
+          }
+        : null;
+      const fallbackFrame = liveFrames.find((candidate) => frameMatchesSession(candidate, session)) ?? null;
+      const media: ClubLiveDisplayMedia | null = streamMedia ?? fallbackFrame;
+      return {
+        id: [
+          session.clubId,
+          session.deviceId ?? 'personal-device',
+          session.studioRiderId,
+          session.sessionId ?? session.id,
+        ].join(':'),
+        session: presentationSession,
+        media,
+        mediaLive: Boolean(
+          streamMedia
+          || fallbackFrame && now <= fallbackFrame.expiresAt && now - fallbackFrame.updatedAt <= 4_000,
+        ),
+      };
+    }),
+    [liveFrames, liveSessions, now, videoFrames, videoPublishers],
   );
-  const enlargedSession = useMemo(
-    () => enlargedFrame
-      ? liveSessions.find((session) => frameMatchesSession(enlargedFrame, session)) ?? null
-      : null,
-    [enlargedFrame, liveSessions],
+  const livePresentations = useMemo(
+    () => selectClubLivePresentations(
+      livePresentationSources,
+      canonicalPresentationSourcesRef.current,
+    ),
+    [livePresentationSources],
   );
+  const enlargedPresentation = useMemo(
+    () => livePresentations.find((presentation) => presentation.id === enlargedPresentationId) ?? null,
+    [enlargedPresentationId, livePresentations],
+  );
+  const enlargedMedia = enlargedPresentation?.canonicalSource.media ?? null;
+  const enlargedSession = enlargedPresentation?.canonicalSource.session ?? null;
+  const enlargedParticipantNames = useMemo(
+    () => [...new Set(enlargedPresentation?.sources.map(({ session }) => (
+      session.athleteName || session.riderName
+    )) ?? [])],
+    [enlargedPresentation],
+  );
+  const enlargedPresentationName = enlargedSession
+    ? enlargedPresentation?.kind === 'shared'
+      ? `${activityLabel(enlargedSession.activityType)} shared screen`
+      : enlargedSession.athleteName || enlargedSession.riderName
+    : '';
   const connectedBikeCount = useMemo(
     () => tablets.filter((tablet) => clubTabletMonitorConnectedBike(tablet, tabletFeedError == null)).length,
     [tabletFeedError, tablets],
@@ -388,6 +530,63 @@ export function ClubLiveMonitor({
   }, []);
 
   useEffect(() => {
+    if (
+      !monitorVisible
+      || typeof RTCPeerConnection === 'undefined'
+      || typeof WebSocket === 'undefined'
+    ) return undefined;
+    const viewer = new ClubLiveVideoViewer({
+      onPublishers: setVideoPublishers,
+      onFrame: (frame) => setVideoFrames((current) => {
+        const next = new Map(current);
+        next.set(frame.publisherId, frame);
+        return next;
+      }),
+      onFrameRemoved: (publisherId) => setVideoFrames((current) => {
+        if (!current.has(publisherId)) return current;
+        const next = new Map(current);
+        next.delete(publisherId);
+        return next;
+      }),
+    }).start();
+    videoViewerRef.current = viewer;
+    return () => {
+      videoViewerRef.current = null;
+      viewer.stop();
+      setVideoFrames(new Map());
+      setVideoPublishers([]);
+    };
+  }, [monitorVisible]);
+
+  useEffect(() => {
+    const updateVisibility = () => setMonitorVisible(document.visibilityState !== 'hidden');
+    const handlePageHide = () => setMonitorVisible(false);
+    const handlePageShow = () => updateVisibility();
+    document.addEventListener('visibilitychange', updateVisibility);
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('pageshow', handlePageShow);
+    return () => {
+      document.removeEventListener('visibilitychange', updateVisibility);
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('pageshow', handlePageShow);
+    };
+  }, []);
+
+  useEffect(() => {
+    const desiredPublishers = livePresentations.flatMap((presentation) => {
+      const publisher = videoPublishers.find((candidate) => (
+        clubLiveVideoPublisherMatchesSession(candidate, presentation.canonicalSource.session)
+      ));
+      return publisher ? [publisher.id] : [];
+    });
+    videoViewerRef.current?.setSubscriptions(desiredPublishers);
+  }, [livePresentations, videoPublishers]);
+
+  useEffect(() => {
+    canonicalPresentationSourcesRef.current = clubLiveCanonicalSelections(livePresentations);
+  }, [livePresentations]);
+
+  useEffect(() => {
     let disposed = false;
     let requestActive = false;
     const poll = async () => {
@@ -423,17 +622,19 @@ export function ClubLiveMonitor({
   }, []);
 
   useEffect(() => {
-    if (enlargedFrameId && !enlargedFrame) setEnlargedFrameId(null);
-  }, [enlargedFrame, enlargedFrameId]);
+    if (enlargedPresentationId && (!enlargedPresentation || !enlargedMedia)) {
+      setEnlargedPresentationId(null);
+    }
+  }, [enlargedMedia, enlargedPresentation, enlargedPresentationId]);
 
   useEffect(() => {
-    if (!enlargedFrame) return undefined;
+    if (!enlargedMedia) return undefined;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setEnlargedFrameId(null);
+      if (event.key === 'Escape') setEnlargedPresentationId(null);
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [enlargedFrame]);
+  }, [enlargedMedia]);
 
   return (
     <main className="club-live-monitor" aria-label="Club Live Monitor">
@@ -527,49 +728,88 @@ export function ClubLiveMonitor({
       </section>
 
       {liveSessions.length > 0 ? (
-        <div className={`club-live-grid count-${liveSessions.length}`}>
-          {liveSessions.map((session) => {
-            const stale = now > session.expiresAt || now - session.updatedAt > 4_000;
+        <div className={`club-live-grid count-${livePresentations.length}${livePresentations.some((presentation) => presentation.kind === 'shared') ? ' has-shared' : ''}`}>
+          {livePresentations.map((presentation) => {
+            const { session, media: frame } = presentation.canonicalSource;
+            const shared = presentation.kind === 'shared';
+            const stale = presentation.sources.every(({ session: sourceSession }) => (
+              now > sourceSession.expiresAt || now - sourceSession.updatedAt > 4_000
+            ));
+            const presentationStatus = presentation.sources.some(({ session: sourceSession }) => sourceSession.status === 'active')
+              ? 'active'
+              : presentation.sources.some(({ session: sourceSession }) => sourceSession.status === 'staging')
+                ? 'staging'
+                : presentation.sources.every(({ session: sourceSession }) => sourceSession.status === 'paused')
+                  ? 'paused'
+                  : session.status;
             const displayName = session.athleteName || session.riderName;
-            const frame = liveFrames.find((candidate) => frameMatchesSession(candidate, session)) ?? null;
-            const frameStale = Boolean(frame && (now > frame.expiresAt || now - frame.updatedAt > 4_000));
+            const directVideo = Boolean(frame && isClubLiveStreamMedia(frame));
+            const frameStale = Boolean(
+              frame
+              && !isClubLiveStreamMedia(frame)
+              && (now > frame.expiresAt || now - frame.updatedAt > 4_000),
+            );
             const subtitle = session.athleteName && session.athleteName !== session.riderName
               ? `Studio rider: ${session.riderName}`
               : 'Club athlete';
+            const participantNames = [...new Set(presentation.sources.map(({ session: sourceSession }) => (
+              sourceSession.athleteName || sourceSession.riderName
+            )))];
+      const accessiblePresentationName = shared
+        ? `${activityLabel(session.activityType)} shared activity screen`
+        : `live activity screen for ${displayName}`;
             const percent = Math.round(session.progress.fraction * 100);
             const location = session.trackName ?? session.destinationLabel ?? 'Training session';
             const position = session.metrics.position && session.metrics.participantCount > 0
               ? `${session.metrics.position} of ${session.metrics.participantCount}`
               : '—';
+            const showTelemetry = !shared || !frame;
             return (
-              <section className={`club-live-tile ${session.status}${stale ? ' stale' : ''}`} key={session.id}>
+              <section
+                className={`club-live-tile ${presentationStatus}${stale ? ' stale' : ''}${shared ? ' shared' : ''}`}
+                key={presentation.id}
+              >
                 <div className="club-live-athlete">
-                  <RiderAvatar
-                    name={displayName}
-                    photoUrl={photoByRiderId.get(session.studioRiderId)}
-                    accent="#78df3b"
-                    className="club-live-avatar"
-                  />
+                  {shared ? (
+                    <span className="club-live-shared-avatar" aria-hidden="true">
+                      <ActivityIcon activityType={session.activityType} />
+                    </span>
+                  ) : (
+                    <RiderAvatar
+                      name={displayName}
+                      photoUrl={photoByRiderId.get(session.studioRiderId)}
+                      accent="#78df3b"
+                      className="club-live-avatar"
+                    />
+                  )}
                   <div>
-                    <h3>{displayName}</h3>
-                    <p>{subtitle}</p>
+                    <h3>{shared ? `${activityLabel(session.activityType)} shared screen` : displayName}</h3>
+                    <p>{shared ? participantNames.join(' · ') : subtitle}</p>
                   </div>
-                  <span className={`club-live-status ${stale ? 'stale' : session.status}`}>
-                    <i /> {stale ? 'Reconnecting' : statusLabel(session.status)}
+                  <span className={`club-live-status ${stale ? 'stale' : presentationStatus}`}>
+                    <i /> {stale ? 'Reconnecting' : statusLabel(presentationStatus)}
                   </span>
                 </div>
 
                 {frame && (
-                  <div className={`club-live-screen${frameStale ? ' stale' : ''}${session.status === 'paused' ? ' paused' : ''}`}>
+                  <div className={`club-live-screen${frameStale ? ' stale' : ''}${presentationStatus === 'paused' ? ' paused' : ''}`}>
                     <div className="club-live-screen-toolbar">
                       <span className="club-live-screen-label">
-                        {frameStale ? 'Screen reconnecting' : session.status === 'paused' ? 'Screen paused' : 'Live activity screen'}
+                        {directVideo
+                          ? `Direct 60 FPS target${shared ? ` · ${presentation.sources.length} riders` : ''}`
+                          : frameStale
+                          ? 'Screen reconnecting'
+                          : presentationStatus === 'paused'
+                            ? 'Screen paused'
+                            : shared
+                              ? `Shared activity screen · ${presentation.sources.length} riders`
+                              : 'Live activity screen'}
                       </span>
                       <button
                         type="button"
                         className="club-live-screen-enlarge"
-                        onClick={() => setEnlargedFrameId(frame.id)}
-                        aria-label={`Enlarge live activity screen for ${displayName}`}
+                        onClick={() => setEnlargedPresentationId(presentation.id)}
+                        aria-label={`Enlarge ${accessiblePresentationName}`}
                       >
                         <Maximize2 size={17} /> Enlarge
                       </button>
@@ -577,63 +817,86 @@ export function ClubLiveMonitor({
                     <button
                       type="button"
                       className="club-live-screen-open"
-                      style={{ aspectRatio: `${frame.width} / ${frame.height}` }}
-                      onClick={() => setEnlargedFrameId(frame.id)}
-                      aria-label={`Open full-screen live activity screen for ${displayName}`}
+                      style={isClubLiveStreamMedia(frame)
+                        ? undefined
+                        : { aspectRatio: `${frame.width} / ${frame.height}` }}
+                      onClick={() => setEnlargedPresentationId(presentation.id)}
+                      aria-label={`Open full-screen ${accessiblePresentationName}`}
                     >
-                      <img
-                        src={frame.jpegDataUrl}
-                        alt={`Live TrackLab activity screen for ${displayName}`}
-                        draggable={false}
+                      <ClubLiveMediaView
+                        media={frame}
+                        label={shared
+                          ? `Live shared TrackLab ${activityLabel(session.activityType)} screen for ${participantNames.join(', ')}`
+                          : `Live TrackLab activity screen for ${displayName}`}
                       />
                     </button>
                   </div>
                 )}
 
-                <div className="club-live-activity">
-                  <span><ActivityIcon activityType={session.activityType} /></span>
-                  <div>
-                    <strong>{activityLabel(session.activityType)}</strong>
-                    <small>{location}</small>
-                  </div>
-                  {session.multiplayer && <b><Users size={14} /> Private room</b>}
-                </div>
-
-                {session.activityType === 'get-pulled' && (
-                  <div className="club-live-pull-scene">
-                    <PullSledScene
-                      active={!stale && session.status === 'active'}
-                      cadenceRpm={session.metrics.cadence}
-                      compact
-                      label={`${displayName} in a Get Pulled test`}
-                      progress={session.progress.fraction}
-                      speedKph={session.metrics.speedKph}
-                    />
+                {shared && (
+                  <div className="club-live-shared-participants" aria-label="Athletes shown on the shared activity screen">
+                    <strong><Users size={15} /> {presentation.sources.length} riders on this screen</strong>
+                    <span>{participantNames.join(' · ')}</span>
                   </div>
                 )}
 
-                <div className="club-live-progress-copy">
-                  <strong>{session.progress.label ?? `${percent}% complete`}</strong>
-                  <span>{formatClubLiveActivityDistance(
-                    session.metrics.distanceMeters,
-                    distanceUnit,
-                    session.activityType,
-                  )}</span>
-                </div>
-                <div className="club-live-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
-                  <span style={{ width: `${percent}%` }} />
-                </div>
+                {showTelemetry && (
+                  <>
+                    <div className="club-live-activity">
+                      <span><ActivityIcon activityType={session.activityType} /></span>
+                      <div>
+                        <strong>{activityLabel(session.activityType)}</strong>
+                        <small>{location}</small>
+                      </div>
+                      {session.multiplayer && <b><Users size={14} /> Private room</b>}
+                    </div>
 
-                <div className="club-live-metrics">
-                  <div><Activity size={18} /><strong>{session.metrics.cadence}</strong><small>rpm</small></div>
-                  <div><Zap size={18} /><strong>{session.metrics.watts}</strong><small>watts</small></div>
-                  <div><Gauge size={18} /><strong>{formatSpeedFromKph(session.metrics.speedKph, speedUnit)}</strong><small>{speedUnitLabel(speedUnit)}</small></div>
-                  <div><Clock3 size={18} /><strong>{formatElapsed(session.metrics.elapsedMs)}</strong><small>elapsed</small></div>
-                </div>
+                    {session.activityType === 'get-pulled' && (
+                      <div className="club-live-pull-scene">
+                        <PullSledScene
+                          active={!stale && session.status === 'active'}
+                          cadenceRpm={session.metrics.cadence}
+                          compact
+                          label={`${displayName} in a Get Pulled test`}
+                          progress={session.progress.fraction}
+                          speedKph={session.metrics.speedKph}
+                        />
+                      </div>
+                    )}
+
+                    <div className="club-live-progress-copy">
+                      <strong>{session.progress.label ?? `${percent}% complete`}</strong>
+                      <span>{formatClubLiveActivityDistance(
+                        session.metrics.distanceMeters,
+                        distanceUnit,
+                        session.activityType,
+                      )}</span>
+                    </div>
+                    <div className="club-live-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
+                      <span style={{ width: `${percent}%` }} />
+                    </div>
+
+                    <div className="club-live-metrics">
+                      <div><Activity size={18} /><strong>{session.metrics.cadence}</strong><small>rpm</small></div>
+                      <div><Zap size={18} /><strong>{session.metrics.watts}</strong><small>watts</small></div>
+                      <div><Gauge size={18} /><strong>{formatSpeedFromKph(session.metrics.speedKph, speedUnit)}</strong><small>{speedUnitLabel(speedUnit)}</small></div>
+                      <div><Clock3 size={18} /><strong>{formatElapsed(session.metrics.elapsedMs)}</strong><small>elapsed</small></div>
+                    </div>
+                  </>
+                )}
 
                 <div className="club-live-tile-footer">
-                  <span>Position <strong>{position}</strong></span>
-                  <span>{stale ? 'Waiting for the athlete device' : 'Read-only live feed'}</span>
+                  {shared ? (
+                    <>
+                      <span><strong>{location}</strong></span>
+                      <span>{stale ? 'Waiting for the athlete devices' : 'Read-only shared view'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Position <strong>{position}</strong></span>
+                      <span>{stale ? 'Waiting for the athlete device' : 'Read-only live feed'}</span>
+                    </>
+                  )}
                 </div>
               </section>
             );
@@ -648,26 +911,30 @@ export function ClubLiveMonitor({
         </section>
       )}
 
-      {enlargedFrame && enlargedSession && (
+      {enlargedPresentation && enlargedMedia && enlargedSession && (
         <div
           className="club-live-screen-dialog-backdrop"
           role="presentation"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setEnlargedFrameId(null);
+            if (event.target === event.currentTarget) setEnlargedPresentationId(null);
           }}
         >
           <section
             className="club-live-screen-dialog"
             role="dialog"
             aria-modal="true"
-            aria-label={`Live activity screen for ${enlargedSession.athleteName || enlargedSession.riderName}`}
+            aria-label={`Live activity screen for ${enlargedPresentationName}`}
           >
             <header>
               <div>
-                <span>Read-only live activity screen</span>
-                <strong>{enlargedSession.athleteName || enlargedSession.riderName}</strong>
+                <span>{enlargedPresentation.kind === 'shared'
+                  ? 'Read-only shared activity screen'
+                  : 'Read-only live activity screen'}</span>
+                <strong>{enlargedPresentation.kind === 'shared'
+                  ? `${enlargedPresentationName} · ${enlargedPresentation.sources.length} riders`
+                  : enlargedPresentationName}</strong>
               </div>
-              {now - enlargedFrame.updatedAt > 4_000 ? (
+              {!isClubLiveStreamMedia(enlargedMedia) && now - enlargedMedia.updatedAt > 4_000 ? (
                 <span className="club-live-screen-dialog-status">Screen reconnecting</span>
               ) : enlargedSession.status === 'paused' && (
                 <span className="club-live-screen-dialog-status">Screen paused</span>
@@ -675,7 +942,7 @@ export function ClubLiveMonitor({
               <button
                 type="button"
                 autoFocus
-                onClick={() => setEnlargedFrameId(null)}
+                onClick={() => setEnlargedPresentationId(null)}
                 aria-label="Close full-screen live activity screen"
               >
                 <X size={22} />
@@ -683,12 +950,15 @@ export function ClubLiveMonitor({
             </header>
             <div
               className="club-live-screen-dialog-frame"
-              style={{ aspectRatio: `${enlargedFrame.width} / ${enlargedFrame.height}` }}
+              style={isClubLiveStreamMedia(enlargedMedia)
+                ? undefined
+                : { aspectRatio: `${enlargedMedia.width} / ${enlargedMedia.height}` }}
             >
-              <img
-                src={enlargedFrame.jpegDataUrl}
-                alt={`Full-screen live TrackLab activity screen for ${enlargedSession.athleteName || enlargedSession.riderName}`}
-                draggable={false}
+              <ClubLiveMediaView
+                media={enlargedMedia}
+                label={enlargedPresentation.kind === 'shared'
+                  ? `Full-screen live shared TrackLab activity for ${enlargedParticipantNames.join(', ')}`
+                  : `Full-screen live TrackLab activity screen for ${enlargedPresentationName}`}
               />
             </div>
           </section>
