@@ -6816,7 +6816,7 @@ test('demo rider names and the last track view restore from the signed-in accoun
     },
   };
   let cloudRaceViewPreferences = {
-    cameraLocked: false,
+    cameraLocked: true,
     cameraLockedUpdatedAt: 100,
     earthCamerasByTrack: {
       'black-mountain-bmx': {
@@ -6936,28 +6936,31 @@ test('demo rider names and the last track view restore from the signed-in accoun
     buffer: tinyPngBuffer(),
   });
   await page.getByRole('button', { name: 'Edit map' }).click();
+  await page.getByRole('button', { name: 'Full screen editing', exact: true }).click();
+  await expect(page.locator('.platform-shell')).toHaveClass(/map-fullscreen/);
+  await expect(page.getByRole('button', { name: 'Unlock saved view', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Tilt map up', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Rotate map right', exact: true })).toBeDisabled();
+
+  const lockedEditorZoom = Number(
+    await page.locator('.earth-stage').getAttribute('data-race-camera-zoom'),
+  );
+  await page.getByRole('button', { name: 'Unlock saved view', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Save and publish view', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Tilt map up', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Rotate map right', exact: true })).toBeEnabled();
+  await expect.poll(async () => Number(
+    await page.locator('.earth-stage').getAttribute('data-race-camera-zoom'),
+  )).toBeCloseTo(lockedEditorZoom, 2);
+
   await page.getByRole('button', { name: 'Tilt map up', exact: true }).click();
   await page.getByRole('button', { name: 'Rotate map right', exact: true }).click();
-  await page.locator('.mapping-section').getByRole('button', { name: 'View', exact: true }).click();
-
-  await expect.poll(() => cloudRaceViewPreferences.demoRiderNames[1]).toBe('Gate Master');
-  await expect.poll(() => cloudRaceViewPreferences.demoRiderNames[2]).toBe('Rhythm Queen');
-  await expect.poll(() => cloudRaceViewPreferences.demoRiderPhotos[1]).toMatch(/^data:image\/jpeg;base64,/);
-  await expect.poll(() => cloudRaceViewPreferences.earthCamerasByTrack['black-mountain-bmx'].angle).toBe(52);
-  await expect.poll(() => cloudRaceViewPreferences.earthCamerasByTrack['black-mountain-bmx'].heading).toBe(195);
-  expect(cloudRaceViewPreferences.demoRiderNamesUpdatedAt).toBeGreaterThan(100);
-  expect(cloudRaceViewPreferences.earthCamerasByTrack['black-mountain-bmx'].updatedAt).toBeGreaterThan(100);
-
-  await page.locator('.workflow-step.primary-action').click();
-  await expect(page.getByRole('button', { name: 'Lock View', exact: true })).toBeVisible();
-  await expect(
-    page.locator('.race-rider-overlay-card').filter({ hasText: 'Gate Master' }).locator('.rider-avatar img'),
-  ).toBeVisible();
   const lockedStageViewport = await page.locator('.earth-stage').evaluate((stage) => ({
     width: stage.clientWidth,
     height: stage.clientHeight,
   }));
-  await page.getByRole('button', { name: 'Lock View', exact: true }).click();
+  await page.getByRole('button', { name: 'Save and publish view', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Unlock saved view', exact: true })).toBeVisible();
   await expect.poll(() => globalRaceViewPreferences?.cameraLocked).toBe(true);
   await expect.poll(
     () => globalRaceViewPreferences?.earthCamerasByTrack['black-mountain-bmx'].angle,
@@ -6972,6 +6975,22 @@ test('demo rider names and the last track view restore from the signed-in accoun
         | undefined
     )?.referenceViewport,
   ).toEqual(lockedStageViewport);
+  await page.getByRole('button', { name: 'Exit full screen editing', exact: true }).click();
+  await page.locator('.mapping-section').getByRole('button', { name: 'View', exact: true }).click();
+
+  await expect.poll(() => cloudRaceViewPreferences.demoRiderNames[1]).toBe('Gate Master');
+  await expect.poll(() => cloudRaceViewPreferences.demoRiderNames[2]).toBe('Rhythm Queen');
+  await expect.poll(() => cloudRaceViewPreferences.demoRiderPhotos[1]).toMatch(/^data:image\/jpeg;base64,/);
+  await expect.poll(() => cloudRaceViewPreferences.earthCamerasByTrack['black-mountain-bmx'].angle).toBe(52);
+  await expect.poll(() => cloudRaceViewPreferences.earthCamerasByTrack['black-mountain-bmx'].heading).toBe(195);
+  expect(cloudRaceViewPreferences.demoRiderNamesUpdatedAt).toBeGreaterThan(100);
+  expect(cloudRaceViewPreferences.earthCamerasByTrack['black-mountain-bmx'].updatedAt).toBeGreaterThan(100);
+
+  await page.locator('.workflow-step.primary-action').click();
+  await expect(page.getByRole('button', { name: 'View Locked', exact: true })).toBeVisible();
+  await expect(
+    page.locator('.race-rider-overlay-card').filter({ hasText: 'Gate Master' }).locator('.rider-avatar img'),
+  ).toBeVisible();
   await page.getByRole('button', { name: /Cancel Race/i }).click();
 
   cloudRaceViewPreferences = {

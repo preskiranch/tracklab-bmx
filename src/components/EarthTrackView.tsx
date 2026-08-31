@@ -19,6 +19,7 @@ import {
   RotateCcw,
   RotateCw,
   Satellite,
+  Save,
   ShieldCheck,
   Signal,
   Unlock,
@@ -149,6 +150,7 @@ type EarthTrackViewProps = {
   onRaceCameraLockedChange: (
     locked: boolean,
     referenceViewport?: RacePresentationViewport | null,
+    editableCamera?: Partial<EarthCamera>,
   ) => void;
   onRiderOverlayPreferenceChange: (trackId: string, layout: RaceRiderOverlayLayout) => void;
   onRaceFullscreenInteraction: () => void;
@@ -455,6 +457,25 @@ export function EarthTrackView({
         ? 'Supplemental locator'
         : 'Source pending verification';
   const showMappingUi = mappingMode && !raceViewFullscreen;
+  const mapCameraControlsLocked = raceCameraImmutable || (
+    raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)
+  );
+  const toggleSavedRaceCamera = () => {
+    const referenceViewport = measurePresentationViewport() ?? presentationViewport;
+    onRaceCameraLockedChange(
+      !raceCameraLocked,
+      referenceViewport,
+      raceCameraLocked
+        ? {
+            angle: presentedEarthAngle,
+            heading: presentedEarthHeading,
+            center: presentedEarthCenter ?? undefined,
+            zoom: presentedEarthZoom ?? undefined,
+            referenceViewport: referenceViewport ?? undefined,
+          }
+        : undefined,
+    );
+  };
   const disqualifiedPlayerIdSet = useMemo(
     () => new Set(disqualifiedPlayerIds),
     [disqualifiedPlayerIds],
@@ -643,9 +664,7 @@ export function EarthTrackView({
               cStartOffsetsByPlayer={cStartOffsetsByPlayer}
               raceViewFullscreen={raceViewFullscreen}
               presentationScale={riderPresentationScale}
-              cameraLocked={raceCameraImmutable || (
-                raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)
-              )}
+              cameraLocked={mapCameraControlsLocked}
               raceState={raceState}
               raceDistanceMeters={raceDistanceMeters}
               earthAngle={presentedEarthAngle}
@@ -766,10 +785,7 @@ export function EarthTrackView({
           <button
             className={`race-camera-lock-overlay${raceCameraLocked ? ' locked' : ''}`}
             type="button"
-            onClick={() => onRaceCameraLockedChange(
-              !raceCameraLocked,
-              measurePresentationViewport() ?? presentationViewport,
-            )}
+            onClick={toggleSavedRaceCamera}
             aria-pressed={raceCameraLocked}
             title={raceCameraLocked ? 'Unlock satellite view' : 'Lock camera angle and track position'}
           >
@@ -881,6 +897,21 @@ export function EarthTrackView({
                 <span>{showingPedalZone3D ? 'Satellite' : '3D jumps'}</span>
               </button>
             )}
+            {canEditRaceLayout && !showingGameArena && !showingPedalZone3D && (
+              <button
+                className={raceCameraLocked ? 'active' : ''}
+                type="button"
+                onClick={toggleSavedRaceCamera}
+                aria-label={raceCameraLocked ? 'Unlock saved view' : 'Save and publish view'}
+                aria-pressed={raceCameraLocked}
+                title={raceCameraLocked
+                  ? 'Unlock this track view to pan, pinch, zoom, and tilt'
+                  : 'Save this track view and publish it to every device'}
+              >
+                {raceCameraLocked ? <Unlock size={16} /> : <Save size={16} />}
+                <span>{raceCameraLocked ? 'Unlock saved view' : 'Save & publish view'}</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onMappingFullscreenChange(!mappingFullscreen)}
@@ -894,14 +925,14 @@ export function EarthTrackView({
         )}
 
         {showMappingUi && !showingGameArena && <div
-          className={`map-camera-pad${raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked) ? ' locked' : ''}`}
+          className={`map-camera-pad${mapCameraControlsLocked ? ' locked' : ''}`}
           aria-label="Map camera controls"
         >
           <button
             aria-label="Rotate map left"
             title="Rotate left"
             type="button"
-            disabled={raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)}
+            disabled={mapCameraControlsLocked}
             onClick={() => {
               const next = (activeEarthHeading + 345) % 360;
               if (showingPedalZone3D) {
@@ -917,7 +948,7 @@ export function EarthTrackView({
             aria-label="Tilt map up"
             title="Tilt up"
             type="button"
-            disabled={raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)}
+            disabled={mapCameraControlsLocked}
             onClick={() => {
               const next = Math.min(67, activeEarthAngle + 5);
               if (showingPedalZone3D) {
@@ -933,7 +964,7 @@ export function EarthTrackView({
             aria-label="Reset map north"
             title="Reset north"
             type="button"
-            disabled={raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)}
+            disabled={mapCameraControlsLocked}
             onClick={() => {
               if (showingPedalZone3D) {
                 setMapping3DCamera((current) => ({ ...current, heading: 0 }));
@@ -948,7 +979,7 @@ export function EarthTrackView({
             aria-label="Tilt map down"
             title="Tilt down"
             type="button"
-            disabled={raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)}
+            disabled={mapCameraControlsLocked}
             onClick={() => {
               const next = Math.max(0, activeEarthAngle - 5);
               if (showingPedalZone3D) {
@@ -964,7 +995,7 @@ export function EarthTrackView({
             aria-label="Rotate map right"
             title="Rotate right"
             type="button"
-            disabled={raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)}
+            disabled={mapCameraControlsLocked}
             onClick={() => {
               const next = (activeEarthHeading + 15) % 360;
               if (showingPedalZone3D) {
