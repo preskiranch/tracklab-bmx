@@ -20,5 +20,6 @@ final class TrackLabBridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(PushInstallationPlugin())
         bridge?.registerPluginInstance(StoreKitPlugin())
         bridge?.registerPluginInstance(NativeSessionPlugin())
+        bridge?.registerPluginInstance(ClubLiveScreenMirrorPlugin())
     }
 }

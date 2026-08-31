@@ -27,10 +27,13 @@ export default function ClubLiveAccessNotice({
       {selected && (
         <p>
           The club owner can optionally open Club Live Monitor to view your program, status, progress, track or
-          destination, cadence, speed, and current live watts. Watts remain excluded from public leaderboards,
-          shared ghosts, multiplayer participants, and shared exports; your saved power history remains in your own
-          training record. Your temporary Club Athlete bike and racer-seat access is based on
-          the club membership and stops when you leave club training.
+          destination, cadence, speed, and current live watts. While you are actively sharing a Club Live session,
+          the owner can also view a temporary, read-only image of the visible TrackLab activity screen. Screen sharing
+          does not capture your device camera, microphone, taps, notifications, other apps, or content outside
+          TrackLab. Frames expire and are deleted when Club Live sharing ends. Watts remain excluded from public
+          leaderboards, shared ghosts, multiplayer participants, and shared exports; your saved power history remains
+          in your own training record. Your temporary Club Athlete bike and racer-seat access is based on the club
+          membership and stops when you leave club training.
         </p>
       )}
     </>

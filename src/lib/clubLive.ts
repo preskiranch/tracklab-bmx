@@ -49,6 +49,17 @@ export type ClubLiveSession = ClubLiveSnapshot & {
   expiresAt: number;
 };
 
+export type ClubLiveScreenFrame = Pick<
+  ClubLiveSnapshot,
+  'clubId' | 'studioRiderId'
+> & {
+  sessionId: string;
+  jpegDataUrl: `data:image/jpeg;base64,${string}`;
+  width: number;
+  height: number;
+  capturedAt: number;
+};
+
 function finiteNumber(value: unknown, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
@@ -219,7 +230,7 @@ export async function publishClubLiveSession(snapshot: ClubLiveSnapshot, signal?
 }
 
 export async function stopClubLiveSession(
-  selection: Pick<ClubLiveSnapshot, 'clubId' | 'studioRiderId'>,
+  selection: Pick<ClubLiveSnapshot, 'clubId' | 'studioRiderId'> & { sessionId: string },
   options: { keepalive?: boolean; signal?: AbortSignal } = {},
 ) {
   const tabletToken = currentClubTabletSessionToken();
@@ -231,6 +242,7 @@ export async function stopClubLiveSession(
       keepalive: options.keepalive,
       signal: options.signal,
       headers: clubTabletSessionHeaders(tabletToken),
+      body: JSON.stringify({ sessionId: selection.sessionId }),
     });
     return;
   }
@@ -238,7 +250,47 @@ export async function stopClubLiveSession(
     method: 'DELETE',
     keepalive: options.keepalive,
     signal: options.signal,
-    body: JSON.stringify(selection),
+    body: JSON.stringify({
+      clubId: selection.clubId,
+      studioRiderId: selection.studioRiderId,
+      sessionId: selection.sessionId,
+    }),
+  });
+}
+
+/**
+ * Replaces the athlete's single short-lived Club Live screen frame. The
+ * server accepts it only after the matching authenticated telemetry session
+ * exists; nothing is persisted as activity history.
+ */
+export async function publishClubLiveScreenFrame(
+  frame: ClubLiveScreenFrame,
+  signal?: AbortSignal,
+) {
+  const tabletToken = currentClubTabletSessionToken();
+  await clubLiveFetch('/api/club-live/frames', {
+    method: 'PUT',
+    signal,
+    headers: clubTabletSessionHeaders(tabletToken),
+    body: JSON.stringify(frame),
+  });
+}
+
+export async function stopClubLiveScreenFrame(
+  selection: Pick<ClubLiveSnapshot, 'clubId' | 'studioRiderId'> & { sessionId: string },
+  options: { keepalive?: boolean; signal?: AbortSignal } = {},
+) {
+  const tabletToken = currentClubTabletSessionToken();
+  await clubLiveFetch('/api/club-live/frames', {
+    method: 'DELETE',
+    keepalive: options.keepalive,
+    signal: options.signal,
+    headers: clubTabletSessionHeaders(tabletToken),
+    body: JSON.stringify({
+      clubId: selection.clubId,
+      studioRiderId: selection.studioRiderId,
+      sessionId: selection.sessionId,
+    }),
   });
 }
 

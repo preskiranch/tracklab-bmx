@@ -170,6 +170,7 @@ type ExploreViewProps = {
   onVoiceStop: () => void;
   onDemoRideStatusChange?: (status: 'ready' | 'riding' | 'paused' | 'finished') => void;
   onLiveStateChange?: (state: {
+    sessionId: string | null;
     status: 'ready' | 'riding' | 'paused' | 'finished';
     route: ExploreRoute | null;
     riders: ExploreRider[];
@@ -430,6 +431,7 @@ export function ExploreView({
       }
       : null,
   );
+  const completedRideSessionIdRef = useRef<string | null>(null);
   const restoredBindingPendingRef = useRef(Boolean(initialCheckpointRef.current?.studioBinding));
   const armingRideRef = useRef(false);
   const armAttemptRevisionRef = useRef(0);
@@ -566,12 +568,15 @@ export function ExploreView({
   const latestPlayersRef = useRef(players);
   latestPlayersRef.current = players;
   const latestClubLiveStateRef = useRef({
+    sessionId: rideSessionRef.current?.sessionId ?? null,
     status: ride.status,
     route,
     riders: ride.riders,
     elapsedMs: ride.elapsedMs,
   });
   latestClubLiveStateRef.current = {
+    sessionId: rideSessionRef.current?.sessionId
+      ?? (ride.status === 'finished' ? completedRideSessionIdRef.current : null),
     status: ride.status,
     route,
     riders: ride.riders,
@@ -657,6 +662,7 @@ export function ExploreView({
         ...(checkpoint.studioBinding ? { studioBinding: checkpoint.studioBinding } : {}),
       }
       : null;
+    completedRideSessionIdRef.current = null;
     restoredBindingPendingRef.current = Boolean(checkpoint?.studioBinding);
     setLocalRouteState({
       profileKey: recentProfileKey,
@@ -1263,6 +1269,7 @@ export function ExploreView({
           activeClockSegments: ride.activeClockSegments,
           ...(session.studioBinding ? { studioBinding: session.studioBinding } : {}),
         });
+        completedRideSessionIdRef.current = session.sessionId;
         rideSessionRef.current = null;
       }
       if (fullscreen) {
@@ -1579,6 +1586,7 @@ export function ExploreView({
         startedAt: Math.max(1, Date.now() - ride.elapsedMs),
       };
       rideSessionRef.current = session;
+      completedRideSessionIdRef.current = null;
       if (session.studioBinding && restoredBindingPendingRef.current) {
         if (!route) return;
         try {
@@ -1659,6 +1667,7 @@ export function ExploreView({
           ...(studioBinding ? { studioBinding } : {}),
         };
         rideSessionRef.current = session;
+        completedRideSessionIdRef.current = null;
         restoredBindingPendingRef.current = false;
         onFullscreenChange(true);
         onRideSessionStart?.({
@@ -1743,6 +1752,7 @@ export function ExploreView({
         onRideSessionReset?.(rideSessionRef.current.sessionId);
         rideSessionRef.current = null;
       }
+      completedRideSessionIdRef.current = null;
       restoredBindingPendingRef.current = false;
       if (recentProfileKey) {
         clearExploreRideCheckpoint(recentProfileKey);

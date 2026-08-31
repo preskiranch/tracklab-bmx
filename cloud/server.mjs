@@ -154,6 +154,14 @@ const challenges = new Map();
 const matchInvites = new Map();
 const persistedRaceResultKeys = new Map();
 const clubLiveSessions = new Map();
+// A publish request can remain in flight while the rider ends sharing. Keep a
+// short-lived, process-local termination fence so that request cannot recreate
+// telemetry or a frame after DELETE, logout, or credential revocation wins.
+const clubLivePublisherTerminationFences = new Map();
+// Club Live screen frames are deliberately process-local and short lived. They
+// are never persisted because the owner only needs the athlete's current
+// TrackLab activity surface, not a screen-recording history.
+const clubLiveFrames = new Map();
 const clubLiveMonitorPresence = new Map();
 const clubLiveAccessSelections = new Map();
 const clubTabletBikePresenceByDeviceId = new Map();
@@ -176,6 +184,21 @@ const configuredClubLiveSessionTtlMs = Number(process.env.TRACKLAB_CLUB_LIVE_SES
 const clubLiveSessionTtlMs = Number.isFinite(configuredClubLiveSessionTtlMs)
   ? Math.max(250, Math.min(120_000, Math.round(configuredClubLiveSessionTtlMs)))
   : 15_000;
+const configuredClubLiveFrameTtlMs = Number(process.env.TRACKLAB_CLUB_LIVE_FRAME_TTL_MS);
+const clubLiveFrameTtlMs = Number.isFinite(configuredClubLiveFrameTtlMs)
+  ? Math.max(250, Math.min(30_000, Math.round(configuredClubLiveFrameTtlMs)))
+  : 9_000;
+const clubLivePublisherTerminationFenceTtlMs = Math.max(60_000, clubLiveSessionTtlMs * 2);
+const clubLiveFrameUploadLimit = 6;
+const maxClubLiveFrameDecodedBytes = 350 * 1024;
+const maxClubLiveFrameDimension = 1_280;
+const maxClubLiveFrameBodyBytes = Math.ceil(maxClubLiveFrameDecodedBytes * 4 / 3) + 16_384;
+const clubLiveJpegStartOfFrameMarkers = new Set([
+  0xc0, 0xc1, 0xc2, 0xc3,
+  0xc5, 0xc6, 0xc7,
+  0xc9, 0xca, 0xcb,
+  0xcd, 0xce, 0xcf,
+]);
 // Tablets publish GATT bike presence every four seconds. Keep three heartbeat
 // windows so a delayed request cannot make a still-connected bike flicker out.
 const clubTabletBikePresenceHeartbeatMs = 4_000;
@@ -275,6 +298,8 @@ const smartExploreRouteRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 100
 const commentaryRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const clubConnectRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const clubLiveRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
+const clubLiveFrameRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
+const clubLiveFrameUploadRateLimiter = createRateLimiter({ windowMs: 1_000 });
 const clubTabletRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const friendReadRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const friendMutationRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
@@ -2222,6 +2247,7 @@ function deactivateAuthenticatedClientsForProfile(profileId, reason) {
 }
 
 function closeResponseStreamsForErasedAccount(profileKey, clubIds) {
+  terminateClubLivePublisher(`profile:${profileKey}`);
   const trainingStreams = trainingHistoryStreams.get(profileKey);
   trainingStreams?.forEach((response) => {
     removeTrainingHistoryStream(profileKey, response);
@@ -2233,12 +2259,14 @@ function closeResponseStreamsForErasedAccount(profileKey, clubIds) {
   heartRateOwnerLiveStreams.delete(profileKey);
   heartRateWatchStatusSnapshots.delete(profileKey);
 
+  deleteClubLiveSessionsWhere((session) => session._publisherProfileKey === profileKey);
+
   for (const clubId of clubIds) {
     const clubHeartRateStreams = heartRateClubLiveStreams.get(clubId);
     clubHeartRateStreams?.forEach((response) => response.end());
     heartRateClubLiveStreams.delete(clubId);
     clubLiveMonitorPresence.delete(clubId);
-    deleteMemoryRuntimeEntries(clubLiveSessions, (session) => session.clubId === clubId);
+    deleteClubLiveSessionsWhere((session) => session.clubId === clubId);
     deleteMemoryRuntimeEntries(clubTabletBikePresenceByDeviceId, (presence) => presence.clubId === clubId);
   }
   for (const [selectedProfileKey, access] of clubLiveAccessSelections.entries()) {
@@ -2766,6 +2794,24 @@ function enforceRateLimit(request, response, limiter, limit, scope) {
 
 function enforceNoStoreRateLimit(request, response, limiter, limit, scope) {
   const result = limiter.check(`${scope}:${requestClientIp(request)}`, limit);
+  response.setHeader('RateLimit-Limit', String(result.limit));
+  response.setHeader('RateLimit-Remaining', String(result.remaining));
+  if (result.allowed) return true;
+  response.setHeader('Retry-After', String(result.retryAfterSeconds));
+  writeJson(
+    response,
+    429,
+    { error: 'Too many requests. Wait a few minutes and try again.' },
+    { 'Cache-Control': 'no-store' },
+  );
+  return false;
+}
+
+function enforceCredentialNoStoreRateLimit(response, limiter, limit, credentialScope) {
+  // credentialScope must contain only a one-way credential hash or another
+  // non-secret identifier. Do not append the caller-controlled forwarded IP:
+  // this limit protects large authenticated request bodies per publisher.
+  const result = limiter.check(credentialScope, limit);
   response.setHeader('RateLimit-Limit', String(result.limit));
   response.setHeader('RateLimit-Remaining', String(result.remaining));
   if (result.allowed) return true;
@@ -6704,6 +6750,10 @@ function flushClubEventParticipantReleaseOutbox(now = Date.now()) {
 
 async function stopClubTabletSession(session, { capacityReason = '' } = {}) {
   if (!session) return { status: 'not-joined', eventId: null };
+  // Fence first, before any asynchronous lease/event cleanup. A telemetry or
+  // frame request that already authenticated with this exact athlete token
+  // must not commit after End Activity or device revocation returns.
+  terminateClubLivePublisher(`tablet:${session.tokenHash}`);
   if (session._expiryTimer) clearTimeout(session._expiryTimer);
   session._expiryTimer = null;
   clubTabletSessionsByTokenHash.delete(session.tokenHash);
@@ -6718,7 +6768,7 @@ async function stopClubTabletSession(session, { capacityReason = '' } = {}) {
   const liveKey = clubLiveSessionKey(session.clubId, session.studioRiderId);
   const liveSession = clubLiveSessions.get(liveKey);
   if (liveSession?._publisherClubTabletSessionHash === session.tokenHash) {
-    clubLiveSessions.delete(liveKey);
+    deleteClubLiveSession(liveKey);
   }
   for (const client of clients.values()) {
     if (client.clubTabletSessionTokenHash === session.tokenHash) {
@@ -7873,13 +7923,123 @@ function clubLiveSessionKey(clubId, studioRiderId) {
   return `${clubId}:${studioRiderId}`;
 }
 
+function clubLivePublisherIdentity(session) {
+  if (session?._publisherClubTabletSessionHash) {
+    return `tablet:${session._publisherClubTabletSessionHash}`;
+  }
+  if (session?._publisherAuthSessionHash) {
+    return `personal:${session._publisherAuthSessionHash}`;
+  }
+  return session?._publisherProfileKey ? `profile:${session._publisherProfileKey}` : '';
+}
+
+function captureClubLivePublisherTerminationFence(...publisherIdentities) {
+  return publisherIdentities
+    .filter(Boolean)
+    .map((identity) => ({
+      identity,
+      revision: clubLivePublisherTerminationFences.get(identity)?.revision ?? 0,
+    }));
+}
+
+function terminateClubLivePublisher(identity, sessionId = '') {
+  if (!identity) return;
+  const previous = clubLivePublisherTerminationFences.get(identity);
+  if (previous?._expiryTimer) clearTimeout(previous._expiryTimer);
+  const revision = (previous?.revision ?? 0) + 1;
+  const exactSessionIds = new Set(previous?.exactSessionIds ?? []);
+  if (sessionId) exactSessionIds.add(sessionId);
+  const fence = {
+    revision,
+    broadRevision: sessionId ? (previous?.broadRevision ?? 0) : revision,
+    exactSessionIds,
+    expiresAt: Date.now() + clubLivePublisherTerminationFenceTtlMs,
+  };
+  fence._expiryTimer = setTimeout(() => {
+    if (clubLivePublisherTerminationFences.get(identity) === fence) {
+      clubLivePublisherTerminationFences.delete(identity);
+    }
+  }, clubLivePublisherTerminationFenceTtlMs + 25);
+  fence._expiryTimer.unref?.();
+  clubLivePublisherTerminationFences.set(identity, fence);
+}
+
+function clubLivePublisherTerminationFenceAllowsSession(capturedFences, sessionId) {
+  if (!sessionId || !Array.isArray(capturedFences) || capturedFences.length === 0) return false;
+  return capturedFences.every(({ identity, revision }) => {
+    const current = clubLivePublisherTerminationFences.get(identity);
+    if (!current) return true;
+    if (current.exactSessionIds.has(sessionId)) return false;
+    return current.broadRevision <= revision;
+  });
+}
+
+function clubLiveFrameMatchesSession(frame, session, now = Date.now()) {
+  return Boolean(
+    frame
+    && session
+    && frame.clubId === session.clubId
+    && frame.studioRiderId === session.studioRiderId
+    && frame.sessionId === session.sessionId
+    && frame._publisherIdentity === clubLivePublisherIdentity(session)
+    && frame.expiresAt > now
+    && session.expiresAt > now
+  );
+}
+
+function deleteClubLiveFrame(key) {
+  const frame = clubLiveFrames.get(key);
+  if (frame?._expiryTimer) clearTimeout(frame._expiryTimer);
+  return clubLiveFrames.delete(key);
+}
+
+function storeClubLiveFrame(key, frame) {
+  deleteClubLiveFrame(key);
+  const storedFrame = { ...frame };
+  storedFrame._expiryTimer = setTimeout(() => {
+    if (clubLiveFrames.get(key) === storedFrame) deleteClubLiveFrame(key);
+  }, Math.max(1, storedFrame.expiresAt - Date.now() + 25));
+  storedFrame._expiryTimer.unref?.();
+  clubLiveFrames.set(key, storedFrame);
+  return storedFrame;
+}
+
+function deleteClubLiveSession(key) {
+  deleteClubLiveFrame(key);
+  return clubLiveSessions.delete(key);
+}
+
+function deleteClubLiveSessionsWhere(predicate) {
+  for (const [key, session] of clubLiveSessions.entries()) {
+    if (predicate(session, key)) deleteClubLiveSession(key);
+  }
+}
+
+function setClubLiveSession(key, session) {
+  const existingFrame = clubLiveFrames.get(key);
+  if (existingFrame && !clubLiveFrameMatchesSession(existingFrame, session)) {
+    deleteClubLiveFrame(key);
+  }
+  clubLiveSessions.set(key, session);
+}
+
+function pruneClubLiveFrames(now = Date.now()) {
+  for (const [key, frame] of clubLiveFrames.entries()) {
+    const liveSession = clubLiveSessions.get(key);
+    if (!clubLiveFrameMatchesSession(frame, liveSession, now)) {
+      deleteClubLiveFrame(key);
+    }
+  }
+}
+
 function pruneClubLiveSessions(now = Date.now()) {
   pruneClubTabletSessions(now);
   for (const [key, session] of clubLiveSessions.entries()) {
     if (!session || session.expiresAt <= now) {
-      clubLiveSessions.delete(key);
+      deleteClubLiveSession(key);
     }
   }
+  pruneClubLiveFrames(now);
   for (const [clubId, presence] of clubLiveMonitorPresence.entries()) {
     if (!presence || presence.expiresAt <= now) {
       clubLiveMonitorPresence.delete(clubId);
@@ -7900,6 +8060,176 @@ function pruneClubLiveSessions(now = Date.now()) {
     if (!client?.clubLiveAccess || clientHasRacerAccess(client, now)) continue;
     demoteClubLiveClient(client);
   }
+}
+
+function clubLiveJpegPixelDimensions(decoded) {
+  let offset = 2;
+  let dimensions = null;
+  let frameComponentIds = null;
+  while (offset + 1 < decoded.byteLength) {
+    if (decoded[offset] !== 0xff) return null;
+    while (offset < decoded.byteLength && decoded[offset] === 0xff) offset += 1;
+    if (offset >= decoded.byteLength) return null;
+    const marker = decoded[offset];
+    offset += 1;
+    if (marker === 0xd9) return null;
+    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+    if (offset + 2 > decoded.byteLength) return null;
+    const segmentLength = decoded.readUInt16BE(offset);
+    if (segmentLength < 2 || offset + segmentLength > decoded.byteLength) return null;
+    if (clubLiveJpegStartOfFrameMarkers.has(marker)) {
+      if (segmentLength < 8) return null;
+      const height = decoded.readUInt16BE(offset + 3);
+      const width = decoded.readUInt16BE(offset + 5);
+      const componentCount = decoded[offset + 7];
+      if (
+        width < 1
+        || height < 1
+        || componentCount < 1
+        || componentCount > 4
+        || segmentLength !== 8 + (3 * componentCount)
+      ) return null;
+      const componentIds = new Set();
+      for (let index = 0; index < componentCount; index += 1) {
+        const componentOffset = offset + 8 + (index * 3);
+        const componentId = decoded[componentOffset];
+        const sampling = decoded[componentOffset + 1];
+        if (
+          componentIds.has(componentId)
+          || (sampling >> 4) < 1
+          || (sampling >> 4) > 4
+          || (sampling & 0x0f) < 1
+          || (sampling & 0x0f) > 4
+        ) return null;
+        componentIds.add(componentId);
+      }
+      dimensions = { width, height };
+      frameComponentIds = componentIds;
+    }
+    if (marker === 0xda) {
+      // Reject header-only marker sequences that merely claim dimensions. A
+      // real JPEG scan names one or more declared frame components and has
+      // entropy-coded bytes before the final EOI marker.
+      if (!dimensions || !frameComponentIds || segmentLength < 8) return null;
+      const scanComponentCount = decoded[offset + 2];
+      if (
+        scanComponentCount < 1
+        || scanComponentCount > 4
+        || segmentLength !== 6 + (2 * scanComponentCount)
+      ) return null;
+      const scanComponentIds = new Set();
+      for (let index = 0; index < scanComponentCount; index += 1) {
+        const componentId = decoded[offset + 3 + (index * 2)];
+        if (
+          scanComponentIds.has(componentId)
+          || !frameComponentIds.has(componentId)
+        ) return null;
+        scanComponentIds.add(componentId);
+      }
+      const scanDataOffset = offset + segmentLength;
+      return scanDataOffset < decoded.byteLength - 2 ? dimensions : null;
+    }
+    offset += segmentLength;
+  }
+  return null;
+}
+
+function decodeClubLiveJpeg(payload) {
+  const explicitDataUrl = payload?.jpegDataUrl;
+  const explicitBase64 = payload?.jpegBase64;
+  if (explicitDataUrl != null && explicitBase64 != null) return null;
+  const jpegDataUrl = typeof explicitDataUrl === 'string'
+    ? explicitDataUrl
+    : typeof explicitBase64 === 'string'
+      ? `data:image/jpeg;base64,${explicitBase64}`
+      : '';
+  if (!jpegDataUrl.startsWith('data:image/jpeg;base64,')) return null;
+  const encoded = jpegDataUrl.slice('data:image/jpeg;base64,'.length);
+  const maxEncodedLength = Math.ceil(maxClubLiveFrameDecodedBytes / 3) * 4;
+  if (encoded.length > maxEncodedLength) {
+    throw new HttpRequestError(413, 'The Club Live screen frame is too large.');
+  }
+  if (
+    encoded.length < 8
+    || encoded.length % 4 !== 0
+    || !/^[A-Za-z0-9+/]+={0,2}$/u.test(encoded)
+  ) return null;
+  const decoded = Buffer.from(encoded, 'base64');
+  if (decoded.byteLength > maxClubLiveFrameDecodedBytes) {
+    throw new HttpRequestError(413, 'The Club Live screen frame is too large.');
+  }
+  if (
+    decoded.byteLength < 4
+    || decoded[0] !== 0xff
+    || decoded[1] !== 0xd8
+    || decoded[2] !== 0xff
+    || decoded[decoded.byteLength - 2] !== 0xff
+    || decoded[decoded.byteLength - 1] !== 0xd9
+    || decoded.toString('base64') !== encoded
+  ) return null;
+  const dimensions = clubLiveJpegPixelDimensions(decoded);
+  if (
+    !dimensions
+    || dimensions.width > maxClubLiveFrameDimension
+    || dimensions.height > maxClubLiveFrameDimension
+  ) return null;
+  return {
+    jpegDataUrl,
+    byteLength: decoded.byteLength,
+    pixelWidth: dimensions.width,
+    pixelHeight: dimensions.height,
+    contentDigest: createHash('sha256').update(decoded).digest('base64url'),
+  };
+}
+
+function sanitizeClubLiveFrame(payload, liveSession, now = Date.now()) {
+  const sessionId = sanitizeText(payload?.sessionId, '', 160);
+  const width = Number(payload?.width);
+  const height = Number(payload?.height);
+  if (
+    !sessionId
+    || sessionId !== liveSession?.sessionId
+    || !Number.isInteger(width)
+    || !Number.isInteger(height)
+    || width < 1
+    || height < 1
+    || width > maxClubLiveFrameDimension
+    || height > maxClubLiveFrameDimension
+  ) return null;
+  const jpeg = decodeClubLiveJpeg(payload);
+  if (!jpeg || jpeg.pixelWidth !== width || jpeg.pixelHeight !== height) return null;
+  const rawCapturedAt = Number(payload?.capturedAt);
+  const capturedAt = Number.isFinite(rawCapturedAt) && rawCapturedAt > 0
+    ? Math.max(now - 60_000, Math.min(now + 5_000, Math.round(rawCapturedAt)))
+    : now;
+  return {
+    clubId: liveSession.clubId,
+    studioRiderId: liveSession.studioRiderId,
+    riderName: liveSession.riderName,
+    sessionId: liveSession.sessionId,
+    activityType: liveSession.activityType,
+    ...(liveSession._publisherDeviceId ? { deviceId: liveSession._publisherDeviceId } : {}),
+    width,
+    height,
+    capturedAt,
+    updatedAt: now,
+    expiresAt: Math.min(now + clubLiveFrameTtlMs, liveSession.expiresAt),
+    contentType: 'image/jpeg',
+    byteLength: jpeg.byteLength,
+    jpegDataUrl: jpeg.jpegDataUrl,
+    _representationDigest: jpeg.contentDigest,
+    _publisherIdentity: clubLivePublisherIdentity(liveSession),
+  };
+}
+
+function publicClubLiveFrame(frame) {
+  const {
+    _publisherIdentity: _privatePublisherIdentity,
+    _representationDigest: _privateRepresentationDigest,
+    _expiryTimer: _privateExpiryTimer,
+    ...visibleFrame
+  } = frame;
+  return visibleFrame;
 }
 
 async function activeClubLiveAccessForState(state, now = Date.now()) {
@@ -8124,6 +8454,7 @@ function sanitizeClubLiveSnapshot(payload, membership, user, now = Date.now(), p
 function publicClubLiveSession(session) {
   const {
     _publisherProfileKey: _privatePublisherProfileKey,
+    _publisherAuthSessionHash: _privatePublisherAuthSessionHash,
     _publisherDeviceId: _privatePublisherDeviceId,
     _publisherClubTabletSessionHash: _privateTabletSessionHash,
     ...visibleSession
@@ -15847,9 +16178,13 @@ async function serveStatic(request, response) {
     const token = requestAuthSessionToken(request);
     if (token) {
       const hash = tokenHash(token);
+      terminateClubLivePublisher(`personal:${hash}`);
       authSessionLookups.forget(hash);
       personalAuthSessions.forget(hash);
       await persistence.deleteAuthSession(hash);
+      deleteClubLiveSessionsWhere((liveSession) => (
+        liveSession?._publisherAuthSessionHash === hash
+      ));
       deactivateAuthenticatedClientsForSession(hash, 'Signed out');
       closeFriendEventStreamsForSession(hash);
       closeTrainingHistoryStreamsForSession(hash);
@@ -17455,6 +17790,7 @@ async function serveStatic(request, response) {
 
     // Match first enrollment exactly: this app installation is now a shared
     // kiosk, not an authenticated administrator device.
+    terminateClubLivePublisher(`personal:${authorizingSessionHash}`);
     authSessionLookups.forget(authorizingSessionHash);
     personalAuthSessions.forget(authorizingSessionHash);
     await persistence.deleteAuthSession(authorizingSessionHash);
@@ -17516,6 +17852,7 @@ async function serveStatic(request, response) {
       // The browser becomes a shared kiosk at enrollment. Retiring the
       // authorizing server session and clearing its cookie before 201 prevents
       // any owner/admin identity from remaining usable on that tablet.
+      terminateClubLivePublisher(`personal:${authorizingSessionHash}`);
       authSessionLookups.forget(authorizingSessionHash);
       personalAuthSessions.forget(authorizingSessionHash);
       await persistence.deleteAuthSession(authorizingSessionHash);
@@ -18057,6 +18394,10 @@ async function serveStatic(request, response) {
       writeJson(response, 405, { error: 'Method not allowed' });
       return;
     }
+    const publisherIdentity = `tablet:${tabletSession.tokenHash}`;
+    const publisherCommitFences = request.method === 'PUT'
+      ? captureClubLivePublisherTerminationFence(publisherIdentity)
+      : null;
     const now = Date.now();
     const clubBikeAccess = await clubBikeAccessForOwnerProfileKey(tabletSession.ownerProfileKey);
     if (!clubBikeAccess.active) {
@@ -18066,9 +18407,23 @@ async function serveStatic(request, response) {
     }
     const key = clubLiveSessionKey(tabletSession.clubId, tabletSession.studioRiderId);
     if (request.method === 'DELETE') {
+      const payload = await readJsonBody(request, 8_000);
       const existing = clubLiveSessions.get(key);
-      const stopped = existing?._publisherClubTabletSessionHash === tabletSession.tokenHash;
-      if (stopped) clubLiveSessions.delete(key);
+      const requestedSessionId = sanitizeText(payload?.sessionId, '', 160);
+      if (!requestedSessionId) {
+        writeJson(response, 400, {
+          error: 'The active Club Live session is required.',
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      // Record the exact end even when the first PUT has not committed yet.
+      // Session IDs are unique per activity attempt, so a late heartbeat for
+      // this ended attempt may never recreate it while the athlete remains
+      // selected on the shared tablet.
+      terminateClubLivePublisher(publisherIdentity, requestedSessionId);
+      const stopped = existing?._publisherClubTabletSessionHash === tabletSession.tokenHash
+        && existing.sessionId === requestedSessionId;
+      if (stopped) deleteClubLiveSession(key);
       writeJson(response, 200, { stopped }, { 'Cache-Control': 'no-store' });
       return;
     }
@@ -18086,7 +18441,23 @@ async function serveStatic(request, response) {
     }
     liveSession._publisherDeviceId = tabletSession.deviceId;
     liveSession._publisherClubTabletSessionHash = tabletSession.tokenHash;
-    clubLiveSessions.set(key, liveSession);
+    const commitNow = Date.now();
+    if (!clubTabletSessionIsCurrent(tabletSession, commitNow)) {
+      writeJson(response, 401, {
+        error: 'This club tablet athlete session expired or ended.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (!clubLivePublisherTerminationFenceAllowsSession(
+      publisherCommitFences,
+      liveSession.sessionId,
+    )) {
+      writeJson(response, 409, {
+        error: 'This Club Live activity ended before the update completed.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    setClubLiveSession(key, liveSession);
     writeJson(response, 200, {
       session: publicClubLiveSession(liveSession),
       heartbeatTtlMs: clubLiveSessionTtlMs,
@@ -18494,10 +18865,318 @@ async function serveStatic(request, response) {
     return;
   }
 
+  if (requestUrl.pathname === '/api/club-live/frames') {
+    const now = Date.now();
+    pruneClubLiveSessions(now);
+    const tabletCredentialPresented = Boolean(requestClubTabletSessionToken(request));
+    const browserBearerCredentialPresented = nonPersonalBearerCredentialPresented(request);
+
+    if (request.method === 'GET') {
+      // An explicitly supplied athlete-tablet credential remains
+      // authoritative. Never let a stale owner cookie turn that credential
+      // into monitor access.
+      if (tabletCredentialPresented) {
+        const tabletSession = await loadClubTabletSessionFromRequest(request);
+        writeJson(response, tabletSession ? 403 : 401, {
+          error: tabletSession
+            ? 'Only the TrackLab club owner can view live athlete screens.'
+            : 'This club tablet athlete session expired or ended.',
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (browserBearerCredentialPresented) {
+        const tabletDevice = await loadClubTabletDeviceFromRequest(request, { requireAvailable: true });
+        writeJson(response, tabletDevice ? 403 : 401, {
+          error: tabletDevice
+            ? 'Only the TrackLab club owner can view live athlete screens.'
+            : 'This club tablet authorization expired or was revoked.',
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      const authSession = await requireAuthSession(request, response);
+      if (!authSession) return;
+      const profileKey = authProfileKey(authSession.user);
+      if (!canManageClubConnect(authSession.user)) {
+        writeJson(response, 403, {
+          error: 'Only the TrackLab club owner can view live athlete screens.',
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (!enforceNoStoreRateLimit(
+        request,
+        response,
+        clubLiveFrameRateLimiter,
+        180,
+        `club-live-frame-read:${profileKey}`,
+      )) return;
+      const state = await persistence.loadClubConnectState(profileKey);
+      const ownedClub = state.ownedClub;
+      if (!ownedClub) {
+        writeJson(response, 200, {
+          club: null,
+          frames: [],
+          heartbeatTtlMs: clubLiveFrameTtlMs,
+          pollAfterMs: 1_000,
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      const ownerUserData = await persistence.loadUserData(profileKey);
+      const activeRosterRiderIds = new Set(
+        (Array.isArray(ownerUserData?.studioRiders) ? ownerUserData.studioRiders : [])
+          .filter((rider) => rider?.id && !rider?.deletedAt)
+          .map((rider) => rider.id),
+      );
+      const frameEntries = [];
+      for (const [key, frame] of clubLiveFrames.entries()) {
+        const liveSession = clubLiveSessions.get(key);
+        if (frame.clubId !== ownedClub.id) continue;
+        if (!activeRosterRiderIds.has(frame.studioRiderId)) {
+          deleteClubLiveSession(key);
+          continue;
+        }
+        if (!clubLiveFrameMatchesSession(frame, liveSession, now)) {
+          deleteClubLiveFrame(key);
+          continue;
+        }
+        frameEntries.push({
+          frame: publicClubLiveFrame(frame),
+          representationDigest: frame._representationDigest,
+        });
+      }
+      frameEntries.sort((left, right) => (
+        left.frame.studioRiderId.localeCompare(right.frame.studioRiderId)
+      ));
+      const visibleFrameEntries = frameEntries.slice(0, maxBillingBikeSeats);
+      const visibleFrames = visibleFrameEntries.map((entry) => entry.frame);
+      const framesEtag = `"${createHash('sha256').update(JSON.stringify({
+        clubId: ownedClub.id,
+        clubName: ownedClub.name,
+        frames: visibleFrameEntries.map(({ frame, representationDigest }) => ({
+          ...frame,
+          jpegDataUrl: undefined,
+          representationDigest,
+        })),
+      })).digest('base64url').slice(0, 32)}"`;
+      if (request.headers['if-none-match'] === framesEtag) {
+        response.writeHead(304, { 'Cache-Control': 'no-store', ETag: framesEtag });
+        response.end();
+        return;
+      }
+      writeJson(response, 200, {
+        club: { id: ownedClub.id, name: ownedClub.name },
+        frames: visibleFrames,
+        heartbeatTtlMs: clubLiveFrameTtlMs,
+        pollAfterMs: 1_000,
+      }, { 'Cache-Control': 'no-store', ETag: framesEtag });
+      return;
+    }
+
+    if (request.method !== 'PUT' && request.method !== 'DELETE') {
+      writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    // A device authorization can never publish a rider's screen by itself;
+    // the short-lived, athlete-specific tablet session is required. Keep an
+    // explicit Bearer credential authoritative so an ambient owner cookie
+    // cannot silently grant either read or write access.
+    if (!tabletCredentialPresented && browserBearerCredentialPresented) {
+      const tabletDevice = await loadClubTabletDeviceFromRequest(request, { requireAvailable: true });
+      writeJson(response, tabletDevice ? 403 : 401, {
+        error: tabletDevice
+          ? 'Choose an athlete on this club tablet before sharing its screen.'
+          : 'This club tablet authorization expired or was revoked.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    let liveSession = null;
+    let key = '';
+    let publisherRateLimitScope = '';
+    let frameTabletSession = null;
+    let publisherCommitFences = null;
+    if (tabletCredentialPresented) {
+      const tabletSession = await loadClubTabletSessionFromRequest(request);
+      if (!tabletSession) {
+        writeJson(response, 401, {
+          error: 'This club tablet athlete session expired or ended.',
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      frameTabletSession = tabletSession;
+      publisherCommitFences = captureClubLivePublisherTerminationFence(
+        `tablet:${tabletSession.tokenHash}`,
+      );
+      key = clubLiveSessionKey(tabletSession.clubId, tabletSession.studioRiderId);
+      liveSession = clubLiveSessions.get(key);
+      if (
+        !liveSession
+        || liveSession.expiresAt <= now
+        || liveSession._publisherClubTabletSessionHash !== tabletSession.tokenHash
+        || liveSession._publisherDeviceId !== tabletSession.deviceId
+      ) {
+        writeJson(response, 409, {
+          error: 'Publish the active Club Live session before sharing its screen.',
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      publisherRateLimitScope = `tablet:${tabletSession.tokenHash.slice(0, 24)}`;
+    } else {
+      const authSession = await requireAuthSession(request, response);
+      if (!authSession) return;
+      const profileKey = authProfileKey(authSession.user);
+      const payloadIdentifiers = request.method === 'DELETE'
+        ? await readJsonBody(request, 8_000)
+        : null;
+      const clubId = sanitizeText(payloadIdentifiers?.clubId, '', 160);
+      const studioRiderId = sanitizeText(payloadIdentifiers?.studioRiderId, '', 160);
+      // PUT needs the same body for both identity and frame validation, so it
+      // is read after the per-publisher limiter below.
+      request._clubLiveFramePayload = payloadIdentifiers;
+      if (request.method === 'DELETE') {
+        key = clubLiveSessionKey(clubId, studioRiderId);
+        liveSession = clubLiveSessions.get(key);
+      }
+      // A rider can hold more than one signed-in browser session. Keep the
+      // frame budget attached to the athlete profile, rather than multiplying
+      // it for every login, while retaining the exact auth-session hash below
+      // for authorization and logout revocation.
+      publisherRateLimitScope = `profile:${tokenHash(`club-live-frame:${profileKey}`).slice(0, 24)}`;
+      request._clubLiveFramePublisherProfileKey = profileKey;
+      request._clubLiveFramePublisherAuthSessionHash = authSession.sessionTokenHash;
+      publisherCommitFences = captureClubLivePublisherTerminationFence(
+        `personal:${authSession.sessionTokenHash}`,
+        `profile:${profileKey}`,
+      );
+    }
+
+    if (!enforceCredentialNoStoreRateLimit(
+      response,
+      clubLiveFrameUploadRateLimiter,
+      clubLiveFrameUploadLimit,
+      `club-live-frame-publish:${publisherRateLimitScope}`,
+    )) return;
+
+    const payload = request._clubLiveFramePayload
+      || await readJsonBody(request, request.method === 'PUT' ? maxClubLiveFrameBodyBytes : 8_000);
+    if (!tabletCredentialPresented && request.method === 'PUT') {
+      const clubId = sanitizeText(payload?.clubId, '', 160);
+      const studioRiderId = sanitizeText(payload?.studioRiderId, '', 160);
+      key = clubLiveSessionKey(clubId, studioRiderId);
+    }
+    const operationNow = Date.now();
+    pruneClubLiveSessions(operationNow);
+    liveSession = clubLiveSessions.get(key);
+    const publisherProfileKey = request._clubLiveFramePublisherProfileKey || '';
+    const publisherAuthSessionHash = request._clubLiveFramePublisherAuthSessionHash || '';
+    if (!tabletCredentialPresented) {
+      const currentPublisherSession = await currentAuthSessionByHash(publisherAuthSessionHash);
+      if (
+        !currentPublisherSession?.user
+        || authProfileKey(currentPublisherSession.user) !== publisherProfileKey
+      ) {
+        writeJson(response, 401, { error: 'Sign in to continue.' }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+    }
+    if (
+      !liveSession
+      || liveSession.expiresAt <= operationNow
+      || (
+        tabletCredentialPresented
+          ? !clubTabletSessionIsCurrent(frameTabletSession, operationNow)
+            || liveSession._publisherClubTabletSessionHash !== frameTabletSession.tokenHash
+            || liveSession._publisherDeviceId !== frameTabletSession.deviceId
+          : liveSession._publisherProfileKey !== publisherProfileKey
+            || liveSession._publisherAuthSessionHash !== publisherAuthSessionHash
+      )
+    ) {
+      writeJson(response, 409, {
+        error: 'Publish the active Club Live session before sharing its screen.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (request.method === 'DELETE') {
+      const existingFrame = clubLiveFrames.get(key);
+      const requestedSessionId = sanitizeText(payload?.sessionId, '', 160);
+      if (!requestedSessionId) {
+        writeJson(response, 400, {
+          error: 'The active Club Live screen session is required.',
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      const stopped = requestedSessionId === liveSession.sessionId
+        && clubLiveFrameMatchesSession(existingFrame, liveSession, operationNow);
+      if (stopped) deleteClubLiveFrame(key);
+      writeJson(response, 200, { stopped }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const requestedSessionId = sanitizeText(payload?.sessionId, '', 160);
+    if (!requestedSessionId || requestedSessionId !== liveSession.sessionId) {
+      writeJson(response, 409, {
+        error: 'This screen frame does not belong to the active Club Live session.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (!clubLivePublisherTerminationFenceAllowsSession(
+      publisherCommitFences,
+      requestedSessionId,
+    )) {
+      writeJson(response, 409, {
+        error: 'This Club Live activity ended before the screen update completed.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    const frame = sanitizeClubLiveFrame(payload, liveSession, operationNow);
+    if (!frame) {
+      writeJson(response, 400, {
+        error: `A JPEG screen frame no larger than ${maxClubLiveFrameDimension}px per side is required.`,
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const existingFrame = clubLiveFrames.get(key);
+    if (
+      clubLiveFrameMatchesSession(existingFrame, liveSession, operationNow)
+      && frame.capturedAt < existingFrame.capturedAt
+    ) {
+      writeJson(response, 409, {
+        error: 'A newer screen frame is already active for this session.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (!existingFrame) {
+      const activeClubFrameCount = [...clubLiveFrames.values()]
+        .filter((candidate) => (
+          candidate.clubId === liveSession.clubId && candidate.expiresAt > operationNow
+        ))
+        .length;
+      if (activeClubFrameCount >= maxBillingBikeSeats) {
+        writeJson(response, 409, { error: 'Club Live screen capacity was reached.' }, {
+          'Cache-Control': 'no-store',
+        });
+        return;
+      }
+    }
+    const storedFrame = storeClubLiveFrame(key, frame);
+    writeJson(response, 200, {
+      frame: publicClubLiveFrame(storedFrame),
+      heartbeatTtlMs: clubLiveFrameTtlMs,
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
   if (requestUrl.pathname === '/api/club-live/sessions') {
     const session = await requireAuthSession(request, response);
     if (!session) return;
     const profileKey = authProfileKey(session.user);
+    const publisherIdentity = `personal:${session.sessionTokenHash}`;
+    const publisherCommitFences = request.method === 'PUT'
+      ? captureClubLivePublisherTerminationFence(
+          publisherIdentity,
+          `profile:${profileKey}`,
+        )
+      : null;
     const now = Date.now();
     pruneClubLiveSessions(now);
 
@@ -18542,7 +19221,7 @@ async function serveStatic(request, response) {
       for (const [key, liveSession] of clubLiveSessions.entries()) {
         if (liveSession.clubId !== ownedClub.id) continue;
         if (!activeRosterRiderIds.has(liveSession.studioRiderId)) {
-          clubLiveSessions.delete(key);
+          deleteClubLiveSession(key);
           continue;
         }
         activeSessions.push(publicClubLiveSession(liveSession));
@@ -18587,8 +19266,22 @@ async function serveStatic(request, response) {
     const key = clubLiveSessionKey(clubId, studioRiderId);
     if (request.method === 'DELETE') {
       const existing = clubLiveSessions.get(key);
-      const stopped = Boolean(existing?._publisherProfileKey === profileKey);
-      if (stopped) clubLiveSessions.delete(key);
+      const requestedSessionId = sanitizeText(payload?.sessionId, '', 160);
+      if (!requestedSessionId) {
+        writeJson(response, 400, {
+          error: 'The active Club Live session is required.',
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      // Fence this exact activity even if its first heartbeat is still being
+      // parsed. A stale cleanup for another unique session ID remains inert.
+      terminateClubLivePublisher(publisherIdentity, requestedSessionId);
+      const stopped = Boolean(
+        existing?._publisherProfileKey === profileKey
+        && existing?._publisherAuthSessionHash === session.sessionTokenHash
+        && existing?.sessionId === requestedSessionId,
+      );
+      if (stopped) deleteClubLiveSession(key);
       writeJson(response, 200, { stopped }, { 'Cache-Control': 'no-store' });
       return;
     }
@@ -18633,6 +19326,7 @@ async function serveStatic(request, response) {
       });
       return;
     }
+    liveSession._publisherAuthSessionHash = session.sessionTokenHash;
     if (!clubLiveSessions.has(key)) {
       const activeClubSessionCount = [...clubLiveSessions.values()]
         .filter((candidate) => candidate.clubId === clubId)
@@ -18644,7 +19338,24 @@ async function serveStatic(request, response) {
         return;
       }
     }
-    clubLiveSessions.set(key, liveSession);
+    const currentPublisherSession = await currentAuthSessionByHash(session.sessionTokenHash);
+    if (
+      !currentPublisherSession?.user
+      || authProfileKey(currentPublisherSession.user) !== profileKey
+    ) {
+      writeJson(response, 401, { error: 'Sign in to continue.' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (!clubLivePublisherTerminationFenceAllowsSession(
+      publisherCommitFences,
+      liveSession.sessionId,
+    )) {
+      writeJson(response, 409, {
+        error: 'This Club Live activity ended before the update completed.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    setClubLiveSession(key, liveSession);
     cloudTelemetry.increment('tracklab_club_live_updates_total', {
       activity: liveSession.activityType,
       multiplayer: liveSession.multiplayer ? 'yes' : 'no',
@@ -18786,16 +19497,57 @@ async function serveStatic(request, response) {
     }
     const payload = await readJsonBody(request, 100_000);
     const studioRiderId = sanitizeText(payload?.studioRiderId, '', 160);
-    const revoked = studioRiderId && await persistence.revokeClubMember(authProfileKey(session.user), studioRiderId);
+    const ownerProfileKey = authProfileKey(session.user);
+    const stateBeforeRevoke = studioRiderId
+      ? await persistence.loadClubConnectState(ownerProfileKey)
+      : null;
+    const memberBeforeRevoke = stateBeforeRevoke?.ownedClub?.members?.find((member) => (
+      member.studioRiderId === studioRiderId
+    ));
+    const revoked = studioRiderId && await persistence.revokeClubMember(ownerProfileKey, studioRiderId);
     if (!revoked) {
       writeJson(response, 404, { error: 'That club athlete connection was not found.' });
       return;
+    }
+    const formerAthleteProfileKey = memberBeforeRevoke?.athleteProfileKey || '';
+    const revokedClubId = stateBeforeRevoke?.ownedClub?.id || '';
+    if (formerAthleteProfileKey) {
+      // The durable claim is gone now. Fence all in-flight personal publishes
+      // from this athlete before clearing the visible snapshot and temporary
+      // club-seat selection; an unclaimed rider using a real club tablet is a
+      // separate publisher and remains unaffected.
+      terminateClubLivePublisher(`profile:${formerAthleteProfileKey}`);
+      const selectedAccess = clubLiveAccessSelections.get(formerAthleteProfileKey);
+      setClubLiveAccessSelection(formerAthleteProfileKey, null);
+      if (
+        selectedAccess?.billingOwnerUserId
+        && selectedAccess?.allocationKey
+        && selectedAccess?.holderId
+      ) {
+        await persistence.releaseWattbikeConnectionLeaseForHolder({
+          billingOwnerUserId: selectedAccess.billingOwnerUserId,
+          allocationKey: selectedAccess.allocationKey,
+          holderId: selectedAccess.holderId,
+        }).catch((error) => {
+          cloudTelemetry.warn('club_connect.revoke_live_access_release_failed', {
+            clubId: revokedClubId,
+            studioRiderId,
+            error,
+          });
+        });
+      }
+      const liveKey = clubLiveSessionKey(revokedClubId, studioRiderId);
+      const liveSession = clubLiveSessions.get(liveKey);
+      if (liveSession?._publisherProfileKey === formerAthleteProfileKey) {
+        terminateClubLivePublisher(clubLivePublisherIdentity(liveSession));
+        deleteClubLiveSession(liveKey);
+      }
     }
     writeJson(
       response,
       200,
       publicClubConnectState(
-        await persistence.loadClubConnectState(authProfileKey(session.user)),
+        await persistence.loadClubConnectState(ownerProfileKey),
         session.user,
       ),
     );

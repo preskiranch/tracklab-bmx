@@ -74,6 +74,28 @@ afterEach(() => {
 });
 
 describe('Explore ride checkpoints', () => {
+  it('allocates a different session ID for repeated attempts of the same route', () => {
+    const first = createExploreRideSessionArm(
+      route(),
+      [rider()],
+      [player()],
+      1_700_000_000_000,
+      () => 'same-route-attempt-a',
+    );
+    const second = createExploreRideSessionArm(
+      route(),
+      [rider()],
+      [player()],
+      1_700_000_000_001,
+      () => 'same-route-attempt-b',
+    );
+
+    expect(first?.route.id).toBe(second?.route.id);
+    expect(first?.sessionId).toBe('explore:same-route-attempt-a');
+    expect(second?.sessionId).toBe('explore:same-route-attempt-b');
+    expect(first?.sessionId).not.toBe(second?.sessionId);
+  });
+
   it('freezes one-to-four rider/player/device snapshots and rejects a changed bike binding', () => {
     const riders = ([1, 2, 3, 4] as const).map((playerId) => ({
       ...rider(1_000 + playerId),

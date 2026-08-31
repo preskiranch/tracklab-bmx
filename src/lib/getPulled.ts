@@ -54,6 +54,8 @@ export type GetPulledResult = {
 };
 
 export type GetPulledLiveState = {
+  /** Unique ID created when this exact pull attempt is armed. */
+  sessionId: string;
   phase: GetPulledPhase;
   playerId: PlayerSlot['id'];
   riderId?: string;

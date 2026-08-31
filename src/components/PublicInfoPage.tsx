@@ -103,7 +103,7 @@ function PrivacyPage() {
           This notice describes the current TrackLab BMX web and iPhone/iPad app behavior. TrackLab combines
           Wattbike telemetry, mapped tracks, training history, multiplayer rooms, and optional AI commentary.
         </p>
-        <span className="public-info-updated">Last updated August 27, 2026</span>
+        <span className="public-info-updated">Last updated August 31, 2026</span>
       </section>
 
       <section className="public-info-summary" aria-label="Privacy summary">
@@ -286,12 +286,15 @@ function PrivacyPage() {
                 </li>
                 <li>
                   <strong>Clubs:</strong> a claimed Club Connect athlete can choose “Training at” a club to associate
-                  the saved session with that club. The club owner may optionally open Club Live Monitor; when open, TrackLab also shares
-                  the athlete&apos;s selected program, live status, course progress, track or destination, cadence, and
-                  speed and current live watts with that owner. Saved power history remains private to the athlete and
-                  live watts are not published to public leaderboards, shared ghosts, multiplayer participants, or shared
-                  exports. This read-only live feed expires automatically after the athlete
-                  leaves club training or stops transmitting.
+                  the saved session with that club. The club owner may optionally open Club Live Monitor; when open,
+                  TrackLab also shares the athlete&apos;s selected program, live status, course progress, track or
+                  destination, cadence, speed, and current live watts with that owner. While the athlete is actively
+                  sharing a Club Live session, the owner can also view a temporary, read-only image of the visible
+                  TrackLab activity screen. Screen sharing does not capture the device camera, microphone, taps,
+                  notifications, other apps, or content outside TrackLab. Frames expire and are deleted when Club Live
+                  sharing ends. Saved power history remains private to the athlete, and live watts are not published to
+                  public leaderboards, shared ghosts, multiplayer participants, or shared exports. The rest of the
+                  read-only live feed expires automatically after the athlete leaves club training or stops transmitting.
                 </li>
                 <li>
                   <strong>Apple Watch heart rate and clubs:</strong> saving private heart rate to a rider account does
