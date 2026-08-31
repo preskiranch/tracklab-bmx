@@ -8573,6 +8573,7 @@ export default function App() {
   const handleRaceCameraLockedChange = useCallback((
     locked: boolean,
     referenceViewportValue?: RacePresentationViewport | null,
+    editableCamera?: Partial<EarthCamera>,
   ) => {
     if (!developerRaceLayoutActive) {
       return;
@@ -8580,13 +8581,13 @@ export default function App() {
     const updatedAt = Date.now();
     const referenceViewport = normalizeRacePresentationViewport(referenceViewportValue)
       ?? currentRacePresentationViewport();
-    const candidateCamera = locked
+    const candidateCamera = locked || editableCamera
       ? normalizeEarthCamera({
-          angle: earthAngle,
-          heading: earthHeading,
-          center: earthCenter ?? accountRaceCamera?.center,
-          zoom: earthZoom ?? accountRaceCamera?.zoom,
-          referenceViewport,
+          angle: editableCamera?.angle ?? earthAngle,
+          heading: editableCamera?.heading ?? earthHeading,
+          center: editableCamera?.center ?? earthCenter ?? accountRaceCamera?.center,
+          zoom: editableCamera?.zoom ?? earthZoom ?? accountRaceCamera?.zoom,
+          referenceViewport: editableCamera?.referenceViewport ?? referenceViewport,
           updatedAt,
         })
       : null;
@@ -8606,6 +8607,16 @@ export default function App() {
           [raceCameraPreferenceKey]: stampedCamera,
         }
       : raceViewPreferencesRef.current.earthCamerasByTrack;
+    if (!locked && stampedCamera) {
+      setEarthAngle(stampedCamera.angle);
+      setEarthHeading(stampedCamera.heading);
+      if (stampedCamera.center) {
+        setEarthCenter(stampedCamera.center);
+      }
+      if (stampedCamera.zoom != null) {
+        setEarthZoom(stampedCamera.zoom);
+      }
+    }
     setRaceCameraLocked(locked);
     const nextPreferences = normalizeRaceViewPreferences({
       ...raceViewPreferencesRef.current,
