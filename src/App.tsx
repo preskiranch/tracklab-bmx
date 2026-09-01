@@ -12834,6 +12834,7 @@ export default function App() {
           <Suspense fallback={lazyLoadingFallback}>
             <ClubTabletMode
               canAuthorize={clubOwnerActive && !clubTabletDevice}
+              authorizationClubId={ownedClub?.id ?? ''}
               device={clubTabletDevice}
               status={clubTabletDeviceStatus}
               ready={clubTabletDeviceActive}

@@ -8043,7 +8043,7 @@ test('native club owner sign-in restores the uniquely assigned Wattbike tablet i
       contentType: 'application/json',
       body: JSON.stringify({
         device: recoveredTabletDevice,
-        deviceToken: 'rotated-tablet-device-token',
+        deviceToken: 'rotated-tablet-device-token-123456789012345',
       }),
     });
   });
@@ -8176,7 +8176,7 @@ test('native club owner sign-in restores the uniquely assigned Wattbike tablet i
   await page.waitForTimeout(250);
   expect(rosterRequests).toBeGreaterThanOrEqual(1);
   expect(rosterRequests).toBeLessThanOrEqual(2);
-  expect(rosterAuthorization).toBe('Bearer rotated-tablet-device-token');
+  expect(rosterAuthorization).toBe('Bearer rotated-tablet-device-token-123456789012345');
   await expect.poll(() => logoutRequests).toBe(1);
   await page.waitForTimeout(250);
   expect(logoutRequests).toBe(1);
@@ -8542,7 +8542,10 @@ test('native club owner sign-in restores the uniquely assigned Wattbike tablet i
       window.localStorage.getItem('tracklab.bluetooth-bike-identities.v1') ?? '{}',
     )['browser-club-tablet-bike'] ?? null,
   }))).toEqual({
-    device: { device: recoveredTabletDevice, deviceToken: 'rotated-tablet-device-token' },
+    device: {
+      device: recoveredTabletDevice,
+      deviceToken: 'rotated-tablet-device-token-123456789012345',
+    },
     session: null,
     pairedBikeMonitorId: 58701,
   });

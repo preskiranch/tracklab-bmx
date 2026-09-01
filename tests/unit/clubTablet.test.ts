@@ -7,10 +7,18 @@ const nativeClubTabletCredentialMocks = vi.hoisted(() => ({
   save: vi.fn(async () => true),
 }));
 
+const nativeAuthSessionMocks = vi.hoisted(() => ({
+  clear: vi.fn(async () => undefined),
+}));
+
 vi.mock('../../src/lib/nativeClubTabletCredential', () => ({
   clearNativeClubTabletCredential: nativeClubTabletCredentialMocks.clear,
   forgetNativeClubTabletAuthorization: nativeClubTabletCredentialMocks.forget,
   saveNativeClubTabletCredential: nativeClubTabletCredentialMocks.save,
+}));
+
+vi.mock('../../src/lib/nativeAuthSession', () => ({
+  clearNativeAuthToken: nativeAuthSessionMocks.clear,
 }));
 
 import {
@@ -82,6 +90,32 @@ class MemoryStorage implements Storage {
   }
 }
 
+class UnavailableStorage implements Storage {
+  get length() {
+    return 0;
+  }
+
+  clear() {
+    throw new Error('Storage unavailable');
+  }
+
+  getItem() {
+    throw new Error('Storage unavailable');
+  }
+
+  key() {
+    return null;
+  }
+
+  removeItem() {
+    throw new Error('Storage unavailable');
+  }
+
+  setItem() {
+    throw new Error('Storage unavailable');
+  }
+}
+
 const deviceCredential: ClubTabletDeviceCredential = {
   device: {
     id: 'tablet-1',
@@ -120,6 +154,7 @@ afterEach(() => {
   nativeClubTabletCredentialMocks.clear.mockClear();
   nativeClubTabletCredentialMocks.forget.mockClear();
   nativeClubTabletCredentialMocks.save.mockClear();
+  nativeAuthSessionMocks.clear.mockClear();
 });
 
 describe('Club Tablet client state', () => {
@@ -510,13 +545,17 @@ describe('Club Tablet client state', () => {
     const localStorage = new MemoryStorage();
     const sessionStorage = new MemoryStorage();
     vi.stubGlobal('window', { localStorage, sessionStorage });
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(deviceCredential), {
-      status: 201,
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
+      String(input).endsWith('/api/club-tablet/roster')
+        ? { device: deviceCredential.device, athletes: [] }
+        : deviceCredential,
+    ), {
+      status: String(input).endsWith('/api/club-tablet/roster') ? 200 : 201,
       headers: { 'Content-Type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(enrollClubTablet('Front desk iPad')).resolves.toEqual(deviceCredential);
+    await expect(enrollClubTablet('Front desk iPad', 'club-1')).resolves.toEqual(deviceCredential);
 
     expect(fetchMock).toHaveBeenCalledWith('/api/club-tablet/devices', expect.objectContaining({
       method: 'POST',
@@ -524,6 +563,93 @@ describe('Club Tablet client state', () => {
     }));
     expect(readStoredClubTabletDevice()).toEqual(deviceCredential);
     expect(nativeClubTabletCredentialMocks.save).toHaveBeenCalledWith(deviceCredential);
+    expect(nativeAuthSessionMocks.clear).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the administrator native session when enrollment cannot reach Keychain', async () => {
+    const localStorage = new MemoryStorage();
+    const sessionStorage = new MemoryStorage();
+    vi.stubGlobal('window', { localStorage, sessionStorage });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
+      String(input).endsWith('/api/club-tablet/roster')
+        ? { device: deviceCredential.device, athletes: [] }
+        : deviceCredential,
+    ), {
+      status: String(input).endsWith('/api/club-tablet/roster') ? 200 : 201,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    nativeClubTabletCredentialMocks.save
+      .mockRejectedValueOnce(new Error('Keychain write failed'))
+      .mockRejectedValueOnce(new Error('Keychain write failed'));
+
+    await expect(enrollClubTablet('Front desk iPad', 'club-1')).rejects.toThrow('Keychain write failed');
+
+    expect(readStoredClubTabletDevice()).toEqual(deviceCredential);
+    expect(nativeAuthSessionMocks.clear).not.toHaveBeenCalled();
+
+    nativeClubTabletCredentialMocks.save.mockResolvedValueOnce(true);
+    await expect(enrollClubTablet('Front desk iPad', 'club-1')).resolves.toEqual(deviceCredential);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    expect(nativeClubTabletCredentialMocks.save).toHaveBeenCalledTimes(3);
+    expect(nativeAuthSessionMocks.clear).toHaveBeenCalledOnce();
+  });
+
+  it('retries one transient Keychain failure without leaving automatic enrollment', async () => {
+    const localStorage = new MemoryStorage();
+    const sessionStorage = new MemoryStorage();
+    vi.stubGlobal('window', { localStorage, sessionStorage });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(deviceCredential), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    nativeClubTabletCredentialMocks.save.mockRejectedValueOnce(new Error('Keychain busy'));
+
+    await expect(enrollClubTablet('Front desk iPad', 'club-1')).resolves.toEqual(deviceCredential);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(nativeClubTabletCredentialMocks.save).toHaveBeenCalledTimes(2);
+    expect(nativeAuthSessionMocks.clear).toHaveBeenCalledOnce();
+  });
+
+  it('never reuses a failed enrollment credential for a different owner club', async () => {
+    const localStorage = new MemoryStorage();
+    const sessionStorage = new MemoryStorage();
+    vi.stubGlobal('window', { localStorage, sessionStorage });
+    const otherClubCredential = {
+      device: {
+        ...deviceCredential.device,
+        id: 'tablet-2',
+        clubId: 'club-2',
+        clubName: 'Other Club',
+      },
+      deviceToken: 'other-device-token',
+    };
+    let requestIndex = 0;
+    const fetchMock = vi.fn(async () => {
+      const credential = requestIndex === 0 ? deviceCredential : otherClubCredential;
+      requestIndex += 1;
+      return new Response(JSON.stringify(credential), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    nativeClubTabletCredentialMocks.save
+      .mockRejectedValueOnce(new Error('Keychain write failed'))
+      .mockRejectedValueOnce(new Error('Keychain write failed'));
+
+    await expect(enrollClubTablet('Front desk iPad', 'club-1')).rejects.toThrow(
+      'Keychain write failed',
+    );
+    await expect(enrollClubTablet('Front desk iPad', 'club-2')).resolves.toEqual(
+      otherClubCredential,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(readStoredClubTabletDevice()).toEqual(otherClubCredential);
   });
 
   it('restores an existing authorized tablet without creating a duplicate enrollment', async () => {
@@ -534,7 +660,11 @@ describe('Club Tablet client state', () => {
       ...deviceCredential,
       deviceToken: 'rotated-device-token',
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(recoveredCredential), {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
+      String(input).endsWith('/api/club-tablet/roster')
+        ? { device: recoveredCredential.device, athletes: [] }
+        : recoveredCredential,
+    ), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }));
@@ -548,6 +678,119 @@ describe('Club Tablet client state', () => {
     );
     expect(readStoredClubTabletDevice()).toEqual(recoveredCredential);
     expect(nativeClubTabletCredentialMocks.save).toHaveBeenCalledWith(recoveredCredential);
+    expect(nativeAuthSessionMocks.clear).toHaveBeenCalledOnce();
+  });
+
+  it('retries a failed native recovery save without rotating the server credential again', async () => {
+    const localStorage = new MemoryStorage();
+    const sessionStorage = new MemoryStorage();
+    vi.stubGlobal('window', { localStorage, sessionStorage });
+    const recoveredCredential = {
+      ...deviceCredential,
+      deviceToken: 'rotated-device-token',
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
+      String(input).endsWith('/api/club-tablet/roster')
+        ? { device: recoveredCredential.device, athletes: [] }
+        : recoveredCredential,
+    ), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    nativeClubTabletCredentialMocks.save
+      .mockRejectedValueOnce(new Error('Keychain write failed'))
+      .mockRejectedValueOnce(new Error('Keychain write failed'));
+
+    await expect(recoverClubTabletDevice('tablet-1')).rejects.toThrow('Keychain write failed');
+    expect(readStoredClubTabletDevice()).toEqual(recoveredCredential);
+    expect(nativeAuthSessionMocks.clear).not.toHaveBeenCalled();
+
+    nativeClubTabletCredentialMocks.save.mockResolvedValueOnce(true);
+    await expect(recoverClubTabletDevice('tablet-1')).resolves.toEqual(recoveredCredential);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    expect(nativeClubTabletCredentialMocks.save).toHaveBeenCalledTimes(3);
+    expect(nativeAuthSessionMocks.clear).toHaveBeenCalledOnce();
+  });
+
+  it('retries the issued recovery credential in memory when browser storage is unavailable', async () => {
+    const localStorage = new UnavailableStorage();
+    const sessionStorage = new MemoryStorage();
+    vi.stubGlobal('window', { localStorage, sessionStorage });
+    const recoveredCredential = {
+      ...deviceCredential,
+      deviceToken: 'rotated-device-token',
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
+      String(input).endsWith('/api/club-tablet/roster')
+        ? { device: recoveredCredential.device, athletes: [] }
+        : recoveredCredential,
+    ), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    nativeClubTabletCredentialMocks.save
+      .mockRejectedValueOnce(new Error('Keychain write failed'))
+      .mockRejectedValueOnce(new Error('Keychain write failed'));
+
+    await expect(recoverClubTabletDevice('tablet-1')).rejects.toThrow('Keychain write failed');
+    expect(readStoredClubTabletDevice()).toBeNull();
+
+    nativeClubTabletCredentialMocks.save.mockResolvedValueOnce(true);
+    await expect(recoverClubTabletDevice('tablet-1')).resolves.toEqual(recoveredCredential);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    expect(nativeAuthSessionMocks.clear).toHaveBeenCalledOnce();
+  });
+
+  it('refuses to persist a pending recovery credential after the server revokes it', async () => {
+    const localStorage = new MemoryStorage();
+    const sessionStorage = new MemoryStorage();
+    vi.stubGlobal('window', { localStorage, sessionStorage });
+    const recoveredCredential = {
+      ...deviceCredential,
+      deviceToken: 'rotated-device-token',
+    };
+    const freshCredential = {
+      ...deviceCredential,
+      deviceToken: 'fresh-device-token',
+    };
+    let recoveryRequests = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/api/club-tablet/roster')) {
+        return new Response(JSON.stringify({ error: 'This tablet authorization was revoked.' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      const credential = recoveryRequests === 0 ? recoveredCredential : freshCredential;
+      recoveryRequests += 1;
+      return new Response(JSON.stringify(credential), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    nativeClubTabletCredentialMocks.save
+      .mockRejectedValueOnce(new Error('Keychain write failed'))
+      .mockRejectedValueOnce(new Error('Keychain write failed'));
+
+    await expect(recoverClubTabletDevice('tablet-1')).rejects.toThrow('Keychain write failed');
+    await expect(recoverClubTabletDevice('tablet-1')).rejects.toThrow(
+      'This tablet authorization was revoked.',
+    );
+
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    expect(nativeClubTabletCredentialMocks.save).toHaveBeenCalledTimes(2);
+    expect(nativeAuthSessionMocks.clear).not.toHaveBeenCalled();
+    expect(readStoredClubTabletDevice()).toBeNull();
+
+    await expect(recoverClubTabletDevice('tablet-1')).resolves.toEqual(freshCredential);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(2);
+    expect(nativeAuthSessionMocks.clear).toHaveBeenCalledOnce();
   });
 
   it('clears the durable native credential when the current tablet is revoked', async () => {
