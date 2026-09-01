@@ -3,11 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const nativeClubTabletCredentialMocks = vi.hoisted(() => ({
   clear: vi.fn(async () => true),
+  forget: vi.fn(async () => true),
   save: vi.fn(async () => true),
 }));
 
 vi.mock('../../src/lib/nativeClubTabletCredential', () => ({
   clearNativeClubTabletCredential: nativeClubTabletCredentialMocks.clear,
+  forgetNativeClubTabletAuthorization: nativeClubTabletCredentialMocks.forget,
   saveNativeClubTabletCredential: nativeClubTabletCredentialMocks.save,
 }));
 
@@ -116,6 +118,7 @@ const durableSessionCredential: ClubTabletSessionCredential = {
 afterEach(() => {
   vi.unstubAllGlobals();
   nativeClubTabletCredentialMocks.clear.mockClear();
+  nativeClubTabletCredentialMocks.forget.mockClear();
   nativeClubTabletCredentialMocks.save.mockClear();
 });
 
@@ -560,7 +563,8 @@ describe('Club Tablet client state', () => {
     await revokeClubTabletDevice(deviceCredential.device.id);
 
     expect(readStoredClubTabletDevice()).toBeNull();
-    expect(nativeClubTabletCredentialMocks.clear).toHaveBeenCalledOnce();
+    expect(nativeClubTabletCredentialMocks.forget).toHaveBeenCalledOnce();
+    expect(nativeClubTabletCredentialMocks.clear).not.toHaveBeenCalled();
   });
 
   it('publishes and clears connected-bike presence with only the enrolled tablet credential', async () => {

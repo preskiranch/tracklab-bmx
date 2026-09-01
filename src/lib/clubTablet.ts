@@ -24,7 +24,7 @@ import {
 import { recordedBikeMetricsAreAccepted } from './bikeSampleSanity';
 import { clearNativeAuthToken } from './nativeAuthSession';
 import {
-  clearNativeClubTabletCredential,
+  forgetNativeClubTabletAuthorization,
   saveNativeClubTabletCredential,
 } from './nativeClubTabletCredential';
 import {
@@ -467,7 +467,9 @@ export async function revokeClubTabletDevice(deviceId: string) {
   if (current?.device.id === deviceId) {
     clearStoredClubTabletSession();
     clearStoredClubTabletDevice();
-    await clearNativeClubTabletCredential().catch(() => undefined);
+    // An owner revoke is the one path that intentionally forgets the durable
+    // native recovery hint as well as the current bearer.
+    await forgetNativeClubTabletAuthorization().catch(() => undefined);
   }
 }
 

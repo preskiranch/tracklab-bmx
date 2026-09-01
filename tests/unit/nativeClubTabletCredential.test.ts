@@ -4,6 +4,9 @@ const nativePlugin = vi.hoisted(() => ({
   loadClubTabletCredential: vi.fn(),
   saveClubTabletCredential: vi.fn(),
   clearClubTabletCredential: vi.fn(),
+  loadClubTabletRecoveryBinding: vi.fn(),
+  saveClubTabletRecoveryBinding: vi.fn(),
+  clearClubTabletRecoveryBinding: vi.fn(),
 }));
 
 vi.mock('@capacitor/core', () => ({
@@ -16,9 +19,14 @@ vi.mock('@capacitor/core', () => ({
 }));
 
 import {
+  clearNativeClubTabletRecoveryBinding,
   clearNativeClubTabletCredential,
+  forgetNativeClubTabletAuthorization,
+  loadNativeClubTabletRecoveryBinding,
   restoreNativeClubTabletCredential,
+  saveNativeClubTabletRecoveryBinding,
   saveNativeClubTabletCredential,
+  type ClubTabletRecoveryBinding,
 } from '../../src/lib/nativeClubTabletCredential';
 import {
   readStoredClubTabletDevice,
@@ -47,6 +55,16 @@ const credential: ClubTabletDeviceCredential = {
   deviceToken: 'T'.repeat(43),
 };
 
+const recoveryBinding: ClubTabletRecoveryBinding = {
+  version: 1,
+  deviceId: credential.device.id,
+  deviceName: credential.device.name,
+  clubId: credential.device.clubId,
+  clubName: credential.device.clubName,
+  pairedBikeDeviceId: null,
+  pairedBikeLabel: null,
+};
+
 function nativeWireValue(value = credential) {
   return {
     version: 1,
@@ -65,8 +83,14 @@ beforeEach(() => {
   nativePlugin.loadClubTabletCredential.mockReset();
   nativePlugin.saveClubTabletCredential.mockReset();
   nativePlugin.clearClubTabletCredential.mockReset();
+  nativePlugin.loadClubTabletRecoveryBinding.mockReset();
+  nativePlugin.saveClubTabletRecoveryBinding.mockReset();
+  nativePlugin.clearClubTabletRecoveryBinding.mockReset();
   nativePlugin.saveClubTabletCredential.mockResolvedValue({ saved: true });
   nativePlugin.clearClubTabletCredential.mockResolvedValue({ cleared: true });
+  nativePlugin.loadClubTabletRecoveryBinding.mockResolvedValue({});
+  nativePlugin.saveClubTabletRecoveryBinding.mockResolvedValue({ saved: true });
+  nativePlugin.clearClubTabletRecoveryBinding.mockResolvedValue({ cleared: true });
 });
 
 afterEach(() => {
@@ -105,6 +129,7 @@ describe('native Club Tablet credential persistence', () => {
   it('commits a valid credential to both local and native storage', async () => {
     await expect(saveNativeClubTabletCredential(credential)).resolves.toEqual(credential);
     expect(nativePlugin.saveClubTabletCredential).toHaveBeenCalledWith(nativeWireValue());
+    expect(nativePlugin.saveClubTabletRecoveryBinding).toHaveBeenCalledWith(recoveryBinding);
     expect(readStoredClubTabletDevice()).toEqual(credential);
   });
 
@@ -130,6 +155,59 @@ describe('native Club Tablet credential persistence', () => {
     storeClubTabletDevice(credential);
     await expect(clearNativeClubTabletCredential()).resolves.toBeUndefined();
     expect(nativePlugin.clearClubTabletCredential).toHaveBeenCalledOnce();
+    expect(nativePlugin.clearClubTabletRecoveryBinding).not.toHaveBeenCalled();
+    expect(readStoredClubTabletDevice()).toBeNull();
+  });
+
+  it('loads the token-free recovery identity independently of the bearer', async () => {
+    nativePlugin.loadClubTabletRecoveryBinding.mockResolvedValue({ binding: recoveryBinding });
+
+    await expect(loadNativeClubTabletRecoveryBinding()).resolves.toEqual(recoveryBinding);
+    expect(nativePlugin.loadClubTabletCredential).not.toHaveBeenCalled();
+  });
+
+  it('refreshes recovery identity with a server-returned paired Wattbike', async () => {
+    const device = {
+      ...credential.device,
+      pairedBike: {
+        deviceId: 701,
+        label: 'WattbikePM25058701',
+        updatedAt: Date.now(),
+      },
+    };
+
+    await expect(saveNativeClubTabletRecoveryBinding(device)).resolves.toEqual({
+      ...recoveryBinding,
+      pairedBikeDeviceId: 701,
+      pairedBikeLabel: 'WattbikePM25058701',
+    });
+    expect(nativePlugin.saveClubTabletRecoveryBinding).toHaveBeenCalledWith({
+      ...recoveryBinding,
+      pairedBikeDeviceId: 701,
+      pairedBikeLabel: 'WattbikePM25058701',
+    });
+  });
+
+  it('rejects a malformed or partially paired recovery identity', async () => {
+    await expect(saveNativeClubTabletRecoveryBinding({
+      ...recoveryBinding,
+      pairedBikeDeviceId: 701,
+      pairedBikeLabel: null,
+    })).rejects.toThrow('invalid club tablet recovery identity');
+    expect(nativePlugin.saveClubTabletRecoveryBinding).not.toHaveBeenCalled();
+  });
+
+  it('clears the recovery identity only when explicitly requested', async () => {
+    await expect(clearNativeClubTabletRecoveryBinding()).resolves.toBeUndefined();
+    expect(nativePlugin.clearClubTabletRecoveryBinding).toHaveBeenCalledOnce();
+    expect(nativePlugin.clearClubTabletCredential).not.toHaveBeenCalled();
+  });
+
+  it('forgets bearer, WebView mirror, and recovery identity on owner revoke', async () => {
+    storeClubTabletDevice(credential);
+    await expect(forgetNativeClubTabletAuthorization()).resolves.toBeUndefined();
+    expect(nativePlugin.clearClubTabletCredential).toHaveBeenCalledOnce();
+    expect(nativePlugin.clearClubTabletRecoveryBinding).toHaveBeenCalledOnce();
     expect(readStoredClubTabletDevice()).toBeNull();
   });
 
