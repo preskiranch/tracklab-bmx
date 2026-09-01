@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
 import * as persistence from './persistence.mjs';
 import { cloudTelemetry } from './telemetry.mjs';
+import { planClubLiveExploreClusters } from './clubLiveExploreClusters.mjs';
 import {
   commentaryGuideForEvent,
   commentaryResearchMetadata,
@@ -172,6 +173,10 @@ const heartRateWatchStatusSnapshots = new Map();
 let friendEventStreamCount = 0;
 const rooms = new Map();
 const clubEventRoomIdByEventId = new Map();
+// Demo multiplayer is an ephemeral, same-club presentation room. It is never
+// persisted and is reachable only through a server-bound Club Tablet device
+// ticket, so demo riders cannot leak into the public multiplayer lobby.
+const clubDemoRoomIdByClubId = new Map();
 const clubEventClosedAtByEventId = new Map();
 const challenges = new Map();
 const matchInvites = new Map();
@@ -296,6 +301,7 @@ const clubTabletSessionIdleTtlMs = 15 * 60 * 1000;
 // survive an entire day. Active workouts can renew the 15-minute idle window,
 // but every selection has a four-hour hard stop and must then be reselected.
 const clubTabletSessionMaxTtlMs = 4 * 60 * 60 * 1000;
+const clubTabletDemoSocketTtlMs = clubTabletSessionMaxTtlMs;
 const configuredWattbikeConnectionLeaseTtlMs = Number(
   process.env.TRACKLAB_WATTBIKE_CONNECTION_LEASE_TTL_MS,
 );
@@ -1615,6 +1621,21 @@ const authWebSocketTicketScopes = new Set([
   clubLiveStreamWebsocketScope,
 ]);
 const clubTabletWebSocketTicketScopes = new Set(['multiplayer', clubLiveStreamWebsocketScope]);
+const clubTabletDemoWebSocketMessageTypes = new Set([
+  'hello',
+  'presence',
+  'ping',
+  'latency',
+  'join-club-demo',
+  'club-demo-start',
+  'leave-room',
+  'room-explore-route',
+  'room-explore-action',
+  'room-chat',
+  'race-sync',
+  'explore-sync',
+  'voice-signal',
+]);
 const liveAudioWebSocketMessageTypes = new Set([
   'hello',
   'presence',
@@ -1730,6 +1751,15 @@ function createClubTabletWebSocketTicket(tabletSession, scope, now = Date.now(),
   record._expiryTimer.unref?.();
   clubTabletWsTicketsByHash.set(ticketHash, record);
   return { token: ticket, expiresAt };
+}
+
+function revokeClubTabletDemoWebSocketTicketsForDevice(deviceId) {
+  if (!deviceId) return;
+  for (const [ticketHash, ticket] of clubTabletWsTicketsByHash.entries()) {
+    if (ticket.demo !== true || ticket.deviceId !== deviceId) continue;
+    if (ticket._expiryTimer) clearTimeout(ticket._expiryTimer);
+    clubTabletWsTicketsByHash.delete(ticketHash);
+  }
 }
 
 async function hashPassword(password) {
@@ -2683,6 +2713,15 @@ function publicFriendRequest(friendRequest) {
 
 function clientsCanInteract(left, right) {
   if (!left || !right || left.id === right.id) return true;
+  if (
+    left.websocketScope === clubLiveStreamWebsocketScope
+    || right.websocketScope === clubLiveStreamWebsocketScope
+  ) return false;
+  const leftDemoClubId = left.clubTabletDemoDeviceId ? left.clubLiveAccess?.clubId : '';
+  const rightDemoClubId = right.clubTabletDemoDeviceId ? right.clubLiveAccess?.clubId : '';
+  if (leftDemoClubId || rightDemoClubId) {
+    return Boolean(leftDemoClubId && rightDemoClubId && leftDemoClubId === rightDemoClubId);
+  }
   if (!left.profileId || !right.profileId) return true;
   return !left.blockedProfileIds?.has(right.profileId)
     && !right.blockedProfileIds?.has(left.profileId);
@@ -4773,7 +4812,7 @@ function sanitizeTrainingSession(value) {
   };
 }
 
-function publicTrainingSession(session, clubRole) {
+function publicTrainingSession(session, clubRole, options = {}) {
   if (!session) return null;
   const {
     _profileKey,
@@ -4790,9 +4829,23 @@ function publicTrainingSession(session, clubRole) {
       healthSafePublicSession.details ?? {},
     )),
   };
-  const visiblePublicSession = clubRole === 'owner'
-    ? { ...privateHealthRedactedSession, details: redactPrivatePower(privateHealthRedactedSession.details) }
-    : privateHealthRedactedSession;
+  const claimedPowerStudioRiderIds = new Set(
+    Array.isArray(options.claimedPowerStudioRiderIds)
+      ? options.claimedPowerStudioRiderIds.map((value) => sanitizeText(value, '', 160)).filter(Boolean)
+      : [],
+  );
+  const visiblePublicSession = clubRole !== 'owner' || options.includePrivatePower === true
+    ? privateHealthRedactedSession
+    : {
+      ...privateHealthRedactedSession,
+      details: claimedPowerStudioRiderIds.size > 0
+        ? redactPrivatePowerExceptClaimedRiders(
+          privateHealthRedactedSession.details,
+          claimedPowerStudioRiderIds,
+          sanitizeText(options.attributedStudioRiderId, '', 160),
+        )
+        : redactPrivatePower(privateHealthRedactedSession.details),
+    };
   if (!_clubId || !_studioRiderId) return visiblePublicSession;
   const club = {
     id: _clubId,
@@ -4823,6 +4876,101 @@ function redactPrivatePower(value) {
       ? []
       : [[key, redactPrivatePower(nested)]]
   )));
+}
+
+function privatePowerPlayerKey(value) {
+  if (value == null) return '';
+  const normalized = typeof value === 'number' && Number.isFinite(value)
+    ? String(value)
+    : sanitizeText(value, '', 160);
+  return normalized ? `player:${normalized}` : '';
+}
+
+function privatePowerStudioRiderId(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+  return sanitizeText(value.studioRiderId ?? value.riderId, '', 160);
+}
+
+function collectPrivatePowerPlayerAccess(value, claimedStudioRiderIds, accessByPlayer) {
+  if (Array.isArray(value)) {
+    value.forEach((entry) => collectPrivatePowerPlayerAccess(
+      entry,
+      claimedStudioRiderIds,
+      accessByPlayer,
+    ));
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+  const studioRiderId = privatePowerStudioRiderId(value);
+  const playerKey = privatePowerPlayerKey(value.playerId);
+  if (studioRiderId && playerKey) {
+    const exactAccess = claimedStudioRiderIds.has(studioRiderId);
+    accessByPlayer.set(
+      playerKey,
+      accessByPlayer.has(playerKey)
+        ? Boolean(accessByPlayer.get(playerKey) && exactAccess)
+        : exactAccess,
+    );
+  }
+  Object.values(value).forEach((entry) => collectPrivatePowerPlayerAccess(
+    entry,
+    claimedStudioRiderIds,
+    accessByPlayer,
+  ));
+}
+
+function privatePowerRiderAccess(value, claimedStudioRiderIds, accessByPlayer) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const studioRiderId = privatePowerStudioRiderId(value);
+  if (studioRiderId) return claimedStudioRiderIds.has(studioRiderId);
+  const playerKey = privatePowerPlayerKey(value.playerId);
+  if (playerKey) return accessByPlayer.get(playerKey) === true;
+  return typeof value.riderName === 'string' ? false : null;
+}
+
+function redactPrivatePowerExceptClaimedRiders(
+  value,
+  claimedStudioRiderIds,
+  attributedStudioRiderId = '',
+) {
+  const accessByPlayer = new Map();
+  collectPrivatePowerPlayerAccess(value, claimedStudioRiderIds, accessByPlayer);
+  const riderAccess = [];
+  const collectRiderAccess = (candidate) => {
+    if (Array.isArray(candidate)) {
+      candidate.forEach(collectRiderAccess);
+      return;
+    }
+    if (!candidate || typeof candidate !== 'object') return;
+    const access = privatePowerRiderAccess(candidate, claimedStudioRiderIds, accessByPlayer);
+    if (access != null) riderAccess.push(access);
+    Object.values(candidate).forEach(collectRiderAccess);
+  };
+  collectRiderAccess(value);
+  const attributedAccess = attributedStudioRiderId
+    ? claimedStudioRiderIds.has(attributedStudioRiderId)
+    : false;
+  const rootAccess = riderAccess.length > 0
+    ? riderAccess.every(Boolean)
+    : attributedAccess;
+  const redact = (candidate, inheritedAccess) => {
+    if (Array.isArray(candidate)) {
+      return candidate.map((entry) => redact(entry, inheritedAccess));
+    }
+    if (!candidate || typeof candidate !== 'object') return candidate;
+    const exactAccess = privatePowerRiderAccess(
+      candidate,
+      claimedStudioRiderIds,
+      accessByPlayer,
+    );
+    const effectiveAccess = exactAccess == null ? inheritedAccess : exactAccess;
+    return Object.fromEntries(Object.entries(candidate).flatMap(([key, nested]) => (
+      /(?:watts?|power)/i.test(key) && !effectiveAccess
+        ? []
+        : [[key, redact(nested, effectiveAccess)]]
+    )));
+  };
+  return redact(value, rootAccess);
 }
 
 function normalizedRiderClaimName(value) {
@@ -5128,7 +5276,7 @@ function projectClubTrainingSession(session, membership) {
   };
 }
 
-function projectOwnedClubTrainingSession(session) {
+function projectOwnedClubTrainingSession(session, member) {
   const clubId = sanitizeText(session?._clubId, '', 160);
   const studioRiderId = sanitizeText(session?._studioRiderId, '', 160);
   if (!clubId || !studioRiderId) return null;
@@ -5142,13 +5290,15 @@ function projectOwnedClubTrainingSession(session) {
     claimedAt: null,
   });
   if (!projected) return null;
+  const claimedPowerAccess = member?.status === 'claimed'
+    && member.studioRiderId === studioRiderId;
   const club = { id: clubId, name: clubName, studioRiderId, riderName, role: 'owner' };
   return {
     ...projected,
     id: `club-owner:${clubId}:${studioRiderId}:${session.id}`,
     club,
     details: {
-      ...redactPrivatePower(projected.details ?? {}),
+      ...(claimedPowerAccess ? projected.details ?? {} : redactPrivatePower(projected.details ?? {})),
       club: { id: clubId, name: clubName, role: 'owner' },
     },
   };
@@ -5158,6 +5308,12 @@ async function loadTrainingSessionsForAccount(profileKey, options) {
   const clubState = await persistence.loadClubConnectState(profileKey);
   const ownedStudioRiderIds = new Set(
     (clubState.ownedClub?.members ?? []).map((member) => member.studioRiderId).filter(Boolean),
+  );
+  const claimedOwnedStudioRiderIds = new Set(
+    (clubState.ownedClub?.members ?? [])
+      .filter((member) => member.status === 'claimed')
+      .map((member) => member.studioRiderId)
+      .filter(Boolean),
   );
   const claimedAtByRiderName = new Map(
     (clubState.ownedClub?.members ?? [])
@@ -5184,18 +5340,24 @@ async function loadTrainingSessionsForAccount(profileKey, options) {
     ) || containsOwnedStudioRider(nested, legacySessionUpdatedAt));
   };
   const ownSessions = (await persistence.loadTrainingSessions(profileKey, options))
-    .map((session) => publicTrainingSession(
-      session,
-      (Boolean(clubState.ownedClub?.id) && clubState.ownedClub.id === session?._clubId)
+    .map((session) => {
+      const ownedClubSession = (Boolean(clubState.ownedClub?.id) && clubState.ownedClub.id === session?._clubId)
         || containsOwnedStudioRider(
           session?.details,
           !session?._clubId && !session?._studioRiderId
             ? Number(session?.updatedAt)
             : Number.NaN,
-        )
-        ? 'owner'
-        : 'athlete',
-    ))
+        );
+      const attributedStudioRiderId = sanitizeText(session?._studioRiderId, '', 160);
+      return publicTrainingSession(
+        session,
+        ownedClubSession ? 'owner' : 'athlete',
+        ownedClubSession ? {
+          claimedPowerStudioRiderIds: [...claimedOwnedStudioRiderIds],
+          attributedStudioRiderId,
+        } : {},
+      );
+    })
     .filter(Boolean);
   const clubSessions = (await Promise.all(clubState.memberships.map(async (membership) => {
     const [legacyOwnerSessions, attributedClubSessions] = await Promise.all([
@@ -5211,7 +5373,10 @@ async function loadTrainingSessionsForAccount(profileKey, options) {
   }))).flat();
   const ownedClubSessions = clubState.ownedClub
     ? (await persistence.loadClubTrainingSessions(profileKey, options)).flatMap((session) => {
-      const projected = projectOwnedClubTrainingSession(session);
+      const member = (clubState.ownedClub.members ?? []).find((candidate) => (
+        candidate.studioRiderId === session?._studioRiderId
+      ));
+      const projected = projectOwnedClubTrainingSession(session, member);
       return projected ? [projected] : [];
     })
     : [];
@@ -5719,6 +5884,114 @@ function publicHeartRateWatchConnection(connection, enrollment, now = Date.now()
   };
 }
 
+function connectedHeartRateWatchSourceForStudioTablet({
+  enrollments,
+  connections,
+  clubId,
+  studioRiderId,
+  now = Date.now(),
+}) {
+  const sharingEnrollment = enrollments.find((candidate) => (
+    candidate.scope === 'studio'
+    && candidate.clubId === clubId
+    && candidate.studioRiderId === studioRiderId
+    && candidate.revokedAt == null
+    && candidate.membershipActive !== false
+    && candidate.liveStudioConsent === true
+  )) ?? null;
+  if (!sharingEnrollment) return null;
+  const connectedForEnrollment = (enrollment) => [...connections]
+    .filter((candidate) => candidate.enrollmentId === enrollment.id)
+    .sort((left, right) => right.connectedAt - left.connectedAt)
+    .find((candidate) => (
+      publicHeartRateWatchConnection(candidate, enrollment, now)?.state === 'connected'
+    )) ?? null;
+  const studioConnection = connectedForEnrollment(sharingEnrollment);
+  if (studioConnection) {
+    return {
+      sharingEnrollment,
+      sourceEnrollment: sharingEnrollment,
+      sourceConnection: studioConnection,
+      sourceScope: 'studio',
+    };
+  }
+  const personalSources = enrollments
+    .filter((candidate) => (
+      candidate.scope === 'personal'
+      && candidate.clubId == null
+      && candidate.studioRiderId == null
+      && candidate.revokedAt == null
+      && candidate.membershipActive !== false
+    ))
+    .sort((left, right) => right.updatedAt - left.updatedAt);
+  for (const sourceEnrollment of personalSources) {
+    const sourceConnection = connectedForEnrollment(sourceEnrollment);
+    if (sourceConnection) {
+      return {
+        sharingEnrollment,
+        sourceEnrollment,
+        sourceConnection,
+        sourceScope: 'personal',
+      };
+    }
+  }
+  return null;
+}
+
+function heartRateWatchSummarySourceForStudioTablet({
+  enrollments,
+  connections,
+  clubId,
+  studioRiderId,
+  now = Date.now(),
+}) {
+  const sharingEnrollment = enrollments.find((candidate) => (
+    candidate.scope === 'studio'
+    && candidate.clubId === clubId
+    && candidate.studioRiderId === studioRiderId
+    && candidate.revokedAt == null
+    && candidate.membershipActive !== false
+    && candidate.sessionStudioConsent === true
+  )) ?? null;
+  if (!sharingEnrollment) return null;
+  const activeForEnrollment = (enrollment) => [...connections]
+    .filter((candidate) => candidate.enrollmentId === enrollment.id)
+    .sort((left, right) => right.connectedAt - left.connectedAt)
+    .find((candidate) => ['connecting', 'connected'].includes(
+      publicHeartRateWatchConnection(candidate, enrollment, now)?.state,
+    )) ?? null;
+  const studioConnection = activeForEnrollment(sharingEnrollment);
+  if (studioConnection) {
+    return {
+      sharingEnrollment,
+      sourceEnrollment: sharingEnrollment,
+      sourceConnection: studioConnection,
+      sourceScope: 'studio',
+    };
+  }
+  const personalSources = enrollments
+    .filter((candidate) => (
+      candidate.scope === 'personal'
+      && candidate.clubId == null
+      && candidate.studioRiderId == null
+      && candidate.revokedAt == null
+      && candidate.membershipActive !== false
+    ))
+    .sort((left, right) => right.updatedAt - left.updatedAt);
+  for (const sourceEnrollment of personalSources) {
+    const sourceConnection = activeForEnrollment(sourceEnrollment);
+    if (sourceConnection) {
+      return {
+        sharingEnrollment,
+        sourceEnrollment,
+        sourceConnection,
+        sourceScope: 'personal',
+      };
+    }
+  }
+  return null;
+}
+
 function heartRateWatchStudioProjection(row, now = Date.now()) {
   const enrollment = row.enrollment ? {
     ...row.enrollment,
@@ -5854,6 +6127,20 @@ function publicHeartRateAccountBlockStatus(block) {
 
 function publicHeartRateStream(stream, { club = false } = {}) {
   if (!stream) return null;
+  if (club) {
+    return {
+      sessionId: stream.sessionId,
+      activityType: stream.activityType,
+      studioRiderId: stream.studioRiderId,
+      playerId: stream.playerId ?? null,
+      startedAt: stream.startedAt,
+      endedAt: stream.endedAt ?? null,
+      activeDurationMs: stream.activeDurationMs ?? null,
+      summary: stream.summary && typeof stream.summary === 'object' ? stream.summary : {},
+      zoneSummaries: Array.isArray(stream.zoneSummaries) ? stream.zoneSummaries : [],
+      finalizedAt: stream.finalizedAt ?? null,
+    };
+  }
   return {
     id: stream.id,
     ...(!club ? { pairingId: stream.pairingId } : {}),
@@ -5887,6 +6174,20 @@ function publicHeartRateStream(stream, { club = false } = {}) {
 
 function publicHeartRateTrainingSegment(segment, { club = false } = {}) {
   if (!segment) return null;
+  if (club) {
+    return {
+      trainingSessionId: segment.trainingSessionId,
+      activityType: segment.activityType,
+      studioRiderId: segment.studioRiderId,
+      playerId: segment.playerId ?? null,
+      startedAt: segment.startedAt,
+      endedAt: segment.endedAt,
+      activeDurationMs: segment.activeDurationMs,
+      summary: segment.summary && typeof segment.summary === 'object' ? segment.summary : {},
+      zoneSummaries: Array.isArray(segment.zoneSummaries) ? segment.zoneSummaries : [],
+      finalizedAt: segment.finalizedAt ?? null,
+    };
+  }
   return {
     id: segment.id,
     streamId: segment.streamId,
@@ -6248,9 +6549,13 @@ async function attachStudioBlockHeartRateToTrainingSession(
   });
 }
 
-async function attachAccountBlockHeartRateToTrainingSession(profileKey, session) {
+async function attachAccountBlockHeartRateToTrainingSession(
+  profileKey,
+  session,
+  preferredPlayerId = null,
+) {
   if (!profileKey || !session?.id) return { status: 'not-account', segment: null };
-  const playerId = trainingSessionHeartRatePlayerId(session);
+  const playerId = trainingSessionHeartRatePlayerId(session, preferredPlayerId);
   const activeClockSegments = trainingSessionHeartRateActiveClockSegments(session);
   if (session.activityType === 'explore' && !activeClockSegments) {
     return { status: 'invalid-active-clock', segment: null };
@@ -6266,6 +6571,107 @@ async function attachAccountBlockHeartRateToTrainingSession(profileKey, session)
     activeClockSegments: activeClockSegments ?? [],
     now: Date.now(),
   });
+}
+
+async function attachConsentedPersonalHeartRateToClubTrainingSession(
+  athleteProfileKey,
+  session,
+  preferredPlayerId = null,
+) {
+  const clubId = sanitizeText(session?._clubId, '', 160);
+  const studioRiderId = sanitizeText(session?._studioRiderId, '', 160);
+  if (!athleteProfileKey || !session?.id || !clubId || !studioRiderId) {
+    return { status: 'not-club', segment: null };
+  }
+  const playerId = trainingSessionHeartRatePlayerId(session, preferredPlayerId);
+  const activeClockSegments = trainingSessionHeartRateActiveClockSegments(session);
+  if (session.activityType === 'explore' && !activeClockSegments) {
+    return { status: 'invalid-active-clock', segment: null };
+  }
+  return persistence.createHeartRateTrainingSegmentForConsentedPersonalClubSession({
+    athleteProfileKey,
+    clubId,
+    studioRiderId,
+    trainingSessionId: session.id,
+    activityType: session.activityType,
+    playerId,
+    startedAt: session.startedAt,
+    endedAt: session.endedAt,
+    zoneWindows: trainingSessionHeartRateZoneWindows(session, playerId, activeClockSegments ?? []),
+    activeClockSegments: activeClockSegments ?? [],
+    now: Date.now(),
+  });
+}
+
+async function attachClubTabletHeartRateToTrainingSession(
+  athleteProfileKey,
+  session,
+  preferredPlayerId = null,
+) {
+  const clubId = sanitizeText(session?._clubId, '', 160);
+  const studioRiderId = sanitizeText(session?._studioRiderId, '', 160);
+  if (!athleteProfileKey || !clubId || !studioRiderId) {
+    return { status: 'not-club', segment: null };
+  }
+  const [enrollments, connections] = await Promise.all([
+    persistence.loadHeartRateWatchEnrollments(athleteProfileKey),
+    persistence.loadHeartRateWatchConnections(athleteProfileKey),
+  ]);
+  const source = heartRateWatchSummarySourceForStudioTablet({
+    enrollments,
+    connections,
+    clubId,
+    studioRiderId,
+    now: Date.now(),
+  });
+  // Select the current Watch connection before creating a pending binding.
+  // This prevents a nonexistent studio stream from occupying the result key
+  // while the athlete's real personal Watch stream is still starting.
+  if (source?.sourceScope === 'personal') {
+    const personalAttachment = await attachConsentedPersonalHeartRateToClubTrainingSession(
+      athleteProfileKey,
+      session,
+      preferredPlayerId,
+    );
+    if (!['no-block', 'not-consented'].includes(personalAttachment.status)) {
+      return personalAttachment;
+    }
+  } else if (source?.sourceScope === 'studio') {
+    const studioSourceAttachment = await attachStudioBlockHeartRateToTrainingSession(
+      athleteProfileKey,
+      session,
+      preferredPlayerId,
+    );
+    if (studioSourceAttachment.status !== 'no-block') return studioSourceAttachment;
+  }
+  const studioAttachment = await attachStudioBlockHeartRateToTrainingSession(
+    athleteProfileKey,
+    session,
+    preferredPlayerId,
+  );
+  if (studioAttachment.segment) return studioAttachment;
+  if (!['no-block', 'pending'].includes(studioAttachment.status)) return studioAttachment;
+  const accountAttachment = await attachConsentedPersonalHeartRateToClubTrainingSession(
+    athleteProfileKey,
+    session,
+    preferredPlayerId,
+  );
+  if (accountAttachment.segment || accountAttachment.status === 'pending') return accountAttachment;
+  if (accountAttachment.status === 'no-block') {
+    return studioAttachment;
+  }
+  // Even without club-summary consent, preserve the athlete's own private
+  // result if an account Watch block exists. Nothing from this fallback is
+  // returned to the shared tablet or owner.
+  const privateAttachment = await attachAccountBlockHeartRateToTrainingSession(
+    athleteProfileKey,
+    session,
+    preferredPlayerId,
+  );
+  if (!privateAttachment.segment) {
+    return accountAttachment.status === 'no-block' ? studioAttachment : accountAttachment;
+  }
+  return { status: 'private-only', segment: null };
 }
 
 async function reconcilePrivateHeartRateTrainingSession(profileKey, session) {
@@ -6384,6 +6790,78 @@ async function loadClubTabletDeviceFromRequest(request, { requireAvailable = fal
     }
     throw error;
   }
+}
+
+function clubTabletDemoStudioRiderId(deviceId) {
+  const safeDeviceId = sanitizeText(deviceId, '', 160);
+  return safeDeviceId ? `demo:${safeDeviceId}` : '';
+}
+
+function clubTabletDemoSession(device, now = Date.now()) {
+  const studioRiderId = clubTabletDemoStudioRiderId(device?.id);
+  if (!device?.tokenHash || !device?.clubId || !device?.ownerProfileKey || !studioRiderId) {
+    return null;
+  }
+  const expiresAt = now + clubTabletDemoSocketTtlMs;
+  const demoRiderName = sanitizeText(
+    `Demo · ${sanitizeText(device.name, 'Club Tablet', 80)}`,
+    'Demo · Club Tablet',
+    120,
+  );
+  return {
+    demoMode: true,
+    // This is an internal, non-reusable principal identifier. The durable
+    // bearer credential itself never enters runtime client state or output.
+    tokenHash: `demo:${device.tokenHash}`,
+    deviceTokenHash: device.tokenHash,
+    deviceId: device.id,
+    ownerProfileKey: device.ownerProfileKey,
+    clubId: device.clubId,
+    clubName: sanitizeText(device.clubName, 'TrackLab Club', 120),
+    studioRiderId,
+    riderName: demoRiderName,
+    athleteName: demoRiderName,
+    profileId: '',
+    bikeDeviceId: 0,
+    createdAt: now,
+    expiresAt,
+    maxExpiresAt: expiresAt,
+  };
+}
+
+async function loadAuthorizedClubTabletDemoSession(device, now = Date.now()) {
+  if (!device) return null;
+  const activeSessionHash = clubTabletSessionTokenHashByDeviceId.get(device.id);
+  const activeSession = activeSessionHash
+    ? clubTabletSessionsByTokenHash.get(activeSessionHash)
+    : null;
+  if (clubTabletSessionIsCurrent(activeSession, now)) return null;
+  if (activeSession) await stopClubTabletSession(activeSession);
+  const clubBikeAccess = await clubBikeAccessForOwnerProfileKey(device.ownerProfileKey);
+  if (!clubBikeAccess.active) return null;
+  return clubTabletDemoSession(device, now);
+}
+
+function clubLiveSessionMatchesDemoDevice(liveSession, device, now = Date.now()) {
+  const studioRiderId = clubTabletDemoStudioRiderId(device?.id);
+  return Boolean(
+    liveSession
+    && liveSession.expiresAt > now
+    && liveSession.demo === true
+    && liveSession.clubId === device?.clubId
+    && liveSession.studioRiderId === studioRiderId
+    && liveSession._publisherDeviceId === device?.id
+    && liveSession._publisherDemoDeviceTokenHash === device?.tokenHash
+  );
+}
+
+function isServerBoundClubTabletDemoSession(liveSession) {
+  return Boolean(
+    liveSession?.demo === true
+    && liveSession?._publisherDeviceId
+    && liveSession?._publisherDemoDeviceTokenHash
+    && liveSession.studioRiderId === clubTabletDemoStudioRiderId(liveSession._publisherDeviceId)
+  );
 }
 
 function sanitizeClubEventConfigurationValue(value, depth = 0) {
@@ -8139,6 +8617,9 @@ function clubLiveSessionKey(clubId, studioRiderId) {
 }
 
 function clubLivePublisherIdentity(session) {
+  if (session?._publisherDemoDeviceTokenHash) {
+    return `demo-device:${session._publisherDemoDeviceTokenHash}`;
+  }
   if (session?._publisherClubTabletSessionHash) {
     return `tablet:${session._publisherClubTabletSessionHash}`;
   }
@@ -8224,17 +8705,24 @@ function deleteClubLiveSession(key) {
   deleteClubLiveFrame(key);
   const deleted = clubLiveSessions.delete(key);
   if (deleted && session) {
-    for (const client of clients.values()) {
-      const registration = client.clubLiveStreamRegistration;
-      if (
-        client.websocketScope === clubLiveStreamWebsocketScope
-        && registration?.role === 'publisher'
-        && registration.clubId === session.clubId
-        && registration.studioRiderId === session.studioRiderId
-        && registration.sessionId === session.sessionId
-      ) {
-        unregisterClubLiveStreamClient(client, 'activity-ended');
-        client.socket?.close(1008, 'Club Live activity ended');
+    if (isServerBoundClubTabletDemoSession(session)) {
+      closeClubTabletDemoRuntimeClients(
+        session._publisherDeviceId,
+        'club-tablet-demo-activity-ended',
+      );
+    } else {
+      for (const client of clients.values()) {
+        const registration = client.clubLiveStreamRegistration;
+        if (
+          client.websocketScope === clubLiveStreamWebsocketScope
+          && registration?.role === 'publisher'
+          && registration.clubId === session.clubId
+          && registration.studioRiderId === session.studioRiderId
+          && registration.sessionId === session.sessionId
+        ) {
+          unregisterClubLiveStreamClient(client, 'activity-ended');
+          client.socket?.close(1008, 'Club Live activity ended');
+        }
       }
     }
   }
@@ -8247,7 +8735,66 @@ function deleteClubLiveSessionsWhere(predicate) {
   }
 }
 
+function closeClubTabletDemoRuntimeClients(deviceId, reason = 'club-tablet-demo-ended') {
+  if (!deviceId) return;
+  revokeClubTabletDemoWebSocketTicketsForDevice(deviceId);
+  for (const client of [...clients.values()]) {
+    if (client.clubTabletDemoDeviceId !== deviceId) continue;
+    if (client.roomId) leaveRoom(client, reason);
+    unregisterClubLiveStreamClient(client, reason);
+    client.socket?.close(1008, 'Club Tablet demo activity ended');
+  }
+}
+
+function stopClubTabletDemoRuntime(deviceId, deviceTokenHash = '') {
+  if (!deviceId) return;
+  const knownDeviceTokenHashes = new Set(deviceTokenHash ? [deviceTokenHash] : []);
+  for (const ticket of clubTabletWsTicketsByHash.values()) {
+    if (ticket.demo === true && ticket.deviceId === deviceId && ticket.deviceTokenHash) {
+      knownDeviceTokenHashes.add(ticket.deviceTokenHash);
+    }
+  }
+  for (const session of clubLiveSessions.values()) {
+    if (session.demo === true && session._publisherDeviceId === deviceId) {
+      knownDeviceTokenHashes.add(session._publisherDemoDeviceTokenHash);
+    }
+  }
+  for (const client of clients.values()) {
+    if (client.clubTabletDemoDeviceId === deviceId) {
+      knownDeviceTokenHashes.add(client.clubTabletDemoSession?.deviceTokenHash);
+    }
+  }
+  knownDeviceTokenHashes.delete('');
+  knownDeviceTokenHashes.delete(undefined);
+  for (const knownTokenHash of knownDeviceTokenHashes) {
+    terminateClubLivePublisher(`demo-device:${knownTokenHash}`);
+  }
+  deleteClubLiveSessionsWhere((session) => (
+    session.demo === true
+    && session._publisherDeviceId === deviceId
+    && (!deviceTokenHash || session._publisherDemoDeviceTokenHash === deviceTokenHash)
+  ));
+  // This helper deliberately does not delete Club Live state, so the
+  // delete/expiry path can close WebSockets without recursively stopping the
+  // same session again.
+  closeClubTabletDemoRuntimeClients(deviceId, 'club-tablet-demo-ended');
+}
+
 function setClubLiveSession(key, session) {
+  const existingSession = clubLiveSessions.get(key);
+  if (
+    existingSession?.presentation
+    && existingSession.sessionId === session?.sessionId
+    && existingSession.activityType === session?.activityType
+    && existingSession.multiplayer === session?.multiplayer
+    && clubLivePublisherIdentity(existingSession) === clubLivePublisherIdentity(session)
+  ) {
+    // Heartbeats replace the sanitized snapshot object. Carry only the prior
+    // server-verified presentation so a temporary event-store outage cannot
+    // make the REST/JPEG fallback flicker back to the wrong layout.
+    session.presentation = existingSession.presentation;
+    if (existingSession.sharedViewId) session.sharedViewId = existingSession.sharedViewId;
+  }
   const existingFrame = clubLiveFrames.get(key);
   if (existingFrame && !clubLiveFrameMatchesSession(existingFrame, session)) {
     deleteClubLiveFrame(key);
@@ -8440,6 +8987,7 @@ function sanitizeClubLiveFrame(payload, liveSession, now = Date.now()) {
     riderName: liveSession.riderName,
     sessionId: liveSession.sessionId,
     activityType: liveSession.activityType,
+    ...(liveSession.demo === true ? { demo: true } : {}),
     ...(liveSession._publisherDeviceId ? { deviceId: liveSession._publisherDeviceId } : {}),
     width,
     height,
@@ -8689,6 +9237,7 @@ function publicClubLiveSession(session) {
     _publisherAuthSessionHash: _privatePublisherAuthSessionHash,
     _publisherDeviceId: _privatePublisherDeviceId,
     _publisherClubTabletSessionHash: _privateTabletSessionHash,
+    _publisherDemoDeviceTokenHash: _privateDemoDeviceTokenHash,
     ...visibleSession
   } = session;
   return {
@@ -9425,6 +9974,8 @@ function sanitizeExploreState(value, client, room) {
   }
   const routeId = sanitizeText(value.routeId, '', 96);
   const clubEventExplore = room.purpose === 'club-event';
+  const clubDemoExplore = room.purpose === 'club-demo';
+  const serverBoundExplore = clubEventExplore || clubDemoExplore;
   const sessionId = sanitizeText(
     value.sessionId,
     room.exploreSession?.id ?? `${room.id}:${routeId}`,
@@ -9433,7 +9984,7 @@ function sanitizeExploreState(value, client, room) {
   if (
     !routeId
     || routeId !== room.exploreRoute.id
-    || (clubEventExplore && (
+    || (serverBoundExplore && (
       !room.exploreSession
       || room.exploreSession.routeId !== routeId
       || !sessionId
@@ -9448,6 +9999,15 @@ function sanitizeExploreState(value, client, room) {
       room.clubEventActivityType !== 'explore'
       || room.clubEventId !== room.exploreSession.id
       || room.clubEventStartAt !== room.exploreSession.startedAt
+      || room.exploreSession.status !== 'riding'
+      || !Number.isFinite(startedAt)
+      || Date.now() < startedAt
+    ) return null;
+  }
+  if (clubDemoExplore) {
+    const startedAt = Number(room.exploreSession.startedAt);
+    if (
+      room.demoActivityType !== 'explore'
       || room.exploreSession.status !== 'riding'
       || !Number.isFinite(startedAt)
       || Date.now() < startedAt
@@ -9496,7 +10056,7 @@ function sanitizeExploreState(value, client, room) {
     });
 
   return {
-    sessionId: clubEventExplore ? room.exploreSession.id : sessionId,
+    sessionId: serverBoundExplore ? room.exploreSession.id : sessionId,
     clientId: client.id,
     roomId: room.id,
     routeId,
@@ -9641,6 +10201,9 @@ function sanitizeRaceState(value, client, room) {
 
   return {
     sessionId: sanitizeText(value.sessionId, `${room.id}:${client.guestKey}:${value.trackId ?? room.track.id}`, 160),
+    ...(room.purpose === 'club-demo'
+      ? { raceToken: sanitizeText(value.raceToken, '', 80) }
+      : {}),
     clientId: client.id,
     riderName: client.name,
     roomId: room.id,
@@ -9776,6 +10339,30 @@ function sanitizeClubLiveStreamSignal(value) {
 function currentClubLiveStreamPublisherState(client, now = Date.now()) {
   const authorization = client?.clubLiveStreamAuthorization;
   if (authorization?.role !== 'publisher') return null;
+  if (authorization.demo === true) {
+    const tabletSession = client.clubTabletDemoSession;
+    if (
+      !tabletSession?.demoMode
+      || tabletSession.expiresAt <= now
+      || tabletSession.deviceTokenHash !== authorization.deviceTokenHash
+      || tabletSession.clubId !== authorization.clubId
+      || tabletSession.deviceId !== authorization.deviceId
+      || tabletSession.studioRiderId !== authorization.studioRiderId
+    ) return null;
+    const liveSession = clubLiveSessions.get(clubLiveSessionKey(
+      tabletSession.clubId,
+      tabletSession.studioRiderId,
+    ));
+    if (
+      !clubLiveSessionMatchesDemoDevice(liveSession, {
+        id: tabletSession.deviceId,
+        clubId: tabletSession.clubId,
+        tokenHash: tabletSession.deviceTokenHash,
+      }, now)
+      || liveSession.sessionId !== authorization.sessionId
+    ) return null;
+    return { tabletSession, liveSession };
+  }
   const tabletSession = clubTabletSessionsByTokenHash.get(authorization.sessionTokenHash);
   if (
     !clubTabletSessionIsCurrent(tabletSession, now)
@@ -9876,12 +10463,150 @@ function individualClubLiveStreamPresentation(liveSession) {
   };
 }
 
+function clubRoomClientDurableIdentity(client) {
+  if (!client) return '';
+  if (client.clubTabletDemoDeviceId) return `device:${client.clubTabletDemoDeviceId}`;
+  const tabletSession = client.clubTabletSessionTokenHash
+    ? clubTabletSessionsByTokenHash.get(client.clubTabletSessionTokenHash)
+    : null;
+  return tabletSession?.deviceId
+    ? `device:${tabletSession.deviceId}`
+    : client.clubLiveAccess?.studioRiderId
+      ? `rider:${client.clubLiveAccess.studioRiderId}`
+      : `client:${client.id}`;
+}
+
+function explorePresentationEligibleClientIds(room) {
+  if (!room || room.demoActivityType !== 'explore' && room.clubEventActivityType !== 'explore') return [];
+  return [...(room.racers ?? [])].filter((clientId) => (
+    (room.purpose !== 'club-demo' || clubDemoClientGenerationEligible(room, clientId))
+    && (room.purpose !== 'club-event' || (() => {
+      const durableIdentity = clubRoomClientDurableIdentity(clients.get(clientId));
+      const previouslyMeasured = room.explorePresentationMeasuredDurableIdentities?.has(
+        durableIdentity,
+      );
+      // The initial lobby may share before its first sample. Once this durable
+      // tablet has published telemetry, a replacement socket must publish a
+      // fresh current-session sample before it can rejoin a pack.
+      return !previouslyMeasured || room.exploreStates?.has(clientId);
+    })())
+  ));
+}
+
+function explorePresentationDistance(room, clientId) {
+  const riders = room.exploreStates?.get(clientId)?.riders;
+  if (!Array.isArray(riders) || riders.length === 0) return null;
+  const distance = Math.max(...riders.map((rider) => Number(rider?.distanceMeters)));
+  return Number.isFinite(distance) ? Math.max(0, distance) : null;
+}
+
+function updateExplorePresentationClusters(room) {
+  const clientIds = explorePresentationEligibleClientIds(room);
+  const {
+    clusterByParticipantId: next,
+    knownDurablePairs,
+    togetherDurablePairs,
+    signature,
+  } = planClubLiveExploreClusters({
+    generationKey: `${room.id}:${room.exploreSession?.id ?? ''}`,
+    participants: clientIds.map((clientId) => ({
+      id: clientId,
+      durableIdentity: clubRoomClientDurableIdentity(clients.get(clientId)),
+      distanceMeters: explorePresentationDistance(room, clientId),
+    })),
+    previousKnownDurablePairs: room.explorePresentationKnownDurablePairs instanceof Set
+      ? room.explorePresentationKnownDurablePairs
+      : new Set(),
+    previousTogetherDurablePairs: room.explorePresentationTogetherDurablePairs instanceof Set
+      ? room.explorePresentationTogetherDurablePairs
+      : new Set(),
+  });
+  const changed = signature !== (room.explorePresentationClusterSignature ?? '');
+  room.explorePresentationClusterByClientId = next;
+  room.explorePresentationKnownDurablePairs = knownDurablePairs;
+  room.explorePresentationTogetherDurablePairs = togetherDurablePairs;
+  room.explorePresentationClusterSignature = signature;
+  return changed;
+}
+
+function clubExploreRoomPresentation(room, clientId) {
+  if (!room || !explorePresentationEligibleClientIds(room).includes(clientId)) return null;
+  updateExplorePresentationClusters(room);
+  const clusterId = room.explorePresentationClusterByClientId?.get(clientId);
+  if (!clusterId) return null;
+  const clusterClientIds = explorePresentationEligibleClientIds(room)
+    .filter((candidateId) => room.explorePresentationClusterByClientId?.get(candidateId) === clusterId);
+  if (clusterClientIds.length < 2) return { mode: 'individual', activityType: 'explore' };
+  return {
+    mode: 'shared',
+    activityType: 'explore',
+    sharedViewId: `CLUBEXPLORE_${clusterId}`,
+    eventId: room.clubEventId ?? room.id,
+    startAt: room.exploreSession?.startedAt ?? room.createdAt,
+    seatNumber: clusterClientIds.indexOf(clientId) + 1,
+  };
+}
+
+function activeClubDemoRoomPresentation(tabletSession, liveSession) {
+  if (!tabletSession?.demoMode || liveSession?.multiplayer !== true) return null;
+  const multiplayerClient = [...clients.values()].find((candidate) => (
+    candidate.clubTabletDemoDeviceId === tabletSession.deviceId
+    && candidate.websocketScope === 'multiplayer'
+    && candidate.socket?.readyState === WebSocket.OPEN
+    && candidate.roomId
+  ));
+  const room = multiplayerClient?.roomId ? rooms.get(multiplayerClient.roomId) : null;
+  if (
+    !room
+    || room.purpose !== 'club-demo'
+    || room.demoClubId !== tabletSession.clubId
+    || clubDemoRoomIdByClubId.get(tabletSession.clubId) !== room.id
+    || !room.racers?.has(multiplayerClient.id)
+    || room.demoActivityType !== liveSession.activityType
+  ) return null;
+  if (liveSession.activityType === 'explore') {
+    return clubExploreRoomPresentation(room, multiplayerClient.id);
+  }
+  const participatingClientIds = [...room.racers]
+    .filter((clientId) => clubDemoClientGenerationEligible(room, clientId));
+  if (!participatingClientIds.includes(multiplayerClient.id)) return null;
+  const participatingDeviceIds = new Set(
+    participatingClientIds
+      .map((clientId) => clients.get(clientId)?.clubTabletDemoDeviceId)
+      .filter(Boolean),
+  );
+  // One tablet still has an individual screen. The shared owner tile begins
+  // only when at least two distinct authorized tablets are actually present
+  // in the same server room, and collapses again as soon as one leaves.
+  if (participatingDeviceIds.size < 2) return null;
+  const seatNumber = participatingClientIds.indexOf(multiplayerClient.id) + 1;
+  const sharedViewDigest = createHash('sha256').update(JSON.stringify({
+    clubId: tabletSession.clubId,
+    roomId: room.id,
+    purpose: 'club-demo',
+    activityType: liveSession.activityType,
+    trackId: room.track?.id ?? '',
+    configurationId: room.demoConfigurationId,
+  })).digest('base64url').slice(0, 24);
+  return {
+    mode: 'shared',
+    activityType: liveSession.activityType,
+    sharedViewId: `CLUBDEMO_${sharedViewDigest}`,
+    eventId: room.id,
+    startAt: room.createdAt,
+    seatNumber: Math.max(1, Math.min(maxRaceBikeCount, seatNumber || 1)),
+  };
+}
+
 async function verifiedClubLiveStreamPresentation(
   tabletSession,
   liveSession,
   { preserveOnUnavailable = false } = {},
 ) {
   const individual = individualClubLiveStreamPresentation(liveSession);
+  if (tabletSession?.demoMode) {
+    return activeClubDemoRoomPresentation(tabletSession, liveSession) ?? individual;
+  }
   if (clubLiveStreamTestPresentationDelayMs > 0) {
     await new Promise((resolve) => setTimeout(resolve, clubLiveStreamTestPresentationDelayMs));
   }
@@ -9913,6 +10638,26 @@ async function verifiedClubLiveStreamPresentation(
     || !Number.isSafeInteger(startAt)
     || startAt <= 0
   ) return individual;
+  if (event.activityType === 'explore') {
+    const room = rooms.get(clubEventRoomIdByEventId.get(event.id));
+    const multiplayerClient = room ? [...room.racers].map((clientId) => clients.get(clientId)).find((candidate) => (
+      candidate?.clubTabletSessionTokenHash === tabletSession.tokenHash
+    )) : null;
+    if (room && multiplayerClient) {
+      return clubExploreRoomPresentation(room, multiplayerClient.id) ?? individual;
+    }
+    // Once an event room exists, an absent multiplayer socket has no accepted
+    // current-session position. Keep its screen individual until it rejoins
+    // and sends fresh server-sanitized Explore telemetry.
+    if (room) return individual;
+    // The last socket can close the in-memory room while the independent
+    // activity/stream heartbeat is still alive. A participant already marked
+    // launched must not fall back to the pre-launch shared lobby after that.
+    if (Number(participant.launchedAt) > 0) return individual;
+    // Before the event room/socket is present, retain the safe shared lobby
+    // presentation. Accepted Explore telemetry becomes authoritative once the
+    // participant joins the server room.
+  }
   const sharedViewDigest = createHash('sha256').update(JSON.stringify({
     clubId: event.clubId,
     eventId: event.id,
@@ -9941,7 +10686,38 @@ function clubLiveStreamPresentationsEqual(left, right) {
     && (left?.seatNumber ?? null) === (right?.seatNumber ?? null);
 }
 
-async function refreshClubLiveStreamPublisherPresentation(tabletSession, liveSession) {
+function applyPublicClubLivePresentation(liveSession, presentation) {
+  if (!liveSession || !presentation) return;
+  liveSession.presentation = presentation.mode === 'shared' ? 'shared' : 'individual';
+  if (presentation.mode === 'shared' && presentation.sharedViewId) {
+    liveSession.sharedViewId = presentation.sharedViewId;
+  } else {
+    delete liveSession.sharedViewId;
+  }
+}
+
+async function refreshClubLiveStreamPublisherPresentation(
+  tabletSession,
+  liveSession,
+  { forceIndividualExplore = false } = {},
+) {
+  const presentation = forceIndividualExplore && liveSession?.activityType === 'explore'
+    ? individualClubLiveStreamPresentation(liveSession)
+    : await verifiedClubLiveStreamPresentation(
+        tabletSession,
+        liveSession,
+        // A temporary club-event storage failure must not replace a previously
+        // verified REST/JPEG presentation. Direct publishers also retain their
+        // last verified registration until the next heartbeat succeeds.
+        { preserveOnUnavailable: !tabletSession?.demoMode },
+      );
+  const currentLiveSession = clubLiveSessions.get(clubLiveSessionKey(
+    tabletSession.clubId,
+    tabletSession.studioRiderId,
+  ));
+  if (presentation && currentLiveSession === liveSession) {
+    applyPublicClubLivePresentation(liveSession, presentation);
+  }
   const publishers = [...clients.values()].filter((candidate) => (
     candidate.websocketScope === clubLiveStreamWebsocketScope
     && candidate.socket?.readyState === WebSocket.OPEN
@@ -9953,13 +10729,6 @@ async function refreshClubLiveStreamPublisherPresentation(tabletSession, liveSes
   ));
   for (const client of publishers) {
     const registration = client.clubLiveStreamRegistration;
-    const presentation = await verifiedClubLiveStreamPresentation(
-      tabletSession,
-      liveSession,
-      // A temporary club-event storage failure must not flicker a verified
-      // shared stage back to four screens. The next heartbeat retries.
-      { preserveOnUnavailable: true },
-    );
     const currentState = currentClubLiveStreamPublisherState(client);
     if (
       !presentation
@@ -9996,6 +10765,7 @@ function publicClubLiveStreamPublisher(client) {
     deviceId: registration.deviceId,
     studioRiderId: registration.studioRiderId,
     riderName: registration.riderName,
+    ...(client.clubTabletDemoDeviceId ? { demo: true } : {}),
     sessionId: registration.sessionId,
     activityType: registration.activityType,
     presentation: presentation.mode === 'shared' ? 'shared' : 'individual',
@@ -10640,6 +11410,42 @@ function publicRoomFlow(room) {
   };
 }
 
+function activeClubDemoParticipantIds(room) {
+  if (room?.purpose !== 'club-demo') return null;
+  if (room.demoActivityType === 'explore') {
+    return ['riding', 'paused', 'finished'].includes(room.exploreSession?.status)
+      ? room.demoExploreParticipantIds ?? new Set()
+      : null;
+  }
+  return room.flow?.phase === 'race' && room.flow?.raceToken
+    ? room.demoRaceParticipantIds ?? new Set()
+    : null;
+}
+
+function clubDemoClientGenerationEligible(room, clientId) {
+  const participantIds = activeClubDemoParticipantIds(room);
+  return participantIds == null || participantIds.has(clientId);
+}
+
+function clubDemoRoomRestartReady(room) {
+  if (
+    room?.purpose !== 'club-demo'
+    || room.flow?.phase !== 'race'
+    || !room.racers
+  ) return false;
+  const generationParticipantIds = [...(room.demoRaceParticipantIds ?? [])];
+  if (generationParticipantIds.length === 0) return false;
+  const activeParticipantIds = generationParticipantIds
+    .filter((clientId) => room.racers.has(clientId));
+  // If every immutable participant socket was replaced, no client is allowed
+  // to publish into the old generation. Make that abandoned generation
+  // restartable so the current waiting sockets can be snapshotted together.
+  if (activeParticipantIds.length === 0) return true;
+  return activeParticipantIds.every((clientId) => (
+    room.raceStates.get(clientId)?.raceState === 'finished'
+  ));
+}
+
 function publicRoom(room) {
   const latencySummary = roomLatencySummary(room);
   const members = [...room.members]
@@ -10649,7 +11455,13 @@ function publicRoom(room) {
         return null;
       }
       const role = room.racers?.has(clientId) ? 'racer' : 'spectator';
-      return publicRider(client, role, roomRacerSeatCountForMember(room, clientId));
+      const rider = publicRider(client, role, roomRacerSeatCountForMember(room, clientId));
+      return room.purpose === 'club-demo'
+        ? {
+          ...rider,
+          demoParticipantEligible: clubDemoClientGenerationEligible(room, clientId),
+        }
+        : rider;
     })
     .filter(Boolean)
     .map((rider) => rider);
@@ -10657,6 +11469,11 @@ function publicRoom(room) {
   return {
     id: room.id,
     ...(room.purpose === 'club-event' ? { clubEventId: room.clubEventId } : {}),
+    ...(room.purpose === 'club-demo' ? {
+      demo: true,
+      demoActivityType: room.demoActivityType,
+      demoRestartReady: clubDemoRoomRestartReady(room),
+    } : {}),
     hostId: room.hostId,
     private: room.private,
     purpose: room.purpose === 'live-audio'
@@ -10864,6 +11681,11 @@ function applyRoomTrack(room, track) {
 function beginRoomRace(room, source = 'route selection') {
   clearRoomTimers(room.id);
   const latencySummary = roomLatencySummary(room);
+  if (room.purpose === 'club-demo') {
+    // A demo generation is immutable. Tablets that arrive (or reconnect with
+    // a new socket identity) after this snapshot wait for the next race.
+    room.demoRaceParticipantIds = new Set(room.racers ?? []);
+  }
   room.flow = {
     ...publicRoomFlow(room),
     phase: 'race',
@@ -10885,6 +11707,7 @@ function beginRoomRace(room, source = 'route selection') {
     addRoomSystemMessage(room, `Latency warning: highest racer ping is ${latencySummary.maxLatencyMs} ms. Results will still save, but the race may feel delayed.`);
   }
   broadcastRoom(room.id, roomState(room));
+  if (room.purpose === 'club-demo') void refreshClubDemoRoomPresentations(room);
   broadcastLobby();
 }
 
@@ -11518,6 +12341,11 @@ function createClubEventRoom(event) {
     racerSeatCounts: new Map(),
     raceStates: new Map(),
     exploreStates: new Map(),
+    explorePresentationClusterByClientId: new Map(),
+    explorePresentationKnownDurablePairs: new Set(),
+    explorePresentationTogetherDurablePairs: new Set(),
+    explorePresentationMeasuredDurableIdentities: new Set(),
+    explorePresentationClusterSignature: '',
     exploreRoute,
     exploreSession: event.activityType === 'explore' ? {
       id: event.id,
@@ -11541,6 +12369,127 @@ function createClubEventRoom(event) {
   cloudTelemetry.increment('tracklab_multiplayer_rooms_created_total', { visibility: 'private' });
   cloudTelemetry.setGauge('tracklab_multiplayer_rooms', rooms.size);
   return room;
+}
+
+function createOrLoadClubDemoRoom(tabletSession, track, activityType, configurationId) {
+  const mappedRoom = rooms.get(clubDemoRoomIdByClubId.get(tabletSession.clubId));
+  if (
+    mappedRoom?.purpose === 'club-demo'
+    && mappedRoom.demoClubId === tabletSession.clubId
+  ) {
+    return mappedRoom.demoActivityType === activityType
+      && mappedRoom.demoConfigurationId === configurationId
+      && mappedRoom.track?.id === track.id
+      ? mappedRoom
+      : null;
+  }
+  let id = randomId('DEMO', 8);
+  while (rooms.has(id)) id = randomId('DEMO', 8);
+  const room = {
+    id,
+    hostId: null,
+    private: true,
+    purpose: 'club-demo',
+    demoClubId: tabletSession.clubId,
+    demoActivityType: activityType,
+    demoConfigurationId: configurationId,
+    track,
+    flow: defaultRoomFlow(),
+    createdAt: Date.now(),
+    members: new Set(),
+    racers: new Set(),
+    spectators: new Set(),
+    racerSeatCounts: new Map(),
+    raceStates: new Map(),
+    exploreStates: new Map(),
+    explorePresentationClusterByClientId: new Map(),
+    explorePresentationKnownDurablePairs: new Set(),
+    explorePresentationTogetherDurablePairs: new Set(),
+    explorePresentationMeasuredDurableIdentities: new Set(),
+    explorePresentationClusterSignature: '',
+    demoRaceParticipantIds: new Set(),
+    demoExploreParticipantIds: new Set(),
+    exploreRoute: null,
+    exploreSession: null,
+    messages: [{
+      id: randomId('MSG', 10),
+      author: 'TrackLab',
+      text: 'Private Club Tablet demo race opened.',
+      at: new Date().toISOString(),
+    }],
+  };
+  rooms.set(id, room);
+  clubDemoRoomIdByClubId.set(tabletSession.clubId, id);
+  cloudTelemetry.increment('tracklab_multiplayer_rooms_created_total', {
+    visibility: 'private-demo',
+  });
+  cloudTelemetry.setGauge('tracklab_multiplayer_rooms', rooms.size);
+  return room;
+}
+
+async function refreshClubTabletDemoPresentation(client) {
+  const tabletSession = client?.clubTabletDemoSession;
+  if (!tabletSession?.demoMode) return;
+  const liveSession = clubLiveSessions.get(clubLiveSessionKey(
+    tabletSession.clubId,
+    tabletSession.studioRiderId,
+  ));
+  if (!isServerBoundClubTabletDemoSession(liveSession)) return;
+  await refreshClubLiveStreamPublisherPresentation(tabletSession, liveSession);
+}
+
+async function refreshClubDemoRoomPresentations(room) {
+  if (room?.purpose !== 'club-demo') return;
+  const demoClientsByDeviceId = new Map();
+  for (const memberId of room.members) {
+    const member = clients.get(memberId);
+    if (member?.clubTabletDemoDeviceId) {
+      demoClientsByDeviceId.set(member.clubTabletDemoDeviceId, member);
+    }
+  }
+  await Promise.all(
+    [...demoClientsByDeviceId.values()].map(refreshClubTabletDemoPresentation),
+  );
+}
+
+async function refreshClubExploreRoomPresentations(room) {
+  if (
+    !room
+    || room.demoActivityType !== 'explore' && room.clubEventActivityType !== 'explore'
+  ) return;
+  const sessionsByTokenHash = new Map();
+  for (const memberId of room.members ?? []) {
+    const member = clients.get(memberId);
+    const tabletSession = member?.clubTabletDemoSession
+      ?? (member?.clubTabletSessionTokenHash
+        ? clubTabletSessionsByTokenHash.get(member.clubTabletSessionTokenHash)
+        : null);
+    if (tabletSession?.tokenHash) sessionsByTokenHash.set(tabletSession.tokenHash, tabletSession);
+  }
+  await Promise.all([...sessionsByTokenHash.values()].map(async (tabletSession) => {
+    const liveSession = clubLiveSessions.get(clubLiveSessionKey(
+      tabletSession.clubId,
+      tabletSession.studioRiderId,
+    ));
+    if (!liveSession || liveSession.activityType !== 'explore') return;
+    await refreshClubLiveStreamPublisherPresentation(tabletSession, liveSession);
+  }));
+}
+
+function refreshClubExploreClientPresentation(client, { forceIndividual = false } = {}) {
+  const tabletSession = client?.clubTabletDemoSession
+    ?? (client?.clubTabletSessionTokenHash
+      ? clubTabletSessionsByTokenHash.get(client.clubTabletSessionTokenHash)
+      : null);
+  if (!tabletSession?.tokenHash) return Promise.resolve();
+  const liveSession = clubLiveSessions.get(clubLiveSessionKey(
+    tabletSession.clubId,
+    tabletSession.studioRiderId,
+  ));
+  if (!liveSession || liveSession.activityType !== 'explore') return Promise.resolve();
+  return refreshClubLiveStreamPublisherPresentation(tabletSession, liveSession, {
+    forceIndividualExplore: forceIndividual,
+  });
 }
 
 function leaveRoom(client, reason = 'left') {
@@ -11570,6 +12519,12 @@ function leaveRoom(client, reason = 'left') {
   room.racerSeatCounts?.delete(client.id);
   client.roomRole = null;
   client.racerSeatCount = 0;
+  if (room.demoActivityType === 'explore' || room.clubEventActivityType === 'explore') {
+    // Screen publishing uses its own socket. Reclassify the leaving tablet
+    // immediately so stale shared metadata cannot survive until its next
+    // activity heartbeat—even when it was the final room member.
+    void refreshClubExploreClientPresentation(client, { forceIndividual: true });
+  }
   if (room.hostId === client.id) {
     room.hostId = [...room.racers].find((clientId) => (
       clientHasRacerAccess(clients.get(clientId))
@@ -11578,21 +12533,42 @@ function leaveRoom(client, reason = 'left') {
 
   send(client, { type: 'room-left', roomId: oldRoomId, reason });
 
+  if (room.members.size === 0 && room.purpose === 'club-event') {
+    // An active coach event owns this room until cancel/replacement. Retaining
+    // the empty room preserves its immutable gate/route generation and the
+    // durable Explore split hysteresis across a full Wi-Fi outage. The room is
+    // removed by closeClubEventRoom when the event actually ends.
+    broadcastLobby();
+    return;
+  }
+
   if (room.members.size === 0) {
     clearRoomTimers(room.id);
     rooms.delete(room.id);
     if (room.purpose === 'club-event' && clubEventRoomIdByEventId.get(room.clubEventId) === room.id) {
       clubEventRoomIdByEventId.delete(room.clubEventId);
     }
+    if (room.purpose === 'club-demo' && clubDemoRoomIdByClubId.get(room.demoClubId) === room.id) {
+      clubDemoRoomIdByClubId.delete(room.demoClubId);
+    }
     cloudTelemetry.increment('tracklab_multiplayer_rooms_closed_total', { reason });
     cloudTelemetry.setGauge('tracklab_multiplayer_rooms', rooms.size);
     if (room.purpose === 'race') void persistence.closeRoom(room.id);
+    if (room.purpose === 'club-demo') void refreshClubTabletDemoPresentation(client);
     broadcastLobby();
     return;
   }
 
   broadcastRoom(room.id, roomState(room));
   broadcastLobby();
+  if (room.purpose === 'club-demo') {
+    void refreshClubTabletDemoPresentation(client);
+    void refreshClubDemoRoomPresentations(room);
+  }
+  if (room.demoActivityType === 'explore' || room.clubEventActivityType === 'explore') {
+    updateExplorePresentationClusters(room);
+    void refreshClubExploreRoomPresentations(room);
+  }
 }
 
 async function joinRoom(
@@ -11665,6 +12641,11 @@ async function joinRoom(
   }
   if (!room.exploreStates) {
     room.exploreStates = new Map();
+    room.explorePresentationClusterByClientId = new Map();
+    room.explorePresentationKnownDurablePairs = new Set();
+    room.explorePresentationTogetherDurablePairs = new Set();
+    room.explorePresentationMeasuredDurableIdentities = new Set();
+    room.explorePresentationClusterSignature = '';
   }
 
   if (!clientCanClaimRacerSeat(client)) {
@@ -11955,6 +12936,17 @@ async function handleClientMessage(client, rawMessage) {
     return;
   }
 
+  if (
+    client.clubTabletDemoDeviceId
+    && !clubTabletDemoWebSocketMessageTypes.has(message.type)
+  ) {
+    send(client, {
+      type: 'error',
+      message: 'This demo connection is limited to its private same-club race.',
+    });
+    return;
+  }
+
   if (client.clubLiveAccess && !clientHasRacerAccess(client)) {
     demoteClubLiveClient(client);
   }
@@ -12007,7 +12999,7 @@ async function handleClientMessage(client, rawMessage) {
     }
     client.track = sanitizeTrack(message.track ?? client.track);
     client.lastSeen = Date.now();
-    void persistence.upsertProfile(client);
+    if (!client.clubTabletDemoDeviceId) void persistence.upsertProfile(client);
 
     if (message.type === 'hello') {
       send(client, {
@@ -12022,11 +13014,144 @@ async function handleClientMessage(client, rawMessage) {
     }
 
     broadcastLobby();
-    void refreshClientAndFriendPresence(client);
+    if (!client.clubTabletDemoDeviceId) void refreshClientAndFriendPresence(client);
+    return;
+  }
+
+  if (message.type === 'join-club-demo') {
+    const tabletSession = client.clubTabletDemoSession;
+    if (
+      !tabletSession?.demoMode
+      || client.clubTabletDemoDeviceId !== tabletSession.deviceId
+      || client.clubLiveAccess?.clubId !== tabletSession.clubId
+      || !clientHasRacerAccess(client)
+    ) {
+      send(client, {
+        type: 'room-error',
+        message: 'Only an authorized Club Tablet in demo mode can join this race.',
+      });
+      return;
+    }
+    const demoLiveSession = clubLiveSessions.get(clubLiveSessionKey(
+      tabletSession.clubId,
+      tabletSession.studioRiderId,
+    ));
+    const activityType = sanitizeText(message.activityType, '', 32).toLowerCase();
+    const configurationId = sanitizeText(message.configurationId, '', 240);
+    const track = sanitizeTrack(message.track ?? client.track);
+    if (
+      !isServerBoundClubTabletDemoSession(demoLiveSession)
+      || demoLiveSession.expiresAt <= Date.now()
+      || demoLiveSession._publisherDeviceId !== tabletSession.deviceId
+      || demoLiveSession._publisherDemoDeviceTokenHash !== tabletSession.deviceTokenHash
+      || demoLiveSession.activityType !== activityType
+      || !['bmx-race', 'straight-sprint', 'explore'].includes(activityType)
+      || !configurationId
+      || track.id === 'unknown-track'
+    ) {
+      send(client, {
+        type: 'room-error',
+        message: 'Open the same active demo activity and course before joining the club demo race.',
+      });
+      return;
+    }
+    const replacedDeviceClients = [...clients.values()].filter((candidate) => (
+      candidate.id !== client.id
+      && candidate.clubTabletDemoDeviceId === tabletSession.deviceId
+      && candidate.websocketScope === 'multiplayer'
+    ));
+    for (const replacedClient of replacedDeviceClients) {
+      if (replacedClient.roomId) leaveRoom(replacedClient, 'club-demo-device-reconnected');
+      replacedClient.socket?.close(1008, 'Club Tablet demo reconnected');
+    }
+    // Evict a prior socket for this physical tablet before resolving the club
+    // room. If that socket was the room's last member, leaveRoom deletes the
+    // room and its club mapping; resolving first would strand this client in a
+    // stale room object that no later tablet could discover.
+    const room = createOrLoadClubDemoRoom(
+      tabletSession,
+      track,
+      activityType,
+      configurationId,
+    );
+    if (!room) {
+      send(client, {
+        type: 'room-error',
+        message: 'This club demo is using a different activity or race setup. Match the active tablet setup and try again.',
+      });
+      return;
+    }
+    if (!room.members.has(client.id) && roomRacerSeatCount(room) >= maxRaceBikeCount) {
+      send(client, { type: 'room-error', message: 'All four Club Tablet demo seats are already active.' });
+      return;
+    }
+    const joined = await joinRoom(client, room, 'racer', 1);
+    if (!joined || !room.racers.has(client.id)) {
+      if (client.roomId === room.id) leaveRoom(client, 'club-demo-seat-unavailable');
+      send(client, { type: 'room-error', message: 'This Club Tablet demo seat is not available.' });
+      return;
+    }
+    send(client, {
+      type: 'club-demo-joined',
+      room: publicRoom(room),
+      studioRiderId: tabletSession.studioRiderId,
+    });
+    await refreshClubDemoRoomPresentations(room);
+    return;
+  }
+
+  if (message.type === 'club-demo-start') {
+    const room = client.roomId ? rooms.get(client.roomId) : null;
+    if (
+      !room
+      || room.purpose !== 'club-demo'
+      || room.hostId !== client.id
+      || !room.racers?.has(client.id)
+      || !client.clubTabletDemoDeviceId
+    ) {
+      send(client, {
+        type: 'room-error',
+        message: 'Only the first authorized demo tablet can start this club demo race.',
+      });
+      return;
+    }
+    const participatingDeviceIds = new Set(
+      [...room.racers]
+        .map((clientId) => clients.get(clientId)?.clubTabletDemoDeviceId)
+        .filter(Boolean),
+    );
+    if (participatingDeviceIds.size < 2) {
+      send(client, {
+        type: 'room-error',
+        message: 'Connect at least two club demo tablets before starting the multiplayer race.',
+      });
+      return;
+    }
+    if (
+      room.flow?.phase === 'race'
+      && room.flow.raceToken
+      && !clubDemoRoomRestartReady(room)
+    ) {
+      send(client, { type: 'room-state', room: publicRoom(room) });
+      return;
+    }
+    room.raceStates.clear();
+    room.flow = {
+      ...defaultRoomFlow(),
+      selectedTrackId: room.track.id,
+    };
+    beginRoomRace(room, 'matched Club Tablet demo setup');
     return;
   }
 
   if (message.type === 'create-room') {
+    if (client.clubTabletDemoDeviceId) {
+      send(client, {
+        type: 'room-error',
+        message: 'Club Tablet demo riders use their private shared club race.',
+      });
+      return;
+    }
     if (!requireAvailableRacerSeat(client)) {
       return;
     }
@@ -12158,6 +13283,10 @@ async function handleClientMessage(client, rawMessage) {
     ) {
       broadcastRoom(room.id, roomState(room));
       broadcastLobby();
+      if (room.clubEventActivityType === 'explore') {
+        updateExplorePresentationClusters(room);
+        await refreshClubExploreRoomPresentations(room);
+      }
     }
     return;
   }
@@ -12171,6 +13300,10 @@ async function handleClientMessage(client, rawMessage) {
     }
     if (room.purpose === 'club-event') {
       send(client, { type: 'room-error', message: 'Club Event rooms require the authorized event join.' });
+      return;
+    }
+    if (room.purpose === 'club-demo' || client.clubTabletDemoDeviceId) {
+      send(client, { type: 'room-error', message: 'That private Club Tablet demo room is not available.' });
       return;
     }
     if (client.websocketScope === 'live-audio' && room.purpose !== 'live-audio') {
@@ -12208,6 +13341,16 @@ async function handleClientMessage(client, rawMessage) {
     if (!room) {
       return;
     }
+    if (room.purpose === 'club-demo' && room.demoActivityType !== 'explore') {
+      return;
+    }
+    if (
+      room.purpose === 'club-demo'
+      && !clubDemoClientGenerationEligible(room, client.id)
+    ) {
+      send(client, { type: 'room-error', message: 'Wait for the next demo ride before changing its route.' });
+      return;
+    }
     if (room.purpose === 'club-event' && (
       room.clubEventActivityType !== 'explore'
       || room.exploreRoute
@@ -12233,8 +13376,18 @@ async function handleClientMessage(client, rawMessage) {
       updatedAt: Date.now(),
     };
     room.exploreStates = new Map();
+    room.explorePresentationClusterByClientId = new Map();
+    room.explorePresentationKnownDurablePairs = new Set();
+    room.explorePresentationTogetherDurablePairs = new Set();
+    room.explorePresentationMeasuredDurableIdentities = new Set();
+    room.explorePresentationClusterSignature = '';
+    if (room.purpose === 'club-demo') {
+      room.demoExploreParticipantIds = new Set();
+    }
     addRoomSystemMessage(room, `${client.name} selected an Explore ride to ${route.destinationLabel}.`);
     broadcastRoom(room.id, roomState(room));
+    if (room.purpose === 'club-demo') await refreshClubDemoRoomPresentations(room);
+    await refreshClubExploreRoomPresentations(room);
     return;
   }
 
@@ -12246,6 +13399,9 @@ async function handleClientMessage(client, rawMessage) {
     if (!room?.exploreRoute) {
       return;
     }
+    if (room.purpose === 'club-demo' && room.demoActivityType !== 'explore') {
+      return;
+    }
     if (room.purpose === 'club-event') {
       send(client, { type: 'room-error', message: 'The coach controls this Club Event ride.' });
       return;
@@ -12255,8 +13411,21 @@ async function handleClientMessage(client, rawMessage) {
       return;
     }
     const action = sanitizeText(message.action, '', 24);
+    if (
+      room.purpose === 'club-demo'
+      && action !== 'reset'
+      && !clubDemoClientGenerationEligible(room, client.id)
+    ) {
+      send(client, { type: 'room-error', message: 'Wait for the next demo ride before controlling it.' });
+      return;
+    }
     const now = Date.now();
     if (action === 'start' || action === 'reset') {
+      if (room.purpose === 'club-demo') {
+        room.demoExploreParticipantIds = action === 'start'
+          ? new Set(room.racers ?? [])
+          : new Set();
+      }
       room.exploreSession = {
         id: randomId('RIDE', 12),
         routeId: room.exploreRoute.id,
@@ -12265,6 +13434,11 @@ async function handleClientMessage(client, rawMessage) {
         updatedAt: now,
       };
       room.exploreStates = new Map();
+      room.explorePresentationClusterByClientId = new Map();
+      room.explorePresentationKnownDurablePairs = new Set();
+      room.explorePresentationTogetherDurablePairs = new Set();
+      room.explorePresentationMeasuredDurableIdentities = new Set();
+      room.explorePresentationClusterSignature = '';
     } else if (action === 'pause' && room.exploreSession) {
       room.exploreSession = {
         ...room.exploreSession,
@@ -12281,6 +13455,7 @@ async function handleClientMessage(client, rawMessage) {
       return;
     }
     broadcastRoom(room.id, roomState(room));
+    if (room.purpose === 'club-demo') await refreshClubDemoRoomPresentations(room);
     return;
   }
 
@@ -12309,6 +13484,7 @@ async function handleClientMessage(client, rawMessage) {
     room.flow = defaultRoomFlow();
     broadcastRoom(room.id, roomState(room));
     broadcastLobby();
+    if (room.purpose === 'club-demo') await refreshClubDemoRoomPresentations(room);
     return;
   }
 
@@ -12445,6 +13621,7 @@ async function handleClientMessage(client, rawMessage) {
     room.flow = defaultRoomFlow();
     addRoomSystemMessage(room, 'Lobby reset.');
     broadcastRoom(room.id, roomState(room));
+    if (room.purpose === 'club-demo') await refreshClubDemoRoomPresentations(room);
     return;
   }
 
@@ -12581,9 +13758,26 @@ async function handleClientMessage(client, rawMessage) {
       !room
       || room.purpose === 'live-audio'
       || (room.purpose === 'club-event' && room.clubEventActivityType === 'explore')
+      || (room.purpose === 'club-demo' && room.demoActivityType === 'explore')
     ) {
       return;
     }
+
+    if (
+      room.purpose === 'club-demo'
+      && sanitizeText(message.state?.trackId, '', 120) !== room.track.id
+    ) return;
+    if (
+      room.purpose === 'club-demo'
+      && (
+        !room.flow?.raceToken
+        || sanitizeText(message.state?.raceToken, '', 80) !== room.flow.raceToken
+      )
+    ) return;
+    if (
+      room.purpose === 'club-demo'
+      && !clubDemoClientGenerationEligible(room, client.id)
+    ) return;
 
     if (room.racers?.size && !room.racers.has(client.id)) {
       return;
@@ -12593,6 +13787,7 @@ async function handleClientMessage(client, rawMessage) {
       return;
     }
 
+    const demoRestartWasReady = clubDemoRoomRestartReady(room);
     const raceState = sanitizeRaceState(message.state, client, room);
     if (!raceState) {
       return;
@@ -12613,12 +13808,22 @@ async function handleClientMessage(client, rawMessage) {
         // /api/club-tablet/race-results. Saving the broadcast race-sync here
         // would create a second pseudo-user identity and could include other
         // riders supplied by the tablet client.
-        if (!client.clubTabletSessionTokenHash) {
+        if (
+          !client.clubTabletSessionTokenHash
+          && !client.clubTabletDemoDeviceId
+          && room.purpose !== 'club-demo'
+        ) {
           void persistence.saveRaceResults(room, client, raceState);
         }
       }
     }
     broadcastRoom(room.id, { type: 'race-sync', state: raceState });
+    if (
+      room.purpose === 'club-demo'
+      && demoRestartWasReady !== clubDemoRoomRestartReady(room)
+    ) {
+      broadcastRoom(room.id, roomState(room));
+    }
     return;
   }
 
@@ -12630,17 +13835,29 @@ async function handleClientMessage(client, rawMessage) {
     if (
       !room
       || (room.purpose === 'club-event' && room.clubEventActivityType !== 'explore')
+      || (room.purpose === 'club-demo' && room.demoActivityType !== 'explore')
       || !room.racers?.has(client.id)
       || !requireRacerClient(client)
     ) {
       return;
     }
+    if (
+      room.purpose === 'club-demo'
+      && !clubDemoClientGenerationEligible(room, client.id)
+    ) return;
     const exploreState = sanitizeExploreState(message.state, client, room);
     if (!exploreState) {
       return;
     }
     room.exploreStates.set(client.id, exploreState);
+    room.explorePresentationMeasuredDurableIdentities ??= new Set();
+    room.explorePresentationMeasuredDurableIdentities.add(
+      clubRoomClientDurableIdentity(client),
+    );
     broadcastRoom(room.id, { type: 'explore-sync', state: exploreState });
+    if (updateExplorePresentationClusters(room)) {
+      await refreshClubExploreRoomPresentations(room);
+    }
     return;
   }
 
@@ -13654,30 +14871,37 @@ async function handleHeartRateWatchConnectApi(request, response, requestUrl) {
       return;
     }
     const { enrollments, connections } = await loadHeartRateWatchStatusSnapshot(identity.profileKey);
-    const enrollment = enrollments.find((candidate) => (
-      candidate.scope === 'studio'
-      && candidate.clubId === tabletSession.clubId
-      && candidate.studioRiderId === tabletSession.studioRiderId
-      && candidate.revokedAt == null
-      && candidate.membershipActive !== false
-      && candidate.liveStudioConsent === true
-    )) ?? null;
-    const connection = enrollment
-      ? connections.find((candidate) => candidate.enrollmentId === enrollment.id) ?? null
-      : null;
-    const projected = publicHeartRateWatchConnection(connection, enrollment, now);
-    const candidate = projected?.state === 'connected'
+    const source = connectedHeartRateWatchSourceForStudioTablet({
+      enrollments,
+      connections,
+      clubId: tabletSession.clubId,
+      studioRiderId: tabletSession.studioRiderId,
+      now,
+    });
+    const candidate = source?.sourceScope === 'studio'
       ? await persistence.loadLatestStudioTabletHeartRateReading({
         athleteProfileKey: identity.profileKey,
         clubId: tabletSession.clubId,
         studioRiderId: tabletSession.studioRiderId,
-        watchConnectionId: connection.id,
-        watchEnrollmentId: enrollment.id,
-        pairingId: connection.pairingId,
+        watchConnectionId: source.sourceConnection.id,
+        watchEnrollmentId: source.sourceEnrollment.id,
+        pairingId: source.sourceConnection.pairingId,
         freshAfter: now - heartRateLiveFreshnessMs,
         now,
       })
-      : null;
+      : source?.sourceScope === 'personal'
+        ? await persistence.loadLatestConsentedPersonalHeartRateForStudioTablet({
+          athleteProfileKey: identity.profileKey,
+          clubId: tabletSession.clubId,
+          studioRiderId: tabletSession.studioRiderId,
+          studioSharingEnrollmentId: source.sharingEnrollment.id,
+          personalWatchConnectionId: source.sourceConnection.id,
+          personalWatchEnrollmentId: source.sourceEnrollment.id,
+          pairingId: source.sourceConnection.pairingId,
+          freshAfter: now - heartRateLiveFreshnessMs,
+          now,
+        })
+        : null;
     // The database read above yields. Re-check the in-memory exact session
     // synchronously before writing so a completed athlete switch, stop, idle/
     // max expiry, or device revoke cannot receive the former athlete's BPM.
@@ -13744,10 +14968,32 @@ async function handleHeartRateWatchConnectApi(request, response, requestUrl) {
       && candidate.revokedAt == null
       && candidate.membershipActive !== false
     )) ?? null;
-    const connection = enrollment
-      ? connections.find((candidate) => candidate.enrollmentId === enrollment.id) ?? null
+    const enrollmentConnection = enrollment
+      ? [...connections]
+        .filter((candidate) => candidate.enrollmentId === enrollment.id)
+        .sort((left, right) => right.connectedAt - left.connectedAt)[0] ?? null
       : null;
-    const projected = publicHeartRateWatchConnection(connection, enrollment, now);
+    const enrollmentProjected = publicHeartRateWatchConnection(
+      enrollmentConnection,
+      enrollment,
+      now,
+    );
+    const source = connectedHeartRateWatchSourceForStudioTablet({
+      enrollments,
+      connections,
+      clubId: tabletSession.clubId,
+      studioRiderId: tabletSession.studioRiderId,
+      now,
+    });
+    const projected = enrollmentProjected?.state === 'connected'
+      ? enrollmentProjected
+      : source
+      ? publicHeartRateWatchConnection(
+        source.sourceConnection,
+        source.sourceEnrollment,
+        now,
+      )
+      : null;
     const state = projected?.state === 'connected'
       ? 'connected'
       : projected?.state === 'expired'
@@ -15283,7 +16529,7 @@ async function handleClubMonitorHistoryApi(request, response, requestUrl) {
       ]), saved.session);
     }
     writeJson(response, saved.status === 'saved' ? 201 : 200, {
-      session: publicTrainingSession(saved.session, 'owner'),
+      session: publicTrainingSession(saved.session, 'owner', { includePrivatePower: true }),
       replayed: saved.status === 'duplicate',
       heartRate: {
         status: saved.heartRateSegment?.status ?? 'no-stream',
@@ -15701,7 +16947,11 @@ async function handleClubGroupTrainingHistoryApi(request, response, requestUrl) 
     }
     writeJson(response, saved.status === 'saved' ? 201 : 200, {
       authorization: publicClubGroupTrainingAuthorization(saved.authorization, now),
-      sessions: saved.sessions.map((storedSession) => publicTrainingSession(storedSession, 'owner')),
+      sessions: saved.sessions.map((storedSession) => publicTrainingSession(
+        storedSession,
+        'owner',
+        { includePrivatePower: true },
+      )),
       replayed: saved.status === 'duplicate',
       persistence: persistence.persistenceEnabled(),
     }, { 'Cache-Control': 'no-store' });
@@ -19176,6 +20426,7 @@ async function serveStatic(request, response) {
         });
       });
     }
+    stopClubTabletDemoRuntime(deviceId);
 
     // Match first enrollment exactly: this app installation is now a shared
     // kiosk, not an authenticated administrator device.
@@ -19266,6 +20517,7 @@ async function serveStatic(request, response) {
       }
       const tokenHashForSession = clubTabletSessionTokenHashByDeviceId.get(deviceId);
       if (tokenHashForSession) await stopClubTabletSession(clubTabletSessionsByTokenHash.get(tokenHashForSession));
+      stopClubTabletDemoRuntime(deviceId);
       clubTabletBikePresenceByDeviceId.delete(deviceId);
       writeJson(response, 200, { revoked: true }, { 'Cache-Control': 'no-store' });
       return;
@@ -19683,6 +20935,7 @@ async function serveStatic(request, response) {
         // Keep the current athlete active until the replacement has passed
         // every roster, bike, athlete, capacity, and credential-storage check.
         if (existingSession) await stopClubTabletSession(existingSession);
+        stopClubTabletDemoRuntime(device.id, device.tokenHash);
         clubTabletSessionsByTokenHash.set(sessionTokenHash, tabletSession);
         clubTabletSessionTokenHashByDeviceId.set(device.id, sessionTokenHash);
         await applyWattbikeCapacitySnapshot(
@@ -19754,12 +21007,52 @@ async function serveStatic(request, response) {
       writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
       return;
     }
-    const tabletSession = await loadClubTabletSessionFromRequest(request);
+    const athleteCredentialPresented = Boolean(requestClubTabletSessionToken(request));
+    let tabletSession = athleteCredentialPresented
+      ? await loadClubTabletSessionFromRequest(request)
+      : null;
+    let demoDevice = null;
+    if (!tabletSession && !athleteCredentialPresented) {
+      const payload = await readJsonBody(request, 8_000);
+      demoDevice = await loadClubTabletDeviceFromRequest(request, { requireAvailable: true });
+      if (demoDevice && payload?.demo === true) {
+        tabletSession = await loadAuthorizedClubTabletDemoSession(demoDevice);
+      }
+      if (demoDevice && payload?.demo !== true) {
+        writeJson(response, 400, { error: 'Confirm demo mode before opening a shared demo race.' }, {
+          'Cache-Control': 'no-store',
+        });
+        return;
+      }
+    }
     if (!tabletSession) {
-      writeJson(response, 401, { error: 'This club tablet athlete session expired or ended.' }, { 'Cache-Control': 'no-store' });
+      writeJson(response, athleteCredentialPresented ? 401 : demoDevice ? 409 : 401, {
+        error: athleteCredentialPresented
+          ? 'This club tablet athlete session expired or ended.'
+          : demoDevice
+            ? 'End the selected athlete session and confirm active club access before starting demo multiplayer.'
+            : 'This club tablet authorization expired or was revoked.',
+      }, { 'Cache-Control': 'no-store' });
       return;
     }
-    const ticket = createClubTabletWebSocketTicket(tabletSession, 'multiplayer');
+    const demoLiveSession = tabletSession.demoMode
+      ? clubLiveSessions.get(clubLiveSessionKey(tabletSession.clubId, tabletSession.studioRiderId))
+      : null;
+    if (tabletSession.demoMode && !clubLiveSessionMatchesDemoDevice(demoLiveSession, demoDevice)) {
+      writeJson(response, 409, {
+        error: 'Publish the active demo activity before joining the shared demo race.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const ticket = createClubTabletWebSocketTicket(tabletSession, 'multiplayer', Date.now(),
+      tabletSession.demoMode ? {
+        demo: true,
+        deviceTokenHash: tabletSession.deviceTokenHash,
+        deviceId: tabletSession.deviceId,
+        clubId: tabletSession.clubId,
+        studioRiderId: tabletSession.studioRiderId,
+        liveSessionId: demoLiveSession.sessionId,
+      } : {});
     if (!ticket) {
       writeJson(response, 503, { error: 'Live connection authorization is temporarily unavailable.' }, {
         'Cache-Control': 'no-store',
@@ -19769,6 +21062,10 @@ async function serveStatic(request, response) {
     writeJson(response, 201, {
       ticket: ticket.token,
       expiresAt: ticket.expiresAt,
+      ...(tabletSession.demoMode ? {
+        demo: true,
+        studioRiderId: tabletSession.studioRiderId,
+      } : {}),
     }, { 'Cache-Control': 'no-store' });
     return;
   }
@@ -19778,11 +21075,23 @@ async function serveStatic(request, response) {
       writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
       return;
     }
-    const tabletSession = await loadClubTabletSessionFromRequest(request);
+    const athleteCredentialPresented = Boolean(requestClubTabletSessionToken(request));
+    let tabletSession = athleteCredentialPresented
+      ? await loadClubTabletSessionFromRequest(request)
+      : null;
+    let demoDevice = null;
+    if (!tabletSession && !athleteCredentialPresented) {
+      demoDevice = await loadClubTabletDeviceFromRequest(request, { requireAvailable: true });
+      if (demoDevice) tabletSession = await loadAuthorizedClubTabletDemoSession(demoDevice);
+    }
     if (!tabletSession) {
-      writeJson(response, 401, { error: 'This club tablet athlete session expired or ended.' }, {
-        'Cache-Control': 'no-store',
-      });
+      writeJson(response, athleteCredentialPresented ? 401 : demoDevice ? 409 : 401, {
+        error: athleteCredentialPresented
+          ? 'This club tablet athlete session expired or ended.'
+          : demoDevice
+            ? 'End the selected athlete session and confirm active club access before sharing demo mode.'
+            : 'This club tablet authorization expired or was revoked.',
+      }, { 'Cache-Control': 'no-store' });
       return;
     }
     // Use only a one-way digest of the server-verified device/session identity
@@ -19806,7 +21115,10 @@ async function serveStatic(request, response) {
       !liveSession
       || liveSession.expiresAt <= now
       || liveSession._publisherDeviceId !== tabletSession.deviceId
-      || liveSession._publisherClubTabletSessionHash !== tabletSession.tokenHash
+      || (tabletSession.demoMode
+        ? liveSession.demo !== true
+          || liveSession._publisherDemoDeviceTokenHash !== tabletSession.deviceTokenHash
+        : liveSession._publisherClubTabletSessionHash !== tabletSession.tokenHash)
     ) {
       writeJson(response, 409, { error: 'Start an activity on this exact tablet before sharing its live screen.' }, {
         'Cache-Control': 'no-store',
@@ -19822,6 +21134,10 @@ async function serveStatic(request, response) {
         clubId: tabletSession.clubId,
         deviceId: tabletSession.deviceId,
         studioRiderId: tabletSession.studioRiderId,
+        ...(tabletSession.demoMode ? {
+          demo: true,
+          deviceTokenHash: tabletSession.deviceTokenHash,
+        } : {}),
       },
     );
     if (!ticket) {
@@ -19834,6 +21150,96 @@ async function serveStatic(request, response) {
       ticket: ticket.token,
       expiresAt: ticket.expiresAt,
       sessionId: liveSession.sessionId,
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/club-tablet/demo-live') {
+    if (request.method !== 'PUT' && request.method !== 'DELETE') {
+      writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const device = await loadClubTabletDeviceFromRequest(request, { requireAvailable: true });
+    if (!device) {
+      writeJson(response, 401, {
+        error: 'This club tablet authorization expired or was revoked.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (!enforceCredentialNoStoreRateLimit(
+      response,
+      clubLiveRateLimiter,
+      180,
+      `club-tablet-demo-live:${tokenHash(device.tokenHash).slice(0, 24)}`,
+    )) return;
+    const publisherIdentity = `demo-device:${device.tokenHash}`;
+    const publisherCommitFences = request.method === 'PUT'
+      ? captureClubLivePublisherTerminationFence(publisherIdentity)
+      : null;
+    const demoSession = request.method === 'PUT'
+      ? await loadAuthorizedClubTabletDemoSession(device)
+      : clubTabletDemoSession(device);
+    if (!demoSession) {
+      writeJson(response, 409, {
+        error: 'End the selected athlete session and confirm active club access before starting demo mode.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const key = clubLiveSessionKey(demoSession.clubId, demoSession.studioRiderId);
+    const payload = await readJsonBody(request, request.method === 'PUT' ? 32_000 : 8_000);
+    const requestedSessionId = sanitizeText(payload?.sessionId, '', 160);
+    if (request.method === 'DELETE') {
+      if (!requestedSessionId) {
+        writeJson(response, 400, { error: 'The active demo Club Live session is required.' }, {
+          'Cache-Control': 'no-store',
+        });
+        return;
+      }
+      terminateClubLivePublisher(publisherIdentity, requestedSessionId);
+      const existing = clubLiveSessions.get(key);
+      const stopped = clubLiveSessionMatchesDemoDevice(existing, device)
+        && existing.sessionId === requestedSessionId;
+      if (stopped) stopClubTabletDemoRuntime(device.id, device.tokenHash);
+      writeJson(response, 200, { stopped }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (payload?.demo !== true) {
+      writeJson(response, 400, {
+        error: 'Demo Club Live publishing requires an explicitly simulated activity.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const liveSession = sanitizeClubLiveSnapshot(
+      payload,
+      demoSession,
+      { displayName: demoSession.athleteName },
+      Date.now(),
+      `club-tablet-demo:${device.id}`,
+    );
+    if (!liveSession) {
+      writeJson(response, 400, {
+        error: 'A valid demo activity type and live session status are required.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    liveSession.demo = true;
+    liveSession._publisherDeviceId = device.id;
+    liveSession._publisherDemoDeviceTokenHash = device.tokenHash;
+    if (!clubLivePublisherTerminationFenceAllowsSession(
+      publisherCommitFences,
+      liveSession.sessionId,
+    )) {
+      writeJson(response, 409, {
+        error: 'This demo Club Live activity ended before the update completed.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    setClubLiveSession(key, liveSession);
+    await refreshClubLiveStreamPublisherPresentation(demoSession, liveSession);
+    writeJson(response, 200, {
+      session: publicClubLiveSession(liveSession),
+      heartbeatTtlMs: clubLiveSessionTtlMs,
+      demo: true,
     }, { 'Cache-Control': 'no-store' });
     return;
   }
@@ -19976,7 +21382,7 @@ async function serveStatic(request, response) {
       return;
     }
     const heartRateSegment = identity.member.status === 'claimed'
-      ? await attachStudioBlockHeartRateToTrainingSession(
+      ? await attachClubTabletHeartRateToTrainingSession(
         identity.profileKey,
         saved,
         clubTabletPlayerId(payload?.localPlayerId),
@@ -20325,6 +21731,9 @@ async function serveStatic(request, response) {
     pruneClubLiveSessions(now);
     const tabletCredentialPresented = Boolean(requestClubTabletSessionToken(request));
     const browserBearerCredentialPresented = nonPersonalBearerCredentialPresented(request);
+    const anyBearerCredentialPresented = /^Bearer\s+/i.test(
+      String(request.headers.authorization || ''),
+    );
 
     if (request.method === 'GET') {
       // An explicitly supplied athlete-tablet credential remains
@@ -20385,7 +21794,10 @@ async function serveStatic(request, response) {
       for (const [key, frame] of clubLiveFrames.entries()) {
         const liveSession = clubLiveSessions.get(key);
         if (frame.clubId !== ownedClub.id) continue;
-        if (!activeRosterRiderIds.has(frame.studioRiderId)) {
+        if (
+          !activeRosterRiderIds.has(frame.studioRiderId)
+          && !isServerBoundClubTabletDemoSession(liveSession)
+        ) {
           deleteClubLiveSession(key);
           continue;
         }
@@ -20431,25 +21843,21 @@ async function serveStatic(request, response) {
       return;
     }
 
-    // A device authorization can never publish a rider's screen by itself;
-    // the short-lived, athlete-specific tablet session is required. Keep an
-    // explicit Bearer credential authoritative so an ambient owner cookie
-    // cannot silently grant either read or write access.
-    if (!tabletCredentialPresented && browserBearerCredentialPresented) {
-      const tabletDevice = await loadClubTabletDeviceFromRequest(request, { requireAvailable: true });
-      writeJson(response, tabletDevice ? 403 : 401, {
-        error: tabletDevice
-          ? 'Choose an athlete on this club tablet before sharing its screen.'
-          : 'This club tablet authorization expired or was revoked.',
-      }, { 'Cache-Control': 'no-store' });
-      return;
-    }
-
     let liveSession = null;
     let key = '';
     let publisherRateLimitScope = '';
     let frameTabletSession = null;
+    let frameDemoDevice = null;
     let publisherCommitFences = null;
+    if (!tabletCredentialPresented && anyBearerCredentialPresented) {
+      frameDemoDevice = await loadClubTabletDeviceFromRequest(request, { requireAvailable: true });
+      if (!frameDemoDevice && browserBearerCredentialPresented) {
+        writeJson(response, 401, {
+          error: 'This club tablet authorization expired or was revoked.',
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+    }
     if (tabletCredentialPresented) {
       const tabletSession = await loadClubTabletSessionFromRequest(request);
       if (!tabletSession) {
@@ -20476,6 +21884,27 @@ async function serveStatic(request, response) {
         return;
       }
       publisherRateLimitScope = `tablet:${tabletSession.tokenHash.slice(0, 24)}`;
+    } else if (frameDemoDevice) {
+      const tabletDevice = frameDemoDevice;
+      const demoSession = await loadAuthorizedClubTabletDemoSession(tabletDevice);
+      if (!demoSession) {
+        writeJson(response, 409, {
+          error: 'End the selected athlete session and confirm active club access before sharing demo mode.',
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      publisherCommitFences = captureClubLivePublisherTerminationFence(
+        `demo-device:${tabletDevice.tokenHash}`,
+      );
+      key = clubLiveSessionKey(tabletDevice.clubId, demoSession.studioRiderId);
+      liveSession = clubLiveSessions.get(key);
+      if (!clubLiveSessionMatchesDemoDevice(liveSession, tabletDevice, now)) {
+        writeJson(response, 409, {
+          error: 'Publish the active demo Club Live session before sharing its screen.',
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      publisherRateLimitScope = `demo-device:${tokenHash(tabletDevice.tokenHash).slice(0, 24)}`;
     } else {
       const authSession = await requireAuthSession(request, response);
       if (!authSession) return;
@@ -20514,7 +21943,7 @@ async function serveStatic(request, response) {
 
     const payload = request._clubLiveFramePayload
       || await readJsonBody(request, request.method === 'PUT' ? maxClubLiveFrameBodyBytes : 8_000);
-    if (!tabletCredentialPresented && request.method === 'PUT') {
+    if (!tabletCredentialPresented && !frameDemoDevice && request.method === 'PUT') {
       const clubId = sanitizeText(payload?.clubId, '', 160);
       const studioRiderId = sanitizeText(payload?.studioRiderId, '', 160);
       key = clubLiveSessionKey(clubId, studioRiderId);
@@ -20524,7 +21953,7 @@ async function serveStatic(request, response) {
     liveSession = clubLiveSessions.get(key);
     const publisherProfileKey = request._clubLiveFramePublisherProfileKey || '';
     const publisherAuthSessionHash = request._clubLiveFramePublisherAuthSessionHash || '';
-    if (!tabletCredentialPresented) {
+    if (!tabletCredentialPresented && !frameDemoDevice) {
       const currentPublisherSession = await currentAuthSessionByHash(publisherAuthSessionHash);
       if (
         !currentPublisherSession?.user
@@ -20542,6 +21971,8 @@ async function serveStatic(request, response) {
           ? !clubTabletSessionIsCurrent(frameTabletSession, operationNow)
             || liveSession._publisherClubTabletSessionHash !== frameTabletSession.tokenHash
             || liveSession._publisherDeviceId !== frameTabletSession.deviceId
+          : frameDemoDevice
+            ? !clubLiveSessionMatchesDemoDevice(liveSession, frameDemoDevice, operationNow)
           : liveSession._publisherProfileKey !== publisherProfileKey
             || liveSession._publisherAuthSessionHash !== publisherAuthSessionHash
       )
@@ -20675,7 +22106,10 @@ async function serveStatic(request, response) {
       const activeSessions = [];
       for (const [key, liveSession] of clubLiveSessions.entries()) {
         if (liveSession.clubId !== ownedClub.id) continue;
-        if (!activeRosterRiderIds.has(liveSession.studioRiderId)) {
+        if (
+          !activeRosterRiderIds.has(liveSession.studioRiderId)
+          && !isServerBoundClubTabletDemoSession(liveSession)
+        ) {
           deleteClubLiveSession(key);
           continue;
         }
@@ -21136,6 +22570,15 @@ async function serveStatic(request, response) {
       let heartRateSegment = await attachAccountBlockHeartRateToTrainingSession(profileKey, saved);
       if (heartRateSegment.status === 'no-block' && clubMembership) {
         heartRateSegment = await attachStudioBlockHeartRateToTrainingSession(profileKey, saved);
+      } else if (heartRateSegment.segment && clubMembership) {
+        const consentedSegment = await persistence.authorizeAccountHeartRateTrainingSegmentForClubSummary({
+          athleteProfileKey: profileKey,
+          trainingSessionId: saved.id,
+          clubId: clubMembership.clubId,
+          studioRiderId: clubMembership.studioRiderId,
+          now: Date.now(),
+        });
+        if (consentedSegment) heartRateSegment = { ...heartRateSegment, segment: consentedSegment };
       }
       notifyTrainingHistoryProfiles(
         await trainingHistoryRecipients(profileKey, saved, clubMembership),
@@ -21506,6 +22949,8 @@ wss.on('connection', (socket, request) => {
       expiresAt: tabletSession.expiresAt,
     } : null),
     clubTabletSessionTokenHash: tabletSession?.tokenHash ?? null,
+    clubTabletDemoDeviceId: tabletSession?.demoMode ? tabletSession.deviceId : null,
+    clubTabletDemoSession: tabletSession?.demoMode ? tabletSession : null,
     clubLiveStreamAuthorization: request.tracklabClubLiveStreamAuthorization ?? null,
     clubLiveStreamRegistration: null,
     clubLiveStreamSubscriptions: new Set(),
@@ -21701,14 +23146,32 @@ server.on('upgrade', (request, socket, head) => {
         clubTabletWsTicketsByHash.delete(presentedTicketHash);
       }
       const expectedScope = isClubLiveStreamPath ? clubLiveStreamWebsocketScope : 'multiplayer';
-      const tabletSession = ticket?.expiresAt > Date.now() && ticket.scope === expectedScope
-        ? await loadClubTabletSessionByHash(ticket.sessionTokenHash)
-        : null;
+      let demoDevice = null;
+      let tabletSession = null;
+      if (ticket?.expiresAt > Date.now() && ticket.scope === expectedScope) {
+        if (ticket.demo === true) {
+          demoDevice = await persistence.loadClubTabletDeviceByTokenHash(
+            ticket.deviceTokenHash,
+            { requireAvailable: true },
+          );
+          if (
+            demoDevice
+            && demoDevice.id === ticket.deviceId
+            && demoDevice.clubId === ticket.clubId
+            && clubTabletDemoStudioRiderId(demoDevice.id) === ticket.studioRiderId
+          ) {
+            tabletSession = await loadAuthorizedClubTabletDemoSession(demoDevice);
+          }
+        } else {
+          tabletSession = await loadClubTabletSessionByHash(ticket.sessionTokenHash);
+        }
+      }
       if (!tabletSession) {
         rejectUpgrade('401 Unauthorized');
         return;
       }
       request.tracklabClubTabletSession = tabletSession;
+      if (tabletSession.demoMode) request.tracklabClubTabletDemoDevice = demoDevice;
       request.tracklabWebSocketPath = requestUrl.pathname;
       if (isClubLiveStreamPath) {
         const now = Date.now();
@@ -21724,7 +23187,10 @@ server.on('upgrade', (request, socket, head) => {
           || ticket.studioRiderId !== tabletSession.studioRiderId
           || liveSession.expiresAt <= now
           || liveSession._publisherDeviceId !== tabletSession.deviceId
-          || liveSession._publisherClubTabletSessionHash !== tabletSession.tokenHash
+          || (tabletSession.demoMode
+            ? liveSession.demo !== true
+              || liveSession._publisherDemoDeviceTokenHash !== tabletSession.deviceTokenHash
+            : liveSession._publisherClubTabletSessionHash !== tabletSession.tokenHash)
         ) {
           rejectUpgrade('401 Unauthorized');
           return;
@@ -21737,7 +23203,24 @@ server.on('upgrade', (request, socket, head) => {
           clubId: tabletSession.clubId,
           deviceId: tabletSession.deviceId,
           studioRiderId: tabletSession.studioRiderId,
+          ...(tabletSession.demoMode ? {
+            demo: true,
+            deviceTokenHash: tabletSession.deviceTokenHash,
+          } : {}),
         };
+      } else if (tabletSession.demoMode) {
+        const liveSession = clubLiveSessions.get(clubLiveSessionKey(
+          tabletSession.clubId,
+          tabletSession.studioRiderId,
+        ));
+        if (
+          ticket.liveSessionId !== liveSession?.sessionId
+          || !clubLiveSessionMatchesDemoDevice(liveSession, demoDevice)
+        ) {
+          rejectUpgrade('401 Unauthorized');
+          return;
+        }
+        request.tracklabWebSocketScope = 'multiplayer';
       } else if (tabletSession.profileId) {
         const blockedProfileIds = await persistence.loadBlockedAccountProfileIds(tabletSession.profileId);
         if (!Array.isArray(blockedProfileIds)) {

@@ -2197,6 +2197,42 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           ON ${schema}.bike_shop_claim_requests USING GIN (identity_aliases)`,
       ],
     },
+    {
+      version: 41,
+      name: 'allow consented personal Watch summaries in club training',
+      statements: [
+        `ALTER TABLE ${schema}.heart_rate_training_segments
+          DROP CONSTRAINT IF EXISTS heart_rate_training_segments_relay_scope_check`,
+        `ALTER TABLE ${schema}.heart_rate_training_segments
+          ADD CONSTRAINT heart_rate_training_segments_relay_scope_check CHECK (
+            (relay_scope = 'studio-block' AND club_id IS NOT NULL AND studio_rider_id IS NOT NULL)
+            OR (
+              relay_scope = 'account-block'
+              AND (
+                (club_id IS NULL AND studio_rider_id IS NULL)
+                OR (club_id IS NOT NULL AND studio_rider_id IS NOT NULL)
+              )
+            )
+          ) NOT VALID`,
+        `ALTER TABLE ${schema}.heart_rate_training_segments
+          VALIDATE CONSTRAINT heart_rate_training_segments_relay_scope_check`,
+        `ALTER TABLE ${schema}.heart_rate_training_segment_bindings
+          DROP CONSTRAINT IF EXISTS heart_rate_training_segment_bindings_relay_scope_check`,
+        `ALTER TABLE ${schema}.heart_rate_training_segment_bindings
+          ADD CONSTRAINT heart_rate_training_segment_bindings_relay_scope_check CHECK (
+            (relay_scope = 'studio-block' AND club_id IS NOT NULL AND studio_rider_id IS NOT NULL)
+            OR (
+              relay_scope = 'account-block'
+              AND (
+                (club_id IS NULL AND studio_rider_id IS NULL)
+                OR (club_id IS NOT NULL AND studio_rider_id IS NOT NULL)
+              )
+            )
+          ) NOT VALID`,
+        `ALTER TABLE ${schema}.heart_rate_training_segment_bindings
+          VALIDATE CONSTRAINT heart_rate_training_segment_bindings_relay_scope_check`,
+      ],
+    },
   ];
 }
 

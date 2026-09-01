@@ -11,6 +11,8 @@ export type ClubLivePresentationSource<Media> = Readonly<{
   session: ClubLiveSession;
   media: Media | null;
   mediaLive: boolean;
+  /** Direct video outranks the low-rate JPEG safety feed during failover. */
+  mediaTransport?: 'direct' | 'fallback';
 }>;
 
 export type ClubLivePresentation<Media> = Readonly<{
@@ -57,8 +59,15 @@ function chooseCanonicalSource<Media>(
 ) {
   const sorted = [...sources].sort(compareSources);
   const liveSources = sorted.filter((source) => source.mediaLive);
-  return liveSources.find((source) => source.id === previousSourceId)
-    ?? liveSources[0]
+  const bestTransportRank = liveSources.reduce((best, source) => Math.max(
+    best,
+    source.mediaTransport === 'direct' ? 2 : 1,
+  ), 0);
+  const bestLiveSources = liveSources.filter((source) => (
+    (source.mediaTransport === 'direct' ? 2 : 1) === bestTransportRank
+  ));
+  return bestLiveSources.find((source) => source.id === previousSourceId)
+    ?? bestLiveSources[0]
     ?? sorted.find((source) => source.id === previousSourceId)
     ?? sorted[0];
 }

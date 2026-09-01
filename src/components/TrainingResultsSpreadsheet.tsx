@@ -19,10 +19,13 @@ import {
   type TrainingResultSheetId,
 } from '../lib/trainingResultsGrid';
 import {
-  privateTrainingHeartRateForPlayer,
   type PrivateTrainingHeartRateBySession,
   type PrivateTrainingHeartRateProjection,
 } from '../lib/privateTrainingHeartRate';
+import type {
+  ConsentedClubTrainingHeartRateBySession,
+  ConsentedClubTrainingHeartRateProjection,
+} from '../lib/clubTrainingHeartRate';
 import './TrainingResultsSpreadsheet.css';
 
 export type TrainingResultsSpreadsheetProps = Readonly<{
@@ -38,6 +41,7 @@ export type TrainingResultsSpreadsheetProps = Readonly<{
   exportLabel?: string;
   privateExportLabel?: string;
   privateHeartRateBySession?: PrivateTrainingHeartRateBySession;
+  consentedClubHeartRateBySession?: ConsentedClubTrainingHeartRateBySession;
   renderSessionDetail?: (session: TrainingSession) => ReactNode;
 }>;
 
@@ -98,8 +102,12 @@ function heartRatePercentage(value: number) {
   return Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1);
 }
 
+type TrainingHeartRateProjection =
+  | PrivateTrainingHeartRateProjection
+  | ConsentedClubTrainingHeartRateProjection;
+
 function heartRateProjectionLabel(
-  projection: PrivateTrainingHeartRateProjection,
+  projection: TrainingHeartRateProjection,
   metricKind: 'average' | 'peak' | 'coverage',
 ) {
   if (projection.state === 'loading') return 'Loading…';
@@ -139,7 +147,7 @@ function PrivateHeartRateCell({
 }
 
 type PrivateHeartRateResolution = Readonly<{
-  projections: readonly PrivateTrainingHeartRateProjection[];
+  projections: readonly TrainingHeartRateProjection[];
   emptyLabel: 'Not recorded' | 'Private rider only';
 }>;
 
@@ -149,13 +157,13 @@ function privateHeartRateColumns(resolve: PrivateHeartRateResolver): GridColumn[
   return [
     {
       id: 'average-heart-rate',
-      label: 'Private average heart rate',
+      label: 'Average heart rate',
       render: (row) => <PrivateHeartRateCell resolution={resolve(row)} metricKind="average" />,
       numeric: true,
     },
     {
       id: 'peak-heart-rate',
-      label: 'Private peak heart rate',
+      label: 'Peak heart rate',
       render: (row) => <PrivateHeartRateCell resolution={resolve(row)} metricKind="peak" />,
       numeric: true,
     },
@@ -187,6 +195,7 @@ function sessionCell(row: TrainingResultRow) {
 }
 
 function commonColumns(
+  speedUnit: SpeedUnit,
   distanceUnit: DistanceUnit,
   resolveHeartRate: PrivateHeartRateResolver,
   canReview: boolean,
@@ -200,7 +209,13 @@ function commonColumns(
     { id: 'rider', label: 'Rider', render: (row) => row.riderName },
     { id: 'result', label: 'Result', render: result },
     { id: 'recorded-time', label: 'Recorded time', render: primaryTime, numeric: true },
+    { id: 'air', label: 'Air', render: (row) => finite(row.airSetting) ? Math.round(row.airSetting!) : missing, numeric: true },
     { id: 'distance', label: 'Distance', render: (row) => distance(row.distanceMeters, distanceUnit, row.activityType === 'explore'), numeric: true },
+    { id: 'average-speed', label: 'Avg speed', render: (row) => speed(row.averageSpeedKph, speedUnit), numeric: true },
+    { id: 'peak-speed', label: 'Peak speed', render: (row) => speed(row.peakSpeedKph, speedUnit), numeric: true },
+    { id: 'average-cadence', label: 'Avg cadence', render: (row) => metric(row.averageCadence, 'RPM', 1), numeric: true },
+    { id: 'peak-cadence', label: 'Peak cadence', render: (row) => metric(row.peakCadence, 'RPM', 1), numeric: true },
+    { id: 'average-power', label: 'Avg power', render: (row) => metric(row.averageWatts, 'W'), numeric: true },
     { id: 'peak-power', label: 'Peak power', render: (row) => metric(row.peakWatts, 'W'), numeric: true },
     ...privateHeartRateColumns(resolveHeartRate),
     ...(canReview ? [{ id: 'review', label: 'Review', render: review } satisfies GridColumn] : []),
@@ -360,6 +375,7 @@ export function TrainingResultsSpreadsheet({
   exportLabel = 'Numbers / Excel (.xlsx)',
   privateExportLabel = 'Private workbook + heart rate (.xlsx)',
   privateHeartRateBySession,
+  consentedClubHeartRateBySession,
   renderSessionDetail,
 }: TrainingResultsSpreadsheetProps) {
   const regionId = useId().replace(/:/g, '');
@@ -383,17 +399,28 @@ export function TrainingResultsSpreadsheet({
     return resultSlots;
   }, [rows]);
   const resolveHeartRate: PrivateHeartRateResolver = (row) => {
-    const projections = privateHeartRateBySession?.get(row.sessionId) ?? [];
+    const privateProjections = privateHeartRateBySession?.get(row.sessionId) ?? [];
+    const consentedClubProjections = consentedClubHeartRateBySession?.get(row.sessionId) ?? [];
+    const projections: readonly TrainingHeartRateProjection[] = privateProjections.length > 0
+      ? privateProjections
+      : consentedClubProjections;
     const riderCount = riderCountBySession.get(row.sessionId) ?? 1;
     const emptyLabel = sessionById.get(row.sessionId)?.club?.role === 'owner' || riderCount > 1
       ? 'Private rider only' as const
       : 'Not recorded' as const;
     const numericPlayerId = Number(row.playerId);
-    const matched = privateTrainingHeartRateForPlayer(
-      projections,
-      Number.isInteger(numericPlayerId) ? numericPlayerId : -1,
-      riderCount,
-    );
+    const dataBearing = projections.filter((projection) => (
+      projection.state === 'saved' || projection.state === 'syncing'
+    ));
+    const exact = Number.isInteger(numericPlayerId)
+      ? dataBearing.filter((projection) => projection.playerId === numericPlayerId)
+      : [];
+    const matched = exact.length > 0
+      ? exact
+      : riderCount === 1 && dataBearing.length > 0
+        && dataBearing.every((projection) => projection.playerId == null)
+        ? dataBearing
+        : [];
     if (matched.length > 0) return { projections: matched, emptyLabel };
     const stateOnly = projections.filter((projection) => (
       projection.state === 'loading'
@@ -458,7 +485,7 @@ export function TrainingResultsSpreadsheet({
         ? monitorColumns(speedUnit, distanceUnit, resolveHeartRate, canReview, review)
         : activeSheet.id === 'explore'
           ? exploreColumns(speedUnit, distanceUnit, resolveHeartRate, canReview, review)
-          : commonColumns(distanceUnit, resolveHeartRate, canReview, review);
+          : commonColumns(speedUnit, distanceUnit, resolveHeartRate, canReview, review);
 
   return (
     <section

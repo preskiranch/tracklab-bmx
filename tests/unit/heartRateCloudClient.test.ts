@@ -237,15 +237,45 @@ describe('private heart-rate history cloud client', () => {
   it('returns a separately redacted consented club summary without account or raw-sample fields', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       streams: [{
-        ...rawStream('session-1'),
+        sessionId: 'session-1',
+        activityType: 'bmx-race',
         studioRiderId: 'studio-rider-1',
-        pairingId: 'must-not-cross-client-boundary',
-        riderId: 'account:must-not-cross-client-boundary',
-        samples: [{ bpm: 155 }],
+        playerId: 1,
+        startedAt: 1_000,
+        endedAt: 11_000,
+        activeDurationMs: 10_000,
+        summary: {
+          sampleCount: 8,
+          coverageMs: 8_000,
+          coveragePercent: 80,
+          firstSampleElapsedMs: 0,
+          lastSampleElapsedMs: 9_000,
+          minimumBpm: 101,
+          averageBpm: 142.5,
+          peakBpm: 181,
+        },
+        zoneSummaries: [],
+        finalizedAt: 12_000,
       }, {
-        ...rawStream('session-1'),
-        id: 'wrong-studio-rider-stream',
+        sessionId: 'session-1',
+        activityType: 'bmx-race',
         studioRiderId: 'studio-rider-2',
+        playerId: 1,
+        startedAt: 1_000,
+        endedAt: 11_000,
+        activeDurationMs: 10_000,
+        summary: {
+          sampleCount: 1,
+          coverageMs: 1_000,
+          coveragePercent: 10,
+          firstSampleElapsedMs: 0,
+          lastSampleElapsedMs: 0,
+          minimumBpm: 120,
+          averageBpm: 120,
+          peakBpm: 120,
+        },
+        zoneSummaries: [],
+        finalizedAt: 12_000,
       }],
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
 
@@ -261,11 +291,13 @@ describe('private heart-rate history cloud client', () => {
     );
     expect(streams).toHaveLength(1);
     expect(streams[0]).toMatchObject({
-      id: 'stream-session-1',
+      aggregateKey: 'session:session-1:studio-rider-1:1:1000',
       sessionId: 'session-1',
       studioRiderId: 'studio-rider-1',
       summary: { averageBpm: 142.5, peakBpm: 181 },
     });
+    expect(streams[0]).not.toHaveProperty('id');
+    expect(streams[0]).not.toHaveProperty('relayScope');
     expect(streams[0]).not.toHaveProperty('pairingId');
     expect(streams[0]).not.toHaveProperty('riderId');
     expect(streams[0]).not.toHaveProperty('samples');
@@ -274,7 +306,27 @@ describe('private heart-rate history cloud client', () => {
   it('returns only the consented summary slice for a club Monitor sprint', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       streams: [],
-      segments: [rawStudioSegment('session-1')],
+      segments: [{
+        trainingSessionId: 'session-1',
+        activityType: 'monitor-sprint',
+        studioRiderId: 'studio-rider-1',
+        playerId: 2,
+        startedAt: 20_000,
+        endedAt: 26_000,
+        activeDurationMs: 6_000,
+        summary: {
+          sampleCount: 6,
+          coverageMs: 5_000,
+          coveragePercent: 83.3,
+          firstSampleElapsedMs: 0,
+          lastSampleElapsedMs: 5_000,
+          minimumBpm: 141,
+          averageBpm: 154,
+          peakBpm: 169,
+        },
+        zoneSummaries: [],
+        finalizedAt: 27_000,
+      }],
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
 
     const history = await loadClubHeartRateSummaryHistory(
@@ -285,11 +337,14 @@ describe('private heart-rate history cloud client', () => {
 
     expect(history).toHaveLength(1);
     expect(history[0]).toMatchObject({
-      id: 'segment-session-1',
+      aggregateKey: 'training:session-1:studio-rider-1:2:20000',
       trainingSessionId: 'session-1',
       studioRiderId: 'studio-rider-1',
       summary: { averageBpm: 154 },
     });
+    expect(history[0]).not.toHaveProperty('id');
+    expect(history[0]).not.toHaveProperty('streamId');
+    expect(history[0]).not.toHaveProperty('relayScope');
     expect(history[0]).not.toHaveProperty('accountProfileKey');
     expect(history[0]).not.toHaveProperty('riderId');
     expect(history[0]).not.toHaveProperty('samples');

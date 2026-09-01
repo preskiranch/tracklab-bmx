@@ -1288,6 +1288,393 @@ describe('Watch Connect cloud workflow', () => {
     })).resolves.toBeNull();
   });
 
+  it('projects an active personal Watch connection only through exact claimed studio consent', async () => {
+    const now = Date.now();
+    const suffix = `${now}-${Math.random().toString(16).slice(2)}`;
+    const ownerProfileKey = `user:personal-tablet-owner-${suffix}`;
+    const athleteProfileKey = `user:personal-tablet-athlete-${suffix}`;
+    const clubId = `personal-tablet-club-${suffix}`;
+    const studioRiderId = `personal-tablet-rider-${suffix}`;
+    const installIdHash = `personal-tablet-install-${suffix}`;
+    const club = await persistence.ensureClub(ownerProfileKey, 'Personal Relay Club', clubId);
+    await persistence.ensureClubRosterMember(ownerProfileKey, studioRiderId, 'Personal Relay Athlete');
+    const inviteTokenHash = `personal-tablet-invite-${suffix}`;
+    await persistence.saveClubInvite({
+      club,
+      studioRiderId,
+      riderName: 'Personal Relay Athlete',
+      inviteId: `personal-tablet-invite-id-${suffix}`,
+      tokenHash: inviteTokenHash,
+      expiresAt: now + 60_000,
+    });
+    await expect(persistence.claimClubInvite(
+      inviteTokenHash,
+      athleteProfileKey,
+      'Personal Relay Athlete',
+    )).resolves.toEqual({ clubId, studioRiderId });
+
+    const sharingEnrollmentId = `personal-tablet-sharing-${suffix}`;
+    expect(await persistence.createOrRefreshHeartRateWatchEnrollment({
+      id: sharingEnrollmentId,
+      ownerProfileKey: athleteProfileKey,
+      requestId: `personal-tablet-sharing-request-${suffix}`,
+      installIdHash,
+      scope: 'studio',
+      clubId,
+      studioRiderId,
+      liveStudioConsent: true,
+      sessionStudioConsent: true,
+      now,
+    })).toMatchObject({ status: 'created' });
+
+    const personalEnrollmentId = `personal-tablet-enrollment-${suffix}`;
+    expect(await persistence.createOrRefreshHeartRateWatchEnrollment({
+      id: personalEnrollmentId,
+      ownerProfileKey: athleteProfileKey,
+      requestId: `personal-tablet-enrollment-request-${suffix}`,
+      installIdHash,
+      scope: 'personal',
+      liveStudioConsent: false,
+      sessionStudioConsent: false,
+      now,
+    })).toMatchObject({ status: 'created' });
+    const connectionId = `personal-tablet-connection-${suffix}`;
+    const pairingId = `personal-tablet-pairing-${suffix}`;
+    const tokenHash = `personal-tablet-token-${suffix}`;
+    expect(await persistence.createHeartRateWatchConnection({
+      id: connectionId,
+      enrollmentId: personalEnrollmentId,
+      ownerProfileKey: athleteProfileKey,
+      requestId: `personal-tablet-connect-request-${suffix}`,
+      installIdHash,
+      pairingId,
+      relaySessionId: `watch-connect:${connectionId}`,
+      riderId: `account:personal-tablet-athlete-${suffix}`,
+      pairCodeHash: `personal-tablet-code-${suffix}`,
+      ingestTokenHash: tokenHash,
+      connectedUntil: now + persistence.heartRateWatchConnectDurationMs,
+      now,
+    })).toMatchObject({ status: 'created' });
+    const streamId = `personal-tablet-stream-${suffix}`;
+    expect(await persistence.createHeartRateStream(
+      pairingId,
+      tokenHash,
+      streamId,
+      now,
+      now,
+    )).toMatchObject({ id: streamId, relayScope: 'account-block' });
+    expect(await persistence.insertHeartRateSamples(streamId, tokenHash, [{
+      sequence: 0,
+      recordedAt: now + 100,
+      activeElapsedMs: 100,
+      bpm: 158,
+    }], now + 100)).toEqual([0]);
+
+    const exact = {
+      athleteProfileKey,
+      clubId,
+      studioRiderId,
+      studioSharingEnrollmentId: sharingEnrollmentId,
+      personalWatchConnectionId: connectionId,
+      personalWatchEnrollmentId: personalEnrollmentId,
+      pairingId,
+      freshAfter: now - 9_000,
+      now: now + 200,
+    };
+    await expect(persistence.loadLatestConsentedPersonalHeartRateForStudioTablet(exact))
+      .resolves.toMatchObject({ studioRiderId, bpm: 158, recordedAt: now + 100 });
+    await expect(persistence.loadLatestConsentedPersonalHeartRateForStudioTablet({
+      ...exact,
+      studioRiderId: `different-rider-${suffix}`,
+    })).resolves.toBeNull();
+    await expect(persistence.loadLatestConsentedPersonalHeartRateForStudioTablet({
+      ...exact,
+      personalWatchConnectionId: `different-connection-${suffix}`,
+    })).resolves.toBeNull();
+
+    expect(await persistence.createOrRefreshHeartRateWatchEnrollment({
+      id: `ignored-refresh-id-${suffix}`,
+      ownerProfileKey: athleteProfileKey,
+      requestId: `personal-tablet-disable-request-${suffix}`,
+      installIdHash,
+      scope: 'studio',
+      clubId,
+      studioRiderId,
+      liveStudioConsent: false,
+      sessionStudioConsent: true,
+      now: now + 250,
+    })).toMatchObject({ status: 'trusted' });
+    await expect(persistence.loadLatestConsentedPersonalHeartRateForStudioTablet({
+      ...exact,
+      now: now + 300,
+    })).resolves.toBeNull();
+
+    const trainingSessionId = `personal-tablet-result-${suffix}`;
+    await expect(persistence.saveTrainingSession(athleteProfileKey, {
+      id: trainingSessionId,
+      activityType: 'get-pulled',
+      title: 'Personal Watch club-tablet result',
+      startedAt: now,
+      endedAt: now + 200,
+      durationMs: 200,
+      distanceMeters: 10,
+      source: 'live',
+      details: { riderName: 'Personal Relay Athlete', peakWatts: 500 },
+      _clubId: clubId,
+      _studioRiderId: studioRiderId,
+    })).resolves.toMatchObject({ id: trainingSessionId, _clubId: clubId, _studioRiderId: studioRiderId });
+    const privateSegment = await persistence.createHeartRateTrainingSegmentForAccountSession({
+      athleteProfileKey,
+      trainingSessionId,
+      activityType: 'get-pulled',
+      playerId: 1,
+      startedAt: now,
+      endedAt: now + 200,
+      zoneWindows: [],
+      activeClockSegments: [],
+      now: now + 300,
+    });
+    expect(privateSegment).toMatchObject({
+      status: 'created',
+      segment: { relayScope: 'account-block', studioVisible: false },
+    });
+    await expect(persistence.authorizeAccountHeartRateTrainingSegmentForClubSummary({
+      athleteProfileKey,
+      trainingSessionId,
+      clubId,
+      studioRiderId,
+      now: now + 350,
+    })).resolves.toMatchObject({
+      trainingSessionId,
+      clubId,
+      studioRiderId,
+      studioVisible: true,
+      summary: { sampleCount: 1, averageBpm: 158, peakBpm: 158 },
+    });
+    await expect(persistence.loadClubHeartRateTrainingSegments(
+      clubId,
+      trainingSessionId,
+      studioRiderId,
+    )).resolves.toEqual([expect.objectContaining({
+      trainingSessionId,
+      studioRiderId,
+      summary: expect.objectContaining({ averageBpm: 158, peakBpm: 158 }),
+    })]);
+
+    await expect(persistence.revokeHeartRateWatchEnrollment(
+      athleteProfileKey,
+      sharingEnrollmentId,
+      now + 400,
+    )).resolves.toMatchObject({ id: sharingEnrollmentId, revokedAt: now + 400 });
+    await expect(persistence.loadClubHeartRateTrainingSegments(
+      clubId,
+      trainingSessionId,
+      studioRiderId,
+    )).resolves.toEqual([]);
+
+    const persistenceSource = readFileSync(
+      new URL('../../cloud/persistence.mjs', import.meta.url),
+      'utf8',
+    );
+    const accountShareSource = persistenceSource.slice(
+      persistenceSource.indexOf('export async function authorizeAccountHeartRateTrainingSegmentForClubSummary'),
+      persistenceSource.indexOf('export async function reconcileHeartRateTrainingSegmentBindingsForStream'),
+    );
+    expect(accountShareSource).toContain("segments.relay_scope = 'account-block'");
+    expect(accountShareSource).toContain('members.athlete_profile_key = $1');
+    expect(accountShareSource).toContain('enrollments.session_studio_consent = true');
+    const segmentUpsertSource = persistenceSource.slice(
+      persistenceSource.indexOf('async function upsertHeartRateTrainingSegmentWithClient'),
+      persistenceSource.indexOf('async function createHeartRateTrainingSegmentForBlockWithClient'),
+    );
+    expect(segmentUpsertSource).toContain("EXCLUDED.relay_scope = 'account-block'");
+    expect(segmentUpsertSource).toContain('heart_rate_training_segments.studio_visible');
+  });
+
+  it('authorizes a delayed personal Watch summary only while exact club consent remains active', async () => {
+    const setupPending = async (label: string) => {
+      const base = Date.now() - 20_000;
+      const suffix = `${label}-${base}-${Math.random().toString(16).slice(2)}`;
+      const ownerProfileKey = `user:delayed-owner-${suffix}`;
+      const athleteProfileKey = `user:delayed-athlete-${suffix}`;
+      const clubId = `delayed-club-${suffix}`;
+      const studioRiderId = `delayed-rider-${suffix}`;
+      const installIdHash = `delayed-install-${suffix}`;
+      const club = await persistence.ensureClub(ownerProfileKey, 'Delayed Watch Club', clubId);
+      await persistence.ensureClubRosterMember(ownerProfileKey, studioRiderId, 'Delayed Athlete');
+      const inviteTokenHash = `delayed-invite-${suffix}`;
+      await persistence.saveClubInvite({
+        club,
+        studioRiderId,
+        riderName: 'Delayed Athlete',
+        inviteId: `delayed-invite-id-${suffix}`,
+        tokenHash: inviteTokenHash,
+        expiresAt: base + 60_000,
+      });
+      await expect(persistence.claimClubInvite(
+        inviteTokenHash,
+        athleteProfileKey,
+        'Delayed Athlete',
+      )).resolves.toEqual({ clubId, studioRiderId });
+      const sharingEnrollmentId = `delayed-sharing-${suffix}`;
+      await expect(persistence.createOrRefreshHeartRateWatchEnrollment({
+        id: sharingEnrollmentId,
+        ownerProfileKey: athleteProfileKey,
+        requestId: `delayed-sharing-request-${suffix}`,
+        installIdHash,
+        scope: 'studio',
+        clubId,
+        studioRiderId,
+        liveStudioConsent: true,
+        sessionStudioConsent: true,
+        now: base,
+      })).resolves.toMatchObject({ status: 'created' });
+      const personalEnrollmentId = `delayed-personal-${suffix}`;
+      await expect(persistence.createOrRefreshHeartRateWatchEnrollment({
+        id: personalEnrollmentId,
+        ownerProfileKey: athleteProfileKey,
+        requestId: `delayed-personal-request-${suffix}`,
+        installIdHash,
+        scope: 'personal',
+        now: base,
+      })).resolves.toMatchObject({ status: 'created' });
+      const connectionId = `delayed-connection-${suffix}`;
+      const pairingId = `delayed-pairing-${suffix}`;
+      const ingestTokenHash = `delayed-token-${suffix}`;
+      await expect(persistence.createHeartRateWatchConnection({
+        id: connectionId,
+        enrollmentId: personalEnrollmentId,
+        ownerProfileKey: athleteProfileKey,
+        requestId: `delayed-connect-request-${suffix}`,
+        installIdHash,
+        pairingId,
+        relaySessionId: `watch-connect:${connectionId}`,
+        riderId: `account:delayed-athlete-${suffix}`,
+        pairCodeHash: `delayed-code-${suffix}`,
+        ingestTokenHash,
+        connectedUntil: base + persistence.heartRateWatchConnectDurationMs,
+        now: base,
+      })).resolves.toMatchObject({ status: 'created' });
+      const trainingSessionId = `delayed-training-${suffix}`;
+      const startedAt = base + 1_000;
+      const endedAt = base + 6_000;
+      await expect(persistence.saveTrainingSession(athleteProfileKey, {
+        id: trainingSessionId,
+        activityType: 'get-pulled',
+        title: 'Delayed personal Watch result',
+        startedAt,
+        endedAt,
+        durationMs: endedAt - startedAt,
+        distanceMeters: 20,
+        source: 'live',
+        details: { riderName: 'Delayed Athlete', peakWatts: 600 },
+        _clubId: clubId,
+        _studioRiderId: studioRiderId,
+      })).resolves.toMatchObject({ id: trainingSessionId });
+      await expect(persistence.createHeartRateTrainingSegmentForConsentedPersonalClubSession({
+        athleteProfileKey,
+        clubId,
+        studioRiderId,
+        trainingSessionId,
+        activityType: 'get-pulled',
+        playerId: 1,
+        startedAt,
+        endedAt,
+        zoneWindows: [],
+        activeClockSegments: [],
+        now: base + 7_000,
+      })).resolves.toEqual({ status: 'pending', segment: null });
+      return {
+        base,
+        suffix,
+        ownerProfileKey,
+        athleteProfileKey,
+        clubId,
+        studioRiderId,
+        sharingEnrollmentId,
+        pairingId,
+        ingestTokenHash,
+        trainingSessionId,
+        startedAt,
+        endedAt,
+      };
+    };
+
+    const materialize = async (setup: Awaited<ReturnType<typeof setupPending>>) => {
+      const streamId = `delayed-stream-${setup.suffix}`;
+      await expect(persistence.createHeartRateStream(
+        setup.pairingId,
+        setup.ingestTokenHash,
+        streamId,
+        setup.base + 500,
+        setup.base + 7_500,
+      )).resolves.toMatchObject({ id: streamId, relayScope: 'account-block' });
+      await expect(persistence.insertHeartRateSamples(streamId, setup.ingestTokenHash, [{
+        sequence: 0,
+        recordedAt: setup.startedAt + 1_000,
+        activeElapsedMs: 1_000,
+        bpm: 146,
+      }, {
+        sequence: 1,
+        recordedAt: setup.endedAt - 1_000,
+        activeElapsedMs: 4_000,
+        bpm: 166,
+      }], setup.base + 7_600)).resolves.toEqual([0, 1]);
+      await persistence.refreshHeartRateTrainingSegmentsForStream(streamId, setup.base + 7_600);
+      return streamId;
+    };
+
+    const allowed = await setupPending('allowed');
+    await materialize(allowed);
+    await expect(persistence.loadClubHeartRateTrainingSegments(
+      allowed.clubId,
+      allowed.trainingSessionId,
+      allowed.studioRiderId,
+    )).resolves.toEqual([expect.objectContaining({
+      trainingSessionId: allowed.trainingSessionId,
+      relayScope: 'account-block',
+      studioVisible: true,
+      summary: expect.objectContaining({ sampleCount: 2, minimumBpm: 146, peakBpm: 166 }),
+    })]);
+
+    const consentRevoked = await setupPending('consent-revoked');
+    await persistence.revokeHeartRateWatchEnrollment(
+      consentRevoked.athleteProfileKey,
+      consentRevoked.sharingEnrollmentId,
+      consentRevoked.base + 7_100,
+    );
+    await materialize(consentRevoked);
+    await expect(persistence.loadClubHeartRateTrainingSegments(
+      consentRevoked.clubId,
+      consentRevoked.trainingSessionId,
+      consentRevoked.studioRiderId,
+    )).resolves.toEqual([]);
+
+    const membershipRevoked = await setupPending('membership-revoked');
+    await persistence.revokeClubMember(
+      membershipRevoked.ownerProfileKey,
+      membershipRevoked.studioRiderId,
+    );
+    await materialize(membershipRevoked);
+    await expect(persistence.loadClubHeartRateTrainingSegments(
+      membershipRevoked.clubId,
+      membershipRevoked.trainingSessionId,
+      membershipRevoked.studioRiderId,
+    )).resolves.toEqual([]);
+
+    const persistenceSource = readFileSync(
+      new URL('../../cloud/persistence.mjs', import.meta.url),
+      'utf8',
+    );
+    const delayedSource = persistenceSource.slice(
+      persistenceSource.indexOf('async function accountClubSummaryAuthorizationActiveWithClient'),
+      persistenceSource.indexOf('export async function refreshHeartRateTrainingSegmentsForStream'),
+    );
+    expect(delayedSource).toContain("members.status = 'claimed'");
+    expect(delayedSource).toContain('enrollments.session_studio_consent = true');
+    expect(delayedSource).toContain("materialized.status === 'not-consented'");
+  });
+
   it('keeps same-session club heart-rate streams and segments scoped to the exact studio rider', async () => {
     const now = Date.now();
     const suffix = `${now}-${Math.random().toString(16).slice(2)}`;
@@ -2072,8 +2459,8 @@ describe('Watch Connect cloud workflow', () => {
       .toHaveLength(2);
     expect(selectionSource.match(/ranked_samples\.recorded_at >=/g)).toHaveLength(4);
     expect(selectionSource.match(/ranked_samples\.recorded_at <=/g)).toHaveLength(2);
-    expect(selectionSource).toContain(
-      '[athleteProfileKey, startedAt, endedAt, json(activeClockSegments), trainingSessionId]',
+    expect(selectionSource).toMatch(
+      /athleteProfileKey,\s+startedAt,\s+endedAt,\s+json\(activeClockSegments\),\s+trainingSessionId,\s+consentedAccountClubSummary \? clubId : null,\s+consentedAccountClubSummary \? studioRiderId : null/,
     );
     expect(selectionSource).toMatch(
       /athleteProfileKey,\s+clubId,\s+studioRiderId,\s+startedAt,\s+endedAt,\s+json\(activeClockSegments\),\s+trainingSessionId/,

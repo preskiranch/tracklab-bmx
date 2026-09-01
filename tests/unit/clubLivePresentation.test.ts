@@ -76,6 +76,32 @@ describe('Club Live activity-aware presentation selector', () => {
     },
   );
 
+  it('collapses four Club Tablet demos into one shared owner screen only when the backend view id matches', () => {
+    const demoSources = Array.from({ length: 4 }, (_, index) => source(session(index + 1, 'bmx-race', {
+      studioRiderId: `demo:tablet-${index + 1}`,
+      deviceId: `tablet-${index + 1}`,
+      demo: true,
+      sharedViewId: 'club-demo-room-1',
+      presentation: 'shared',
+    })));
+
+    const presentations = selectClubLivePresentations(demoSources);
+    expect(presentations).toHaveLength(1);
+    expect(presentations[0]).toMatchObject({
+      kind: 'shared',
+      activityType: 'bmx-race',
+      canonicalSource: {
+        session: { demo: true, sharedViewId: 'club-demo-room-1' },
+      },
+    });
+    expect(presentations[0].sources.map(({ session: value }) => value.deviceId)).toEqual([
+      'tablet-1',
+      'tablet-2',
+      'tablet-3',
+      'tablet-4',
+    ]);
+  });
+
   it('always keeps Get Pulled as individual screens and enforces the four-tablet maximum', () => {
     const presentations = selectClubLivePresentations([
       ...sharedSessions('get-pulled'),
@@ -153,6 +179,21 @@ describe('Club Live activity-aware presentation selector', () => {
       [presentationId]: previousSourceId,
     });
     expect(waitingForRecovery[0].canonicalSource.id).toBe(previousSourceId);
+  });
+
+  it('prefers a standby direct stream when the prior shared source has only JPEG fallback', () => {
+    const candidates = sharedSessions('bmx-race').map((candidate, index) => ({
+      ...candidate,
+      mediaTransport: index === 2 ? 'direct' as const : 'fallback' as const,
+    }));
+    const presentationId = clubLivePresentationId(candidates[0].session);
+
+    const failedOver = selectClubLivePresentations(candidates, {
+      [presentationId]: candidates[0].id,
+    });
+
+    expect(failedOver[0].canonicalSource.id).toBe(candidates[2].id);
+    expect(failedOver[0].canonicalSource.mediaTransport).toBe('direct');
   });
 
   it('requires all explicit shared-presentation guards', () => {

@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { TrainingActivityType, TrainingSession } from '../../src/types';
 import type { PrivateTrainingHeartRateProjection } from '../../src/lib/privateTrainingHeartRate';
+import type { ConsentedClubTrainingHeartRateProjection } from '../../src/lib/clubTrainingHeartRate';
 import { TrainingResultsSpreadsheet } from '../../src/components/TrainingResultsSpreadsheet';
 import {
   availableTrainingResultSheets,
@@ -333,6 +334,17 @@ describe('training results spreadsheet semantics', () => {
     expect(html).toContain('aria-selected="true"');
     expect(html).toContain('Numbers / Excel (.xlsx)');
     expect(html).toContain('Review zones');
+    expect(html).toContain('Avg speed');
+    expect(html).toContain('Peak speed');
+    expect(html).toContain('Avg cadence');
+    expect(html).toContain('Peak cadence');
+    expect(html).toContain('Avg power');
+    expect(html).toContain('Peak power');
+    expect(html).toContain('Air');
+    expect(html).toContain('700 W');
+    expect(html).toContain('900 W');
+    expect(html).toContain('165.0 RPM');
+    expect(html).toContain('185.0 RPM');
     expect(html).not.toContain('role="grid"');
     expect(html).not.toContain('contenteditable');
   });
@@ -368,13 +380,59 @@ describe('training results spreadsheet semantics', () => {
       onExportPrivateWorkbook: () => undefined,
     }));
 
-    expect(html).toContain('Private average heart rate');
-    expect(html).toContain('Private peak heart rate');
+    expect(html).toContain('Average heart rate');
+    expect(html).toContain('Peak heart rate');
     expect(html).toContain('Heart-rate coverage / status');
     expect(html).toContain('143 BPM');
     expect(html).toContain('181 BPM');
     expect(html).toContain('8 samples · 80%');
     expect(html).toContain('Private workbook + heart rate (.xlsx)');
+  });
+
+  it('shows an exact rider-consented club summary in the owner day grid', () => {
+    const base = race('club-owner:club-1:rider-1:shared-result', 0, [{
+      playerId: 1, riderId: 'rider-1', riderName: 'Rider One', watts: 900,
+    }]);
+    const sprint: TrainingSession = {
+      ...base,
+      club: {
+        id: 'club-1',
+        name: 'Test Club',
+        studioRiderId: 'rider-1',
+        riderName: 'Rider One',
+        role: 'owner',
+      },
+    };
+    const projection: ConsentedClubTrainingHeartRateProjection = {
+      access: 'club-consented-summary',
+      displayedSessionId: sprint.id,
+      canonicalSessionId: 'shared-result',
+      state: 'saved',
+      playerId: 1,
+      summary: {
+        sampleCount: 6,
+        coverageMs: 6_000,
+        coveragePercent: 75,
+        firstSampleElapsedMs: 0,
+        lastSampleElapsedMs: 7_000,
+        minimumBpm: 110,
+        averageBpm: 149,
+        peakBpm: 187,
+      },
+      zoneSummaries: [],
+    };
+    const html = renderToStaticMarkup(createElement(TrainingResultsSpreadsheet, {
+      sessions: [sprint],
+      dateLabel: 'August 24, 2026',
+      speedUnit: 'mph',
+      distanceUnit: 'ft',
+      consentedClubHeartRateBySession: new Map([[sprint.id, [projection]]]),
+    }));
+
+    expect(html).toContain('149 BPM');
+    expect(html).toContain('187 BPM');
+    expect(html).toContain('6 samples · 75%');
+    expect(html).not.toContain('Private rider only');
   });
 
   it('announces day-level loading and does not assign a null placeholder to every rider', () => {

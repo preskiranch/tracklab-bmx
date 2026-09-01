@@ -591,9 +591,12 @@ export function FriendsView({
         first.focus();
       }
     };
-    document.addEventListener('keydown', handleKeyDown);
+    // Capture Escape before the browser's native <details> handling can close
+    // the safety menu that owns the report trigger. The dialog can then close
+    // and reliably return keyboard focus to the same visible control.
+    document.addEventListener('keydown', handleKeyDown, true);
     return () => {
-      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keydown', handleKeyDown, true);
       if (returnFocus?.isConnected) returnFocus.focus();
     };
   }, [blockedOpen, reportingProfile]);

@@ -104,6 +104,41 @@ describe('training history metric access', () => {
     expect(csv).toContain('"13","300","1180","880","43.1","37.4","181","168.2","1210","920.4"');
   });
 
+  it('exports Get Pulled air, speed, cadence, and power as dedicated rider columns', () => {
+    const base = mappedIntervalSession();
+    const pull: TrainingSession = {
+      ...base,
+      id: 'get-pulled-session',
+      activityType: 'get-pulled',
+      title: '6s Get Pulled · Air 7',
+      durationMs: 6_000,
+      distanceMeters: 35.36,
+      details: {
+        durationSeconds: 6,
+        airSetting: 7,
+        riders: [{
+          playerId: 1,
+          riderId: 'studio-rider-one',
+          riderName: 'Rider One',
+          resultStatus: 'finished',
+          distanceMeters: 35.36,
+          averageSpeedKph: 21.08,
+          peakSpeedKph: 29.4,
+          averageCadence: 80,
+          peakCadence: 105,
+          averageWatts: 179,
+          peakWatts: 229,
+        }],
+      },
+    };
+
+    const csv = trainingSessionCsv(pull);
+
+    expect(csv).toContain('"Planned duration seconds","Air setting"');
+    expect(csv).toContain('"Average cadence rpm","Peak cadence rpm","Average watts","Peak watts"');
+    expect(csv).toContain('"1","studio-rider-one","Rider One","finished","6","7","35.36","21.08","29.4","80","105","179","229"');
+  });
+
   it('removes every private health alias from generic JSON and CSV exports at any depth', () => {
     const session = mappedIntervalSession() as TrainingSession & Record<string, unknown>;
     session.AppleWatch = { samples: [{ bpm: 199 }] };

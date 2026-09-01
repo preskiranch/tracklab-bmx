@@ -329,7 +329,11 @@ import { useRaceEngine } from './hooks/useRaceEngine';
 import { useRaceCommentary } from './hooks/useRaceCommentary';
 import { useBluetoothBikes } from './hooks/useBluetoothBikes';
 import { createDemoPlayers, useDemoBikes } from './hooks/useDemoBikes';
-import { useMultiplayer, type MultiplayerIdentityOverride } from './hooks/useMultiplayer';
+import {
+  useMultiplayer,
+  type ClubTabletDemoMultiplayerConfiguration,
+  type MultiplayerIdentityOverride,
+} from './hooks/useMultiplayer';
 import { useRoomVoiceChat } from './hooks/useRoomVoiceChat';
 import { useWattbikeBridge } from './hooks/useWattbikeBridge';
 import { useHeartRate } from './hooks/useHeartRate';
@@ -492,6 +496,8 @@ type RaceWorkflowStep = {
   state: string;
 };
 type RoomRaceStartAuthority = Readonly<{
+  /** Stable identity used to seed one shared cadence and reject stale room generations. */
+  raceKey: string;
   /** Immutable room start in the multiplayer server clock domain. */
   startAt: number;
   /** Server time minus this tablet's Date.now(). */
@@ -1943,7 +1949,9 @@ export default function App() {
   const mappingBackfillProfileRef = useRef<string | null>(null);
   const roomTrackApplyRef = useRef<string | null>(null);
   const lastRoomRaceTokenRef = useRef<string | null>(null);
+  const latestRoomRaceKeyRef = useRef<string | null>(null);
   const roomRaceStartTimeoutRef = useRef<number | null>(null);
+  const demoGenerationWaitingRef = useRef(false);
   const roomRaceStartHandlerRef = useRef<(
     authority?: RoomRaceStartAuthority,
   ) => Promise<boolean>>(async () => false);
@@ -4023,9 +4031,13 @@ export default function App() {
   );
   const exploreDemoCandidates = useMemo(
     () => clubTabletKioskMode && demoMode
-      ? createDemoPlayers(1)
+      ? createDemoPlayers(1, {
+        1: clubTabletDevice?.device.name
+          ? `Demo · ${clubTabletDevice.device.name}`
+          : 'Demo · Club Tablet',
+      })
       : createDemoPlayers(maxPlayers, demoRiderNames, demoRiderPhotos),
-    [clubTabletKioskMode, demoMode, demoRiderNames, demoRiderPhotos],
+    [clubTabletDevice?.device.name, clubTabletKioskMode, demoMode, demoRiderNames, demoRiderPhotos],
   );
   const demoPlayers = exploreDemoCandidates.filter((player) => selectedDemoPlayerIds.includes(player.id));
   const connectedBikeSamples = useMemo(() => {
@@ -4172,9 +4184,60 @@ export default function App() {
     );
     return applyStudioRiderAssignments(enteredPlayers, availableStudioRiders, studioRiderAssignments);
   }, [activePlayers, availableStudioRiders, demoMode, liveRaceReadyDeviceIds, studioRiderAssignments]);
+  const clubTabletDemoMultiplayerConfiguration = useMemo<ClubTabletDemoMultiplayerConfiguration | null>(() => {
+    if (appMode === 'race') {
+      return {
+        activityType: 'bmx-race',
+        configurationId: JSON.stringify([
+          'v1',
+          effectiveTrack.id,
+          isLoopTrack ? lapCount : 1,
+          hasDualStartRoutes ? raceRouteVariantId : 'amateur',
+        ]),
+      };
+    }
+    if (appMode === 'straight-sprint') {
+      return {
+        activityType: 'straight-sprint',
+        configurationId: JSON.stringify([
+          'v1',
+          effectiveTrack.id,
+          straightSprintDistanceFeet,
+          straightSprintAirSetting,
+          hasDualStartRoutes ? raceRouteVariantId : 'amateur',
+        ]),
+      };
+    }
+    if (appMode === 'explore') {
+      return {
+        activityType: 'explore',
+        configurationId: JSON.stringify(['v1', effectiveTrack.id]),
+      };
+    }
+    return null;
+  }, [
+    appMode,
+    effectiveTrack.id,
+    hasDualStartRoutes,
+    isLoopTrack,
+    lapCount,
+    raceRouteVariantId,
+    straightSprintAirSetting,
+    straightSprintDistanceFeet,
+  ]);
   const multiplayerIdentityOverride = useMemo<MultiplayerIdentityOverride | null>(() => {
     if (!clubTabletKioskMode || !clubTabletDevice) return null;
     if (!clubTabletSessionActive || !clubTabletSession) {
+      if (demoMode) {
+        return {
+          scopeKey: `club-tablet-demo:${clubTabletDevice.device.id}:${clubTabletDemoMultiplayerConfiguration?.activityType ?? 'none'}:${clubTabletDemoMultiplayerConfiguration?.configurationId ?? 'waiting'}`,
+          guestKey: `demo:${clubTabletDevice.device.id}`,
+          name: `Demo · ${clubTabletDevice.device.name}`,
+          available: true,
+          membershipTier: 'racer',
+          readOnly: true,
+        };
+      }
       return {
         scopeKey: `club-tablet:${clubTabletDevice.device.id}:picker`,
         guestKey: `club-tablet:${clubTabletDevice.device.id}:picker`,
@@ -4199,10 +4262,13 @@ export default function App() {
     };
   }, [
     clubTabletDevice,
+    clubTabletDemoMultiplayerConfiguration?.activityType,
+    clubTabletDemoMultiplayerConfiguration?.configurationId,
     clubTabletKioskMode,
     clubTabletRider?.name,
     clubTabletSession,
     clubTabletSessionActive,
+    demoMode,
   ]);
   const wattbikeConnectionCount = useMemo(() => {
     if (demoMode) return 0;
@@ -4218,7 +4284,11 @@ export default function App() {
     return Math.min(maxPlayers, connectedDeviceIds.size);
   }, [bluetooth.devices, bridge.devices, clubTabletKioskMode, demoMode]);
   const multiplayer = useMultiplayer({
-    enabled: playMode === 'multiplayer' && (!clubTabletKioskMode || clubTabletSessionActive),
+    enabled: playMode === 'multiplayer' && (
+      !clubTabletKioskMode
+      || clubTabletSessionActive
+      || (clubTabletDeviceActive && demoMode)
+    ),
     capacityChannelEnabled: Boolean(
       (!clubTabletKioskMode && authStatus === 'signed-in' && authUser)
       || (clubTabletKioskMode && clubTabletSessionActive),
@@ -4232,6 +4302,12 @@ export default function App() {
     wattbikeConnectionCount,
     identityOverride: multiplayerIdentityOverride,
     clubTabletSession: clubTabletSessionActive ? clubTabletSession : null,
+    clubTabletDemoDevice: clubTabletDeviceActive && demoMode && !clubTabletSessionActive
+      ? clubTabletDevice
+      : null,
+    clubTabletDemoConfiguration: clubTabletDeviceActive && demoMode && !clubTabletSessionActive
+      ? clubTabletDemoMultiplayerConfiguration
+      : null,
     onFriendNetworkChange: authUser && !clubTabletKioskMode
       ? handleFriendNetworkChange
       : undefined,
@@ -5123,6 +5199,36 @@ export default function App() {
   ]);
 
   useEffect(() => {
+    const waitingForNextDemoGeneration = playMode === 'multiplayer'
+      && multiplayer.currentRoom?.demo === true
+      && !multiplayer.demoParticipantEligible
+      && (appMode === 'race' || appMode === 'straight-sprint');
+    if (!waitingForNextDemoGeneration) {
+      demoGenerationWaitingRef.current = false;
+      return;
+    }
+    if (demoGenerationWaitingRef.current) return;
+    demoGenerationWaitingRef.current = true;
+    if (roomRaceStartTimeoutRef.current != null) {
+      window.clearTimeout(roomRaceStartTimeoutRef.current);
+      roomRaceStartTimeoutRef.current = null;
+    }
+    latestRaceSyncRef.current = null;
+    clearStartGateSequence();
+    setDemoRaceStartedAt(null);
+    resetRace();
+    releaseRaceFullscreen();
+  }, [
+    appMode,
+    clearStartGateSequence,
+    multiplayer.currentRoom?.demo,
+    multiplayer.demoParticipantEligible,
+    playMode,
+    releaseRaceFullscreen,
+    resetRace,
+  ]);
+
+  useEffect(() => {
     const armedEventId = activeClubEventGateIdRef.current;
     if (armedEventId && armedEventId !== clubEventLaunch?.eventId) {
       cancelActiveClubEventGateAndRace('Club Event ended');
@@ -5252,10 +5358,13 @@ export default function App() {
 
     latestRaceSyncRef.current = {
       sessionId: raceCapture?.sessionId ?? `${multiplayer.currentRoom.id}:${effectiveTrack.id}:manual`,
+      ...(multiplayer.currentRoom.demo && lastRoomRaceTokenRef.current
+        ? { raceToken: lastRoomRaceTokenRef.current }
+        : {}),
       trackId: effectiveTrack.id,
-      raceState,
+      raceState: startGateStatus.active && raceState !== 'racing' ? 'ready' : raceState,
       riders: syncedRiders,
-      summary: raceSummary,
+      summary: startGateStatus.active && raceState !== 'racing' ? [] : raceSummary,
     };
   }, [
     effectiveTrack.id,
@@ -5267,6 +5376,7 @@ export default function App() {
     raceSummary,
     riders,
     samplesByDevice,
+    startGateStatus.active,
     synchronizedFalseStartPlayerIdSet,
   ]);
 
@@ -5479,6 +5589,9 @@ export default function App() {
 
     multiplayer.sendRaceState({
       sessionId,
+      ...(multiplayer.currentRoom.demo && lastRoomRaceTokenRef.current
+        ? { raceToken: lastRoomRaceTokenRef.current }
+        : {}),
       trackId: effectiveTrack.id,
       raceState: 'ready',
       riders: [],
@@ -8997,25 +9110,29 @@ export default function App() {
     authority: RoomRaceStartAuthority,
   ) => {
     const launch = clubEventLaunchRef.current;
-    if (!launch || !Number.isFinite(authority.startAt) || authority.startAt <= 0) return false;
+    const synchronizedRaceId = launch?.eventId ?? authority.raceKey.trim();
+    if (!synchronizedRaceId || !Number.isFinite(authority.startAt) || authority.startAt <= 0) return false;
     const roomExitSequence = latestRoomExitSequenceRef.current;
 
     const gateRuntime = await import('./lib/clubEventGateTimeline');
     if (
       sequenceId !== startGateSequenceIdRef.current
       || selectedTrackIdRef.current !== startingTrackId
-      || clubEventLaunchRef.current?.eventId !== launch.eventId
+      || latestRoomRaceKeyRef.current !== synchronizedRaceId
+      || (launch != null && clubEventLaunchRef.current?.eventId !== launch.eventId)
       || latestRoomExitSequenceRef.current !== roomExitSequence
     ) return false;
 
     const plan = gateRuntime.planClubEventGateTimeline({
-      eventId: launch.eventId,
+      eventId: synchronizedRaceId,
       startAt: authority.startAt,
       serverClockOffsetMs: authority.serverClockOffsetMs,
       now: Date.now(),
     });
-    activeClubEventGateIdRef.current = launch.eventId;
-    activeClubEventGateRoomExitSequenceRef.current = roomExitSequence;
+    if (launch) {
+      activeClubEventGateIdRef.current = launch.eventId;
+      activeClubEventGateRoomExitSequenceRef.current = roomExitSequence;
+    }
     cadenceStartedAtRef.current = plan.cadenceLocalAt;
     const firstRedLocalAt = plan.timeline.redAt[0] - authority.serverClockOffsetMs;
     stagingCountdownEndsAtRef.current = plan.cadenceLocalAt;
@@ -11162,10 +11279,11 @@ export default function App() {
     if (!demoMode) bridge.sendControlCommand('race-arm');
     primeRaceAudio();
     void primeBikeRaceAudio();
-    if (clubEventLaunchRef.current) {
-      if (source !== 'room-clock' || !roomAuthority) return false;
+    if (source === 'room-clock') {
+      if (!roomAuthority) return false;
       return await scheduleClubEventGate(startingTrackId, sequenceId, roomAuthority);
     }
+    if (clubEventLaunchRef.current) return false;
     scheduleStagingCountdown(startingTrackId, sequenceId);
     return true;
   };
@@ -11256,12 +11374,21 @@ export default function App() {
   useEffect(() => {
     const roomFlow = multiplayer.currentRoom?.flow;
     const raceToken = roomFlow?.raceToken;
+    const roomRaceKey = clubEventLaunch?.eventId
+      ?? (multiplayer.currentRoom?.id && raceToken
+        ? `${multiplayer.currentRoom.id}:${raceToken}`
+        : null);
+    latestRoomRaceKeyRef.current = roomRaceKey;
     if (
       playMode !== 'multiplayer'
       || roomFlow?.phase !== 'race'
       || !raceToken
       || lastRoomRaceTokenRef.current === raceToken
-      || (clubEventLaunch != null && multiplayer.latency.measuredAt == null)
+      || (multiplayer.currentRoom?.demo && !multiplayer.demoParticipantEligible)
+      || multiplayer.latency.measuredAt == null
+      || !Number.isFinite(Number(roomFlow.raceStartAt))
+      || Number(roomFlow.raceStartAt) <= 0
+      || !roomRaceKey
       || (roomFlow.selectedTrackId && roomFlow.selectedTrackId !== effectiveTrack.id)
     ) {
       return;
@@ -11276,12 +11403,11 @@ export default function App() {
     const localRaceStartAt = Number.isFinite(serverRaceStartAt)
       ? serverRaceStartAt - multiplayer.latency.clockOffsetMs
       : Date.now();
-    const roomAuthority = Number.isFinite(serverRaceStartAt) && serverRaceStartAt > 0
-      ? {
-        startAt: serverRaceStartAt,
-        serverClockOffsetMs: multiplayer.latency.clockOffsetMs,
-      } satisfies RoomRaceStartAuthority
-      : undefined;
+    const roomAuthority = {
+      raceKey: roomRaceKey,
+      startAt: serverRaceStartAt,
+      serverClockOffsetMs: multiplayer.latency.clockOffsetMs,
+    } satisfies RoomRaceStartAuthority;
     const delayMs = Math.max(0, localRaceStartAt - Date.now());
     let cancelled = false;
     const attemptStart = async () => {
@@ -11315,7 +11441,10 @@ export default function App() {
   }, [
     clubEventLaunch,
     effectiveTrack.id,
+    multiplayer.currentRoom?.id,
     multiplayer.currentRoom?.flow,
+    multiplayer.currentRoom?.demo,
+    multiplayer.demoParticipantEligible,
     multiplayer.latency.clockOffsetMs,
     multiplayer.latency.measuredAt,
     playMode,
@@ -11669,24 +11798,42 @@ export default function App() {
     },
   };
   const clubLiveActivityScreenVisible = !showMembershipLanding
-    && accountProfileComplete
+    && (clubTabletKioskMode || accountProfileComplete)
     && (
       appMode === 'race'
       || appMode === 'straight-sprint'
       || appMode === 'get-pulled'
       || appMode === 'explore'
     );
-  const clubLiveAthleteBridge = clubLiveProfileKey
-    && clubTrainingSelection
-    && selectedClubTrainingMembershipActive ? (
+  const clubTabletDemoClubLiveActive = Boolean(
+    clubTabletKioskMode
+    && clubTabletDeviceActive
+    && clubTabletDevice
+    && demoMode,
+  );
+  const clubTabletDemoClubLiveSelection = clubTabletDemoClubLiveActive && clubTabletDevice
+    ? {
+      clubId: clubTabletDevice.device.clubId,
+      studioRiderId: `demo:${clubTabletDevice.device.id}`,
+    }
+    : null;
+  const clubLiveAthleteBridge = (
+    clubTabletDemoClubLiveActive
+    || Boolean(clubLiveProfileKey && clubTrainingSelection && selectedClubTrainingMembershipActive)
+  ) ? (
       <Suspense fallback={null}>
         <ClubLiveAthleteBridge
-          accessActive={clubLiveAccessActive}
+          accessActive={clubTabletDemoClubLiveActive || clubLiveAccessActive}
           activity={clubLiveActivity}
           activityScreenVisible={clubLiveActivityScreenVisible}
+          clubTabletDemoDeviceToken={clubTabletDemoClubLiveActive
+            ? clubTabletDevice?.deviceToken
+            : undefined}
           demoMode={demoMode}
-          profileKey={clubLiveProfileKey}
-          selection={clubTrainingSelection}
+          profileKey={clubTabletDemoClubLiveActive && clubTabletDevice
+            ? `club-tablet-demo:${clubTabletDevice.device.id}`
+            : clubLiveProfileKey}
+          selection={clubTabletDemoClubLiveSelection ?? clubTrainingSelection!}
           tabletSessionActive={clubTabletSessionActive}
           onAccessChange={setClubLiveAccess}
           onAccessStatusChange={setClubLiveAccessStatus}
@@ -13091,8 +13238,11 @@ export default function App() {
                 onDistanceUnitChange: handleDistanceUnitChange,
                 playMode,
                 demoMode,
+                clubTabletDemoActive: clubTabletDemoClubLiveActive,
                 multiplayerConnection: multiplayer.connection,
                 multiplayerClockOffsetMs: multiplayer.latency.clockOffsetMs,
+                multiplayerClockMeasuredAt: multiplayer.latency.measuredAt,
+                demoParticipantEligible: multiplayer.demoParticipantEligible,
                 currentRoom: multiplayer.currentRoom,
                 currentUserId: multiplayer.clientId,
                 accountProfileKey: exploreRecentRouteHistoryScope.profileKey,
@@ -13448,6 +13598,8 @@ export default function App() {
 
                 <Suspense fallback={panelLoadingFallback}>
                   <MultiplayerPanel
+                  clubTabletDemoActive={clubTabletDemoClubLiveActive}
+                  demoParticipantEligible={multiplayer.demoParticipantEligible}
                   playMode={playMode}
                   connection={multiplayer.connection}
                   status={multiplayer.status}
@@ -13486,6 +13638,7 @@ export default function App() {
                   onLeaveRoom={multiplayer.leaveRoom}
                   onShareInvite={shareMultiplayerInvite}
                   onRandomTrack={chooseRandomRoomTrack}
+                  onStartClubDemoRace={multiplayer.startClubDemoRace}
                   onStartTrackVote={startRoomTrackVote}
                   onVoteTrack={multiplayer.submitTrackVote}
                   onRoomRouteChoice={handleRoomRouteChoice}

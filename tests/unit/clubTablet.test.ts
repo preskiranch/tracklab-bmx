@@ -38,6 +38,7 @@ import {
   readStoredClubTabletSession,
   recoverClubTabletDevice,
   releaseClubTabletPickerWattbikeCapacity,
+  requestClubTabletDemoMultiplayerTicket,
   revokeClubTabletDevice,
   saveClubTabletRaceResult,
   startClubTabletSession,
@@ -837,6 +838,38 @@ describe('Club Tablet client state', () => {
     expect(JSON.stringify(fetchMock.mock.calls)).not.toContain('clubId');
   });
 
+  it('requests an ephemeral demo multiplayer ticket with the current device bearer only', async () => {
+    const localStorage = new MemoryStorage();
+    const sessionStorage = new MemoryStorage();
+    vi.stubGlobal('window', { localStorage, sessionStorage });
+    storeClubTabletDevice(deviceCredential);
+    const expiresAt = Date.now() + 60_000;
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      ticket: 'd'.repeat(43),
+      expiresAt,
+    }), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(requestClubTabletDemoMultiplayerTicket(deviceCredential)).resolves.toEqual({
+      ticket: 'd'.repeat(43),
+      expiresAt,
+    });
+    expect(fetchMock).toHaveBeenCalledWith('/api/club-tablet/multiplayer-ticket', expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({ Authorization: 'Bearer device-token' }),
+      body: JSON.stringify({ demo: true }),
+    }));
+
+    await expect(requestClubTabletDemoMultiplayerTicket({
+      ...deviceCredential,
+      deviceToken: 'stale-device-token',
+    })).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('claims and releases only the enrolled picker\'s one short-lived Wattbike grant', async () => {
     const now = Date.now();
     const fetchMock = vi.fn()
@@ -1305,7 +1338,7 @@ describe('Club Tablet client state', () => {
     expect(effectSource).toContain('}, 250);');
   });
 
-  it('lets only the synchronized room clock start an active coach-led race', () => {
+  it('lets only a measured synchronized room clock start coach-led and Club Tablet demo races', () => {
     const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
     const multiplayerSource = readFileSync(new URL('../../src/hooks/useMultiplayer.ts', import.meta.url), 'utf8');
     const startHandler = appSource.slice(
@@ -1315,7 +1348,12 @@ describe('Club Tablet client state', () => {
     expect(startHandler).toContain("if (clubEventConfigurationLocked && source !== 'room-clock') return false;");
     expect(startHandler).toContain('return await scheduleClubEventGate(startingTrackId, sequenceId, roomAuthority);');
     expect(appSource).toContain("roomRaceStartHandlerRef.current = (authority) => handleStart('room-clock', authority);");
-    expect(appSource).toContain('(clubEventLaunch != null && multiplayer.latency.measuredAt == null)');
+    expect(appSource).toContain('|| multiplayer.latency.measuredAt == null');
+    expect(appSource).toContain('raceKey: roomRaceKey,');
+    expect(appSource).toContain('latestRoomRaceKeyRef.current !== synchronizedRaceId');
+    expect(startHandler).toContain("if (source === 'room-clock') {");
+    expect(startHandler.indexOf("if (source === 'room-clock') {"))
+      .toBeLessThan(startHandler.indexOf('scheduleStagingCountdown(startingTrackId, sequenceId);'));
     expect(appSource).toContain('cadenceStartedAtRef.current = plan.cadenceLocalAt;');
     expect(appSource).toContain('// Stop any slow/stale cadence media before every coalesced red phase;');
     expect(appSource).toContain('stopStartGateAudio();');
@@ -1384,6 +1422,46 @@ describe('Club Tablet client state', () => {
     expect(appSource).toContain('disabled={clubEventConfigurationLocked}');
     expect(appSource).toContain('const lapControlsDisabled = clubEventConfigurationLocked');
     expect(appSource).toContain('const canChooseStartHereSplitLine = !clubEventConfigurationLocked');
+  });
+
+  it('holds late Club Tablet demo sockets outside the active race and Explore generation', () => {
+    const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
+    const multiplayerSource = readFileSync(
+      new URL('../../src/hooks/useMultiplayer.ts', import.meta.url),
+      'utf8',
+    );
+    const exploreSource = readFileSync(
+      new URL('../../src/components/ExploreView.tsx', import.meta.url),
+      'utf8',
+    );
+    const panelSource = readFileSync(
+      new URL('../../src/components/MultiplayerPanel.tsx', import.meta.url),
+      'utf8',
+    );
+
+    const racePublisher = multiplayerSource.slice(
+      multiplayerSource.indexOf('const sendRaceState = useCallback'),
+      multiplayerSource.indexOf('const syncExploreRoute = useCallback'),
+    );
+    expect(multiplayerSource).toContain('localMember?.demoParticipantEligible === true');
+    expect(racePublisher).toContain('currentRoom.demo && !demoParticipantEligible');
+    expect(racePublisher).toContain('state.raceToken !== currentRoom.flow.raceToken');
+    expect(racePublisher).not.toContain('raceToken: currentRoom.flow.raceToken');
+    expect(multiplayerSource).toContain("currentRoom.demo && action !== 'reset' && !demoParticipantEligible");
+    expect(multiplayerSource).toContain('currentRoom.demo && !demoParticipantEligible');
+
+    expect(appSource).toContain('const demoGenerationWaitingRef = useRef(false);');
+    expect(appSource).toContain('latestRaceSyncRef.current = null;');
+    expect(appSource).toContain('|| (multiplayer.currentRoom?.demo && !multiplayer.demoParticipantEligible)');
+    expect(appSource).toContain('raceToken: lastRoomRaceTokenRef.current');
+    expect(appSource).toContain("startGateStatus.active && raceState !== 'racing' ? 'ready' : raceState");
+
+    expect(exploreSource).toContain('multiplayerClockMeasuredAt == null');
+    expect(exploreSource).toContain('currentRoom.demo && !demoParticipantEligible');
+    expect(exploreSource).toContain('Waiting for the next demo start. This tablet joined after the current ride began.');
+    expect(panelSource).toContain('Waiting for the next demo start. This tablet joined after the current race began.');
+    expect(panelSource).toContain('disabled={!isHost || currentRoom.demoRestartReady !== true}');
+    expect(panelSource).toContain('The previous demo connections ended. Start a fresh synchronized race');
   });
 
   it('keeps completed Club Tablet results and athlete identity until explicit exit', () => {

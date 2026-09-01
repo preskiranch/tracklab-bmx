@@ -7284,8 +7284,8 @@ test('club athletes see only their own connection and never the studio roster', 
   const resultTable = spreadsheet.getByRole('table', { name: /Race & sprint/ });
   await expect(resultTable.getByRole('columnheader', { name: 'Finish' })).toBeVisible();
   await expect(resultTable.getByRole('columnheader', { name: '30 ft split' })).toBeVisible();
-  await expect(resultTable.getByRole('columnheader', { name: 'Private average heart rate' })).toBeVisible();
-  await expect(resultTable.getByRole('columnheader', { name: 'Private peak heart rate' })).toBeVisible();
+  await expect(resultTable.getByRole('columnheader', { name: 'Average heart rate' })).toBeVisible();
+  await expect(resultTable.getByRole('columnheader', { name: 'Peak heart rate' })).toBeVisible();
   await expect(resultTable.getByRole('columnheader', { name: 'Heart-rate coverage / status' })).toBeVisible();
   const intervalRow = resultTable.getByRole('row').filter({ hasText: 'Chula Vista interval race' });
   await expect(intervalRow).toContainText('Rasheen “The Machine” Hicks');
@@ -8306,7 +8306,7 @@ test('native club owner sign-in restores the uniquely assigned Wattbike tablet i
     if (activity.picker) {
       const demoRiderChooser = page.getByRole('group', { name: 'Choose demo riders' });
       await expect(demoRiderChooser.getByRole('button')).toHaveCount(1);
-      await expect(demoRiderChooser).toContainText('Demo Rider 1');
+      await expect(demoRiderChooser).toContainText('Demo · Preski Front Desk');
       await expect(demoRiderChooser).not.toContainText('Demo Rider 2');
     } else if (!activity.start) {
       await expect(page.getByRole('group', { name: 'Choose demo riders' })).toHaveCount(0);
@@ -8445,7 +8445,9 @@ test('native club owner sign-in restores the uniquely assigned Wattbike tablet i
       await page.getByRole('button', { name: 'Exit demo activity', exact: true }).click();
       await expect(page.locator('.platform-shell')).not.toHaveClass(/race-fullscreen/);
     } else if (activity.start) {
-      await expect(page.getByRole('main', { name: 'Get Pulled timed Wattbike test' })).toContainText('Demo Rider 1');
+      await expect(page.getByRole('main', { name: 'Get Pulled timed Wattbike test' })).toContainText(
+        'Demo · Preski Front Desk',
+      );
       await expect(page.getByRole('main', { name: 'Get Pulled timed Wattbike test' })).toContainText(
         'Simulated pull results are for testing only and are not saved, published, or assigned to an athlete.',
       );

@@ -54,15 +54,29 @@ export type HeartRateStream = Readonly<{
 
 /** Redacted, consented club view. It can never carry account identity or samples. */
 export type ClubHeartRateSummaryStream = Readonly<{
-  id: string;
+  aggregateKey: string;
   sessionId: string;
   activityType: HeartRateActivityType;
-  relayScope: HeartRateRelayScope;
   studioRiderId: string;
   playerId: number | null;
   startedAt: number;
   endedAt: number | null;
   activeDurationMs: number | null;
+  summary: PrivateHeartRateSummary | null;
+  zoneSummaries: readonly PrivateHeartRateZoneSummary[];
+  finalizedAt: number | null;
+}>;
+
+/** Club-owner training slice with no personal stream/segment identifiers. */
+export type ClubHeartRateTrainingSummary = Readonly<{
+  aggregateKey: string;
+  trainingSessionId: string;
+  activityType: HeartRateActivityType;
+  studioRiderId: string;
+  playerId: number | null;
+  startedAt: number;
+  endedAt: number;
+  activeDurationMs: number;
   summary: PrivateHeartRateSummary | null;
   zoneSummaries: readonly PrivateHeartRateZoneSummary[];
   finalizedAt: number | null;
@@ -89,7 +103,7 @@ export type HeartRateTrainingSegment = Readonly<{
 }>;
 
 export type PrivateHeartRateHistoryItem = HeartRateStream | HeartRateTrainingSegment;
-export type ClubHeartRateHistoryItem = ClubHeartRateSummaryStream | HeartRateTrainingSegment;
+export type ClubHeartRateHistoryItem = ClubHeartRateSummaryStream | ClubHeartRateTrainingSummary;
 export type PrivateHeartRateAttachmentStatus = 'syncing' | 'saved' | 'not-recorded';
 export type PrivateHeartRateSessionHistory = Readonly<{
   items: readonly PrivateHeartRateHistoryItem[];
@@ -508,33 +522,68 @@ function normalizeStream(value: unknown): HeartRateStream | null {
 function normalizeClubSummaryStream(value: unknown): ClubHeartRateSummaryStream | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const item = value as Record<string, unknown>;
-  const id = typeof item.id === 'string' ? item.id.trim() : '';
   const sessionId = typeof item.sessionId === 'string' ? item.sessionId.trim() : '';
   const studioRiderId = typeof item.studioRiderId === 'string' ? item.studioRiderId.trim() : '';
   const normalizedActivityType = activityType(item.activityType);
-  const normalizedRelayScope = item.relayScope == null ? 'session' : studioRelayScope(item.relayScope);
   const startedAt = nullableTimestamp(item.startedAt);
   if (
-    !id
-    || id.length > 160
-    || !sessionId
+    !sessionId
     || sessionId.length > 160
     || !studioRiderId
     || studioRiderId.length > 160
     || !normalizedActivityType
-    || !normalizedRelayScope
     || startedAt == null
   ) return null;
+  const normalizedPlayerId = playerId(item.playerId);
   return {
-    id,
+    aggregateKey: `session:${sessionId}:${studioRiderId}:${normalizedPlayerId ?? 'rider'}:${startedAt}`,
     sessionId,
     activityType: normalizedActivityType,
-    relayScope: normalizedRelayScope,
     studioRiderId,
-    playerId: playerId(item.playerId),
+    playerId: normalizedPlayerId,
     startedAt,
     endedAt: nullableTimestamp(item.endedAt),
     activeDurationMs: nullableTimestamp(item.activeDurationMs),
+    summary: normalizeSummary(item.summary),
+    zoneSummaries: Array.isArray(item.zoneSummaries)
+      ? item.zoneSummaries.flatMap((zone) => {
+        const normalized = normalizeZoneSummary(zone);
+        return normalized ? [normalized] : [];
+      })
+      : [],
+    finalizedAt: nullableTimestamp(item.finalizedAt),
+  };
+}
+
+function normalizeClubTrainingSummary(value: unknown): ClubHeartRateTrainingSummary | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const item = value as Record<string, unknown>;
+  const trainingSessionId = identifier(item.trainingSessionId);
+  const studioRiderId = identifier(item.studioRiderId);
+  const normalizedActivityType = activityType(item.activityType);
+  const startedAt = nullableTimestamp(item.startedAt);
+  const endedAt = nullableTimestamp(item.endedAt);
+  const activeDurationMs = nullableTimestamp(item.activeDurationMs);
+  if (
+    !trainingSessionId
+    || !studioRiderId
+    || !normalizedActivityType
+    || startedAt == null
+    || endedAt == null
+    || endedAt < startedAt
+    || activeDurationMs == null
+    || activeDurationMs > endedAt - startedAt + 120_000
+  ) return null;
+  const normalizedPlayerId = playerId(item.playerId);
+  return {
+    aggregateKey: `training:${trainingSessionId}:${studioRiderId}:${normalizedPlayerId ?? 'rider'}:${startedAt}`,
+    trainingSessionId,
+    activityType: normalizedActivityType,
+    studioRiderId,
+    playerId: normalizedPlayerId,
+    startedAt,
+    endedAt,
+    activeDurationMs,
     summary: normalizeSummary(item.summary),
     zoneSummaries: Array.isArray(item.zoneSummaries)
       ? item.zoneSummaries.flatMap((zone) => {
@@ -1413,6 +1462,7 @@ export async function loadClubHeartRateSummaryHistory(
   clubId: string,
   sessionId: string,
   studioRiderId: string,
+  options: Readonly<{ signal?: AbortSignal }> = {},
 ) {
   const normalizedClubId = clubId.trim();
   const normalizedSessionId = sessionId.trim();
@@ -1433,6 +1483,7 @@ export async function loadClubHeartRateSummaryHistory(
   const response = await fetch(`/api/heart-rate/club-streams?${params}`, {
     cache: 'no-store',
     headers: { Accept: 'application/json' },
+    signal: options.signal,
   });
   const payload = await jsonResponse<{ streams?: unknown; segments?: unknown }>(response, 'Consented club heart-rate summaries');
   const streams = Array.isArray(payload.streams)
@@ -1444,7 +1495,7 @@ export async function loadClubHeartRateSummaryHistory(
     : [];
   const segments = Array.isArray(payload.segments)
     ? payload.segments.flatMap((value) => {
-      const segment = normalizeTrainingSegment(value);
+      const segment = normalizeClubTrainingSummary(value);
       return segment?.trainingSessionId === normalizedSessionId
         && segment.studioRiderId === normalizedStudioRiderId ? [segment] : [];
     })

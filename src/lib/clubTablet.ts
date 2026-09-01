@@ -788,6 +788,38 @@ export async function requestClubTabletMultiplayerTicket(
 }
 
 /**
+ * Opens the non-persistent multiplayer transport used by an authorized club
+ * tablet while it is explicitly in demo mode. The exact in-memory device
+ * credential must still match this browser's current authorization so an old
+ * token cannot be revived after the tablet is restored or revoked.
+ */
+export async function requestClubTabletDemoMultiplayerTicket(
+  credential = readStoredClubTabletDevice(),
+  signal?: AbortSignal,
+) {
+  const current = readStoredClubTabletDevice();
+  if (
+    !credential
+    || !current
+    || current.device.id !== credential.device.id
+    || current.device.clubId !== credential.device.clubId
+    || current.deviceToken !== credential.deviceToken
+  ) return null;
+  const payload = await tabletFetch('/api/club-tablet/multiplayer-ticket', {
+    method: 'POST',
+    signal,
+    headers: { Authorization: `Bearer ${credential.deviceToken}` },
+    body: JSON.stringify({ demo: true }),
+  }) as { ticket?: unknown; expiresAt?: unknown };
+  const ticket = text(payload.ticket, 2048);
+  const expiresAt = positiveNumber(payload.expiresAt);
+  if (!ticket || !expiresAt) {
+    throw new Error('TrackLab returned an invalid demo multiplayer ticket.');
+  }
+  return { ticket, expiresAt };
+}
+
+/**
  * Revalidates (without extending) the selected athlete session and its
  * server-reserved Wattbike connection. Unlike refreshClubTabletSession this
  * must not keep an abandoned kiosk identity alive.

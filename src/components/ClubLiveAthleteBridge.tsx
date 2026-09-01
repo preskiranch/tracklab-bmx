@@ -112,6 +112,8 @@ function currentClubLiveRaceCaptureSessionId(
 
 type ClubLiveAthleteBridgeProps = {
   demoMode: boolean;
+  /** Present only while an authorized Club Tablet is running a simulation. */
+  clubTabletDemoDeviceToken?: string;
   accessActive: boolean;
   activityScreenVisible: boolean;
   tabletSessionActive?: boolean;
@@ -153,6 +155,7 @@ export function clubLiveStreamSnapshotRevision(snapshot: ClubLiveSnapshot | null
     snapshot.studioRiderId,
     snapshot.sessionId,
     snapshot.activityType,
+    snapshot.demo ? 'demo' : 'live',
     snapshot.multiplayer ? 'shared-event' : 'individual',
   ].join(':');
 }
@@ -166,7 +169,7 @@ export function buildClubLiveSnapshot({
   tabletSessionActive = false,
 }: ClubLiveSnapshotInput): ClubLiveSnapshot | null {
   return ((): ClubLiveSnapshot | null => {
-    if (demoMode || !accessActive) return null;
+    if (!accessActive) return null;
     const {
       accountRiderId,
       appMode,
@@ -179,7 +182,7 @@ export function buildClubLiveSnapshot({
     } = activity;
 
     if (appMode === 'get-pulled') {
-      if (!getPulled || getPulled.riderId !== accountRiderId) return null;
+      if (!getPulled || (!demoMode && getPulled.riderId !== accountRiderId)) return null;
       const cadence = cleanBikeCadenceRpm(getPulled.metrics.cadence);
       const speedKph = acceptedTrainingSpeedKph(getPulled.metrics.speedKph);
       if (cadence == null || speedKph == null) return null;
@@ -213,6 +216,7 @@ export function buildClubLiveSnapshot({
         trackName: `Preski Ranch Pull Lane · Air ${getPulled.airSetting}`,
         ...(getPulled.phase === 'active' ? { startedAt: Math.max(1, now - getPulled.elapsedMs) } : {}),
         multiplayer: false,
+        ...(demoMode ? { demo: true } : {}),
       };
     }
 
@@ -261,6 +265,7 @@ export function buildClubLiveSnapshot({
         ...(explore?.route?.destinationLabel ? { destinationLabel: explore.route.destinationLabel } : {}),
         ...(status === 'active' && explore?.elapsedMs ? { startedAt: Math.max(1, now - explore.elapsedMs) } : {}),
         multiplayer: multiplayerActive,
+        ...(demoMode ? { demo: true } : {}),
       };
     }
 
@@ -318,6 +323,7 @@ export function buildClubLiveSnapshot({
       trackName: race.trackName,
       ...(startedAt ? { startedAt } : {}),
       multiplayer: multiplayerActive,
+      ...(demoMode ? { demo: true } : {}),
     };
   })();
 }
@@ -326,6 +332,7 @@ export function ClubLiveAthleteBridge({
   accessActive,
   activity,
   activityScreenVisible,
+  clubTabletDemoDeviceToken = '',
   demoMode,
   profileKey,
   selection,
@@ -391,6 +398,23 @@ export function ClubLiveAthleteBridge({
       return undefined;
     }
 
+    if (demoMode && clubTabletDemoDeviceToken) {
+      const access = {
+        clubId: selection.clubId,
+        active: true,
+        expiresAt: Number.MAX_SAFE_INTEGER,
+        bikeSeats: 1,
+        profileKey,
+        studioRiderId: selection.studioRiderId,
+      };
+      onAccessChange(access);
+      onAccessStatusChange('active');
+      return () => {
+        onAccessChange(null);
+        onAccessStatusChange('idle');
+      };
+    }
+
     const checkAccess = async () => {
       if (disposed || requestActive || document.visibilityState === 'hidden') return;
       requestActive = true;
@@ -438,12 +462,14 @@ export function ClubLiveAthleteBridge({
     onAccessChange,
     onAccessStatusChange,
     profileKey,
+    clubTabletDemoDeviceToken,
+    demoMode,
     selection.clubId,
     selection.studioRiderId,
   ]);
 
   useEffect(() => {
-    if (!profileKey || demoMode) return undefined;
+    if (!profileKey || (demoMode && !clubTabletDemoDeviceToken)) return undefined;
     setPublishedStreamRevision('');
     let disposed = false;
     let publishedSessionId = '';
@@ -466,7 +492,9 @@ export function ClubLiveAthleteBridge({
       ) {
         const requestedSessionId = currentSnapshot.sessionId;
         const requestedStreamRevision = clubLiveStreamSnapshotRevision(currentSnapshot);
-        operation = publishClubLiveSession(currentSnapshot, controller.signal).then(() => {
+        operation = publishClubLiveSession(currentSnapshot, controller.signal, {
+          clubTabletDeviceToken: clubTabletDemoDeviceToken,
+        }).then(() => {
           if (!disposed) {
             publishedSessionId = requestedSessionId;
             setPublishedStreamRevision(requestedStreamRevision);
@@ -476,6 +504,7 @@ export function ClubLiveAthleteBridge({
         const stoppedSessionId = publishedSessionId;
         operation = stopClubLiveSession({ ...selection, sessionId: stoppedSessionId }, {
           signal: controller.signal,
+          clubTabletDeviceToken: clubTabletDemoDeviceToken,
         }).then(() => {
           if (publishedSessionId === stoppedSessionId) {
             publishedSessionId = '';
@@ -504,14 +533,16 @@ export function ClubLiveAthleteBridge({
       disposed = true;
       window.clearInterval(timer);
       controller?.abort();
-      if (!tabletSessionActive && publishedSessionId) {
+      if ((!tabletSessionActive || demoMode) && publishedSessionId) {
         void stopClubLiveSession({ ...selection, sessionId: publishedSessionId }, {
           keepalive: true,
+          clubTabletDeviceToken: clubTabletDemoDeviceToken,
         }).catch(() => undefined);
       }
     };
   }, [
     demoMode,
+    clubTabletDemoDeviceToken,
     profileKey,
     selection.clubId,
     selection.studioRiderId,
@@ -522,8 +553,8 @@ export function ClubLiveAthleteBridge({
     const sessionId = snapshot?.sessionId ?? '';
     if (
       !profileKey
-      || demoMode
-      || !tabletSessionActive
+      || (demoMode && !clubTabletDemoDeviceToken)
+      || (!tabletSessionActive && !clubTabletDemoDeviceToken)
       || !activityScreenVisible
       || !sessionId
       || !streamRevision
@@ -534,6 +565,7 @@ export function ClubLiveAthleteBridge({
     }
     return startClubLiveVideoPublisher({
       sessionId,
+      clubTabletDeviceToken: clubTabletDemoDeviceToken,
       activityVisible: () => clubLiveScreenFrameMatchesVisibleActivity(
         activityScreenVisibleRef.current,
         snapshotRef.current,
@@ -545,6 +577,7 @@ export function ClubLiveAthleteBridge({
   }, [
     activityScreenVisible,
     demoMode,
+    clubTabletDemoDeviceToken,
     profileKey,
     publishedStreamRevision,
     selection.clubId,
@@ -557,7 +590,7 @@ export function ClubLiveAthleteBridge({
   useEffect(() => {
     if (
       !profileKey
-      || demoMode
+      || (demoMode && !clubTabletDemoDeviceToken)
       || activityVideoStreaming
       || !nativeClubLiveScreenMirrorAvailable()
     ) return undefined;
@@ -575,6 +608,7 @@ export function ClubLiveAthleteBridge({
         await stopClubLiveScreenFrame({ ...selection, sessionId }, {
           keepalive,
           signal: keepalive ? undefined : controller.signal,
+          clubTabletDeviceToken: clubTabletDemoDeviceToken,
         });
       } catch (error) {
         if (!disposed && (error as Error).name !== 'AbortError') {
@@ -631,7 +665,7 @@ export function ClubLiveAthleteBridge({
           width: frame.pixelWidth,
           height: frame.pixelHeight,
           capturedAt: frame.capturedAt,
-        }, controller.signal);
+        }, controller.signal, { clubTabletDeviceToken: clubTabletDemoDeviceToken });
         publishedSessionId = requestedSessionId;
       } catch (error) {
         if (!disposed && (error as Error).name !== 'AbortError') {
@@ -663,12 +697,16 @@ export function ClubLiveAthleteBridge({
       if (publishedSessionId) {
         const sessionId = publishedSessionId;
         publishedSessionId = '';
-        void stopClubLiveScreenFrame({ ...selection, sessionId }, { keepalive: true }).catch(() => undefined);
+        void stopClubLiveScreenFrame({ ...selection, sessionId }, {
+          keepalive: true,
+          clubTabletDeviceToken: clubTabletDemoDeviceToken,
+        }).catch(() => undefined);
       }
     };
   }, [
     activityVideoStreaming,
     demoMode,
+    clubTabletDemoDeviceToken,
     profileKey,
     selection.clubId,
     selection.studioRiderId,
@@ -676,7 +714,7 @@ export function ClubLiveAthleteBridge({
 
   return activityVideoStreaming ? (
     <div className="club-live-sharing-indicator" role="status" aria-live="polite">
-      <i aria-hidden="true" /> Activity screen shared with club owner
+      <i aria-hidden="true" /> {demoMode ? 'DEMO screen shared with club owner · nothing is saved' : 'Activity screen shared with club owner'}
     </div>
   ) : null;
 }

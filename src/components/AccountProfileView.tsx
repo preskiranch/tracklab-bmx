@@ -60,6 +60,12 @@ import {
   type PrivateTrainingHeartRateTarget,
 } from '../lib/privateTrainingHeartRate';
 import {
+  consentedClubTrainingHeartRatePlaceholder,
+  consentedClubTrainingHeartRateTarget,
+  loadConsentedClubTrainingHeartRateDay,
+  type ConsentedClubTrainingHeartRateBySession,
+} from '../lib/clubTrainingHeartRate';
+import {
   formatDistanceMeters,
   formatExploreDistanceMeters,
 } from '../units';
@@ -328,7 +334,7 @@ export function PrivateHeartRateHistoryPanel({
               className="private-heart-rate-stream"
               key={isPrivateTrainingHeartRateProjection(stream)
                 ? `${stream.displayedSessionId}:${stream.playerId ?? 'single'}:${index}`
-                : stream.id}
+                : stream.aggregateKey}
             >
               {streams.length > 1 && <strong className="private-heart-rate-segment">Watch segment {index + 1}</strong>}
               {stream.summary && stream.summary.sampleCount > 0 ? (
@@ -355,7 +361,7 @@ export function PrivateHeartRateHistoryPanel({
                   {stream.zoneSummaries.filter((zone) => zone.summary.sampleCount > 0).map((zone) => (
                     <article key={`${isPrivateTrainingHeartRateProjection(stream)
                       ? stream.displayedSessionId
-                      : stream.id}:${zone.zoneId}:${zone.startElapsedMs}:${zone.endElapsedMs}`}>
+                      : stream.aggregateKey}:${zone.zoneId}:${zone.startElapsedMs}:${zone.endElapsedMs}`}>
                       <div>
                         <strong>{zone.zoneName || zone.zoneId}</strong>
                         <small>{activeClockLabel(zone.startElapsedMs)}–{activeClockLabel(zone.endElapsedMs)} active time</small>
@@ -731,6 +737,9 @@ export function AccountProfileView({
     () => new Map(),
   );
   const [privateHeartRateRetryRevision, setPrivateHeartRateRetryRevision] = useState(0);
+  const [consentedClubHeartRateBySession, setConsentedClubHeartRateBySession] = useState<
+    ConsentedClubTrainingHeartRateBySession
+  >(() => new Map());
   const historyRequestRef = useRef(0);
   const spreadsheetExportPendingRef = useRef(false);
   const privateHeartRateCacheRef = useRef<ReadonlyMap<string, PrivateHeartRateCacheEntry>>(new Map());
@@ -944,6 +953,19 @@ export function AccountProfileView({
   const privateHeartRateExportPending = [...privateHeartRateBySession.values()].some((projections) => (
     projections.some((projection) => projection.state === 'loading' || projection.state === 'syncing')
   ));
+  const selectedConsentedClubHeartRateTargets = useMemo(
+    () => selectedSessions.flatMap((session) => {
+      const target = consentedClubTrainingHeartRateTarget(session);
+      return target ? [target] : [];
+    }),
+    [selectedSessions],
+  );
+  const selectedConsentedClubHeartRateSignature = useMemo(
+    () => selectedConsentedClubHeartRateTargets.map((target) => (
+      `${target.displayedSessionId}:${target.canonicalSessionId}:${target.studioRiderId}:${target.activityType}`
+    )).join('|'),
+    [selectedConsentedClubHeartRateTargets],
+  );
 
   useEffect(() => {
     if (selectedPrivateHeartRateEntries.length === 0) return undefined;
@@ -1008,6 +1030,44 @@ export function AccountProfileView({
     selectedPrivateHeartRateEntries,
     selectedPrivateHeartRateSignature,
   ]);
+
+  useEffect(() => {
+    if (selectedConsentedClubHeartRateTargets.length === 0) {
+      setConsentedClubHeartRateBySession(new Map());
+      return undefined;
+    }
+    const controller = new AbortController();
+    let syncTimer: number | null = null;
+    setConsentedClubHeartRateBySession(new Map(
+      selectedConsentedClubHeartRateTargets.map((target) => [
+        target.displayedSessionId,
+        [consentedClubTrainingHeartRatePlaceholder(target, 'loading')],
+      ]),
+    ));
+    const loadWave = async (attempt: number) => {
+      const loaded = await loadConsentedClubTrainingHeartRateDay(
+        selectedConsentedClubHeartRateTargets,
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted) return;
+      setConsentedClubHeartRateBySession(loaded);
+      const syncing = [...loaded.values()].some((projections) => (
+        projections.some((projection) => projection.state === 'syncing')
+      ));
+      const delayMs = syncing ? privateHeartRateSyncPollDelay(attempt) : null;
+      if (delayMs != null) {
+        syncTimer = window.setTimeout(() => void loadWave(attempt + 1), delayMs);
+      }
+    };
+    void loadWave(0).catch(() => {
+      // Per-target failures are projected as safe error states. An abort is an
+      // intentional day/account change and must not write stale health data.
+    });
+    return () => {
+      controller.abort();
+      if (syncTimer != null) window.clearTimeout(syncTimer);
+    };
+  }, [selectedConsentedClubHeartRateSignature, selectedConsentedClubHeartRateTargets]);
   const selectedDateLabel = useMemo(
     () => new Date(`${selectedDate}T12:00:00`).toLocaleDateString(undefined, {
       weekday: 'long',
@@ -1197,8 +1257,9 @@ export function AccountProfileView({
                   read-only image of the visible TrackLab activity screen. Screen sharing does not capture your device
                   camera, microphone, taps, notifications, other apps, or content outside TrackLab. Frames expire and
                   are deleted when Club Live sharing ends. Watts stay out of public leaderboards, shared ghosts,
-                  multiplayer displays, and shared exports; saved power history remains in your own rider record. Club
-                  access ends when you leave club training.
+                  multiplayer displays, and shared exports. Power from club training that is explicitly attributed to
+                  your claimed Club Connect profile is saved in your rider record and is also visible to this club&apos;s
+                  authenticated owner in private Results. Club access ends when you leave club training.
                 </p>
               </div>
               <span>Club Athlete</span>
@@ -1287,6 +1348,7 @@ export function AccountProfileView({
           speedUnit={speedUnit}
           distanceUnit={distanceUnit}
           privateHeartRateBySession={privateHeartRateBySession}
+          consentedClubHeartRateBySession={consentedClubHeartRateBySession}
           onExportWorkbook={exportSelectedDay}
           onExportPrivateWorkbook={selectedPrivateHeartRateEntries.length > 0
             ? exportSelectedDayPrivate

@@ -330,6 +330,24 @@ describe('database migration runner', () => {
     expect(statements).toContain('USING GIN (identity_aliases)');
   });
 
+  it('allows only complete club attribution on consented personal Watch summaries', () => {
+    const migration = databaseMigrations().find((candidate) => candidate.version === 41);
+    const statements = migration?.statements.join('\n') ?? '';
+    expect(migration).toMatchObject({
+      version: 41,
+      name: 'allow consented personal Watch summaries in club training',
+    });
+    expect(statements).toContain('heart_rate_training_segments_relay_scope_check');
+    expect(statements).toContain('heart_rate_training_segment_bindings_relay_scope_check');
+    expect(statements).toContain('DROP CONSTRAINT IF EXISTS');
+    expect(statements).toContain("relay_scope = 'studio-block' AND club_id IS NOT NULL AND studio_rider_id IS NOT NULL");
+    expect(statements).toContain("relay_scope = 'account-block'");
+    expect(statements).toContain('(club_id IS NULL AND studio_rider_id IS NULL)');
+    expect(statements).toContain('(club_id IS NOT NULL AND studio_rider_id IS NOT NULL)');
+    expect(statements.match(/NOT VALID/g)).toHaveLength(2);
+    expect(statements.match(/VALIDATE CONSTRAINT/g)).toHaveLength(2);
+  });
+
   it('adds accountable administrator review fields to community reports', () => {
     const moderationMigration = databaseMigrations().find((candidate) => candidate.version === 32);
     const statements = moderationMigration?.statements.join('\n') ?? '';

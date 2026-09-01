@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   clubLiveSessionWithPublisherPresentation,
+  clubLiveVideoPublisherIdsForPresentations,
   frameMatchesSession,
   normalizeClubLiveFrames,
   unexpiredClubLiveFrames,
 } from '../../src/components/ClubLiveMonitor';
+import { selectClubLivePresentations } from '../../src/lib/clubLivePresentation';
 import type { ClubLiveSession } from '../../src/lib/clubLive';
 
 const exactBackendFrame = {
@@ -25,6 +27,58 @@ const exactBackendFrame = {
 };
 
 describe('Club Live owner screen frames', () => {
+  it('subscribes to the shared-stage source plus one rotating standby for direct-video failover', () => {
+    const sessions = Array.from({ length: 4 }, (_, index) => ({
+      id: `club-1:demo:tablet-${index + 1}`,
+      clubId: 'club-1',
+      studioRiderId: `demo:tablet-${index + 1}`,
+      riderName: `Demo · Bike ${index + 1}`,
+      athleteName: `Demo · Bike ${index + 1}`,
+      sessionId: `demo-session-${index + 1}`,
+      deviceId: `tablet-${index + 1}`,
+      activityType: 'bmx-race' as const,
+      status: 'active' as const,
+      progress: { fraction: 0 },
+      metrics: {
+        watts: 0,
+        cadence: 0,
+        speedKph: 0,
+        distanceMeters: 0,
+        elapsedMs: 0,
+        position: index + 1,
+        participantCount: 4,
+      },
+      demo: true,
+      multiplayer: true,
+      presentation: 'shared' as const,
+      sharedViewId: 'server-demo-room',
+      updatedAt: 1,
+      expiresAt: 60_000,
+    } satisfies ClubLiveSession));
+    const presentations = selectClubLivePresentations(sessions.map((session) => ({
+      id: session.id,
+      session,
+      media: null,
+      mediaLive: false,
+    })));
+    const publishers = sessions.map((session, index) => ({
+      id: `publisher-${index + 1}`,
+      clubId: session.clubId,
+      studioRiderId: session.studioRiderId,
+      sessionId: session.sessionId!,
+      deviceId: session.deviceId,
+    }));
+
+    expect(clubLiveVideoPublisherIdsForPresentations(presentations, publishers, 0)).toEqual([
+      'publisher-1',
+      'publisher-2',
+    ]);
+    expect(clubLiveVideoPublisherIdsForPresentations(presentations, publishers, 2)).toEqual([
+      'publisher-1',
+      'publisher-4',
+    ]);
+  });
+
   it('uses shared presentation metadata only from the exact authenticated publisher', () => {
     const session = {
       id: 'session-row',

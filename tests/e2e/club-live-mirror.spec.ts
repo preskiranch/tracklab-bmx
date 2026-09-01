@@ -110,6 +110,7 @@ test('club owner sees four exact-aspect athlete screens, can enlarge them, and k
             participantCount: 4,
           },
           trackName: `Track ${index + 1}`,
+          demo: index === 0,
           multiplayer: true,
           updatedAt: sessionNow,
           expiresAt: sessionNow + 60_000,
@@ -156,7 +157,9 @@ test('club owner sees four exact-aspect athlete screens, can enlarge them, and k
   const monitor = page.getByLabel('Club Live Monitor');
   const liveScreenButtons = monitor.getByRole('button', { name: /Open full-screen live activity screen for Athlete/ });
   await expect(liveScreenButtons).toHaveCount(4);
-  await expect(monitor.getByText('Live activity screen', { exact: true })).toHaveCount(2);
+  await expect(monitor.getByText('Live activity screen', { exact: true })).toHaveCount(1);
+  await expect(monitor.getByText('DEMO · simulated club tablet · nothing is saved', { exact: true })).toBeVisible();
+  await expect(monitor.getByText('DEMO · Live activity screen', { exact: true })).toBeVisible();
   await expect(monitor.getByText('Screen paused', { exact: true })).toBeVisible();
   await expect(monitor.getByText('Screen reconnecting', { exact: true })).toBeVisible();
 
@@ -176,7 +179,7 @@ test('club owner sees four exact-aspect athlete screens, can enlarge them, and k
   await liveScreenButtons.nth(0).click();
   const dialog = page.getByRole('dialog', { name: 'Live activity screen for Athlete 1' });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText('Read-only live activity screen', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('DEMO · Read-only live activity screen', { exact: true })).toBeVisible();
   await expect(dialog.getByRole('img', { name: 'Full-screen live TrackLab activity screen for Athlete 1' })).toHaveCSS('object-fit', 'contain');
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
@@ -200,6 +203,7 @@ test('club owner sees four exact-aspect athlete screens, can enlarge them, and k
   await expect(liveScreenButtons).toHaveCount(0);
   await expect(monitor.getByText('301', { exact: true })).toBeVisible();
   await expect(monitor.getByText('watts', { exact: true })).toHaveCount(4);
-  await expect(monitor.getByText('Read-only live feed', { exact: true })).toHaveCount(4);
+  await expect(monitor.getByText('Read-only live feed', { exact: true })).toHaveCount(3);
+  await expect(monitor.getByText('Read-only DEMO feed · not saved', { exact: true })).toBeVisible();
   await expect(monitor.getByRole('button', { name: /Pause|Resume|Stop|Cancel|Control/i })).toHaveCount(0);
 });

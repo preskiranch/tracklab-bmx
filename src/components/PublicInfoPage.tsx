@@ -167,10 +167,12 @@ function PrivacyPage() {
               </p>
               <p>
                 Watt and power measurements are private rider records. They remain available in the individual
-                rider&apos;s own training history and downloads, but are not published to public leaderboards, ghosts,
-                demo views, multiplayer participants, or shared exports. During club training, current live watts may
-                appear only on the authenticated club owner’s optional Club Live Monitor and on a local monitor directly
-                connected to the bikes.
+                rider&apos;s own training history and downloads. When a rider has claimed their Club Connect profile,
+                power from training explicitly attributed to that claimed profile is also available to that club&apos;s
+                authenticated owner in the private Results view. Power is never published to public leaderboards,
+                ghosts, demo views, multiplayer participants, or public/shared exports. During club training, current
+                live watts may also appear on the authenticated club owner’s optional Club Live Monitor and on a local
+                monitor directly connected to the bikes.
               </p>
 
               <h3>Optional Apple Watch heart rate</h3>
@@ -307,8 +309,9 @@ function PrivacyPage() {
                   sharing a Club Live session, the owner can also view a temporary, read-only image of the visible
                   TrackLab activity screen. Screen sharing does not capture the device camera, microphone, taps,
                   notifications, other apps, or content outside TrackLab. Frames expire and are deleted when Club Live
-                  sharing ends. Saved power history remains private to the athlete, and live watts are not published to
-                  public leaderboards, shared ghosts, multiplayer participants, or shared exports. The rest of the
+                  sharing ends. Saved power history remains private to the athlete and, for training attributed to a
+                  claimed Club Connect profile, that club&apos;s authenticated owner. Live or saved watts are not published
+                  to public leaderboards, shared ghosts, multiplayer participants, or public/shared exports. The rest of the
                   read-only live feed expires automatically after the athlete leaves club training or stops transmitting.
                 </li>
                 <li>

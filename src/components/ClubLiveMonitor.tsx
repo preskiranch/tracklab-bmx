@@ -28,6 +28,7 @@ import {
   clubLiveCanonicalSelections,
   selectClubLivePresentations,
   type ClubLiveCanonicalSelections,
+  type ClubLivePresentation,
 } from '../lib/clubLivePresentation';
 import {
   ClubLiveVideoViewer,
@@ -110,6 +111,33 @@ export function clubLiveSessionWithPublisherPresentation(
     ...(publisher.sharedViewId ? { sharedViewId: publisher.sharedViewId } : {}),
     ...(publisher.presentation ? { presentation: publisher.presentation } : {}),
   };
+}
+
+export function clubLiveVideoPublisherIdsForPresentations(
+  presentations: readonly ClubLivePresentation<unknown>[],
+  publishers: readonly ClubLiveVideoPublisher[],
+  standbyProbeIndex = 0,
+) {
+  const ids = new Set<string>();
+  presentations.forEach((presentation) => {
+    const publisherForSource = ({ session }: (typeof presentation.sources)[number]) => (
+      publishers.find((candidate) => (
+        clubLiveVideoPublisherMatchesSession(candidate, session)
+      ))
+    );
+    const canonicalPublisher = publisherForSource(presentation.canonicalSource);
+    if (canonicalPublisher) ids.add(canonicalPublisher.id);
+    if (presentation.kind !== 'shared') return;
+    const standbys = presentation.sources
+      .filter(({ id }) => id !== presentation.canonicalSource.id)
+      .map(publisherForSource)
+      .filter((publisher): publisher is ClubLiveVideoPublisher => Boolean(publisher));
+    if (standbys.length > 0) {
+      const index = Math.abs(Math.trunc(standbyProbeIndex)) % standbys.length;
+      ids.add(standbys[index].id);
+    }
+  });
+  return [...ids].slice(0, 4);
 }
 
 function clubLiveStreamIsLive(frame: ClubLiveVideoFrame) {
@@ -392,6 +420,7 @@ export function ClubLiveMonitor({
   const [frames, setFrames] = useState<ClubLiveFrame[]>([]);
   const [videoPublishers, setVideoPublishers] = useState<ClubLiveVideoPublisher[]>([]);
   const [videoFrames, setVideoFrames] = useState<Map<string, ClubLiveVideoFrame>>(new Map());
+  const [standbyProbeIndex, setStandbyProbeIndex] = useState(0);
   const [monitorVisible, setMonitorVisible] = useState(() => (
     typeof document === 'undefined' || document.visibilityState !== 'hidden'
   ));
@@ -442,6 +471,11 @@ export function ClubLiveMonitor({
         ].join(':'),
         session: presentationSession,
         media,
+        ...(streamMedia
+          ? { mediaTransport: 'direct' as const }
+          : fallbackFrame
+            ? { mediaTransport: 'fallback' as const }
+            : {}),
         mediaLive: Boolean(
           streamMedia
           || fallbackFrame && now <= fallbackFrame.expiresAt && now - fallbackFrame.updatedAt <= 4_000,
@@ -477,6 +511,10 @@ export function ClubLiveMonitor({
   const connectedBikeCount = useMemo(
     () => tablets.filter((tablet) => clubTabletMonitorConnectedBike(tablet, tabletFeedError == null)).length,
     [tabletFeedError, tablets],
+  );
+  const liveDemoCount = useMemo(
+    () => liveSessions.filter((session) => session.demo).length,
+    [liveSessions],
   );
   const tabletSlots = useMemo(() => {
     const enrolled = selectClubTabletOverviewDevices(tablets, liveSessions, now).map((tablet, index) => ({
@@ -573,14 +611,24 @@ export function ClubLiveMonitor({
   }, []);
 
   useEffect(() => {
-    const desiredPublishers = livePresentations.flatMap((presentation) => {
-      const publisher = videoPublishers.find((candidate) => (
-        clubLiveVideoPublisherMatchesSession(candidate, presentation.canonicalSource.session)
-      ));
-      return publisher ? [publisher.id] : [];
-    });
+    const desiredPublishers = clubLiveVideoPublisherIdsForPresentations(
+      livePresentations,
+      videoPublishers,
+      standbyProbeIndex,
+    );
     videoViewerRef.current?.setSubscriptions(desiredPublishers);
-  }, [livePresentations, videoPublishers]);
+  }, [livePresentations, standbyProbeIndex, videoPublishers]);
+
+  useEffect(() => {
+    if (!monitorVisible) return undefined;
+    const timer = window.setInterval(() => {
+      // A shared stage carries only its canonical direct stream plus one
+      // rotating standby. This probes every tablet without continuously
+      // decoding four high-bitrate streams on each owner display.
+      setStandbyProbeIndex((current) => current + 1);
+    }, 6_000);
+    return () => window.clearInterval(timer);
+  }, [monitorVisible]);
 
   useEffect(() => {
     canonicalPresentationSourcesRef.current = clubLiveCanonicalSelections(livePresentations);
@@ -646,7 +694,9 @@ export function ClubLiveMonitor({
         </div>
         <div className={`club-live-connection ${status}`}>
           <Signal size={17} />
-          <span>{status === 'error' ? 'Feed interrupted' : `${liveSessions.length} live`}</span>
+          <span>{status === 'error'
+            ? 'Feed interrupted'
+            : `${liveSessions.length} live${liveDemoCount ? ` · ${liveDemoCount} demo` : ''}`}</span>
           <button type="button" onClick={() => void refresh(true)} aria-label="Refresh Club Live Monitor">
             <RefreshCw size={16} />
           </button>
@@ -704,7 +754,7 @@ export function ClubLiveMonitor({
                 <div>
                   <strong>{tablet?.name ?? `Tablet ${seatNumber}`}</strong>
                   <small>{session
-                    ? `${displayName} · ${activityLabel(session.activityType)}`
+                    ? `${displayName} · ${session.demo ? 'DEMO · ' : ''}${activityLabel(session.activityType)}`
                     : tablet
                       ? 'Ready for an athlete'
                       : 'Not enrolled yet'}</small>
@@ -766,7 +816,7 @@ export function ClubLiveMonitor({
             const showTelemetry = !shared || !frame;
             return (
               <section
-                className={`club-live-tile ${presentationStatus}${stale ? ' stale' : ''}${shared ? ' shared' : ''}`}
+                className={`club-live-tile ${presentationStatus}${stale ? ' stale' : ''}${shared ? ' shared' : ''}${session.demo ? ' demo' : ''}`}
                 key={presentation.id}
               >
                 <div className="club-live-athlete">
@@ -784,7 +834,11 @@ export function ClubLiveMonitor({
                   )}
                   <div>
                     <h3>{shared ? `${activityLabel(session.activityType)} shared screen` : displayName}</h3>
-                    <p>{shared ? participantNames.join(' · ') : subtitle}</p>
+                    <p>{session.demo
+                      ? shared
+                        ? `DEMO · ${participantNames.join(' · ')} · nothing is saved`
+                        : 'DEMO · simulated club tablet · nothing is saved'
+                      : shared ? participantNames.join(' · ') : subtitle}</p>
                   </div>
                   <span className={`club-live-status ${stale ? 'stale' : presentationStatus}`}>
                     <i /> {stale ? 'Reconnecting' : statusLabel(presentationStatus)}
@@ -795,7 +849,7 @@ export function ClubLiveMonitor({
                   <div className={`club-live-screen${frameStale ? ' stale' : ''}${presentationStatus === 'paused' ? ' paused' : ''}`}>
                     <div className="club-live-screen-toolbar">
                       <span className="club-live-screen-label">
-                        {directVideo
+                        {session.demo ? 'DEMO · ' : ''}{directVideo
                           ? `Direct 60 FPS target${shared ? ` · ${presentation.sources.length} riders` : ''}`
                           : frameStale
                           ? 'Screen reconnecting'
@@ -835,7 +889,7 @@ export function ClubLiveMonitor({
 
                 {shared && (
                   <div className="club-live-shared-participants" aria-label="Athletes shown on the shared activity screen">
-                    <strong><Users size={15} /> {presentation.sources.length} riders on this screen</strong>
+                    <strong><Users size={15} /> {presentation.sources.length} {session.demo ? 'demo riders' : 'riders'} on this screen</strong>
                     <span>{participantNames.join(' · ')}</span>
                   </div>
                 )}
@@ -889,12 +943,16 @@ export function ClubLiveMonitor({
                   {shared ? (
                     <>
                       <span><strong>{location}</strong></span>
-                      <span>{stale ? 'Waiting for the athlete devices' : 'Read-only shared view'}</span>
+                      <span>{stale
+                        ? `Waiting for the ${session.demo ? 'demo tablets' : 'athlete devices'}`
+                        : session.demo ? 'Read-only DEMO view · not saved' : 'Read-only shared view'}</span>
                     </>
                   ) : (
                     <>
                       <span>Position <strong>{position}</strong></span>
-                      <span>{stale ? 'Waiting for the athlete device' : 'Read-only live feed'}</span>
+                      <span>{stale
+                        ? `Waiting for the ${session.demo ? 'demo tablet' : 'athlete device'}`
+                        : session.demo ? 'Read-only DEMO feed · not saved' : 'Read-only live feed'}</span>
                     </>
                   )}
                 </div>
@@ -928,8 +986,8 @@ export function ClubLiveMonitor({
             <header>
               <div>
                 <span>{enlargedPresentation.kind === 'shared'
-                  ? 'Read-only shared activity screen'
-                  : 'Read-only live activity screen'}</span>
+                  ? `${enlargedSession.demo ? 'DEMO · ' : ''}Read-only shared activity screen`
+                  : `${enlargedSession.demo ? 'DEMO · ' : ''}Read-only live activity screen`}</span>
                 <strong>{enlargedPresentation.kind === 'shared'
                   ? `${enlargedPresentationName} · ${enlargedPresentation.sources.length} riders`
                   : enlargedPresentationName}</strong>

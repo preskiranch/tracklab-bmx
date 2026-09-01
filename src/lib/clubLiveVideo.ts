@@ -52,6 +52,8 @@ type SocketMessage = Record<string, unknown> & { type?: unknown };
 
 type StartPublisherOptions = Readonly<{
   sessionId: string;
+  /** Authorized Club Tablet bearer used only for a simulated demo stream. */
+  clubTabletDeviceToken?: string;
   activityVisible: () => boolean;
   onState?: (state: string) => void;
 }>;
@@ -190,16 +192,31 @@ function sendJson(socket: WebSocket | null, message: Record<string, unknown>) {
   return true;
 }
 
-async function requestClubTabletStreamTicket(signal?: AbortSignal) {
-  const token = currentClubTabletSessionToken();
-  if (!token) throw new Error('No active Club Tablet athlete session.');
+export function clubLivePublisherTicketHeaders(
+  clubTabletDeviceToken = '',
+  clubTabletSessionToken = currentClubTabletSessionToken(),
+) {
+  const deviceToken = clubTabletDeviceToken.trim();
+  const sessionToken = deviceToken ? '' : clubTabletSessionToken.trim();
+  return deviceToken
+    ? { Authorization: `Bearer ${deviceToken}` }
+    : clubTabletSessionHeaders(sessionToken);
+}
+
+async function requestClubTabletStreamTicket(
+  signal?: AbortSignal,
+  clubTabletDeviceToken = '',
+) {
+  const deviceToken = clubTabletDeviceToken.trim();
+  const token = deviceToken ? '' : currentClubTabletSessionToken();
+  if (!token && !deviceToken) throw new Error('No active Club Tablet activity.');
   const response = await fetch('/api/club-tablet/club-live-stream-ticket', {
     method: 'POST',
     cache: 'no-store',
     signal,
     headers: {
       Accept: 'application/json',
-      ...clubTabletSessionHeaders(token),
+      ...clubLivePublisherTicketHeaders(deviceToken, token),
     },
   });
   const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
@@ -357,7 +374,10 @@ export function startClubLiveVideoPublisher(options: StartPublisherOptions) {
     if (disposed || opening || !options.activityVisible()) return;
     opening = true;
     try {
-      const ticket = await requestClubTabletStreamTicket(abortController.signal);
+      const ticket = await requestClubTabletStreamTicket(
+        abortController.signal,
+        options.clubTabletDeviceToken,
+      );
       if (disposed || !options.activityVisible()) return;
       const next = new WebSocket(streamWebSocketUrl({ clubTabletTicket: ticket }));
       socket = next;

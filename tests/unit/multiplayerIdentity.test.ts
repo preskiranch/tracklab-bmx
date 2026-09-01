@@ -43,4 +43,22 @@ describe('multiplayer identity scoping', () => {
   it('returns the stored owner profile when no kiosk identity scope is active', () => {
     expect(resolveMultiplayerProfile(ownerProfile, null)).toBe(ownerProfile);
   });
+
+  it('keeps a Club Tablet demo identity simulated and device-scoped', () => {
+    expect(resolveMultiplayerProfile(ownerProfile, {
+      scopeKey: 'club-tablet-demo:tablet-701',
+      guestKey: 'demo:tablet-701',
+      name: 'Demo · Club tablet · Bike 701',
+      available: true,
+      membershipTier: 'racer',
+      readOnly: true,
+    })).toEqual({
+      guestKey: 'demo:tablet-701',
+      name: 'Demo · Club tablet · Bike 701',
+      email: '',
+      available: true,
+      membershipTier: 'racer',
+    });
+    expect(ownerProfile.name).toBe('Studio Owner');
+  });
 });

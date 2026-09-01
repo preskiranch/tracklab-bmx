@@ -72,6 +72,33 @@ describe('absolute Club Event gate timeline', () => {
     expect(clubEventCadenceDelayMs(`  ${eventId}  `)).toBe(first);
   });
 
+  it('gives two skewed demo tablets the identical gate drop after measured clock translation', () => {
+    const demoRaceKey = 'club-demo-room:RACE-generation-2';
+    const timeline = createClubEventGateTimeline({ eventId: demoRaceKey, startAt });
+    const fastTabletClockMs = 2_750;
+    const slowTabletClockMs = -1_900;
+    const deliveryServerAt = startAt + 6_400;
+    const fastTablet = planClubEventGateTimeline({
+      eventId: demoRaceKey,
+      startAt,
+      serverClockOffsetMs: -fastTabletClockMs,
+      now: deliveryServerAt + fastTabletClockMs,
+    });
+    const slowTablet = planClubEventGateTimeline({
+      eventId: demoRaceKey,
+      startAt,
+      serverClockOffsetMs: -slowTabletClockMs,
+      now: deliveryServerAt + slowTabletClockMs,
+    });
+
+    expect(fastTablet.serverNow).toBe(deliveryServerAt);
+    expect(slowTablet.serverNow).toBe(deliveryServerAt);
+    expect(fastTablet.timeline.greenAt).toBe(timeline.greenAt);
+    expect(slowTablet.timeline.greenAt).toBe(timeline.greenAt);
+    expect(fastTablet.gateDropLocalAt - fastTabletClockMs).toBe(timeline.greenAt);
+    expect(slowTablet.gateDropLocalAt - slowTabletClockMs).toBe(timeline.greenAt);
+  });
+
   it('keeps red and green targets fixed across zero and 2500ms audio startup latency', () => {
     const timeline = createClubEventGateTimeline({ eventId, startAt });
     const immediateAudio = planClubEventGateTimeline({

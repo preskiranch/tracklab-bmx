@@ -18,7 +18,10 @@ import type {
   TrackRecord,
 } from '../types';
 import { safeSetLocalStorage } from '../lib/browserStorage';
-import type { ClubTabletSessionCredential } from '../lib/clubTabletStorage';
+import type {
+  ClubTabletDeviceCredential,
+  ClubTabletSessionCredential,
+} from '../lib/clubTabletStorage';
 import {
   clubTabletWattbikeCapacityGrant,
   normalizeWattbikeCapacityMessage,
@@ -49,6 +52,12 @@ export type MultiplayerIdentityOverride = {
   readOnly?: boolean;
 };
 
+export type ClubTabletDemoMultiplayerConfiguration = Readonly<{
+  activityType: 'bmx-race' | 'straight-sprint' | 'explore';
+  /** Versioned compatibility key for the exact demo race mechanics. */
+  configurationId: string;
+}>;
+
 type UseMultiplayerOptions = {
   enabled: boolean;
   /** Keeps only the authenticated capacity transport online outside multiplayer. */
@@ -58,6 +67,9 @@ type UseMultiplayerOptions = {
   wattbikeConnectionCount?: number;
   identityOverride?: MultiplayerIdentityOverride | null;
   clubTabletSession?: ClubTabletSessionCredential | null;
+  /** Exact authorized device used only for an explicitly active kiosk demo. */
+  clubTabletDemoDevice?: ClubTabletDeviceCredential | null;
+  clubTabletDemoConfiguration?: ClubTabletDemoMultiplayerConfiguration | null;
   onFriendNetworkChange?: () => void;
   onWattbikeCapacityChange?: (capacity: WattbikeCapacityState | null) => void;
 };
@@ -236,6 +248,8 @@ export function useMultiplayer({
   wattbikeConnectionCount = bikeCount,
   identityOverride = null,
   clubTabletSession = null,
+  clubTabletDemoDevice = null,
+  clubTabletDemoConfiguration = null,
   onFriendNetworkChange,
   onWattbikeCapacityChange,
 }: UseMultiplayerOptions) {
@@ -249,6 +263,8 @@ export function useMultiplayer({
   const identityScopeRef = useRef('');
   const identityOverrideActiveRef = useRef(Boolean(identityOverride));
   const latestClubTabletSessionRef = useRef(clubTabletSession);
+  const latestClubTabletDemoDeviceRef = useRef(clubTabletDemoDevice);
+  const latestClubTabletDemoConfigurationRef = useRef(clubTabletDemoConfiguration);
   const latestProfileRef = useRef<MultiplayerProfile | null>(null);
   const latestWattbikeConnectionCountRef = useRef(wattbikeConnectionCount);
   const latestTrackRef = useRef<MultiplayerTrackSummary | null>(null);
@@ -263,6 +279,10 @@ export function useMultiplayer({
   const profileReadOnly = Boolean(identityOverride);
   const identityScopeKey = identityOverride?.scopeKey ?? `owner:${storedProfile.guestKey}`;
   const clubTabletSessionToken = clubTabletSession?.sessionToken ?? '';
+  const clubTabletDemoDeviceToken = clubTabletDemoDevice?.deviceToken ?? '';
+  const clubTabletDemoConfigurationKey = clubTabletDemoConfiguration
+    ? `${clubTabletDemoConfiguration.activityType}:${clubTabletDemoConfiguration.configurationId}`
+    : '';
   const transportEnabled = enabled || capacityChannelEnabled;
   const [connection, setConnection] = useState<ConnectionState>('idle');
   const [clientId, setClientId] = useState<string | null>(null);
@@ -307,6 +327,8 @@ export function useMultiplayer({
   // callbacks without reconnecting (and momentarily dropping the BLE grant).
   identityOverrideActiveRef.current = Boolean(identityOverride);
   latestClubTabletSessionRef.current = clubTabletSession;
+  latestClubTabletDemoDeviceRef.current = clubTabletDemoDevice;
+  latestClubTabletDemoConfigurationRef.current = clubTabletDemoConfiguration;
 
   useEffect(() => {
     latestProfileRef.current = profile;
@@ -474,18 +496,25 @@ export function useMultiplayer({
       const tabletSession = identityOverrideActiveRef.current
         ? latestClubTabletSessionRef.current
         : null;
-      if (tabletSession) {
+      const tabletDemoDevice = identityOverrideActiveRef.current && !tabletSession
+        ? latestClubTabletDemoDeviceRef.current
+        : null;
+      if (tabletSession || tabletDemoDevice) {
         try {
-          const authorization = await import('../lib/clubTablet').then(
-            ({ requestClubTabletMultiplayerTicket }) => requestClubTabletMultiplayerTicket(tabletSession),
-          );
+          const authorization = await import('../lib/clubTablet').then((clubTablet) => (
+            tabletSession
+              ? clubTablet.requestClubTabletMultiplayerTicket(tabletSession)
+              : clubTablet.requestClubTabletDemoMultiplayerTicket(tabletDemoDevice)
+          ));
           if (cancelled) return;
           ticket = authorization?.ticket ?? '';
           if (!ticket) throw new Error('Club Tablet multiplayer authorization is unavailable.');
         } catch (error) {
           if (cancelled || (error as Error).name === 'AbortError') return;
           setConnection('error');
-          setStatus('Club Tablet athlete authorization expired. Return to Club Tablet and choose the athlete again.');
+          setStatus(tabletDemoDevice
+            ? 'Club Tablet demo multiplayer is reconnecting.'
+            : 'Club Tablet athlete authorization expired. Return to Club Tablet and choose the athlete again.');
           scheduleReconnect();
           return;
         }
@@ -598,6 +627,24 @@ export function useMultiplayer({
           setClientId(message.clientId ?? null);
           setOnlineRiders(Array.isArray(message.riders) ? message.riders : []);
           setRooms(Array.isArray(message.rooms) ? message.rooms : []);
+          if (tabletDemoDevice) {
+            // Authorized demo tablets share one ephemeral, club-scoped room.
+            // The server derives the identity and room; no athlete or owner
+            // profile is borrowed and no race result is persisted.
+            pendingInviteRoomRef.current = null;
+            const demoConfiguration = latestClubTabletDemoConfigurationRef.current;
+            if (!demoConfiguration) {
+              setStatus('Open BMX Race Intervals or Straight Sprint before starting demo multiplayer.');
+              return;
+            }
+            socket.send(JSON.stringify({
+              type: 'join-club-demo',
+              track: latestTrackRef.current ?? currentTrack,
+              activityType: demoConfiguration.activityType,
+              configurationId: demoConfiguration.configurationId,
+            }));
+            return;
+          }
           const pendingRoom = pendingInviteRoomRef.current;
           if (pendingRoom) {
             pendingInviteRoomRef.current = null;
@@ -634,7 +681,8 @@ export function useMultiplayer({
           setRoomExploreStates(Array.isArray(message.exploreStates) ? message.exploreStates : []);
           if (message.room?.id) {
             const url = new URL(window.location.href);
-            url.searchParams.set('room', message.room.id);
+            if (message.room.demo) url.searchParams.delete('room');
+            else url.searchParams.set('room', message.room.id);
             window.history.replaceState(null, '', url);
           }
         }
@@ -795,6 +843,8 @@ export function useMultiplayer({
   }, [
     capacityChannelEnabled,
     clearWattbikeCapacityGrant,
+    clubTabletDemoDeviceToken,
+    clubTabletDemoConfigurationKey,
     clubTabletSessionToken,
     enabled,
     identityScopeKey,
@@ -809,6 +859,40 @@ export function useMultiplayer({
       void sendPresence();
     }
   }, [connection, sendPresence, transportEnabled]);
+
+  useEffect(() => {
+    if (
+      !enabled
+      || !clubTabletDemoDeviceToken
+      || !clubTabletDemoConfiguration
+      || connection !== 'open'
+      || currentRoom?.demo
+    ) return undefined;
+
+    // The first join is sent with the welcome packet. Keep a low-frequency
+    // retry while this authorized tablet is roomless so staggered activity or
+    // configuration changes converge without asking anyone to toggle modes.
+    const retryJoin = () => {
+      const configuration = latestClubTabletDemoConfigurationRef.current;
+      const activeTrack = latestTrackRef.current;
+      if (!configuration || !activeTrack) return;
+      send({
+        type: 'join-club-demo',
+        track: activeTrack,
+        activityType: configuration.activityType,
+        configurationId: configuration.configurationId,
+      });
+    };
+    const timer = window.setInterval(retryJoin, 1_500);
+    return () => window.clearInterval(timer);
+  }, [
+    clubTabletDemoConfiguration,
+    clubTabletDemoDeviceToken,
+    connection,
+    currentRoom?.demo,
+    enabled,
+    send,
+  ]);
 
   const createPrivateRoom = useCallback(() => {
     setStatus('Opening private room.');
@@ -856,6 +940,11 @@ export function useMultiplayer({
     return send({ type: 'leave-room' });
   }, [send]);
 
+  const startClubDemoRace = useCallback(() => {
+    setStatus('Starting the shared Club Tablet demo race.');
+    return send({ type: 'club-demo-start' });
+  }, [send]);
+
   const syncTrack = useCallback((nextTrack: TrackRecord) => {
     if (!currentRoom) {
       return false;
@@ -897,6 +986,11 @@ export function useMultiplayer({
   }, [send]);
 
   const currentRoomId = currentRoom?.id ?? null;
+  const demoParticipantEligible = useMemo(() => {
+    if (!currentRoom?.demo) return true;
+    const localMember = currentRoom.members.find((member) => member.id === clientId);
+    return localMember?.demoParticipantEligible === true;
+  }, [clientId, currentRoom]);
   const sendVoiceSignal = useCallback((targetId: string | null, signal: MultiplayerVoiceSignalPayload) => {
     if (!currentRoomId) {
       return false;
@@ -905,7 +999,18 @@ export function useMultiplayer({
   }, [currentRoomId, send]);
 
   const sendRaceState = useCallback((state: Omit<MultiplayerRaceState, 'clientId' | 'riderName' | 'roomId' | 'at'>) => {
-    if (!currentRoom) {
+    if (!currentRoom || (currentRoom.demo && !demoParticipantEligible)) {
+      return false;
+    }
+    if (
+      currentRoom.demo
+      && (
+        !currentRoom.flow.raceToken
+        || state.raceToken !== currentRoom.flow.raceToken
+      )
+    ) {
+      // Never relabel a previous generation's finished packet with the new
+      // token while the next synchronized countdown is arming.
       return false;
     }
 
@@ -916,24 +1021,27 @@ export function useMultiplayer({
         roomId: currentRoom.id,
       },
     });
-  }, [currentRoom, send]);
+  }, [currentRoom, demoParticipantEligible, send]);
 
   const syncExploreRoute = useCallback((route: ExploreRoute) => {
-    if (!currentRoom) {
+    if (!currentRoom || (currentRoom.demo && !demoParticipantEligible)) {
       return false;
     }
     return send({ type: 'room-explore-route', route });
-  }, [currentRoom, send]);
+  }, [currentRoom, demoParticipantEligible, send]);
 
   const controlExploreSession = useCallback((action: 'start' | 'pause' | 'resume' | 'reset') => {
-    if (!currentRoom) {
+    if (
+      !currentRoom
+      || (currentRoom.demo && action !== 'reset' && !demoParticipantEligible)
+    ) {
       return false;
     }
     return send({ type: 'room-explore-action', action });
-  }, [currentRoom, send]);
+  }, [currentRoom, demoParticipantEligible, send]);
 
   const sendExploreState = useCallback((state: Omit<MultiplayerExploreState, 'clientId' | 'roomId' | 'at'>) => {
-    if (!currentRoom) {
+    if (!currentRoom || (currentRoom.demo && !demoParticipantEligible)) {
       return false;
     }
     return send({
@@ -943,7 +1051,7 @@ export function useMultiplayer({
         roomId: currentRoom.id,
       },
     });
-  }, [currentRoom, send]);
+  }, [currentRoom, demoParticipantEligible, send]);
 
   const challengeRider = useCallback((targetId: string) => {
     setStatus('Sending challenge.');
@@ -975,7 +1083,7 @@ export function useMultiplayer({
   }, [send]);
 
   const inviteUrl = useMemo(() => {
-    if (!currentRoom) {
+    if (!currentRoom || currentRoom.demo) {
       return '';
     }
 
@@ -996,6 +1104,7 @@ export function useMultiplayer({
     createPrivateRoom,
     createPublicRoom,
     currentRoom,
+    demoParticipantEligible,
     incomingChallenges,
     incomingMatchInvites,
     inviteUrl,
@@ -1021,6 +1130,7 @@ export function useMultiplayer({
     sendVoiceSignal,
     setProfile,
     startTrackVote,
+    startClubDemoRace,
     status,
     submitTrackVote,
     syncTrack,

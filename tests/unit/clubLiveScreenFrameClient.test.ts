@@ -12,6 +12,7 @@ vi.mock('../../src/lib/clubTabletStorage', () => ({
 
 import {
   ClubLiveRequestError,
+  publishClubLiveSession,
   publishClubLiveScreenFrame,
   stopClubLiveSession,
   stopClubLiveScreenFrame,
@@ -103,6 +104,51 @@ describe('Club Live screen-frame client', () => {
       headers: expect.objectContaining({ 'X-TrackLab-Club-Tablet-Session': tabletToken }),
       body: JSON.stringify({ sessionId: 'race-session-1' }),
     }));
+  });
+
+  it('uses the authorized device bearer for demo telemetry, frames, and cleanup', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const auth = { clubTabletDeviceToken: 'authorized-demo-device-token' };
+    const demoSnapshot = {
+      ...frame,
+      demo: true as const,
+      activityType: 'bmx-race' as const,
+      status: 'active' as const,
+      progress: { fraction: 0.2 },
+      metrics: {
+        watts: 300,
+        cadence: 80,
+        speedKph: 25,
+        distanceMeters: 20,
+        elapsedMs: 1_000,
+        position: 1,
+        participantCount: 4,
+      },
+      multiplayer: true,
+    };
+
+    await publishClubLiveSession(demoSnapshot, undefined, auth);
+    await publishClubLiveScreenFrame(frame, undefined, auth);
+    await stopClubLiveScreenFrame(frame, { ...auth, keepalive: true });
+    await stopClubLiveSession(frame, { ...auth, keepalive: true });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/club-tablet/demo-live',
+      '/api/club-live/frames',
+      '/api/club-live/frames',
+      '/api/club-tablet/demo-live',
+    ]);
+    fetchMock.mock.calls.forEach(([, init]) => {
+      expect(init?.headers).toMatchObject({
+        Authorization: 'Bearer authorized-demo-device-token',
+      });
+    });
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toContain('"demo":true');
+    expect(fetchMock.mock.calls[3]?.[1]?.body).toBe(JSON.stringify({ sessionId: 'race-session-1' }));
   });
 
   it('fails closed when the server rejects frame authorization', async () => {

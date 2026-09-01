@@ -1,11 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
+  clubLivePublisherTicketHeaders,
   clubLivePublisherSignalErrorIsRecoverable,
   normalizeClubLiveVideoPublishers,
   normalizeClubLiveVideoSignal,
 } from '../../src/lib/clubLiveVideo';
 
 describe('Club Live direct video publisher normalization', () => {
+  it('uses the authorized Club Tablet bearer for demo video and never an athlete session token', () => {
+    expect(clubLivePublisherTicketHeaders(' demo-device-token ', 'athlete-session-token')).toEqual({
+      Authorization: 'Bearer demo-device-token',
+    });
+    expect(clubLivePublisherTicketHeaders('', 'athlete-session-token')).toEqual({
+      'X-TrackLab-Club-Tablet-Session': 'athlete-session-token',
+    });
+  });
+
   it('keeps only exact, bounded publisher identities', () => {
     expect(normalizeClubLiveVideoPublishers([
       {

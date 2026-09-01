@@ -308,6 +308,8 @@ export type MultiplayerRider = {
   id: string;
   name: string;
   available: boolean;
+  /** Club demo generation membership; false means wait for the next start/reset. */
+  demoParticipantEligible?: boolean;
   membershipTier?: 'visitor' | 'spectator' | 'racer';
   bikeCount: number;
   racerSeatCount?: number;
@@ -323,6 +325,11 @@ export type MultiplayerRoom = {
   id: string;
   /** Present only for secure rooms opened by a coach-led Club Event. */
   clubEventId?: string;
+  /** Server-authenticated, ephemeral same-club simulation room. */
+  demo?: boolean;
+  demoActivityType?: 'bmx-race' | 'straight-sprint' | 'explore';
+  /** True only after every demo tablet has reported the current race finished. */
+  demoRestartReady?: boolean;
   hostId: string | null;
   private: boolean;
   purpose?: 'race' | 'live-audio' | 'club-event';
@@ -450,6 +457,8 @@ export type MultiplayerRaceRider = {
 
 export type MultiplayerRaceState = {
   sessionId: string;
+  /** Immutable server generation for secure Club Tablet demo races. */
+  raceToken?: string;
   clientId: string;
   riderName: string;
   roomId: string;

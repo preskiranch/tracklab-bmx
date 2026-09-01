@@ -113,6 +113,26 @@ describe('Club Live Monitor client state', () => {
     expect(invalid).not.toHaveProperty('presentation');
   });
 
+  it('preserves an explicit server-confirmed demo marker and its authorized device identity', () => {
+    expect(normalizeClubLiveSessions({
+      sessions: [{
+        ...baseSession,
+        id: 'demo-session',
+        studioRiderId: 'demo:tablet-701',
+        deviceId: 'tablet-701',
+        demo: true,
+      }],
+    })[0]).toMatchObject({
+      id: 'demo-session',
+      studioRiderId: 'demo:tablet-701',
+      deviceId: 'tablet-701',
+      demo: true,
+    });
+    expect(normalizeClubLiveSessions({
+      sessions: [{ ...baseSession, id: 'not-demo', demo: 'true' }],
+    })[0]).not.toHaveProperty('demo');
+  });
+
   it('expires monitor tiles from the independent client clock', () => {
     const expired = { ...baseSession, id: 'expired', expiresAt: 9_999 };
     const live = { ...baseSession, id: 'live', studioRiderId: 'rider-2', expiresAt: 10_001 };
@@ -142,6 +162,31 @@ describe('Club Live Monitor client state', () => {
     const selected = selectClubTabletOverviewDevices(tablets, [trainingSession], now);
     expect(selected).toHaveLength(4);
     expect(selected.slice(0, 2).map((tablet) => tablet.id)).toEqual(['tablet-6', 'tablet-5']);
+    expect(selected.map((tablet) => tablet.id)).not.toContain('tablet-4');
+  });
+
+  it('places an active demo session into its matching authorized tablet slot', () => {
+    const now = 100_000;
+    const tablets: ClubTabletDevice[] = Array.from({ length: 5 }, (_, index) => ({
+      id: `tablet-${index + 1}`,
+      clubId: 'club-1',
+      name: `Tablet ${index + 1}`,
+      createdAt: index + 1,
+      lastSeenAt: now - 90_000 - index,
+    }));
+    const demoSession = {
+      ...baseSession,
+      id: 'demo-tablet-five-session',
+      studioRiderId: 'demo:tablet-5',
+      deviceId: 'tablet-5',
+      demo: true,
+      updatedAt: now - 250,
+      expiresAt: now + 10_000,
+    };
+
+    const selected = selectClubTabletOverviewDevices(tablets, [demoSession], now);
+    expect(selected).toHaveLength(4);
+    expect(selected[0]).toMatchObject({ id: 'tablet-5', name: 'Tablet 5' });
     expect(selected.map((tablet) => tablet.id)).not.toContain('tablet-4');
   });
 

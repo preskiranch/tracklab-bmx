@@ -29,6 +29,8 @@ export type ClubLiveSnapshot = {
   clubId: string;
   studioRiderId: string;
   sessionId?: string;
+  /** A non-persisted, simulated Club Tablet activity. */
+  demo?: boolean;
   activityType: TrainingActivityType;
   status: ClubLiveStatus;
   progress: ClubLiveProgress;
@@ -52,6 +54,11 @@ export type ClubLiveSession = ClubLiveSnapshot & {
   /** Server-normalized owner-display policy. Missing values stay individual. */
   presentation?: 'shared' | 'individual';
 };
+
+export type ClubLivePublisherAuth = Readonly<{
+  /** Durable bearer for an authorized Club Tablet running a demo activity. */
+  clubTabletDeviceToken?: string;
+}>;
 
 export type ClubLiveScreenFrame = Pick<
   ClubLiveSnapshot,
@@ -165,6 +172,7 @@ export function normalizeClubLiveSession(value: unknown): ClubLiveSession | null
     updatedAt,
     expiresAt,
     multiplayer: candidate.multiplayer === true,
+    ...(candidate.demo === true ? { demo: true } : {}),
     ...(sharedViewId ? { sharedViewId } : {}),
     ...(presentation ? { presentation } : {}),
     ...(sessionId ? { sessionId } : {}),
@@ -229,29 +237,57 @@ async function clubLiveFetch(path: string, init?: RequestInit) {
   return payload;
 }
 
-export async function publishClubLiveSession(snapshot: ClubLiveSnapshot, signal?: AbortSignal) {
+function clubLivePublisherAuth(
+  auth: ClubLivePublisherAuth = {},
+) {
   const tabletToken = currentClubTabletSessionToken();
-  await clubLiveFetch(tabletToken ? '/api/club-tablet/live' : '/api/club-live/sessions', {
+  const deviceToken = auth.clubTabletDeviceToken?.trim() ?? '';
+  return {
+    // An explicit device bearer is used only for a clearly marked demo. It
+    // wins over ambient sessionStorage so a previously selected athlete can
+    // never receive or own the simulated activity.
+    tabletToken: deviceToken ? '' : tabletToken,
+    deviceToken,
+    headers: deviceToken
+      ? { Authorization: `Bearer ${deviceToken}` }
+      : tabletToken ? clubTabletSessionHeaders(tabletToken) : {},
+  };
+}
+
+export async function publishClubLiveSession(
+  snapshot: ClubLiveSnapshot,
+  signal?: AbortSignal,
+  auth: ClubLivePublisherAuth = {},
+) {
+  const publisher = clubLivePublisherAuth(auth);
+  const path = publisher.tabletToken
+    ? '/api/club-tablet/live'
+    : publisher.deviceToken
+      ? '/api/club-tablet/demo-live'
+      : '/api/club-live/sessions';
+  await clubLiveFetch(path, {
     method: 'PUT',
     signal,
-    headers: clubTabletSessionHeaders(tabletToken),
+    headers: publisher.headers,
     body: JSON.stringify(snapshot),
   });
 }
 
 export async function stopClubLiveSession(
   selection: Pick<ClubLiveSnapshot, 'clubId' | 'studioRiderId'> & { sessionId: string },
-  options: { keepalive?: boolean; signal?: AbortSignal } = {},
+  options: { keepalive?: boolean; signal?: AbortSignal } & ClubLivePublisherAuth = {},
 ) {
-  const tabletToken = currentClubTabletSessionToken();
-  if (tabletToken) {
+  const publisher = clubLivePublisherAuth(options);
+  if (publisher.tabletToken || publisher.deviceToken) {
     // Clearing Club Live telemetry is separate from ending the selected athlete
     // or changing this tablet's durable Wattbike pairing.
-    await clubLiveFetch('/api/club-tablet/live', {
+    await clubLiveFetch(publisher.deviceToken
+      ? '/api/club-tablet/demo-live'
+      : '/api/club-tablet/live', {
       method: 'DELETE',
       keepalive: options.keepalive,
       signal: options.signal,
-      headers: clubTabletSessionHeaders(tabletToken),
+      headers: publisher.headers,
       body: JSON.stringify({ sessionId: selection.sessionId }),
     });
     return;
@@ -276,26 +312,27 @@ export async function stopClubLiveSession(
 export async function publishClubLiveScreenFrame(
   frame: ClubLiveScreenFrame,
   signal?: AbortSignal,
+  auth: ClubLivePublisherAuth = {},
 ) {
-  const tabletToken = currentClubTabletSessionToken();
+  const publisher = clubLivePublisherAuth(auth);
   await clubLiveFetch('/api/club-live/frames', {
     method: 'PUT',
     signal,
-    headers: clubTabletSessionHeaders(tabletToken),
+    headers: publisher.headers,
     body: JSON.stringify(frame),
   });
 }
 
 export async function stopClubLiveScreenFrame(
   selection: Pick<ClubLiveSnapshot, 'clubId' | 'studioRiderId'> & { sessionId: string },
-  options: { keepalive?: boolean; signal?: AbortSignal } = {},
+  options: { keepalive?: boolean; signal?: AbortSignal } & ClubLivePublisherAuth = {},
 ) {
-  const tabletToken = currentClubTabletSessionToken();
+  const publisher = clubLivePublisherAuth(options);
   await clubLiveFetch('/api/club-live/frames', {
     method: 'DELETE',
     keepalive: options.keepalive,
     signal: options.signal,
-    headers: clubTabletSessionHeaders(tabletToken),
+    headers: publisher.headers,
     body: JSON.stringify({
       clubId: selection.clubId,
       studioRiderId: selection.studioRiderId,

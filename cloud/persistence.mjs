@@ -1126,6 +1126,7 @@ function deleteMemoryHeartRatePairing(pairingId) {
 }
 
 function detachMemoryClubFromAthleteHistory(clubId) {
+  const now = Date.now();
   for (const session of memoryTrainingSessions.values()) {
     if (session._clubId !== clubId) continue;
     delete session._clubId;
@@ -1147,6 +1148,19 @@ function detachMemoryClubFromAthleteHistory(clubId) {
     stream.studioRiderId = null;
     stream.liveStudioConsent = false;
     stream.sessionStudioConsent = false;
+  }
+  for (const segment of memoryHeartRateTrainingSegments.values()) {
+    if (segment.clubId !== clubId || segment.relayScope !== 'account-block') continue;
+    segment.clubId = null;
+    segment.studioRiderId = null;
+    segment.studioVisible = false;
+    segment.updatedAt = now;
+  }
+  for (const binding of memoryHeartRateTrainingSegmentBindings.values()) {
+    if (binding.clubId !== clubId || binding.relayScope !== 'account-block') continue;
+    binding.clubId = null;
+    binding.studioRiderId = null;
+    binding.updatedAt = now;
   }
 }
 
@@ -1541,6 +1555,23 @@ async function deletePostgresAuthUserAccount(userId) {
     // Keep other athletes' personal training/Watch history when its studio is
     // erased, but remove the now-invalid club attribution and sharing consent.
     if (clubIds.length > 0) {
+      await client.query(
+        `UPDATE ${schema}.heart_rate_training_segments
+         SET club_id = NULL, studio_rider_id = NULL, studio_visible = false,
+           updated_at = now()
+         WHERE club_id = ANY($1::text[])
+           AND owner_profile_key <> $2
+           AND relay_scope = 'account-block'`,
+        [clubIds, profileKey],
+      );
+      await client.query(
+        `UPDATE ${schema}.heart_rate_training_segment_bindings
+         SET club_id = NULL, studio_rider_id = NULL, updated_at = now()
+         WHERE club_id = ANY($1::text[])
+           AND training_profile_key <> $2
+           AND relay_scope = 'account-block'`,
+        [clubIds, profileKey],
+      );
       await client.query(
         `UPDATE ${schema}.training_sessions
          SET club_id = NULL, studio_rider_id = NULL, updated_at = now()
@@ -5211,6 +5242,18 @@ export async function revokeHeartRateWatchEnrollment(
     const enrollment = memoryHeartRateWatchEnrollments.get(enrollmentId);
     if (!enrollment || enrollment.ownerProfileKey !== ownerProfileKey) return null;
     revokeMemoryHeartRateWatchEnrollment(enrollment, revokedAt, 'athlete-disconnected');
+    if (enrollment.scope === 'studio' && enrollment.clubId && enrollment.studioRiderId) {
+      memoryHeartRateTrainingSegments.forEach((segment) => {
+        if (
+          segment.ownerProfileKey === ownerProfileKey
+          && segment.clubId === enrollment.clubId
+          && segment.studioRiderId === enrollment.studioRiderId
+        ) {
+          segment.studioVisible = false;
+          segment.updatedAt = revokedAt;
+        }
+      });
+    }
     return publicMemoryHeartRateWatchEnrollment(enrollment);
   }
   return withPersistenceLock(`heart-rate-watch-enrollment-revoke:${enrollmentId}`, async (client) => {
@@ -5261,6 +5304,14 @@ export async function revokeHeartRateWatchEnrollment(
          AND streams.pairing_id = pairings.id`,
       [enrollmentId, revokedAt],
     );
+    if (enrollment.scope === 'studio' && enrollment.club_id && enrollment.studio_rider_id) {
+      await client.query(
+        `UPDATE ${schema}.heart_rate_training_segments
+         SET studio_visible = false, updated_at = to_timestamp($4 / 1000.0)
+         WHERE owner_profile_key = $1 AND club_id = $2 AND studio_rider_id = $3`,
+        [ownerProfileKey, enrollment.club_id, enrollment.studio_rider_id, revokedAt],
+      );
+    }
     return heartRateWatchEnrollmentFromRow(enrollment);
   });
 }
@@ -5309,12 +5360,21 @@ export async function revokeHeartRateWatchStudioEnrollmentByOwner(
         stream.updatedAt = revokedAt;
       }
       memoryHeartRateTrainingSegments.forEach((segment) => {
-        if (segment.pairingId === connection.pairingId) {
+        if (
+          segment.pairingId === connection.pairingId
+          || (segment.clubId === clubId && segment.studioRiderId === enrollment.studioRiderId)
+        ) {
           segment.studioVisible = false;
           segment.updatedAt = revokedAt;
         }
       });
     }
+    memoryHeartRateTrainingSegments.forEach((segment) => {
+      if (segment.clubId === clubId && segment.studioRiderId === enrollment.studioRiderId) {
+        segment.studioVisible = false;
+        segment.updatedAt = revokedAt;
+      }
+    });
     return {
       enrollment: publicMemoryHeartRateWatchEnrollment(enrollment),
       studioRiderId: enrollment.studioRiderId,
@@ -5392,11 +5452,9 @@ export async function revokeHeartRateWatchStudioEnrollmentByOwner(
       );
       await client.query(
         `UPDATE ${schema}.heart_rate_training_segments AS segments
-         SET studio_visible = false, updated_at = to_timestamp($2 / 1000.0)
-         FROM ${schema}.heart_rate_watch_connections AS connections
-         WHERE connections.enrollment_id = $1
-           AND segments.pairing_id = connections.pairing_id`,
-        [enrollmentId, revokedAt],
+         SET studio_visible = false, updated_at = to_timestamp($1 / 1000.0)
+         WHERE segments.club_id = $2 AND segments.studio_rider_id = $3`,
+        [revokedAt, clubId, updatedEnrollment.rows[0].studio_rider_id],
       );
       const enrollment = heartRateWatchEnrollmentFromRow(updatedEnrollment.rows[0]);
       return { enrollment, studioRiderId: enrollment.studioRiderId };
@@ -6983,6 +7041,194 @@ export async function loadLatestStudioTabletHeartRateReading({
   } : null;
 }
 
+/**
+ * Projects one athlete-owned personal Watch Connect stream onto that athlete's
+ * active club-tablet session. The source connection remains private: this path
+ * is enabled only by a separate, still-trusted studio enrollment for the exact
+ * claimed club member with Live BPM consent enabled. No account, connection,
+ * pairing, stream, or sample identity is returned to the shared tablet.
+ */
+export async function loadLatestConsentedPersonalHeartRateForStudioTablet({
+  athleteProfileKey,
+  clubId,
+  studioRiderId,
+  studioSharingEnrollmentId,
+  personalWatchConnectionId,
+  personalWatchEnrollmentId,
+  pairingId,
+  freshAfter,
+  now = Date.now(),
+}) {
+  if (!pool) {
+    const member = memoryClubMembers.get(clubMemberKey(clubId, studioRiderId));
+    const sharingEnrollment = memoryHeartRateWatchEnrollments.get(studioSharingEnrollmentId);
+    const personalConnection = memoryHeartRateWatchConnections.get(personalWatchConnectionId);
+    const personalEnrollment = memoryHeartRateWatchEnrollments.get(personalWatchEnrollmentId);
+    if (
+      member?.status !== 'claimed'
+      || member.athleteProfileKey !== athleteProfileKey
+      || !sharingEnrollment
+      || sharingEnrollment.ownerProfileKey !== athleteProfileKey
+      || sharingEnrollment.scope !== 'studio'
+      || sharingEnrollment.clubId !== clubId
+      || sharingEnrollment.studioRiderId !== studioRiderId
+      || sharingEnrollment.revokedAt != null
+      || !sharingEnrollment.liveStudioConsent
+      || !personalConnection
+      || personalConnection.enrollmentId !== personalWatchEnrollmentId
+      || personalConnection.pairingId !== pairingId
+      || personalConnection.ownerProfileKey !== athleteProfileKey
+      || personalConnection.scope !== 'personal'
+      || personalConnection.clubId != null
+      || personalConnection.studioRiderId != null
+      || personalConnection.stoppedAt != null
+      || personalConnection.connectedUntil <= now
+      || !personalEnrollment
+      || personalEnrollment.ownerProfileKey !== athleteProfileKey
+      || personalEnrollment.scope !== 'personal'
+      || personalEnrollment.clubId != null
+      || personalEnrollment.studioRiderId != null
+      || personalEnrollment.revokedAt != null
+    ) return null;
+    const pairing = memoryHeartRatePairings.get(pairingId);
+    const streamId = memoryHeartRateStreamIdByPairingId.get(pairingId);
+    const stream = streamId ? memoryHeartRateStreams.get(streamId) : null;
+    if (
+      !pairing
+      || pairing.ownerProfileKey !== athleteProfileKey
+      || pairing.relayScope !== 'account-block'
+      || pairing.clubId != null
+      || pairing.studioRiderId != null
+      || pairing.claimedAt == null
+      || pairing.revokedAt != null
+      || (pairing.ingestExpiresAt ?? 0) <= now
+      || (pairing.accountBlockStopRequestedAt != null && pairing.accountBlockStopRequestedAt <= now)
+      || !stream
+      || stream.ownerProfileKey !== athleteProfileKey
+      || stream.pairingId !== pairingId
+      || stream.relayScope !== 'account-block'
+      || stream.clubId != null
+      || stream.studioRiderId != null
+      || stream.finalizedAt != null
+      || (stream.relayExpiresAt ?? 0) <= now
+      || (stream.accountBlockStopRequestedAt != null && stream.accountBlockStopRequestedAt <= now)
+    ) return null;
+    const samples = [...(memoryHeartRateSamplesByStreamId.get(stream.id)?.values() ?? [])];
+    if (samples.length === 0) return null;
+    const sample = samples.reduce((current, candidate) => (
+      candidate.sequence > current.sequence ? candidate : current
+    ), samples[0]);
+    const receivedAt = Number(sample._receivedAt);
+    if (
+      !Number.isFinite(receivedAt)
+      || receivedAt > now + 60_000
+      || sample.recordedAt <= receivedAt - 10_000
+      || sample.recordedAt > receivedAt + 2_000
+      || sample.recordedAt <= freshAfter
+      || sample.recordedAt > now + 2_000
+    ) return null;
+    return cloneJson({
+      studioRiderId,
+      bpm: sample.bpm,
+      recordedAt: sample.recordedAt,
+      receivedAt,
+    }, null);
+  }
+
+  const result = await query(
+    `SELECT samples.bpm, samples.recorded_at, samples.received_at, samples.sequence
+     FROM ${schema}.heart_rate_streams AS streams
+     JOIN ${schema}.heart_rate_pairings AS pairings
+       ON pairings.id = streams.pairing_id
+     JOIN ${schema}.heart_rate_watch_connections AS personal_connections
+       ON personal_connections.pairing_id = pairings.id
+     JOIN ${schema}.heart_rate_watch_enrollments AS personal_enrollments
+       ON personal_enrollments.id = personal_connections.enrollment_id
+     JOIN ${schema}.heart_rate_watch_enrollments AS sharing_enrollments
+       ON sharing_enrollments.owner_profile_key = streams.owner_profile_key
+     JOIN ${schema}.club_members AS members
+       ON members.club_id = $2 AND members.studio_rider_id = $3
+     JOIN LATERAL (
+       SELECT bpm, recorded_at, received_at, sequence
+       FROM ${schema}.heart_rate_samples
+       WHERE stream_id = streams.id
+       ORDER BY sequence DESC
+       LIMIT 1
+     ) AS samples ON true
+     WHERE streams.owner_profile_key = $1
+       AND streams.relay_scope = 'account-block'
+       AND streams.club_id IS NULL
+       AND streams.studio_rider_id IS NULL
+       AND streams.pairing_id = $7
+       AND streams.finalized_at IS NULL
+       AND pairings.owner_profile_key = $1
+       AND pairings.relay_scope = 'account-block'
+       AND pairings.club_id IS NULL
+       AND pairings.studio_rider_id IS NULL
+       AND pairings.id = $7
+       AND pairings.claimed_at IS NOT NULL
+       AND pairings.revoked_at IS NULL
+       AND personal_connections.id = $5
+       AND personal_connections.enrollment_id = $6
+       AND personal_connections.owner_profile_key = $1
+       AND personal_connections.scope = 'personal'
+       AND personal_connections.club_id IS NULL
+       AND personal_connections.studio_rider_id IS NULL
+       AND personal_connections.stopped_at IS NULL
+       AND personal_connections.connected_until > to_timestamp($9 / 1000.0)
+       AND personal_enrollments.id = $6
+       AND personal_enrollments.owner_profile_key = $1
+       AND personal_enrollments.scope = 'personal'
+       AND personal_enrollments.club_id IS NULL
+       AND personal_enrollments.studio_rider_id IS NULL
+       AND personal_enrollments.revoked_at IS NULL
+       AND sharing_enrollments.id = $4
+       AND sharing_enrollments.owner_profile_key = $1
+       AND sharing_enrollments.scope = 'studio'
+       AND sharing_enrollments.club_id = $2
+       AND sharing_enrollments.studio_rider_id = $3
+       AND sharing_enrollments.revoked_at IS NULL
+       AND sharing_enrollments.live_studio_consent = true
+       AND COALESCE(streams.relay_expires_at, pairings.ingest_expires_at) > to_timestamp($9 / 1000.0)
+       AND pairings.ingest_expires_at > to_timestamp($9 / 1000.0)
+       AND (
+         streams.account_block_stop_requested_at IS NULL
+         OR streams.account_block_stop_requested_at > to_timestamp($9 / 1000.0)
+       )
+       AND (
+         pairings.account_block_stop_requested_at IS NULL
+         OR pairings.account_block_stop_requested_at > to_timestamp($9 / 1000.0)
+       )
+       AND members.status = 'claimed'
+       AND members.athlete_profile_key = $1
+       AND samples.recorded_at > to_timestamp($8 / 1000.0)
+       AND samples.recorded_at <= to_timestamp(($9 + 2000) / 1000.0)
+       AND samples.recorded_at > samples.received_at - interval '10 seconds'
+       AND samples.recorded_at <= samples.received_at + interval '2 seconds'
+       AND samples.received_at <= to_timestamp(($9 + 60000) / 1000.0)
+     ORDER BY samples.received_at DESC, samples.sequence DESC
+     LIMIT 1`,
+    [
+      athleteProfileKey,
+      clubId,
+      studioRiderId,
+      studioSharingEnrollmentId,
+      personalWatchConnectionId,
+      personalWatchEnrollmentId,
+      pairingId,
+      freshAfter,
+      now,
+    ],
+  );
+  const row = result?.rows?.[0];
+  return row ? {
+    studioRiderId,
+    bpm: Number(row.bpm),
+    recordedAt: new Date(row.recorded_at).getTime(),
+    receivedAt: new Date(row.received_at).getTime(),
+  } : null;
+}
+
 export async function finalizeHeartRateStream(
   streamId,
   ingestTokenHash,
@@ -7258,16 +7504,74 @@ function heartRateTrainingSegmentMatchesOptions(segment, options) {
   const relayScope = options.relayScope === 'account-block' ? 'account-block' : 'studio-block';
   return segment.ownerProfileKey === options.athleteProfileKey
     && segment.relayScope === relayScope
-    && (segment.clubId ?? null) === (relayScope === 'account-block' ? null : options.clubId ?? null)
-    && (segment.studioRiderId ?? null) === (
-      relayScope === 'account-block' ? null : options.studioRiderId ?? null
-    )
+    // An account-block segment may carry an independently authorized,
+    // summary-only club projection. Club attribution is not source identity.
+    && (relayScope === 'account-block'
+      || (segment.clubId ?? null) === (options.clubId ?? null))
+    && (relayScope === 'account-block'
+      || (segment.studioRiderId ?? null) === (options.studioRiderId ?? null))
     && segment.trainingSessionId === options.trainingSessionId
     && segment.activityType === options.activityType
     && (segment.playerId ?? null) === (options.playerId ?? null)
     && segment.startedAt === options.startedAt
     && segment.endedAt === options.endedAt
     && json(segment.activeClockSegments ?? []) === json(options.activeClockSegments ?? []);
+}
+
+function memoryAccountClubSummaryAuthorizationActive({
+  athleteProfileKey,
+  trainingSessionId,
+  clubId,
+  studioRiderId,
+}) {
+  const member = memoryClubMembers.get(clubMemberKey(clubId, studioRiderId));
+  const session = memoryTrainingSessions.get(`${athleteProfileKey}:${trainingSessionId}`);
+  return member?.status === 'claimed'
+    && member.athleteProfileKey === athleteProfileKey
+    && session?._clubId === clubId
+    && session?._studioRiderId === studioRiderId
+    && [...memoryHeartRateWatchEnrollments.values()].some((enrollment) => (
+      enrollment.ownerProfileKey === athleteProfileKey
+      && enrollment.scope === 'studio'
+      && enrollment.clubId === clubId
+      && enrollment.studioRiderId === studioRiderId
+      && enrollment.revokedAt == null
+      && enrollment.sessionStudioConsent === true
+      && memoryHeartRateWatchMembershipActive(enrollment)
+    ));
+}
+
+async function accountClubSummaryAuthorizationActiveWithClient(client, {
+  athleteProfileKey,
+  trainingSessionId,
+  clubId,
+  studioRiderId,
+}) {
+  if (!athleteProfileKey || !trainingSessionId || !clubId || !studioRiderId) return false;
+  const result = await client.query(
+    `SELECT 1
+     FROM ${schema}.training_sessions AS sessions
+     JOIN ${schema}.club_members AS members
+       ON members.club_id = sessions.club_id
+       AND members.studio_rider_id = sessions.studio_rider_id
+     JOIN ${schema}.heart_rate_watch_enrollments AS enrollments
+       ON enrollments.owner_profile_key = sessions.profile_key
+       AND enrollments.scope = 'studio'
+       AND enrollments.club_id = sessions.club_id
+       AND enrollments.studio_rider_id = sessions.studio_rider_id
+     WHERE sessions.profile_key = $1
+       AND sessions.id = $2
+       AND sessions.club_id = $3
+       AND sessions.studio_rider_id = $4
+       AND members.status = 'claimed'
+       AND members.athlete_profile_key = $1
+       AND enrollments.revoked_at IS NULL
+       AND enrollments.session_studio_consent = true
+     LIMIT 1
+     FOR UPDATE OF sessions, members, enrollments`,
+    [athleteProfileKey, trainingSessionId, clubId, studioRiderId],
+  );
+  return Boolean(result.rows[0]);
 }
 
 function saveMemoryHeartRateTrainingSegmentBinding(options) {
@@ -7620,6 +7924,19 @@ function upsertMemoryHeartRateTrainingSegment({
   activeClockSegments = [],
   now = Date.now(),
 }) {
+  const consentedAccountClubSummary = relayScope === 'account-block'
+    && Boolean(clubId)
+    && Boolean(studioRiderId);
+  if (
+    relayScope === 'account-block'
+    && Boolean(clubId) !== Boolean(studioRiderId)
+  ) return { status: 'not-consented', segment: null };
+  if (consentedAccountClubSummary && !memoryAccountClubSummaryAuthorizationActive({
+    athleteProfileKey,
+    trainingSessionId,
+    clubId,
+    studioRiderId,
+  })) return { status: 'not-consented', segment: null };
   const key = memoryHeartRateTrainingSegmentKey(athleteProfileKey, trainingSessionId);
   const existing = memoryHeartRateTrainingSegments.get(key);
   const options = {
@@ -7684,8 +8001,8 @@ function upsertMemoryHeartRateTrainingSegment({
     pairingId: stream.pairingId,
     ownerProfileKey: athleteProfileKey,
     relayScope,
-    clubId: relayScope === 'account-block' ? null : clubId,
-    studioRiderId: relayScope === 'account-block' ? null : studioRiderId,
+    clubId: relayScope === 'account-block' && !consentedAccountClubSummary ? null : clubId,
+    studioRiderId: relayScope === 'account-block' && !consentedAccountClubSummary ? null : studioRiderId,
     trainingSessionId,
     activityType,
     playerId,
@@ -7696,7 +8013,9 @@ function upsertMemoryHeartRateTrainingSegment({
     summary: {},
     zoneSummaries: [],
     finalizedAt: null,
-    studioVisible: relayScope === 'studio-block' && Boolean(stream.sessionStudioConsent),
+    studioVisible: relayScope === 'studio-block'
+      ? Boolean(stream.sessionStudioConsent)
+      : consentedAccountClubSummary,
     createdAt: now,
     updatedAt: now,
   };
@@ -7715,7 +8034,12 @@ function upsertMemoryHeartRateTrainingSegment({
       memoryHeartRatePairings.get(stream.pairingId),
       allEligibleSourcesSettled,
     ),
-    studioVisible: relayScope === 'studio-block' && Boolean(stream.sessionStudioConsent),
+    ...(consentedAccountClubSummary ? { clubId, studioRiderId } : {}),
+    studioVisible: relayScope === 'studio-block'
+      ? Boolean(stream.sessionStudioConsent)
+      : Boolean(consentedAccountClubSummary || (
+        segment.studioVisible && segment.clubId && segment.studioRiderId
+      )),
     updatedAt: now,
   });
   memoryHeartRateTrainingSegments.set(key, segment);
@@ -7736,6 +8060,18 @@ async function upsertHeartRateTrainingSegmentWithClient(client, {
   activeClockSegments = [],
   now = Date.now(),
 }) {
+  const consentedAccountClubSummary = relayScope === 'account-block'
+    && Boolean(clubId)
+    && Boolean(studioRiderId);
+  if (relayScope === 'account-block' && Boolean(clubId) !== Boolean(studioRiderId)) {
+    return { status: 'not-consented', segment: null };
+  }
+  if (consentedAccountClubSummary && !(await accountClubSummaryAuthorizationActiveWithClient(client, {
+    athleteProfileKey,
+    trainingSessionId,
+    clubId,
+    studioRiderId,
+  }))) return { status: 'not-consented', segment: null };
   const streamResult = relayScope === 'account-block'
     ? await client.query(
       `SELECT streams.*,
@@ -7773,6 +8109,35 @@ async function upsertHeartRateTrainingSegmentWithClient(client, {
            streams.relay_expires_at,
            pairings.ingest_expires_at
          ) > to_timestamp($2 / 1000.0)
+         AND (
+           ($6::text IS NULL AND $7::text IS NULL)
+           OR (
+             $6::text IS NOT NULL AND $7::text IS NOT NULL
+             AND EXISTS (
+               SELECT 1 FROM ${schema}.training_sessions AS authorized_sessions
+               WHERE authorized_sessions.profile_key = $1
+                 AND authorized_sessions.id = $5
+                 AND authorized_sessions.club_id = $6
+                 AND authorized_sessions.studio_rider_id = $7
+             )
+             AND EXISTS (
+               SELECT 1 FROM ${schema}.club_members AS authorized_members
+               WHERE authorized_members.club_id = $6
+                 AND authorized_members.studio_rider_id = $7
+                 AND authorized_members.status = 'claimed'
+                 AND authorized_members.athlete_profile_key = $1
+             )
+             AND EXISTS (
+               SELECT 1 FROM ${schema}.heart_rate_watch_enrollments AS authorized_enrollments
+               WHERE authorized_enrollments.owner_profile_key = $1
+                 AND authorized_enrollments.scope = 'studio'
+                 AND authorized_enrollments.club_id = $6
+                 AND authorized_enrollments.studio_rider_id = $7
+                 AND authorized_enrollments.revoked_at IS NULL
+                 AND authorized_enrollments.session_studio_consent = true
+             )
+           )
+         )
        ORDER BY (
          SELECT COUNT(*)
          FROM ${schema}.heart_rate_samples AS ranked_samples
@@ -7806,7 +8171,15 @@ async function upsertHeartRateTrainingSegmentWithClient(client, {
          ), '')
        ) DESC, streams.started_at DESC, streams.id DESC
        FOR UPDATE OF streams`,
-      [athleteProfileKey, startedAt, endedAt, json(activeClockSegments), trainingSessionId],
+      [
+        athleteProfileKey,
+        startedAt,
+        endedAt,
+        json(activeClockSegments),
+        trainingSessionId,
+        consentedAccountClubSummary ? clubId : null,
+        consentedAccountClubSummary ? studioRiderId : null,
+      ],
     )
     : await client.query(
       `SELECT streams.*,
@@ -7957,6 +8330,16 @@ async function upsertHeartRateTrainingSegmentWithClient(client, {
      ON CONFLICT (training_profile_key, training_session_id) DO UPDATE
        SET stream_id = EXCLUDED.stream_id,
          pairing_id = EXCLUDED.pairing_id,
+         club_id = CASE
+           WHEN EXCLUDED.relay_scope = 'account-block' AND EXCLUDED.studio_visible
+             THEN EXCLUDED.club_id
+           ELSE ${schema}.heart_rate_training_segments.club_id
+         END,
+         studio_rider_id = CASE
+           WHEN EXCLUDED.relay_scope = 'account-block' AND EXCLUDED.studio_visible
+             THEN EXCLUDED.studio_rider_id
+           ELSE ${schema}.heart_rate_training_segments.studio_rider_id
+         END,
          summary = EXCLUDED.summary,
          zone_summaries = EXCLUDED.zone_summaries,
          finalized_at = CASE
@@ -7966,12 +8349,22 @@ async function upsertHeartRateTrainingSegmentWithClient(client, {
              EXCLUDED.finalized_at
            )
          END,
-         studio_visible = EXCLUDED.studio_visible,
+         studio_visible = CASE
+           WHEN EXCLUDED.relay_scope = 'account-block'
+             THEN ${schema}.heart_rate_training_segments.studio_visible OR EXCLUDED.studio_visible
+           ELSE EXCLUDED.studio_visible
+         END,
          updated_at = EXCLUDED.updated_at
        WHERE ${schema}.heart_rate_training_segments.owner_profile_key = EXCLUDED.owner_profile_key
          AND ${schema}.heart_rate_training_segments.relay_scope = EXCLUDED.relay_scope
-         AND ${schema}.heart_rate_training_segments.club_id IS NOT DISTINCT FROM EXCLUDED.club_id
-         AND ${schema}.heart_rate_training_segments.studio_rider_id IS NOT DISTINCT FROM EXCLUDED.studio_rider_id
+         AND (
+           EXCLUDED.relay_scope = 'account-block'
+           OR ${schema}.heart_rate_training_segments.club_id IS NOT DISTINCT FROM EXCLUDED.club_id
+         )
+         AND (
+           EXCLUDED.relay_scope = 'account-block'
+           OR ${schema}.heart_rate_training_segments.studio_rider_id IS NOT DISTINCT FROM EXCLUDED.studio_rider_id
+         )
          AND ${schema}.heart_rate_training_segments.training_profile_key = EXCLUDED.training_profile_key
          AND ${schema}.heart_rate_training_segments.training_session_id = EXCLUDED.training_session_id
          AND ${schema}.heart_rate_training_segments.activity_type = EXCLUDED.activity_type
@@ -7998,8 +8391,8 @@ async function upsertHeartRateTrainingSegmentWithClient(client, {
       stream.pairingId,
       athleteProfileKey,
       relayScope,
-      relayScope === 'account-block' ? null : clubId,
-      relayScope === 'account-block' ? null : studioRiderId,
+      relayScope === 'account-block' && !consentedAccountClubSummary ? null : clubId,
+      relayScope === 'account-block' && !consentedAccountClubSummary ? null : studioRiderId,
       trainingSessionId,
       activityType,
       playerId ?? null,
@@ -8010,7 +8403,9 @@ async function upsertHeartRateTrainingSegmentWithClient(client, {
       json(summaries.summary),
       json(summaries.zoneSummaries),
       finalizedAt,
-      relayScope === 'studio-block' && Boolean(stream.sessionStudioConsent),
+      relayScope === 'studio-block'
+        ? Boolean(stream.sessionStudioConsent)
+        : consentedAccountClubSummary,
       now,
     ],
   );
@@ -8082,6 +8477,108 @@ export async function createHeartRateTrainingSegmentForAccountSession(options) {
   });
 }
 
+/**
+ * Attaches a private account-block Watch source to one exact club-attributed
+ * training result while exposing only its derived summary to the club owner.
+ * The account stream remains private, and authorization is re-checked again
+ * if the stream arrives after the result was saved.
+ */
+export async function createHeartRateTrainingSegmentForConsentedPersonalClubSession(options) {
+  if (!options?.clubId || !options?.studioRiderId) {
+    return { status: 'not-consented', segment: null };
+  }
+  return createHeartRateTrainingSegmentForBlock({
+    ...options,
+    relayScope: 'account-block',
+  });
+}
+
+/**
+ * Grants one exact account-block result a redacted club summary projection.
+ * The personal Watch stream remains private. This succeeds only while the
+ * result is attributed to the exact claimed club member and that athlete has
+ * a trusted studio Watch enrollment with per-session summary consent.
+ */
+export async function authorizeAccountHeartRateTrainingSegmentForClubSummary({
+  athleteProfileKey,
+  trainingSessionId,
+  clubId,
+  studioRiderId,
+  now = Date.now(),
+}) {
+  if (!pool) {
+    const member = memoryClubMembers.get(clubMemberKey(clubId, studioRiderId));
+    const session = memoryTrainingSessions.get(`${athleteProfileKey}:${trainingSessionId}`);
+    const segment = memoryHeartRateTrainingSegments.get(
+      memoryHeartRateTrainingSegmentKey(athleteProfileKey, trainingSessionId),
+    );
+    const pairing = segment ? memoryHeartRatePairings.get(segment.pairingId) : null;
+    const consented = [...memoryHeartRateWatchEnrollments.values()].some((enrollment) => (
+      enrollment.ownerProfileKey === athleteProfileKey
+      && enrollment.scope === 'studio'
+      && enrollment.clubId === clubId
+      && enrollment.studioRiderId === studioRiderId
+      && enrollment.revokedAt == null
+      && enrollment.sessionStudioConsent === true
+      && memoryHeartRateWatchMembershipActive(enrollment)
+    ));
+    if (
+      member?.status !== 'claimed'
+      || member.athleteProfileKey !== athleteProfileKey
+      || session?._clubId !== clubId
+      || session?._studioRiderId !== studioRiderId
+      || !segment
+      || segment.relayScope !== 'account-block'
+      || segment.ownerProfileKey !== athleteProfileKey
+      || pairing?.ownerProfileKey !== athleteProfileKey
+      || pairing.relayScope !== 'account-block'
+      || pairing.revokedAt != null
+      || !consented
+    ) return null;
+    segment.clubId = clubId;
+    segment.studioRiderId = studioRiderId;
+    segment.studioVisible = true;
+    segment.updatedAt = now;
+    return cloneJson(segment, segment);
+  }
+  const result = await query(
+    `UPDATE ${schema}.heart_rate_training_segments AS segments
+     SET club_id = $3, studio_rider_id = $4, studio_visible = true,
+       updated_at = to_timestamp($5 / 1000.0)
+     FROM ${schema}.training_sessions AS sessions,
+       ${schema}.club_members AS members,
+       ${schema}.heart_rate_pairings AS pairings
+     WHERE segments.training_profile_key = $1
+       AND segments.training_session_id = $2
+       AND segments.owner_profile_key = $1
+       AND segments.relay_scope = 'account-block'
+       AND sessions.profile_key = $1
+       AND sessions.id = $2
+       AND sessions.club_id = $3
+       AND sessions.studio_rider_id = $4
+       AND members.club_id = $3
+       AND members.studio_rider_id = $4
+       AND members.status = 'claimed'
+       AND members.athlete_profile_key = $1
+       AND pairings.id = segments.pairing_id
+       AND pairings.owner_profile_key = $1
+       AND pairings.relay_scope = 'account-block'
+       AND pairings.revoked_at IS NULL
+       AND EXISTS (
+         SELECT 1 FROM ${schema}.heart_rate_watch_enrollments AS enrollments
+         WHERE enrollments.owner_profile_key = $1
+           AND enrollments.scope = 'studio'
+           AND enrollments.club_id = $3
+           AND enrollments.studio_rider_id = $4
+           AND enrollments.revoked_at IS NULL
+           AND enrollments.session_studio_consent = true
+       )
+     RETURNING segments.*`,
+    [athleteProfileKey, trainingSessionId, clubId, studioRiderId, now],
+  );
+  return heartRateTrainingSegmentFromRow(result?.rows?.[0]);
+}
+
 export async function reconcileHeartRateTrainingSegmentBindingsForStream(streamId, now = Date.now()) {
   if (!pool) {
     const stream = memoryHeartRateStreams.get(streamId);
@@ -8098,13 +8595,18 @@ export async function reconcileHeartRateTrainingSegmentBindingsForStream(streamI
         || (
           stream.relayScope === 'studio-block'
             ? binding.clubId !== stream.clubId || binding.studioRiderId !== stream.studioRiderId
-            : binding.clubId != null || binding.studioRiderId != null
+            : Boolean(binding.clubId) !== Boolean(binding.studioRiderId)
         )
         || stream.startedAt > binding.endedAt
         || (stream.endedAt != null && stream.endedAt < binding.startedAt)
       ) continue;
       const materialized = upsertMemoryHeartRateTrainingSegment({ ...binding, now });
-      if (materialized.segment) {
+      if (materialized.status === 'not-consented') {
+        // Consent or membership ended before the delayed Watch stream arrived.
+        // Discard the binding so a later re-enrollment cannot resurrect an old
+        // owner-visible health summary.
+        memoryHeartRateTrainingSegmentBindings.delete(key);
+      } else if (materialized.segment) {
         memoryHeartRateTrainingSegmentBindings.delete(key);
         reconciled.push(materialized.segment);
       }
@@ -8134,8 +8636,10 @@ export async function reconcileHeartRateTrainingSegmentBindingsForStream(streamI
              streams.relay_scope = 'account-block'
              AND streams.club_id IS NULL
              AND streams.studio_rider_id IS NULL
-             AND bindings.club_id IS NULL
-             AND bindings.studio_rider_id IS NULL
+             AND (
+               (bindings.club_id IS NULL AND bindings.studio_rider_id IS NULL)
+               OR (bindings.club_id IS NOT NULL AND bindings.studio_rider_id IS NOT NULL)
+             )
            )
          )
          AND streams.started_at <= bindings.ended_at
@@ -8162,7 +8666,16 @@ export async function reconcileHeartRateTrainingSegmentBindingsForStream(streamI
         now,
       };
       const materialized = await upsertHeartRateTrainingSegmentWithClient(client, options);
-      if (!materialized.segment) continue;
+      if (!materialized.segment) {
+        if (materialized.status === 'not-consented') {
+          await client.query(
+            `DELETE FROM ${schema}.heart_rate_training_segment_bindings
+             WHERE training_profile_key = $1 AND training_session_id = $2`,
+            [options.athleteProfileKey, options.trainingSessionId],
+          );
+        }
+        continue;
+      }
       await client.query(
         `DELETE FROM ${schema}.heart_rate_training_segment_bindings
          WHERE training_profile_key = $1 AND training_session_id = $2`,
@@ -8216,7 +8729,9 @@ export async function refreshHeartRateTrainingSegmentsForStream(streamId, now = 
           )
           : null,
       );
-      segment.studioVisible = stream.relayScope === 'studio-block' && Boolean(stream.sessionStudioConsent);
+      segment.studioVisible = stream.relayScope === 'studio-block'
+        ? Boolean(stream.sessionStudioConsent)
+        : Boolean(segment.studioVisible && segment.clubId && segment.studioRiderId);
       segment.updatedAt = now;
       return cloneJson(segment, segment);
     });
@@ -8281,7 +8796,9 @@ export async function refreshHeartRateTrainingSegmentsForStream(streamId, now = 
           json(summaries.summary),
           json(summaries.zoneSummaries),
           finalizedAt,
-          stream.relayScope === 'studio-block' && Boolean(stream.sessionStudioConsent),
+          stream.relayScope === 'studio-block'
+            ? Boolean(stream.sessionStudioConsent)
+            : Boolean(existing.studioVisible && existing.clubId && existing.studioRiderId),
           now,
         ],
       );
@@ -8425,14 +8942,37 @@ export async function loadClubHeartRateTrainingSegments(clubId, sessionId, studi
     return [...memoryHeartRateTrainingSegments.values()]
       .filter((segment) => {
         const pairing = memoryHeartRatePairings.get(segment.pairingId);
+        const session = memoryTrainingSessions.get(
+          `${segment.ownerProfileKey}:${segment.trainingSessionId}`,
+        );
+        const member = memoryClubMembers.get(clubMemberKey(clubId, studioRiderId));
+        const consentedAccountProjection = segment.relayScope === 'account-block'
+          && pairing?.relayScope === 'account-block'
+          && pairing.clubId == null
+          && pairing.studioRiderId == null
+          && session?._clubId === clubId
+          && session?._studioRiderId === studioRiderId
+          && member?.status === 'claimed'
+          && member.athleteProfileKey === segment.ownerProfileKey
+          && [...memoryHeartRateWatchEnrollments.values()].some((enrollment) => (
+            enrollment.ownerProfileKey === segment.ownerProfileKey
+            && enrollment.scope === 'studio'
+            && enrollment.clubId === clubId
+            && enrollment.studioRiderId === studioRiderId
+            && enrollment.revokedAt == null
+            && enrollment.sessionStudioConsent === true
+            && memoryHeartRateWatchMembershipActive(enrollment)
+          ));
+        const studioProjection = segment.relayScope === 'studio-block'
+          && pairing?.relayScope === 'studio-block'
+          && pairing.clubId === clubId
+          && pairing.studioRiderId === studioRiderId
+          && pairing.sessionStudioConsent;
         return segment.clubId === clubId
         && segment.studioRiderId === studioRiderId
-        && segment.relayScope === 'studio-block'
         && segment.studioVisible
         && segment.trainingSessionId === sessionId
-        && pairing?.clubId === clubId
-        && pairing.studioRiderId === studioRiderId
-        && pairing.sessionStudioConsent
+        && (studioProjection || consentedAccountProjection)
         && pairing.revokedAt == null;
       })
       .sort((left, right) => right.startedAt - left.startedAt)
@@ -8452,15 +8992,44 @@ export async function loadClubHeartRateTrainingSegments(clubId, sessionId, studi
     `SELECT segments.*
      FROM ${schema}.heart_rate_training_segments AS segments
      JOIN ${schema}.heart_rate_pairings AS pairings ON pairings.id = segments.pairing_id
+     JOIN ${schema}.training_sessions AS sessions
+       ON sessions.profile_key = segments.training_profile_key
+       AND sessions.id = segments.training_session_id
+     JOIN ${schema}.club_members AS members
+       ON members.club_id = segments.club_id
+       AND members.studio_rider_id = segments.studio_rider_id
      WHERE segments.club_id = $1
-       AND segments.relay_scope = 'studio-block'
        AND segments.studio_rider_id = $3
        AND segments.studio_visible = true
-       AND pairings.club_id = $1
-       AND pairings.studio_rider_id = $3
-       AND pairings.session_studio_consent = true
        AND pairings.revoked_at IS NULL
        AND segments.training_session_id = $2
+       AND sessions.club_id = $1
+       AND sessions.studio_rider_id = $3
+       AND members.status = 'claimed'
+       AND members.athlete_profile_key = segments.owner_profile_key
+       AND (
+         (
+           segments.relay_scope = 'studio-block'
+           AND pairings.relay_scope = 'studio-block'
+           AND pairings.club_id = $1
+           AND pairings.studio_rider_id = $3
+           AND pairings.session_studio_consent = true
+         ) OR (
+           segments.relay_scope = 'account-block'
+           AND pairings.relay_scope = 'account-block'
+           AND pairings.club_id IS NULL
+           AND pairings.studio_rider_id IS NULL
+           AND EXISTS (
+             SELECT 1 FROM ${schema}.heart_rate_watch_enrollments AS enrollments
+             WHERE enrollments.owner_profile_key = segments.owner_profile_key
+               AND enrollments.scope = 'studio'
+               AND enrollments.club_id = $1
+               AND enrollments.studio_rider_id = $3
+               AND enrollments.revoked_at IS NULL
+               AND enrollments.session_studio_consent = true
+           )
+         )
+       )
      ORDER BY segments.started_at DESC, segments.id DESC
      LIMIT 1000`,
     [clubId, sessionId, studioRiderId],
@@ -17757,7 +18326,13 @@ export async function updateChallenge(challengeId, status, roomId = null) {
 }
 
 export async function saveRaceResults(room, client, raceState) {
-  if (raceState.raceState !== 'finished' || !Array.isArray(raceState.summary) || raceState.summary.length === 0) {
+  if (
+    room?.purpose === 'club-demo'
+    || client?.clubTabletDemoDeviceId
+    || raceState.raceState !== 'finished'
+    || !Array.isArray(raceState.summary)
+    || raceState.summary.length === 0
+  ) {
     return null;
   }
 

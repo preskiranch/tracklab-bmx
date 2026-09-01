@@ -31,10 +31,13 @@ describe('Club Live athlete review lifecycle', () => {
     } as ReturnType<typeof buildClubLiveSnapshot>;
 
     expect(clubLiveStreamSnapshotRevision(base)).toBe(
-      'club-1:rider-1:activity-session-1:bmx-race:individual',
+      'club-1:rider-1:activity-session-1:bmx-race:live:individual',
     );
     expect(clubLiveStreamSnapshotRevision({ ...base!, multiplayer: true })).toBe(
-      'club-1:rider-1:activity-session-1:bmx-race:shared-event',
+      'club-1:rider-1:activity-session-1:bmx-race:live:shared-event',
+    );
+    expect(clubLiveStreamSnapshotRevision({ ...base!, demo: true, multiplayer: true })).toBe(
+      'club-1:rider-1:activity-session-1:bmx-race:demo:shared-event',
     );
     expect(clubLiveStreamSnapshotRevision(null)).toBe('');
   });
@@ -132,6 +135,132 @@ describe('Club Live athlete review lifecycle', () => {
       .toBe('club-live-preview:first-visit');
     expect(build('club-live-preview:second-visit')?.sessionId)
       .toBe('club-live-preview:second-visit');
+  });
+
+  it('publishes an authorized Club Tablet demo without assigning or saving it to an athlete', () => {
+    const demoRace = {
+      appMode: 'race',
+      explore: null,
+      getPulled: null,
+      multiplayerActive: true,
+      multiplayerParticipantCount: 4,
+      now,
+      race: {
+        capture: null,
+        courseLengthMeters: 350,
+        players: [{ id: 1, name: 'Demo Rider 1', deviceId: 1 }],
+        riders: [{
+          playerId: 1,
+          distance: 70,
+          velocity: 7,
+          lastWatts: 300,
+          lastRawCadence: 80,
+          rank: 1,
+        }],
+        samplesByDevice: new Map([[1, {
+          at: now,
+          watts: 300,
+          cadence: 80,
+          cadenceAt: now,
+        }]]),
+        startGateActive: false,
+        state: 'racing',
+        trackId: 'track-1',
+        trackName: 'Chula Vista',
+      },
+    } as unknown as ClubLiveActivityState;
+
+    expect(buildClubLiveSnapshot({
+      accessActive: true,
+      activity: demoRace,
+      demoMode: true,
+      racePreviewSessionId: 'club-live-preview:demo-tablet-701',
+      selection: { clubId: 'club-1', studioRiderId: 'demo:tablet-701' },
+      tabletSessionActive: false,
+    })).toMatchObject({
+      clubId: 'club-1',
+      studioRiderId: 'demo:tablet-701',
+      sessionId: 'club-live-preview:demo-tablet-701',
+      demo: true,
+      multiplayer: true,
+      metrics: { participantCount: 4 },
+    });
+  });
+
+  it('publishes simulated Get Pulled and Explore screens without borrowing an athlete identity', () => {
+    const demoSelection = { clubId: 'club-1', studioRiderId: 'demo:tablet-701' };
+    const common = {
+      accessActive: true,
+      demoMode: true,
+      selection: demoSelection,
+      tabletSessionActive: false,
+    } as const;
+    const getPulled = buildClubLiveSnapshot({
+      ...common,
+      activity: {
+        appMode: 'get-pulled',
+        explore: null,
+        getPulled: {
+          sessionId: 'demo-pull-1',
+          phase: 'active',
+          playerId: 1,
+          riderId: 'demo-rider-local-only',
+          riderName: 'Demo Rider 1',
+          durationSeconds: 6,
+          airSetting: 1,
+          elapsedMs: 2_000,
+          distanceMeters: 18,
+          metrics: { live: true, watts: 700, cadence: 105, speedKph: 31 },
+          result: null,
+        },
+        multiplayerActive: false,
+        multiplayerParticipantCount: 1,
+        now,
+        race: {},
+      } as unknown as ClubLiveActivityState,
+    });
+    const explore = buildClubLiveSnapshot({
+      ...common,
+      activity: {
+        appMode: 'explore',
+        explore: {
+          sessionId: 'demo-explore-1',
+          status: 'riding',
+          route: { id: 'route-1', name: 'Demo Coast', distanceMeters: 1_000 },
+          riders: [{
+            id: 'demo-rider-1',
+            distanceMeters: 100,
+            velocityMps: 8,
+            cadence: 90,
+            watts: 320,
+            signal: 1,
+            at: now,
+          }],
+          elapsedMs: 10_000,
+        },
+        getPulled: null,
+        multiplayerActive: true,
+        multiplayerParticipantCount: 4,
+        now,
+        race: {},
+      } as unknown as ClubLiveActivityState,
+    });
+
+    expect(getPulled).toMatchObject({
+      studioRiderId: 'demo:tablet-701',
+      sessionId: 'demo-pull-1',
+      activityType: 'get-pulled',
+      demo: true,
+      multiplayer: false,
+    });
+    expect(explore).toMatchObject({
+      studioRiderId: 'demo:tablet-701',
+      sessionId: 'demo-explore-1',
+      activityType: 'explore',
+      demo: true,
+      multiplayer: true,
+      metrics: { participantCount: 4 },
+    });
   });
 
   it('preserves the unique arm ID across repeated Get Pulled attempts with the same settings', () => {

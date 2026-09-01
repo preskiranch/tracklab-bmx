@@ -51,6 +51,8 @@ export type ChatMessage = {
 };
 
 type MultiplayerPanelProps = {
+  clubTabletDemoActive?: boolean;
+  demoParticipantEligible?: boolean;
   playMode: PlayMode;
   connection: string;
   status: string;
@@ -96,6 +98,7 @@ type MultiplayerPanelProps = {
   onLeaveRoom: () => void;
   onShareInvite: () => void;
   onRandomTrack: () => void;
+  onStartClubDemoRace: () => void;
   onStartTrackVote: () => void;
   onVoteTrack: (trackId: string) => void;
   onRoomRouteChoice: (choice: SplitBranchChoice) => void;
@@ -146,6 +149,8 @@ export function formatMultiplayerProSetMinimumSpeed(speedUnit: SpeedUnit) {
 }
 
 export function MultiplayerPanel({
+  clubTabletDemoActive = false,
+  demoParticipantEligible = true,
   playMode,
   connection,
   status,
@@ -185,6 +190,7 @@ export function MultiplayerPanel({
   onLeaveRoom,
   onShareInvite,
   onRandomTrack,
+  onStartClubDemoRace,
   onStartTrackVote,
   onVoteTrack,
   onRoomRouteChoice,
@@ -301,6 +307,7 @@ export function MultiplayerPanel({
     .flatMap((state) => state.riders.map((rider) => ({ state, rider })))
     .slice(0, maxPlayers);
   const roomFlow = currentRoom?.flow;
+  const demoConnection = clubTabletDemoActive || currentRoom?.demo === true;
   const isHost = Boolean(currentRoom && currentRoom.hostId === currentUserId);
   const voteCounts = new Map<string, number>();
   Object.values(roomFlow?.votes ?? {}).forEach((trackId) => {
@@ -365,7 +372,12 @@ export function MultiplayerPanel({
             {profileReadOnly ? (
               <div className="selected-track-note">
                 <Check size={14} />
-                <span><strong>{riderName}</strong> · Club Tablet athlete identity is verified and locked for this session.</span>
+                <span>
+                  <strong>{riderName}</strong>
+                  {demoConnection
+                    ? ' · Verified Club Tablet demo identity. Simulated data is not saved.'
+                    : ' · Club Tablet athlete identity is verified and locked for this session.'}
+                </span>
               </div>
             ) : (
               <>
@@ -417,39 +429,45 @@ export function MultiplayerPanel({
 
         <div className="room-card">
           <div>
-            <span>{currentRoom?.private === false ? 'Public lobby' : 'Private room'}</span>
-            <strong>{currentRoom?.id ?? 'No room'}</strong>
+            <span>{demoConnection ? 'Private studio demo' : currentRoom?.private === false ? 'Public lobby' : 'Private room'}</span>
+            <strong>{currentRoom?.id ?? (demoConnection ? 'Matching authorized tablets…' : 'No room')}</strong>
           </div>
-          <button
-            className="square-button"
-            type="button"
-            aria-label="Copy room invite"
-            disabled={!currentRoom || !inviteUrl}
-            onClick={onShareInvite}
-          >
-            <Copy size={16} />
-          </button>
+          {!demoConnection && (
+            <button
+              className="square-button"
+              type="button"
+              aria-label="Copy room invite"
+              disabled={!currentRoom || !inviteUrl}
+              onClick={onShareInvite}
+            >
+              <Copy size={16} />
+            </button>
+          )}
         </div>
 
         <div className="room-actions">
-          <button type="button" disabled={!multiplayerOnline} onClick={onCreatePrivateRoom}>
-            <UserPlus size={14} /> Private room
-          </button>
-          <button type="button" disabled={!multiplayerOnline} onClick={onQuickMatch}>
-            <Users size={14} /> Quick match
-          </button>
-          <button type="button" disabled={!currentRoom || !inviteUrl} onClick={onShareInvite}>
-            <Link size={14} /> Share link
-          </button>
-          <button type="button" disabled={!currentRoom} onClick={onRandomTrack}>
-            <Shuffle size={14} /> Random track
-          </button>
-          <button type="button" disabled={!currentRoom || !isHost} onClick={onResetRoomFlow}>
-            <X size={14} /> Reset lobby
-          </button>
-          <button type="button" disabled={!currentRoom} onClick={onLeaveRoom}>
-            <LogOut size={14} /> Leave
-          </button>
+          {!demoConnection && (
+            <>
+              <button type="button" disabled={!multiplayerOnline} onClick={onCreatePrivateRoom}>
+                <UserPlus size={14} /> Private room
+              </button>
+              <button type="button" disabled={!multiplayerOnline} onClick={onQuickMatch}>
+                <Users size={14} /> Quick match
+              </button>
+              <button type="button" disabled={!currentRoom || !inviteUrl} onClick={onShareInvite}>
+                <Link size={14} /> Share link
+              </button>
+              <button type="button" disabled={!currentRoom} onClick={onRandomTrack}>
+                <Shuffle size={14} /> Random track
+              </button>
+              <button type="button" disabled={!currentRoom || !isHost} onClick={onResetRoomFlow}>
+                <X size={14} /> Reset lobby
+              </button>
+              <button type="button" disabled={!currentRoom} onClick={onLeaveRoom}>
+                <LogOut size={14} /> Leave
+              </button>
+            </>
+          )}
         </div>
 
         <div className="selected-track-note">
@@ -474,21 +492,49 @@ export function MultiplayerPanel({
             <Vote size={18} />
           </div>
 
+          {currentRoom.demo && !demoParticipantEligible && (
+            <p className="diagnostic-note" role="status">
+              Waiting for the next demo start. This tablet joined after the current race began.
+            </p>
+          )}
+
           {(!roomFlow || roomFlow.phase === 'lobby') && (
             <>
-              <button
-                className="primary-inline-button"
-                type="button"
-                disabled={!isHost || trackVoteCandidates.length < 3}
-                onClick={onStartTrackVote}
-              >
-                <Shuffle size={15} /> Vote on 3 mapped tracks
-              </button>
-              <p className="diagnostic-note">
-                {trackVoteCandidates.length >= 3
-                  ? `${trackVoteCandidates.length} mapped tracks with pedaling zones are eligible.`
-                  : 'Map and save at least three tracks with pedaling zones before voting.'}
-              </p>
+              {currentRoom.demo ? (
+                <>
+                  <button
+                    className="primary-inline-button"
+                    type="button"
+                    disabled={!isHost || (currentRoom.racerCount ?? 0) < 2}
+                    onClick={onStartClubDemoRace}
+                  >
+                    <Flag size={15} /> Start demo multiplayer race
+                  </button>
+                  <p className="diagnostic-note">
+                    {(currentRoom.racerCount ?? 0) >= 2
+                      ? isHost
+                        ? 'The matched activity and race setup will launch together on every demo tablet.'
+                        : 'Waiting for the first connected demo tablet to start the race.'
+                      : 'Connect at least two demo tablets with the same activity and race setup.'}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <button
+                    className="primary-inline-button"
+                    type="button"
+                    disabled={!isHost || trackVoteCandidates.length < 3}
+                    onClick={onStartTrackVote}
+                  >
+                    <Shuffle size={15} /> Vote on 3 mapped tracks
+                  </button>
+                  <p className="diagnostic-note">
+                    {trackVoteCandidates.length >= 3
+                      ? `${trackVoteCandidates.length} mapped tracks with pedaling zones are eligible.`
+                      : 'Map and save at least three tracks with pedaling zones before voting.'}
+                  </p>
+                </>
+              )}
             </>
           )}
 
@@ -549,12 +595,33 @@ export function MultiplayerPanel({
                   ? 'Race launch sent. High latency warning active.'
                   : 'Race launch sent. Full-screen gate starts on each racer device.'}</span>
               </div>
+              {currentRoom.demo && (
+                <>
+                  <button
+                    className="primary-inline-button"
+                    type="button"
+                    disabled={!isHost || currentRoom.demoRestartReady !== true}
+                    onClick={onStartClubDemoRace}
+                  >
+                    <Flag size={15} /> Race demo again
+                  </button>
+                  <p className="diagnostic-note">
+                    {currentRoom.demoRestartReady
+                      ? isHost
+                        ? demoParticipantEligible
+                          ? 'Every tablet finished. Start the next synchronized demo race when ready.'
+                          : 'The previous demo connections ended. Start a fresh synchronized race for the waiting tablets.'
+                        : 'Waiting for the first connected demo tablet to start the next race.'
+                      : 'Race again unlocks after every demo tablet finishes.'}
+                  </p>
+                </>
+              )}
             </div>
           )}
         </section>
       )}
 
-      {playMode === 'multiplayer' && currentRoom && (
+      {playMode === 'multiplayer' && currentRoom && !demoConnection && (
         <section className="panel-section voice-section">
           <div className="section-heading">
             <div>
@@ -581,7 +648,7 @@ export function MultiplayerPanel({
         </section>
       )}
 
-      {playMode === 'multiplayer' && incomingMatchInvites.length > 0 && (
+      {playMode === 'multiplayer' && !demoConnection && incomingMatchInvites.length > 0 && (
         <section className="panel-section challenge-section">
           <div className="section-heading">
             <div>
@@ -602,7 +669,7 @@ export function MultiplayerPanel({
         </section>
       )}
 
-      {playMode === 'multiplayer' && incomingChallenges.length > 0 && (
+      {playMode === 'multiplayer' && !demoConnection && incomingChallenges.length > 0 && (
         <section className="panel-section challenge-section">
           <div className="section-heading">
             <div>
@@ -623,7 +690,7 @@ export function MultiplayerPanel({
         </section>
       )}
 
-      {playMode === 'multiplayer' && (
+      {playMode === 'multiplayer' && !demoConnection && (
         <section className="panel-section online-section community-section">
           <div className="section-heading">
             <div>
@@ -812,7 +879,7 @@ export function MultiplayerPanel({
         </div>
       </section>
 
-      {playMode === 'multiplayer' && currentRoom && roomSafetyMembers.length > 0 && (
+      {playMode === 'multiplayer' && currentRoom && !demoConnection && roomSafetyMembers.length > 0 && (
         <section className="panel-section room-safety-section" aria-labelledby="room-safety-heading">
           <div className="section-heading">
             <div>
@@ -860,7 +927,7 @@ export function MultiplayerPanel({
         </section>
       )}
 
-      <section className="panel-section chat-section">
+      {!demoConnection && <section className="panel-section chat-section">
         <div className="section-heading">
           <div>
             <span className="eyebrow">Room Chat</span>
@@ -891,7 +958,7 @@ export function MultiplayerPanel({
             <Send size={16} />
           </button>
         </form>
-      </section>
+      </section>}
     </aside>
   );
 }

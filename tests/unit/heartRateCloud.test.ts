@@ -499,13 +499,15 @@ describe('private Apple Watch heart-rate cloud relay', () => {
     const clubSummaries = await clubSummariesResponse.json() as any;
     expect(clubSummaries.streams).toHaveLength(1);
     expect(clubSummaries.streams[0]).toMatchObject({
-      id: studioStreamId,
       sessionId: studioSessionId,
       studioRiderId,
       summary: { sampleCount: 1, averageBpm: 155, peakBpm: 155 },
     });
+    expect(clubSummaries.streams[0]).not.toHaveProperty('id');
+    expect(clubSummaries.streams[0]).not.toHaveProperty('streamId');
     expect(clubSummaries.streams[0]).not.toHaveProperty('riderId');
     expect(clubSummaries.streams[0]).not.toHaveProperty('pairingId');
+    expect(clubSummaries.streams[0]).not.toHaveProperty('relayScope');
     expect((await api(
       `/api/heart-rate/club-streams?clubId=${encodeURIComponent(clubId)}&sessionId=${encodeURIComponent(studioSessionId)}`,
       {},

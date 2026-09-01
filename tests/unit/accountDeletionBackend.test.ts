@@ -131,6 +131,158 @@ describe('account erasure persistence', () => {
     await persistence.deleteAuthUserAccount(ownerId);
   });
 
+  it('preserves another athlete private Watch summary when its club owner erases the club', async () => {
+    const suffix = randomUUID();
+    const ownerId = randomUUID();
+    const athleteId = randomUUID();
+    const ownerProfileKey = `user:${ownerId}`;
+    const athleteProfileKey = `user:${athleteId}`;
+    await persistence.createAuthUser(testUser(
+      ownerId,
+      `watch-erasure-owner-${suffix}@tracklab.test`,
+      'Watch Erasure Club Owner',
+    ));
+    await persistence.createAuthUser(testUser(
+      athleteId,
+      `watch-erasure-athlete-${suffix}@tracklab.test`,
+      'Watch Erasure Athlete',
+    ));
+
+    const clubId = `watch-erasure-club-${suffix}`;
+    const studioRiderId = `watch-erasure-rider-${suffix}`;
+    const club = await persistence.ensureClub(ownerProfileKey, 'Watch Erasure Club', clubId);
+    await persistence.ensureClubRosterMember(ownerProfileKey, studioRiderId, 'Watch Erasure Athlete');
+    const inviteHash = `watch-erasure-invite-${suffix}`;
+    await persistence.saveClubInvite({
+      club,
+      studioRiderId,
+      riderName: 'Watch Erasure Athlete',
+      inviteId: `watch-erasure-invite-id-${suffix}`,
+      tokenHash: inviteHash,
+      expiresAt: Date.now() + 60_000,
+    });
+    await expect(
+      persistence.claimClubInvite(inviteHash, athleteProfileKey, 'Watch Erasure Athlete'),
+    ).resolves.toEqual({ clubId, studioRiderId });
+
+    const now = Date.now() - 10_000;
+    const installIdHash = `watch-erasure-install-${suffix}`;
+    const sharingEnrollmentId = `watch-erasure-sharing-${suffix}`;
+    await expect(persistence.createOrRefreshHeartRateWatchEnrollment({
+      id: sharingEnrollmentId,
+      ownerProfileKey: athleteProfileKey,
+      requestId: `watch-erasure-sharing-request-${suffix}`,
+      installIdHash,
+      scope: 'studio',
+      clubId,
+      studioRiderId,
+      liveStudioConsent: true,
+      sessionStudioConsent: true,
+      now,
+    })).resolves.toMatchObject({ status: 'created' });
+    const personalEnrollmentId = `watch-erasure-personal-${suffix}`;
+    await expect(persistence.createOrRefreshHeartRateWatchEnrollment({
+      id: personalEnrollmentId,
+      ownerProfileKey: athleteProfileKey,
+      requestId: `watch-erasure-personal-request-${suffix}`,
+      installIdHash,
+      scope: 'personal',
+      now,
+    })).resolves.toMatchObject({ status: 'created' });
+    const pairingId = `watch-erasure-pairing-${suffix}`;
+    const ingestTokenHash = `watch-erasure-token-${suffix}`;
+    await expect(persistence.createHeartRateWatchConnection({
+      id: `watch-erasure-connection-${suffix}`,
+      enrollmentId: personalEnrollmentId,
+      ownerProfileKey: athleteProfileKey,
+      requestId: `watch-erasure-connect-request-${suffix}`,
+      installIdHash,
+      pairingId,
+      relaySessionId: `watch-connect:watch-erasure-${suffix}`,
+      riderId: `account:watch-erasure-${suffix}`,
+      pairCodeHash: `watch-erasure-code-${suffix}`,
+      ingestTokenHash,
+      connectedUntil: now + persistence.heartRateWatchConnectDurationMs,
+      now,
+    })).resolves.toMatchObject({ status: 'created' });
+    const streamId = `watch-erasure-stream-${suffix}`;
+    await expect(persistence.createHeartRateStream(
+      pairingId,
+      ingestTokenHash,
+      streamId,
+      now,
+      now,
+    )).resolves.toMatchObject({ id: streamId, relayScope: 'account-block' });
+
+    const trainingSessionId = `watch-erasure-training-${suffix}`;
+    const startedAt = now + 1_000;
+    const endedAt = now + 5_000;
+    await expect(persistence.insertHeartRateSamples(streamId, ingestTokenHash, [{
+      sequence: 0,
+      recordedAt: startedAt + 1_000,
+      activeElapsedMs: 1_000,
+      bpm: 154,
+    }], startedAt + 1_000)).resolves.toEqual([0]);
+    await expect(persistence.saveTrainingSession(athleteProfileKey, {
+      id: trainingSessionId,
+      activityType: 'get-pulled',
+      title: 'Watch summary that outlives the club',
+      startedAt,
+      endedAt,
+      durationMs: endedAt - startedAt,
+      distanceMeters: 20,
+      source: 'live',
+      details: { riderName: 'Watch Erasure Athlete', peakWatts: 640 },
+      _clubId: clubId,
+      _studioRiderId: studioRiderId,
+    })).resolves.toMatchObject({ id: trainingSessionId, _clubId: clubId, _studioRiderId: studioRiderId });
+    await expect(persistence.createHeartRateTrainingSegmentForConsentedPersonalClubSession({
+      athleteProfileKey,
+      clubId,
+      studioRiderId,
+      trainingSessionId,
+      activityType: 'get-pulled',
+      playerId: 1,
+      startedAt,
+      endedAt,
+      zoneWindows: [],
+      activeClockSegments: [],
+      now: endedAt + 1_000,
+    })).resolves.toMatchObject({
+      status: 'created',
+      segment: {
+        relayScope: 'account-block',
+        clubId,
+        studioRiderId,
+        studioVisible: true,
+        summary: { sampleCount: 1, averageBpm: 154, peakBpm: 154 },
+      },
+    });
+
+    await expect(persistence.deleteAuthUserAccount(ownerId)).resolves.toMatchObject({
+      deleted: true,
+      profileKey: ownerProfileKey,
+      clubIds: [clubId],
+    });
+    const detachedSessions = await persistence.loadTrainingSessions(athleteProfileKey);
+    expect(detachedSessions).toHaveLength(1);
+    expect(detachedSessions[0]).toMatchObject({ id: trainingSessionId });
+    expect(detachedSessions[0]).not.toHaveProperty('_clubId');
+    expect(detachedSessions[0]).not.toHaveProperty('_studioRiderId');
+    await expect(persistence.loadHeartRateTrainingSegments(
+      athleteProfileKey,
+      trainingSessionId,
+    )).resolves.toEqual([expect.objectContaining({
+      relayScope: 'account-block',
+      clubId: null,
+      studioRiderId: null,
+      studioVisible: false,
+      summary: expect.objectContaining({ sampleCount: 1, averageBpm: 154, peakBpm: 154 }),
+    })]);
+
+    await persistence.deleteAuthUserAccount(athleteId);
+  });
+
   it('orders PostgreSQL erasure around non-cascading profile keys and the official account restriction', async () => {
     const source = await readFile(new URL('../../cloud/persistence.mjs', import.meta.url), 'utf8');
     const implementation = source.slice(
@@ -143,6 +295,16 @@ describe('account erasure persistence', () => {
     expect(implementation).toContain("status = 'unclaimed'");
     expect(implementation.indexOf('DELETE FROM ${schema}.official_friend_accounts')).toBeLessThan(
       implementation.lastIndexOf('DELETE FROM ${schema}.auth_users'),
+    );
+    expect(implementation).toContain('UPDATE ${schema}.heart_rate_training_segments');
+    expect(implementation).toContain('UPDATE ${schema}.heart_rate_training_segment_bindings');
+    expect(implementation).toContain("AND relay_scope = 'account-block'");
+    expect(implementation).toContain('SET club_id = NULL, studio_rider_id = NULL, studio_visible = false');
+    expect(implementation.indexOf('UPDATE ${schema}.heart_rate_training_segments')).toBeLessThan(
+      implementation.indexOf('DELETE FROM ${schema}.clubs WHERE owner_profile_key = $1'),
+    );
+    expect(implementation.indexOf('UPDATE ${schema}.heart_rate_training_segment_bindings')).toBeLessThan(
+      implementation.indexOf('DELETE FROM ${schema}.clubs WHERE owner_profile_key = $1'),
     );
   });
 });

@@ -222,6 +222,22 @@
   grid-column: 1 / -1;
 }
 
+.club-live-tile.demo {
+  border-color: rgba(106, 197, 54, 0.42);
+  border-top-color: #78df3b;
+  background:
+    linear-gradient(145deg, rgba(239, 255, 230, 0.96), rgba(255, 255, 255, 0.98));
+}
+
+.club-live-tile.demo .club-live-athlete p {
+  color: #347419;
+  font-weight: 900;
+}
+
+.club-live-tile.demo .club-live-screen-label {
+  color: #9cff67;
+}
+
 .club-live-tile.paused { border-top-color: #f0ad32; }
 .club-live-tile.staging { border-top-color: #3ca4ed; }
 .club-live-tile.stale { border-top-color: #929b8e; opacity: 0.82; }

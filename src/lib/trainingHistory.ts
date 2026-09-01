@@ -303,6 +303,9 @@ function csvCell(value: unknown) {
 
 export function trainingSessionCsv(session: TrainingSession) {
   const safeSession = sanitizeTrainingSessionForExport(session);
+  const safeDetails = safeSession.details && typeof safeSession.details === 'object'
+    ? safeSession.details as Record<string, unknown>
+    : {};
   const reactionTimes = trainingSessionReactionTimes(safeSession);
   const summaryRows = trainingSessionRaceSummaries(safeSession).map((summary) => {
     return [
@@ -341,6 +344,29 @@ export function trainingSessionCsv(session: TrainingSession) {
     rider.topWatts ?? '',
     rider.averageWatts ?? '',
   ]));
+  const utilityRows = safeSession.activityType !== 'bmx-race'
+    && safeSession.activityType !== 'straight-sprint'
+    && Array.isArray(safeDetails.riders)
+    ? safeDetails.riders.flatMap((candidate) => {
+      if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return [];
+      const rider = candidate as Record<string, unknown>;
+      return [[
+        rider.playerId ?? '',
+        rider.riderId ?? rider.studioRiderId ?? safeSession.club?.studioRiderId ?? '',
+        rider.riderName ?? rider.name ?? safeSession.club?.riderName ?? '',
+        rider.resultStatus ?? 'finished',
+        safeDetails.durationSeconds ?? '',
+        safeDetails.airSetting ?? '',
+        rider.distanceMeters ?? safeSession.distanceMeters,
+        rider.averageSpeedKph ?? '',
+        rider.peakSpeedKph ?? '',
+        rider.averageCadence ?? '',
+        rider.peakCadence ?? '',
+        rider.averageWatts ?? '',
+        rider.peakWatts ?? '',
+      ]];
+    })
+    : [];
   const rows: Array<[string, unknown]> = [
     ['Session ID', safeSession.id],
     ['Activity', safeSession.activityType],
@@ -372,6 +398,16 @@ export function trainingSessionCsv(session: TrainingSession) {
         'Top cadence rpm', 'Average cadence rpm', 'Top watts', 'Average watts',
       ].map(csvCell).join(','),
       ...zoneRows.map((row) => row.map(csvCell).join(',')),
+    ].join('\n'));
+  }
+  if (utilityRows.length > 0) {
+    sections.push([
+      [
+        'Player ID', 'Studio rider ID', 'Rider', 'Status', 'Planned duration seconds', 'Air setting',
+        'Distance meters', 'Average speed kph', 'Peak speed kph', 'Average cadence rpm',
+        'Peak cadence rpm', 'Average watts', 'Peak watts',
+      ].map(csvCell).join(','),
+      ...utilityRows.map((row) => row.map(csvCell).join(',')),
     ].join('\n'));
   }
   return `${sections.join('\n\n')}\n`;

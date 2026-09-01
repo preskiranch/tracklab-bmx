@@ -141,8 +141,11 @@ type ExploreViewProps = {
   onDistanceUnitChange: (unit: DistanceUnit) => void;
   playMode: PlayMode;
   demoMode: boolean;
+  clubTabletDemoActive?: boolean;
   multiplayerConnection: string;
   multiplayerClockOffsetMs: number;
+  multiplayerClockMeasuredAt: number | null;
+  demoParticipantEligible: boolean;
   currentRoom: MultiplayerRoom | null;
   currentUserId: string | null;
   accountProfileKey: string | null;
@@ -367,8 +370,11 @@ export function ExploreView({
   onDistanceUnitChange,
   playMode,
   demoMode,
+  clubTabletDemoActive = false,
   multiplayerConnection,
   multiplayerClockOffsetMs,
+  multiplayerClockMeasuredAt,
+  demoParticipantEligible,
   currentRoom,
   currentUserId,
   accountProfileKey,
@@ -597,7 +603,9 @@ export function ExploreView({
   const rideSessionCancelRef = useRef(onRideSessionCancel);
   rideSessionCancelRef.current = onRideSessionCancel;
   const roomHost = Boolean(currentRoom && currentRoom.hostId === currentUserId);
-  const canChooseRoute = !serverControlledExplore && (playMode === 'local' || roomHost);
+  const clubTabletDemoRoom = clubTabletDemoActive || currentRoom?.demo === true;
+  const canChooseRoute = !serverControlledExplore
+    && (playMode === 'local' || (roomHost && (!clubTabletDemoRoom || demoParticipantEligible)));
   const activeRemoteRiders = useMemo(() => {
     if (playMode !== 'multiplayer' || !route) {
       return [];
@@ -1204,6 +1212,16 @@ export function ExploreView({
       return () => { cancelled = true; };
     }
     if (session.status === 'riding') {
+      if (
+        multiplayerClockMeasuredAt == null
+        || (currentRoom.demo && !demoParticipantEligible)
+      ) {
+        clearScheduledStart();
+        appliedRoomSessionRef.current = null;
+        resetLocalRide();
+        onFullscreenChange(false);
+        return () => { cancelled = true; };
+      }
       onFullscreenChange(true);
       if (appliedRoomSessionRef.current === session.id) {
         resumeLocalRide();
@@ -1235,6 +1253,8 @@ export function ExploreView({
   }, [
     currentRoom?.exploreSession,
     clubEventRoomReady,
+    demoParticipantEligible,
+    multiplayerClockMeasuredAt,
     multiplayerClockOffsetMs,
     pauseLocalRide,
     onFullscreenChange,
@@ -1291,7 +1311,13 @@ export function ExploreView({
   ]);
 
   useEffect(() => {
-    if (playMode !== 'multiplayer' || !currentRoom || !route || !clubEventRoomReady) {
+    if (
+      playMode !== 'multiplayer'
+      || !currentRoom
+      || !route
+      || !clubEventRoomReady
+      || (currentRoom.demo && !demoParticipantEligible)
+    ) {
       return undefined;
     }
     const timer = window.setInterval(() => {
@@ -1302,7 +1328,7 @@ export function ExploreView({
       });
     }, 300);
     return () => window.clearInterval(timer);
-  }, [clubEventRoomReady, currentRoom, onSendState, playMode, route]);
+  }, [clubEventRoomReady, currentRoom, demoParticipantEligible, onSendState, playMode, route]);
 
   const useCurrentLocation = () => {
     if (!navigator.geolocation) {
@@ -1573,7 +1599,7 @@ export function ExploreView({
     if (serverControlledExplore) return;
     void primeBikeRaceAudio();
     if (playMode === 'multiplayer') {
-      if (!roomHost) {
+      if (!roomHost || (clubTabletDemoRoom && !demoParticipantEligible)) {
         return;
       }
       onFullscreenChange(true);
@@ -1939,29 +1965,39 @@ export function ExploreView({
 
           {playMode === 'multiplayer' && (
             <section className="explore-room-card">
-              <span className="eyebrow">{serverControlledExplore ? 'Coach-led Club Event' : 'Private multiplayer'}</span>
+              <span className="eyebrow">{serverControlledExplore
+                ? 'Coach-led Club Event'
+                : clubTabletDemoRoom
+                  ? 'Club Tablet demo'
+                  : 'Private multiplayer'}</span>
               {currentRoom && clubEventRoomReady ? (
                 <>
                   <strong>Room {currentRoom.id}</strong>
                   <small>{currentRoom.racerSeatCount ?? 0} / 4 rider seats</small>
-                  <button type="button" onClick={onShareInvite} disabled={!inviteUrl}>
-                    <Share2 size={15} /> Share room link
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!voiceSupported}
-                    aria-pressed={voiceEnabled}
-                    onClick={voiceEnabled ? onVoiceStop : onVoiceStart}
-                  >
-                    {voiceEnabled ? <MicOff size={15} /> : <Mic size={15} />}
-                    {voiceEnabled ? 'Mute microphone' : 'Enable microphone'}
-                  </button>
-                  <small aria-live="polite">
-                    {voiceStatus}{voiceEnabled ? ` ${voiceRemoteCount} rider${voiceRemoteCount === 1 ? '' : 's'} connected.` : ''}
-                    {' '}Off by default. TrackLab does not record room audio.
-                  </small>
+                  {!clubTabletDemoRoom && (
+                    <>
+                      <button type="button" onClick={onShareInvite} disabled={!inviteUrl}>
+                        <Share2 size={15} /> Share room link
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!voiceSupported}
+                        aria-pressed={voiceEnabled}
+                        onClick={voiceEnabled ? onVoiceStop : onVoiceStart}
+                      >
+                        {voiceEnabled ? <MicOff size={15} /> : <Mic size={15} />}
+                        {voiceEnabled ? 'Mute microphone' : 'Enable microphone'}
+                      </button>
+                      <small aria-live="polite">
+                        {voiceStatus}{voiceEnabled ? ` ${voiceRemoteCount} rider${voiceRemoteCount === 1 ? '' : 's'} connected.` : ''}
+                        {' '}Off by default. TrackLab does not record room audio.
+                      </small>
+                    </>
+                  )}
                   {serverControlledExplore
                     ? <p>The coach selected this route and the server controls the synchronized start.</p>
+                    : clubTabletDemoRoom
+                      ? <p>Authorized demo tablets join automatically. Simulated routes and results are not saved.</p>
                     : !roomHost && <p>The room host chooses and controls the shared route.</p>}
                 </>
               ) : (
@@ -1970,12 +2006,19 @@ export function ExploreView({
                     <strong>Joining the coach event…</strong>
                     <small>The saved route and synchronized start will appear automatically.</small>
                   </>
-                ) : <>
-                  <strong>{multiplayerConnection === 'open' ? 'Open a room' : 'Connecting…'}</strong>
-                  <button type="button" onClick={onCreatePrivateRoom} disabled={multiplayerConnection !== 'open'}>
-                    <Users size={15} /> Create private room
-                  </button>
-                </>
+                ) : clubTabletDemoRoom ? (
+                  <>
+                    <strong>{multiplayerConnection === 'open' ? 'Matching authorized demo tablets…' : 'Connecting…'}</strong>
+                    <small>Keep every tablet on the same activity and setup. TrackLab joins the private studio room automatically.</small>
+                  </>
+                ) : (
+                  <>
+                    <strong>{multiplayerConnection === 'open' ? 'Open a room' : 'Connecting…'}</strong>
+                    <button type="button" onClick={onCreatePrivateRoom} disabled={multiplayerConnection !== 'open'}>
+                      <Users size={15} /> Create private room
+                    </button>
+                  </>
+                )
               )}
             </section>
           )}
@@ -2435,6 +2478,7 @@ export function ExploreView({
                         disabled={
                           players.length === 0
                           || (playMode === 'multiplayer' && (!currentRoom || !roomHost))
+                          || (clubTabletDemoRoom && !demoParticipantEligible)
                         }
                       >
                         <Play size={18} />
@@ -2731,6 +2775,12 @@ export function ExploreView({
                 </section>
               )}
 
+              {clubTabletDemoRoom && !demoParticipantEligible && (
+                <p className="explore-route-message" role="status">
+                  Waiting for the next demo start. This tablet joined after the current ride began.
+                </p>
+              )}
+
               {!serverControlledExplore && (
               <div className="explore-controls">
                 {ride.status === 'riding' ? (
@@ -2753,6 +2803,7 @@ export function ExploreView({
                     disabled={
                       players.length === 0
                       || (playMode === 'multiplayer' && (!currentRoom || !roomHost))
+                      || (clubTabletDemoRoom && !demoParticipantEligible)
                     }
                   >
                     <Play size={18} />

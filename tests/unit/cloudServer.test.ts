@@ -106,6 +106,15 @@ async function clubTabletSocketTicket(sessionToken: string) {
   return response.json() as Promise<{ ticket: string; expiresAt: number }>;
 }
 
+async function clubTabletDemoSocketTicket(deviceToken: string) {
+  const response = await api('/api/club-tablet/multiplayer-ticket', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${deviceToken}` },
+    body: JSON.stringify({ demo: true }),
+  });
+  return response;
+}
+
 async function authWebSocketTicket(authCookie: string, scope: string) {
   const response = await api('/api/auth/websocket-ticket', {
     method: 'POST',
@@ -414,7 +423,7 @@ beforeAll(async () => {
       NODE_ENV: 'test',
       PORT: String(port),
       DATABASE_URL: '',
-      TRACKLAB_ADMIN_EMAILS: 'admin-only@tracklab.test,usage-admin@tracklab.test,global-view-admin@tracklab.test,club-owner-admin@tracklab.test,overlay-only-admin@tracklab.test,capacity-admin@tracklab.test,tablet-capacity-admin@tracklab.test',
+      TRACKLAB_ADMIN_EMAILS: 'admin-only@tracklab.test,usage-admin@tracklab.test,global-view-admin@tracklab.test,club-owner-admin@tracklab.test,overlay-only-admin@tracklab.test,capacity-admin@tracklab.test,tablet-capacity-admin@tracklab.test,demo-live-admin@tracklab.test,demo-live-other-admin@tracklab.test,demo-explore-admin@tracklab.test',
       TRACKLAB_ALLOW_RACER_MAP_PUBLISH: '0',
       TRACKLAB_METRICS_TOKEN: 'test-metrics-token',
       TRACKLAB_3D_FREE_LOAD_CAP: '5000',
@@ -2916,7 +2925,9 @@ describe('cloud API trust boundaries', () => {
     const ownerViewOfAthleteSession = ownerCombinedPayload.sessions.find(
       (session: { id: string }) => session.id === `club-owner:${claimedMembership.clubId}:studio-maya:${athleteClubSessionId}`,
     );
-    expect(JSON.stringify(ownerViewOfAthleteSession)).not.toMatch(/watts?|power/i);
+    expect(ownerViewOfAthleteSession).toMatchObject({
+      details: { summaries: [{ riderId: 'studio-maya', topWatts: 1_025 }] },
+    });
     const ownerViewOfLegacyNameRace = ownerCombinedPayload.sessions.find(
       (session: { id: string }) => session.id === legacyNameRaceId,
     );
@@ -2940,6 +2951,7 @@ describe('cloud API trust boundaries', () => {
           riderId: 'studio-jordan',
           riderName: 'Jordan Lee',
           finishTimeMs: 500,
+          topWatts: 1_100,
         }],
         reactionTimesByPlayer: { 2: 190 },
         zoneResults: [{
@@ -2948,14 +2960,14 @@ describe('cloud API trust boundaries', () => {
           zoneType: 'pedal',
           startMeter: 5,
           endMeter: 25,
-          riders: [{ playerId: 2, sampleCount: 8 }],
+          riders: [{ playerId: 2, sampleCount: 8, topWatts: 1_050 }],
         }],
         events: [],
         club: { role: 'owner' },
       },
     });
     const ownerJordanJson = JSON.stringify(ownerViewOfJordanAttributed);
-    expect(ownerJordanJson).not.toMatch(/watts?|power/i);
+    expect(ownerJordanJson).toMatch(/topWatts/);
     expect(ownerJordanJson).not.toMatch(/studio-maya|Maya Torres|sibling secret|maya-only-attributed-zone/iu);
     expect(ownerCombinedPayload.sessions).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -4174,6 +4186,53 @@ describe('cloud API trust boundaries', () => {
         body: JSON.stringify(liveStreamBody),
       });
       expect(multiplayerLiveStreamPublish.status).toBe(200);
+      const multiplayerLiveStreamPayload = await multiplayerLiveStreamPublish.json();
+      expect(multiplayerLiveStreamPayload.session).toMatchObject({
+        sessionId: liveStreamSessionId,
+        presentation: 'shared',
+        sharedViewId: expect.stringMatching(/^CLUBVIEW_[A-Za-z0-9_-]{24}$/),
+      });
+
+      // Server-derived Club Event presentation must be available to the REST
+      // monitor and its JPEG fallback, not only to direct WebRTC publishers.
+      // The frame itself stays a media payload; the matching REST session is
+      // the authoritative grouping metadata for that fallback source.
+      const fallbackFramePublish = await api('/api/club-live/frames', {
+        method: 'PUT',
+        headers: athleteHeaders(selectedPayload.sessionToken),
+        body: JSON.stringify({
+          sessionId: liveStreamSessionId,
+          jpegDataUrl: onePixelJpegDataUrl,
+          width: 1,
+          height: 1,
+          capturedAt: Date.now(),
+        }),
+      });
+      expect(fallbackFramePublish.status).toBe(200);
+      const [fallbackSessionsResponse, fallbackFramesResponse] = await Promise.all([
+        fetch(`${baseUrl}/api/club-live/sessions`, {
+          headers: { Origin: baseUrl, Cookie: monitorCookie },
+        }),
+        fetch(`${baseUrl}/api/club-live/frames`, {
+          headers: { Origin: baseUrl, Cookie: monitorCookie },
+        }),
+      ]);
+      expect([fallbackSessionsResponse.status, fallbackFramesResponse.status]).toEqual([200, 200]);
+      const fallbackSessions = await fallbackSessionsResponse.json();
+      const fallbackFrames = await fallbackFramesResponse.json();
+      expect(fallbackSessions.sessions.find(
+        (session: { sessionId: string }) => session.sessionId === liveStreamSessionId,
+      )).toMatchObject({
+        presentation: 'shared',
+        sharedViewId: multiplayerLiveStreamPayload.session.sharedViewId,
+      });
+      expect(fallbackFrames.frames.find(
+        (frame: { sessionId: string }) => frame.sessionId === liveStreamSessionId,
+      )).toMatchObject({
+        deviceId: firstDevice.device.id,
+        studioRiderId: 'shared-tablet-rider-one',
+        contentType: 'image/jpeg',
+      });
       liveStreamHeartbeat = setInterval(publishLiveStreamHeartbeat, 200);
       await waitForSocketMessage(
         liveStreamViewer,
@@ -4634,11 +4693,19 @@ describe('cloud API trust boundaries', () => {
     expect(exploreCreatedPayload.event.configuration.route).not.toHaveProperty('privateToken');
     const exploreEventId = exploreCreatedPayload.event.id;
     cookie = '';
-    expect((await api('/api/club-events/current/join', {
-      method: 'POST',
-      headers: athleteHeaders(selectedPayload.sessionToken),
-      body: JSON.stringify({ eventId: exploreEventId }),
-    })).status).toBe(200);
+    const exploreJoins = await Promise.all([
+      api('/api/club-events/current/join', {
+        method: 'POST',
+        headers: athleteHeaders(selectedPayload.sessionToken),
+        body: JSON.stringify({ eventId: exploreEventId }),
+      }),
+      api('/api/club-events/current/join', {
+        method: 'POST',
+        headers: athleteHeaders(secondSelectedPayload.sessionToken),
+        body: JSON.stringify({ eventId: exploreEventId }),
+      }),
+    ]);
+    expect(exploreJoins.map((response) => response.status)).toEqual([200, 200]);
     cookie = monitorCookie;
     const exploreStarted = await api('/api/club-events/current/start', {
       method: 'POST',
@@ -4647,12 +4714,19 @@ describe('cloud API trust boundaries', () => {
     expect(exploreStarted.status).toBe(200);
     const exploreStartedPayload = await exploreStarted.json();
     cookie = '';
-    const exploreSocket = await openClubTabletSocket(selectedPayload.sessionToken);
+    let exploreSocket = await openClubTabletSocket(selectedPayload.sessionToken);
+    let exploreSocketTwo = await openClubTabletSocket(secondSelectedPayload.sessionToken);
     exploreSocket.socket.send(JSON.stringify({ type: 'join-club-event', eventId: exploreEventId }));
     const exploreRoom = await waitForSocketMessage(
       exploreSocket,
       (message) => message.type === 'room-state' && message.room?.clubEventId === exploreEventId,
     );
+    exploreSocketTwo.socket.send(JSON.stringify({ type: 'join-club-event', eventId: exploreEventId }));
+    const exploreRoomTwo = await waitForSocketMessage(
+      exploreSocketTwo,
+      (message) => message.type === 'room-state' && message.room?.clubEventId === exploreEventId,
+    );
+    expect(exploreRoomTwo.room.id).toBe(exploreRoom.room.id);
     expect(exploreRoom.room).toMatchObject({
       hostId: null,
       exploreRoute: {
@@ -4719,6 +4793,304 @@ describe('cloud API trust boundaries', () => {
       routeId: ownerExploreRoute.id,
       startedAt: exploreStartedPayload.event.startAt,
     });
+
+    const secondExploreSyncIndex = exploreSocket.messages.length;
+    exploreSocketTwo.socket.send(JSON.stringify({
+      type: 'explore-sync',
+      state: {
+        sessionId: exploreEventId,
+        routeId: ownerExploreRoute.id,
+        riders: [{ id: 'second-server-bound-rider', distanceMeters: 30, velocityMps: 4 }],
+      },
+    }));
+    await waitForSocketMessage(
+      exploreSocket,
+      (message) => message.type === 'explore-sync'
+        && message.state?.riders?.[0]?.distanceMeters === 30,
+      secondExploreSyncIndex,
+    );
+
+    const firstExploreLiveSessionId = `club-event-explore-one-${Date.now()}`;
+    const secondExploreLiveSessionId = `club-event-explore-two-${Date.now()}`;
+    const publishExploreLive = (sessionToken: string, sessionId: string, distanceMeters: number) => (
+      api('/api/club-tablet/live', {
+        method: 'PUT',
+        headers: athleteHeaders(sessionToken),
+        body: JSON.stringify({
+          sessionId,
+          activityType: 'explore',
+          status: 'active',
+          multiplayer: true,
+          progress: { fraction: distanceMeters / ownerExploreRoute.distanceMeters },
+          metrics: {
+            watts: 350,
+            cadence: 85,
+            speedKph: 18,
+            distanceMeters,
+          },
+        }),
+      })
+    );
+    const initialExploreLiveResponses = await Promise.all([
+      publishExploreLive(selectedPayload.sessionToken, firstExploreLiveSessionId, 25),
+      publishExploreLive(secondSelectedPayload.sessionToken, secondExploreLiveSessionId, 30),
+    ]);
+    expect(initialExploreLiveResponses.map((response) => response.status)).toEqual([200, 200]);
+    const initialExploreLivePayloads = await Promise.all(
+      initialExploreLiveResponses.map((response) => response.json()),
+    );
+    expect(initialExploreLivePayloads[0].session).toMatchObject({
+      presentation: 'shared',
+      sharedViewId: expect.stringMatching(/^CLUBEXPLORE_[A-Za-z0-9_-]{24}$/),
+    });
+    expect(initialExploreLivePayloads[1].session).toMatchObject({
+      presentation: 'shared',
+      sharedViewId: initialExploreLivePayloads[0].session.sharedViewId,
+    });
+    const durableExploreClusterId = initialExploreLivePayloads[0].session.sharedViewId;
+
+    // A replacement transport has no accepted current-session position. The
+    // server must immediately remove both stale shared tiles and keep the
+    // reconnect individual—even if its normal activity heartbeat resumes—
+    // until fresh, sanitized Explore telemetry arrives on that exact socket.
+    exploreSocketTwo.socket.terminate();
+    testSockets.delete(exploreSocketTwo.socket);
+    let disconnectedExplorePayloads: any[] = [];
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const responses = await Promise.all([
+        publishExploreLive(selectedPayload.sessionToken, firstExploreLiveSessionId, 25),
+        publishExploreLive(secondSelectedPayload.sessionToken, secondExploreLiveSessionId, 30),
+      ]);
+      expect(responses.map((response) => response.status)).toEqual([200, 200]);
+      disconnectedExplorePayloads = await Promise.all(responses.map((response) => response.json()));
+      if (disconnectedExplorePayloads.every(
+        (payload) => payload.session.presentation === 'individual',
+      )) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(disconnectedExplorePayloads.map(
+      (payload) => payload.session.presentation,
+    )).toEqual(['individual', 'individual']);
+    expect(disconnectedExplorePayloads.every(
+      (payload) => !Object.prototype.hasOwnProperty.call(payload.session, 'sharedViewId'),
+    )).toBe(true);
+
+    exploreSocketTwo = await openClubTabletSocket(secondSelectedPayload.sessionToken);
+    exploreSocketTwo.socket.send(JSON.stringify({
+      type: 'join-club-event',
+      eventId: exploreEventId,
+    }));
+    await waitForSocketMessage(
+      exploreSocketTwo,
+      (message) => message.type === 'room-state' && message.room?.id === exploreRoom.room.id,
+    );
+    const reconnectedBeforeSyncResponses = await Promise.all([
+      publishExploreLive(selectedPayload.sessionToken, firstExploreLiveSessionId, 25),
+      publishExploreLive(secondSelectedPayload.sessionToken, secondExploreLiveSessionId, 30),
+    ]);
+    expect(reconnectedBeforeSyncResponses.map((response) => response.status)).toEqual([200, 200]);
+    const reconnectedBeforeSyncPayloads = await Promise.all(
+      reconnectedBeforeSyncResponses.map((response) => response.json()),
+    );
+    expect(reconnectedBeforeSyncPayloads.map(
+      (payload) => payload.session.presentation,
+    )).toEqual(['individual', 'individual']);
+
+    exploreSocketTwo.socket.send(JSON.stringify({
+      type: 'explore-sync',
+      state: {
+        sessionId: `${exploreEventId}-stale`,
+        routeId: ownerExploreRoute.id,
+        riders: [{ id: 'stale-reconnected-rider', distanceMeters: 30, velocityMps: 4 }],
+      },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const staleReconnectHeartbeat = await publishExploreLive(
+      secondSelectedPayload.sessionToken,
+      secondExploreLiveSessionId,
+      30,
+    );
+    expect(staleReconnectHeartbeat.status).toBe(200);
+    await expect(staleReconnectHeartbeat.json()).resolves.toMatchObject({
+      session: { presentation: 'individual' },
+    });
+
+    const reconnectedExploreSyncIndex = exploreSocket.messages.length;
+    exploreSocketTwo.socket.send(JSON.stringify({
+      type: 'explore-sync',
+      state: {
+        sessionId: exploreEventId,
+        routeId: ownerExploreRoute.id,
+        riders: [{ id: 'fresh-reconnected-rider', distanceMeters: 30, velocityMps: 4 }],
+      },
+    }));
+    await waitForSocketMessage(
+      exploreSocket,
+      (message) => message.type === 'explore-sync'
+        && message.state?.sessionId === exploreEventId
+        && message.state?.riders?.[0]?.distanceMeters === 30,
+      reconnectedExploreSyncIndex,
+    );
+    const regroupedExploreResponses = await Promise.all([
+      publishExploreLive(selectedPayload.sessionToken, firstExploreLiveSessionId, 25),
+      publishExploreLive(secondSelectedPayload.sessionToken, secondExploreLiveSessionId, 30),
+    ]);
+    expect(regroupedExploreResponses.map((response) => response.status)).toEqual([200, 200]);
+    const regroupedExplorePayloads = await Promise.all(
+      regroupedExploreResponses.map((response) => response.json()),
+    );
+    expect(regroupedExplorePayloads[0].session).toMatchObject({
+      presentation: 'shared',
+      sharedViewId: durableExploreClusterId,
+    });
+    expect(regroupedExplorePayloads[1].session).toMatchObject({
+      presentation: 'shared',
+      sharedViewId: durableExploreClusterId,
+    });
+
+    // Split the durable pair, drop every multiplayer transport, then reconnect
+    // both inside the same active coach event. The empty server room retains
+    // the generation and the prior 50m merge threshold: a 75m gap remains two
+    // screens, and only returning to 50m regroups the same durable shared ID.
+    const splitExploreIndex = exploreSocket.messages.length;
+    exploreSocketTwo.socket.send(JSON.stringify({
+      type: 'explore-sync',
+      state: {
+        sessionId: exploreEventId,
+        routeId: ownerExploreRoute.id,
+        riders: [{ id: 'split-second-rider', distanceMeters: 150, velocityMps: 4 }],
+      },
+    }));
+    await waitForSocketMessage(
+      exploreSocket,
+      (message) => message.type === 'explore-sync'
+        && message.state?.riders?.[0]?.distanceMeters === 150,
+      splitExploreIndex,
+    );
+    const splitExploreResponses = await Promise.all([
+      publishExploreLive(selectedPayload.sessionToken, firstExploreLiveSessionId, 25),
+      publishExploreLive(secondSelectedPayload.sessionToken, secondExploreLiveSessionId, 150),
+    ]);
+    const splitExplorePayloads = await Promise.all(
+      splitExploreResponses.map((response) => response.json()),
+    );
+    expect(splitExplorePayloads.map(
+      (payload) => payload.session.presentation,
+    )).toEqual(['individual', 'individual']);
+
+    exploreSocket.socket.terminate();
+    exploreSocketTwo.socket.terminate();
+    testSockets.delete(exploreSocket.socket);
+    testSockets.delete(exploreSocketTwo.socket);
+    let fullyDisconnectedPayloads: any[] = [];
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const responses = await Promise.all([
+        publishExploreLive(selectedPayload.sessionToken, firstExploreLiveSessionId, 25),
+        publishExploreLive(secondSelectedPayload.sessionToken, secondExploreLiveSessionId, 150),
+      ]);
+      fullyDisconnectedPayloads = await Promise.all(responses.map((response) => response.json()));
+      if (fullyDisconnectedPayloads.every(
+        (payload) => payload.session.presentation === 'individual',
+      )) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(fullyDisconnectedPayloads.map(
+      (payload) => payload.session.presentation,
+    )).toEqual(['individual', 'individual']);
+
+    exploreSocket = await openClubTabletSocket(selectedPayload.sessionToken);
+    exploreSocketTwo = await openClubTabletSocket(secondSelectedPayload.sessionToken);
+    exploreSocket.socket.send(JSON.stringify({
+      type: 'join-club-event',
+      eventId: exploreEventId,
+    }));
+    const fullOutageReconnectRoom = await waitForSocketMessage(
+      exploreSocket,
+      (message) => message.type === 'room-state' && message.room?.clubEventId === exploreEventId,
+    );
+    exploreSocketTwo.socket.send(JSON.stringify({
+      type: 'join-club-event',
+      eventId: exploreEventId,
+    }));
+    const fullOutageReconnectRoomTwo = await waitForSocketMessage(
+      exploreSocketTwo,
+      (message) => message.type === 'room-state' && message.room?.clubEventId === exploreEventId,
+    );
+    expect(fullOutageReconnectRoom.room.id).toBe(exploreRoom.room.id);
+    expect(fullOutageReconnectRoomTwo.room.id).toBe(exploreRoom.room.id);
+
+    const firstFullReconnectSyncIndex = exploreSocket.messages.length;
+    exploreSocket.socket.send(JSON.stringify({
+      type: 'explore-sync',
+      state: {
+        sessionId: exploreEventId,
+        routeId: ownerExploreRoute.id,
+        riders: [{ id: 'full-reconnect-first', distanceMeters: 25, velocityMps: 4 }],
+      },
+    }));
+    await waitForSocketMessage(
+      exploreSocket,
+      (message) => message.type === 'explore-sync'
+        && message.state?.riders?.[0]?.distanceMeters === 25,
+      firstFullReconnectSyncIndex,
+    );
+    const secondFullReconnectSyncIndex = exploreSocket.messages.length;
+    exploreSocketTwo.socket.send(JSON.stringify({
+      type: 'explore-sync',
+      state: {
+        sessionId: exploreEventId,
+        routeId: ownerExploreRoute.id,
+        riders: [{ id: 'full-reconnect-second', distanceMeters: 100, velocityMps: 4 }],
+      },
+    }));
+    await waitForSocketMessage(
+      exploreSocket,
+      (message) => message.type === 'explore-sync'
+        && message.state?.riders?.[0]?.distanceMeters === 100,
+      secondFullReconnectSyncIndex,
+    );
+    const stillSplitResponses = await Promise.all([
+      publishExploreLive(selectedPayload.sessionToken, firstExploreLiveSessionId, 25),
+      publishExploreLive(secondSelectedPayload.sessionToken, secondExploreLiveSessionId, 100),
+    ]);
+    const stillSplitPayloads = await Promise.all(
+      stillSplitResponses.map((response) => response.json()),
+    );
+    expect(stillSplitPayloads.map(
+      (payload) => payload.session.presentation,
+    )).toEqual(['individual', 'individual']);
+
+    const mergeAfterOutageIndex = exploreSocket.messages.length;
+    exploreSocketTwo.socket.send(JSON.stringify({
+      type: 'explore-sync',
+      state: {
+        sessionId: exploreEventId,
+        routeId: ownerExploreRoute.id,
+        riders: [{ id: 'full-reconnect-second', distanceMeters: 75, velocityMps: 4 }],
+      },
+    }));
+    await waitForSocketMessage(
+      exploreSocket,
+      (message) => message.type === 'explore-sync'
+        && message.state?.riders?.[0]?.distanceMeters === 75,
+      mergeAfterOutageIndex,
+    );
+    const mergedAfterOutageResponses = await Promise.all([
+      publishExploreLive(selectedPayload.sessionToken, firstExploreLiveSessionId, 25),
+      publishExploreLive(secondSelectedPayload.sessionToken, secondExploreLiveSessionId, 75),
+    ]);
+    const mergedAfterOutagePayloads = await Promise.all(
+      mergedAfterOutageResponses.map((response) => response.json()),
+    );
+    expect(mergedAfterOutagePayloads[0].session).toMatchObject({
+      presentation: 'shared',
+      sharedViewId: durableExploreClusterId,
+    });
+    expect(mergedAfterOutagePayloads[1].session).toMatchObject({
+      presentation: 'shared',
+      sharedViewId: durableExploreClusterId,
+    });
+
     const wrongSessionSyncIndex = exploreSocket.messages.length;
     exploreSocket.socket.send(JSON.stringify({
       type: 'explore-sync',
@@ -4750,7 +5122,22 @@ describe('cloud API trust boundaries', () => {
       blockedExploreRouteIndex,
     );
     exploreSocket.socket.terminate();
+    exploreSocketTwo.socket.terminate();
     testSockets.delete(exploreSocket.socket);
+    testSockets.delete(exploreSocketTwo.socket);
+    const stoppedExploreLive = await Promise.all([
+      api('/api/club-tablet/live', {
+        method: 'DELETE',
+        headers: athleteHeaders(selectedPayload.sessionToken),
+        body: JSON.stringify({ sessionId: firstExploreLiveSessionId }),
+      }),
+      api('/api/club-tablet/live', {
+        method: 'DELETE',
+        headers: athleteHeaders(secondSelectedPayload.sessionToken),
+        body: JSON.stringify({ sessionId: secondExploreLiveSessionId }),
+      }),
+    ]);
+    expect(stoppedExploreLive.map((response) => response.status)).toEqual([200, 200]);
     cookie = monitorCookie;
     expect((await api('/api/club-events/current/cancel', {
       method: 'POST',
@@ -4951,12 +5338,12 @@ describe('cloud API trust boundaries', () => {
       headers: deviceHeaders(firstDevice.deviceToken),
       body: JSON.stringify(tabletFrame),
     });
-    expect(devicePublishWithOwnerCookie.status).toBe(403);
+    expect(devicePublishWithOwnerCookie.status).toBe(409);
     const deviceDeleteWithOwnerCookie = await api('/api/club-live/frames', {
       method: 'DELETE',
       headers: deviceHeaders(firstDevice.deviceToken),
     });
-    expect(deviceDeleteWithOwnerCookie.status).toBe(403);
+    expect(deviceDeleteWithOwnerCookie.status).toBe(409);
     const invalidDeviceCredentialWithOwnerCookie = await api('/api/club-live/frames', {
       headers: deviceHeaders('invalid-device-token-that-must-not-fall-back'),
     });
@@ -5174,7 +5561,14 @@ describe('cloud API trust boundaries', () => {
         details: {
           summaries: [
             { playerId: 1, riderName: 'Sibling', finishTimeMs: 900, distanceMeters: 44.2 },
-            { playerId: 2, riderName: 'Forged Name', finishTimeMs: 950, distanceMeters: 44.2 },
+            {
+              playerId: 2,
+              riderName: 'Forged Name',
+              finishTimeMs: 950,
+              distanceMeters: 44.2,
+              topWatts: 800,
+              averageWatts: 600,
+            },
           ],
           events: [{ label: 'Sibling data must not leave the tablet boundary' }],
           otherRiders: [{ name: 'Private sibling' }],
@@ -5197,6 +5591,8 @@ describe('cloud API trust boundaries', () => {
       }),
     ]);
     expect(trainingPayload.session.details.events).toEqual([]);
+    expect(trainingPayload.session.details.summaries[0]).not.toHaveProperty('topWatts');
+    expect(trainingPayload.session.details.summaries[0]).not.toHaveProperty('averageWatts');
     expect(JSON.stringify(trainingPayload)).not.toContain('Sibling data');
     expect(JSON.stringify(trainingPayload)).not.toContain('Private sibling');
     expect(JSON.stringify(trainingPayload)).not.toContain('medical note');
@@ -5210,6 +5606,12 @@ describe('cloud API trust boundaries', () => {
       replayed: true,
       session: { id: trainingId },
     });
+    const unclaimedOwnerHistory = await api(`/api/training-sessions?from=${now - 5_000}&to=${Date.now() + 1_000}`);
+    const unclaimedOwnerTraining = (await unclaimedOwnerHistory.json()).sessions.find(
+      (session: { id: string }) => session.id.includes(trainingId),
+    );
+    expect(unclaimedOwnerTraining).toBeDefined();
+    expect(JSON.stringify(unclaimedOwnerTraining)).not.toMatch(/watts?|power/i);
 
     const raceRequestPayload = {
       sessionId: raceSessionId,
@@ -5462,7 +5864,11 @@ describe('cloud API trust boundaries', () => {
     expect(claimedTrainingSession).toMatchObject({
       club: { studioRiderId: 'shared-tablet-rider-one', role: 'athlete' },
       details: {
-        summaries: [expect.objectContaining({ riderId: 'shared-tablet-rider-one' })],
+        summaries: [expect.objectContaining({
+          riderId: 'shared-tablet-rider-one',
+          topWatts: 800,
+          averageWatts: 600,
+        })],
       },
     });
     expect(JSON.stringify(claimedTrainingSession)).not.toContain('Sibling');
@@ -5518,7 +5924,1438 @@ describe('cloud API trust boundaries', () => {
       headers: athleteHeaders(claimedTabletSessionPayload.sessionToken),
     });
     cookie = originalCookie;
-  });
+  }, 30_000);
+
+  it('shares same-club Club Tablet demos privately without persisting demo athletes or results', async () => {
+    const originalCookie = cookie;
+    cookie = '';
+    const now = Date.now();
+    const password = 'demo-live-correct-horse-battery-staple';
+
+    const registerOwner = async (email: string, name: string, forwardedFor: string) => {
+      const response = await fetch(`${baseUrl}/api/auth/register`, {
+        method: 'POST',
+        headers: {
+          Origin: baseUrl,
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': forwardedFor,
+        },
+        body: JSON.stringify({ email, name, password }),
+      });
+      expect(response.status).toBe(201);
+      return String(response.headers.get('set-cookie')).split(';')[0];
+    };
+    const loginOwner = async (email: string, forwardedFor: string) => {
+      const response = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: {
+          Origin: baseUrl,
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': forwardedFor,
+        },
+        body: JSON.stringify({ email, password }),
+      });
+      expect(response.status).toBe(200);
+      return String(response.headers.get('set-cookie')).split(';')[0];
+    };
+    const enrollDevice = async (ownerCookie: string, name: string) => {
+      const response = await fetch(`${baseUrl}/api/club-tablet/devices`, {
+        method: 'POST',
+        headers: {
+          Origin: baseUrl,
+          Cookie: ownerCookie,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name }),
+      });
+      expect(response.status).toBe(201);
+      return response.json() as Promise<{
+        device: { id: string; clubId: string; name: string };
+        deviceToken: string;
+      }>;
+    };
+    const deviceRequest = (
+      deviceToken: string,
+      pathname: string,
+      init: RequestInit = {},
+    ) => fetch(`${baseUrl}${pathname}`, {
+      ...init,
+      headers: {
+        Origin: baseUrl,
+        Authorization: `Bearer ${deviceToken}`,
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        ...init.headers,
+      },
+    });
+    const ownerRequest = (ownerCookie: string, pathname: string, init: RequestInit = {}) => (
+      fetch(`${baseUrl}${pathname}`, {
+        ...init,
+        headers: {
+          Origin: baseUrl,
+          Cookie: ownerCookie,
+          ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+          ...init.headers,
+        },
+      })
+    );
+
+    const primaryEmail = 'demo-live-admin@tracklab.test';
+    const otherEmail = 'demo-live-other-admin@tracklab.test';
+    const firstEnrollmentCookie = await registerOwner(
+      primaryEmail,
+      'Demo Live Club',
+      '203.0.113.210',
+    );
+    const firstDevice = await enrollDevice(firstEnrollmentCookie, 'Bike 701');
+    const secondEnrollmentCookie = await loginOwner(primaryEmail, '203.0.113.211');
+    const secondDevice = await enrollDevice(secondEnrollmentCookie, 'Bike 959');
+    const thirdEnrollmentCookie = await loginOwner(primaryEmail, '203.0.113.213');
+    const thirdDevice = await enrollDevice(thirdEnrollmentCookie, 'Bike 729');
+    const monitorCookie = await loginOwner(primaryEmail, '203.0.113.212');
+
+    const otherEnrollmentCookie = await registerOwner(
+      otherEmail,
+      'Other Demo Live Club',
+      '203.0.113.220',
+    );
+    const otherDevice = await enrollDevice(otherEnrollmentCookie, 'Other Club Bike');
+
+    // A device bearer is not enough by itself: a short-lived, exact demo
+    // activity must exist before the server issues either multiplayer or
+    // direct screen signaling authority.
+    const ticketBeforeDemo = await clubTabletDemoSocketTicket(firstDevice.deviceToken);
+    expect(ticketBeforeDemo.status).toBe(409);
+    await expect(ticketBeforeDemo.json()).resolves.toMatchObject({
+      error: expect.stringMatching(/publish the active demo activity/i),
+    });
+    const streamTicketBeforeDemo = await deviceRequest(
+      firstDevice.deviceToken,
+      '/api/club-tablet/club-live-stream-ticket',
+      { method: 'POST' },
+    );
+    expect(streamTicketBeforeDemo.status).toBe(409);
+
+    const track = {
+      id: `club-demo-track-${now}`,
+      name: 'Private Club Demo Track',
+      country: 'United States',
+      state: 'California',
+    };
+    const demoConfigurationId = JSON.stringify(['v1', track.id, 1, 'amateur']);
+    const demoJoinMessage = {
+      type: 'join-club-demo',
+      track,
+      activityType: 'bmx-race',
+      configurationId: demoConfigurationId,
+    };
+    const firstSessionId = `club-demo-701-${now}`;
+    const secondSessionId = `club-demo-959-${now}`;
+    const thirdSessionId = `club-demo-729-${now}`;
+    const otherSessionId = `club-demo-other-${now}`;
+    const demoSnapshot = (sessionId: string, progress: number) => ({
+      demo: true,
+      sessionId,
+      // These fields are untrusted and must be replaced by the server-bound
+      // device identity rather than becoming an athlete/profile identity.
+      clubId: 'client-forged-club',
+      studioRiderId: 'client-forged-athlete',
+      riderName: 'Client Forged Demo Rider',
+      activityType: 'bmx-race',
+      status: 'active',
+      multiplayer: true,
+      trackName: track.name,
+      progress: { fraction: progress },
+      metrics: {
+        watts: 500,
+        cadence: 90,
+        speedKph: 25,
+        distanceMeters: progress * 320,
+        elapsedMs: progress * 10_000,
+      },
+    });
+    const firstSnapshot = demoSnapshot(firstSessionId, 0.1);
+    const secondSnapshot = demoSnapshot(secondSessionId, 0.15);
+    const thirdSnapshot = demoSnapshot(thirdSessionId, 0.18);
+    const otherSnapshot = demoSnapshot(otherSessionId, 0.2);
+    const publishDemo = async (
+      enrollment: { deviceToken: string },
+      snapshot: ReturnType<typeof demoSnapshot>,
+    ) => deviceRequest(enrollment.deviceToken, '/api/club-tablet/demo-live', {
+      method: 'PUT',
+      body: JSON.stringify(snapshot),
+    });
+
+    const [firstPublish, secondPublish, thirdPublish, otherPublish] = await Promise.all([
+      publishDemo(firstDevice, firstSnapshot),
+      publishDemo(secondDevice, secondSnapshot),
+      publishDemo(thirdDevice, thirdSnapshot),
+      publishDemo(otherDevice, otherSnapshot),
+    ]);
+    expect([firstPublish.status, secondPublish.status, thirdPublish.status, otherPublish.status]).toEqual([200, 200, 200, 200]);
+    const firstPublished = await firstPublish.json();
+    const secondPublished = await secondPublish.json();
+    const thirdPublished = await thirdPublish.json();
+    const otherPublished = await otherPublish.json();
+    expect(firstPublished.session).toMatchObject({
+      clubId: firstDevice.device.clubId,
+      studioRiderId: `demo:${firstDevice.device.id}`,
+      riderName: 'Demo · Bike 701',
+      athleteName: 'Demo · Bike 701',
+      sessionId: firstSessionId,
+      demo: true,
+    });
+    expect(secondPublished.session).toMatchObject({
+      clubId: firstDevice.device.clubId,
+      studioRiderId: `demo:${secondDevice.device.id}`,
+      riderName: 'Demo · Bike 959',
+      sessionId: secondSessionId,
+      demo: true,
+    });
+    expect(otherPublished.session.clubId).toBe(otherDevice.device.clubId);
+    expect(firstDevice.device.clubId).not.toBe(otherDevice.device.clubId);
+    expect(thirdPublished.session).toMatchObject({
+      studioRiderId: `demo:${thirdDevice.device.id}`,
+      riderName: 'Demo · Bike 729',
+      sessionId: thirdSessionId,
+      demo: true,
+    });
+    expect(JSON.stringify([firstPublished, secondPublished, thirdPublished, otherPublished])).not.toMatch(
+      /tokenHash|publisherDemoDeviceTokenHash/i,
+    );
+
+    let heartbeatError: unknown = null;
+    let otherHeartbeatActive = true;
+    let thirdHeartbeatActive = true;
+    let heartbeatChain = Promise.resolve();
+    const publishHeartbeat = () => {
+      heartbeatChain = heartbeatChain.then(async () => {
+        const requests = [
+          publishDemo(firstDevice, firstSnapshot),
+          publishDemo(secondDevice, secondSnapshot),
+        ];
+        if (thirdHeartbeatActive) requests.push(publishDemo(thirdDevice, thirdSnapshot));
+        if (otherHeartbeatActive) requests.push(publishDemo(otherDevice, otherSnapshot));
+        const responses = await Promise.all(requests);
+        if (responses.some((response) => response.status !== 200)) {
+          throw new Error(`Demo heartbeat failed: ${responses.map((response) => response.status).join(',')}`);
+        }
+      }).catch((error) => {
+        heartbeatError = error;
+      });
+    };
+    const heartbeat = setInterval(publishHeartbeat, 400);
+
+    let firstSocket: TestSocket | null = null;
+    let secondSocket: TestSocket | null = null;
+    let thirdSocket: TestSocket | null = null;
+    let otherSocket: TestSocket | null = null;
+    let firstStreamSocket: TestSocket | null = null;
+    let secondStreamSocket: TestSocket | null = null;
+    let ownerViewerSocket: TestSocket | null = null;
+    try {
+      const firstTicketResponse = await clubTabletDemoSocketTicket(firstDevice.deviceToken);
+      expect(firstTicketResponse.status).toBe(201);
+      const firstTicket = await firstTicketResponse.json();
+      expect(firstTicket).toMatchObject({
+        demo: true,
+        studioRiderId: `demo:${firstDevice.device.id}`,
+      });
+
+      firstSocket = await openClubTabletSocketWithTicket(firstTicket.ticket);
+      const firstConnected = await waitForSocketMessage(
+        firstSocket,
+        (message) => message.type === 'connected',
+      );
+      firstSocket.socket.send(JSON.stringify({
+        type: 'hello',
+        available: true,
+        bikeCount: 0,
+        track,
+      }));
+      await waitForSocketMessage(firstSocket, (message) => message.type === 'welcome');
+      const firstJoinIndex = firstSocket.messages.length;
+      firstSocket.socket.send(JSON.stringify(demoJoinMessage));
+      const firstJoined = await waitForSocketMessage(
+        firstSocket,
+        (message) => message.type === 'club-demo-joined',
+        firstJoinIndex,
+      );
+      expect(firstJoined.room).toMatchObject({
+        demo: true,
+        private: true,
+        purpose: 'race',
+        demoActivityType: 'bmx-race',
+        racerCount: 1,
+        racerSeatCount: 1,
+      });
+      const firstRoomId = firstJoined.room.id as string;
+
+      const firstAloneSessions = await ownerRequest(monitorCookie, '/api/club-live/sessions');
+      expect(firstAloneSessions.status).toBe(200);
+      const firstAlonePayload = await firstAloneSessions.json();
+      expect(firstAlonePayload.sessions.find(
+        (session: { sessionId: string }) => session.sessionId === firstSessionId,
+      )).toMatchObject({ presentation: 'individual' });
+
+      const secondTicketResponse = await clubTabletDemoSocketTicket(secondDevice.deviceToken);
+      expect(secondTicketResponse.status).toBe(201);
+      const secondTicket = await secondTicketResponse.json();
+      secondSocket = await openClubTabletSocketWithTicket(secondTicket.ticket);
+      const secondConnected = await waitForSocketMessage(
+        secondSocket,
+        (message) => message.type === 'connected',
+      );
+      secondSocket.socket.send(JSON.stringify({
+        type: 'hello',
+        available: true,
+        bikeCount: 0,
+        track,
+      }));
+      await waitForSocketMessage(secondSocket, (message) => message.type === 'welcome');
+      const wrongActivityIndex = secondSocket.messages.length;
+      secondSocket.socket.send(JSON.stringify({
+        ...demoJoinMessage,
+        activityType: 'straight-sprint',
+      }));
+      await waitForSocketMessage(
+        secondSocket,
+        (message) => message.type === 'room-error' && /same active demo activity/i.test(message.message),
+        wrongActivityIndex,
+      );
+      const wrongConfigurationIndex = secondSocket.messages.length;
+      secondSocket.socket.send(JSON.stringify({
+        ...demoJoinMessage,
+        configurationId: JSON.stringify(['v1', track.id, 2, 'pro']),
+      }));
+      await waitForSocketMessage(
+        secondSocket,
+        (message) => message.type === 'room-error' && /different activity or race setup/i.test(message.message),
+        wrongConfigurationIndex,
+      );
+      const secondJoinIndex = secondSocket.messages.length;
+      const firstTwoMemberIndex = firstSocket.messages.length;
+      secondSocket.socket.send(JSON.stringify(demoJoinMessage));
+      const secondJoined = await waitForSocketMessage(
+        secondSocket,
+        (message) => message.type === 'club-demo-joined',
+        secondJoinIndex,
+      );
+      const twoMemberRoomState = await waitForSocketMessage(
+        firstSocket,
+        (message) => message.type === 'room-state'
+          && message.room?.id === firstRoomId
+          && message.room?.racerCount === 2,
+        firstTwoMemberIndex,
+      );
+      expect(secondJoined.room.id).toBe(firstRoomId);
+      expect(twoMemberRoomState.room).toMatchObject({
+        demo: true,
+        private: true,
+        racerCount: 2,
+        racerSeatCount: 2,
+      });
+      expect(twoMemberRoomState.room.members).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: firstConnected.clientId,
+          name: 'Demo · Bike 701',
+          bikeCount: 0,
+          roomRole: 'racer',
+          racerSeatCount: 1,
+        }),
+        expect.objectContaining({
+          id: secondConnected.clientId,
+          name: 'Demo · Bike 959',
+          bikeCount: 0,
+          roomRole: 'racer',
+          racerSeatCount: 1,
+        }),
+      ]));
+
+      const firstLaunchIndex = firstSocket.messages.length;
+      const secondLaunchIndex = secondSocket.messages.length;
+      firstSocket.socket.send(JSON.stringify({ type: 'club-demo-start' }));
+      const firstLaunch = await waitForSocketMessage(
+        firstSocket,
+        (message) => message.type === 'room-state'
+          && message.room?.flow?.phase === 'race'
+          && typeof message.room?.flow?.raceToken === 'string',
+        firstLaunchIndex,
+      );
+      const secondLaunch = await waitForSocketMessage(
+        secondSocket,
+        (message) => message.type === 'room-state'
+          && message.room?.flow?.phase === 'race'
+          && typeof message.room?.flow?.raceToken === 'string',
+        secondLaunchIndex,
+      );
+      expect(firstLaunch.room.flow).toMatchObject({
+        selectedTrackId: track.id,
+        raceToken: secondLaunch.room.flow.raceToken,
+        raceStartAt: secondLaunch.room.flow.raceStartAt,
+      });
+      expect(Number(firstLaunch.room.flow.raceStartAt)).toBeGreaterThan(Date.now() - 100);
+
+      const repeatedLaunchIndex = firstSocket.messages.length;
+      firstSocket.socket.send(JSON.stringify({ type: 'club-demo-start' }));
+      const repeatedLaunch = await waitForSocketMessage(
+        firstSocket,
+        (message) => message.type === 'room-state'
+          && message.room?.flow?.phase === 'race',
+        repeatedLaunchIndex,
+      );
+      expect(repeatedLaunch.room.flow).toMatchObject({
+        raceToken: firstLaunch.room.flow.raceToken,
+        raceStartAt: firstLaunch.room.flow.raceStartAt,
+      });
+      const raceSessionId = `private-club-demo-race-${now}`;
+
+      await new Promise((resolve) => setTimeout(
+        resolve,
+        Math.max(0, Number(firstLaunch.room.flow.raceStartAt) - Date.now() + 25),
+      ));
+      const thirdTicketResponse = await clubTabletDemoSocketTicket(thirdDevice.deviceToken);
+      expect(thirdTicketResponse.status).toBe(201);
+      const thirdTicket = await thirdTicketResponse.json();
+      thirdSocket = await openClubTabletSocketWithTicket(thirdTicket.ticket);
+      const thirdConnected = await waitForSocketMessage(
+        thirdSocket,
+        (message) => message.type === 'connected',
+      );
+      thirdSocket.socket.send(JSON.stringify({
+        type: 'hello',
+        available: true,
+        bikeCount: 0,
+        track,
+      }));
+      await waitForSocketMessage(thirdSocket, (message) => message.type === 'welcome');
+      const thirdJoinIndex = thirdSocket.messages.length;
+      thirdSocket.socket.send(JSON.stringify(demoJoinMessage));
+      const thirdJoined = await waitForSocketMessage(
+        thirdSocket,
+        (message) => message.type === 'club-demo-joined',
+        thirdJoinIndex,
+      );
+      expect(thirdJoined.room.members).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: thirdConnected.clientId,
+          name: 'Demo · Bike 729',
+          demoParticipantEligible: false,
+        }),
+      ]));
+
+      const lateJoinMonitorResponse = await ownerRequest(monitorCookie, '/api/club-live/sessions');
+      expect(lateJoinMonitorResponse.status).toBe(200);
+      const lateJoinMonitor = await lateJoinMonitorResponse.json();
+      const lateJoinFirst = lateJoinMonitor.sessions.find(
+        (session: { sessionId: string }) => session.sessionId === firstSessionId,
+      );
+      const lateJoinSecond = lateJoinMonitor.sessions.find(
+        (session: { sessionId: string }) => session.sessionId === secondSessionId,
+      );
+      const lateJoinThird = lateJoinMonitor.sessions.find(
+        (session: { sessionId: string }) => session.sessionId === thirdSessionId,
+      );
+      expect(lateJoinFirst).toMatchObject({ presentation: 'shared' });
+      expect(lateJoinSecond).toMatchObject({
+        presentation: 'shared',
+        sharedViewId: lateJoinFirst.sharedViewId,
+      });
+      expect(lateJoinThird).toMatchObject({ presentation: 'individual' });
+      expect(lateJoinThird).not.toHaveProperty('sharedViewId');
+
+      const blockedLateRaceSessionId = `${raceSessionId}-late-seat`;
+      const blockedLateRaceIndex = firstSocket.messages.length;
+      thirdSocket.socket.send(JSON.stringify({
+        type: 'race-sync',
+        state: {
+          sessionId: blockedLateRaceSessionId,
+          raceToken: firstLaunch.room.flow.raceToken,
+          trackId: track.id,
+          raceState: 'racing',
+          riders: [{ id: 'demo-729-rider', playerId: 1, name: 'Demo · Bike 729' }],
+          summary: [],
+        },
+      }));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(firstSocket.messages.slice(blockedLateRaceIndex).some(
+        (message) => message.type === 'race-sync'
+          && message.state?.sessionId === blockedLateRaceSessionId,
+      )).toBe(false);
+
+      // Multiplayer state is smooth shared state, but a simulated rider can
+      // never create a persistent leaderboard or athlete history record.
+      const secondRaceSyncIndex = secondSocket.messages.length;
+      firstSocket.socket.send(JSON.stringify({
+        type: 'race-sync',
+        state: {
+          sessionId: raceSessionId,
+          raceToken: firstLaunch.room.flow.raceToken,
+          trackId: track.id,
+          raceState: 'racing',
+          riders: [{
+            id: 'demo-701-rider',
+            playerId: 1,
+            name: 'Demo · Bike 701',
+            distance: 25,
+            velocity: 7,
+            cadence: 95,
+            speedKph: 25.2,
+          }],
+          summary: [],
+        },
+      }));
+      await waitForSocketMessage(
+        secondSocket,
+        (message) => message.type === 'race-sync'
+          && message.state?.sessionId === raceSessionId,
+        secondRaceSyncIndex,
+      );
+      const finishedSyncIndex = secondSocket.messages.length;
+      firstSocket.socket.send(JSON.stringify({
+        type: 'race-sync',
+        state: {
+          sessionId: raceSessionId,
+          raceToken: firstLaunch.room.flow.raceToken,
+          trackId: track.id,
+          raceState: 'finished',
+          riders: [{ id: 'demo-701-rider', playerId: 1, name: 'Demo · Bike 701' }],
+          summary: [{
+            playerId: 1,
+            riderName: 'Demo · Bike 701',
+            rank: 1,
+            finishTimeMs: 1_200,
+            topCadence: 105,
+            topWatts: 800,
+          }],
+        },
+      }));
+      await waitForSocketMessage(
+        secondSocket,
+        (message) => message.type === 'race-sync'
+          && message.state?.sessionId === raceSessionId
+          && message.state?.raceState === 'finished',
+        finishedSyncIndex,
+      );
+
+      const restartReadyIndex = firstSocket.messages.length;
+      secondSocket.socket.send(JSON.stringify({
+        type: 'race-sync',
+        state: {
+          sessionId: `${raceSessionId}-bike-959`,
+          raceToken: firstLaunch.room.flow.raceToken,
+          trackId: track.id,
+          raceState: 'finished',
+          riders: [{ id: 'demo-959-rider', playerId: 1, name: 'Demo · Bike 959' }],
+          summary: [{
+            playerId: 1,
+            riderName: 'Demo · Bike 959',
+            rank: 2,
+            finishTimeMs: 1_350,
+            topCadence: 100,
+            topWatts: 760,
+          }],
+        },
+      }));
+      const restartReady = await waitForSocketMessage(
+        firstSocket,
+        (message) => message.type === 'room-state'
+          && message.room?.demoRestartReady === true,
+        restartReadyIndex,
+      );
+      expect(restartReady.room.flow.raceToken).toBe(firstLaunch.room.flow.raceToken);
+
+      const restartIndex = secondSocket.messages.length;
+      firstSocket.socket.send(JSON.stringify({ type: 'club-demo-start' }));
+      const restartedRace = await waitForSocketMessage(
+        secondSocket,
+        (message) => message.type === 'room-state'
+          && message.room?.flow?.phase === 'race'
+          && message.room?.flow?.raceToken !== firstLaunch.room.flow.raceToken,
+        restartIndex,
+      );
+      expect(restartedRace.room).toMatchObject({ demoRestartReady: false });
+      expect(restartedRace.room.flow.raceStartAt).toBeGreaterThan(firstLaunch.room.flow.raceStartAt);
+
+      const staleGenerationIndex = secondSocket.messages.length;
+      firstSocket.socket.send(JSON.stringify({
+        type: 'race-sync',
+        state: {
+          sessionId: `${raceSessionId}-stale-generation`,
+          raceToken: firstLaunch.room.flow.raceToken,
+          trackId: track.id,
+          raceState: 'finished',
+          riders: [{ id: 'demo-701-rider', playerId: 1, name: 'Demo · Bike 701' }],
+          summary: [],
+        },
+      }));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(secondSocket.messages.slice(staleGenerationIndex).some(
+        (message) => message.type === 'race-sync'
+          && message.state?.sessionId === `${raceSessionId}-stale-generation`,
+      )).toBe(false);
+      const currentGenerationSnapshotIndex = firstSocket.messages.length;
+      firstSocket.socket.send(JSON.stringify({ type: 'club-demo-start' }));
+      const currentGenerationSnapshot = await waitForSocketMessage(
+        firstSocket,
+        (message) => message.type === 'room-state'
+          && message.room?.flow?.raceToken === restartedRace.room.flow.raceToken,
+        currentGenerationSnapshotIndex,
+      );
+      expect(currentGenerationSnapshot.room.demoRestartReady).toBe(false);
+
+      // Reconnecting the same physical tablet after the immutable start time
+      // creates a new socket identity, so it must also wait for the next race.
+      await new Promise((resolve) => setTimeout(
+        resolve,
+        Math.max(0, Number(restartedRace.room.flow.raceStartAt) - Date.now() + 25),
+      ));
+      const replacementTicketResponse = await clubTabletDemoSocketTicket(secondDevice.deviceToken);
+      expect(replacementTicketResponse.status).toBe(201);
+      const replacementTicket = await replacementTicketResponse.json();
+      const replacementSocket = await openClubTabletSocketWithTicket(replacementTicket.ticket);
+      const replacementConnected = await waitForSocketMessage(
+        replacementSocket,
+        (message) => message.type === 'connected',
+      );
+      replacementSocket.socket.send(JSON.stringify({
+        type: 'hello',
+        available: true,
+        bikeCount: 0,
+        track,
+      }));
+      await waitForSocketMessage(replacementSocket, (message) => message.type === 'welcome');
+      const replacementJoinIndex = replacementSocket.messages.length;
+      replacementSocket.socket.send(JSON.stringify(demoJoinMessage));
+      const replacementJoined = await waitForSocketMessage(
+        replacementSocket,
+        (message) => message.type === 'club-demo-joined',
+        replacementJoinIndex,
+      );
+      expect(replacementJoined.room.members).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: replacementConnected.clientId,
+          name: 'Demo · Bike 959',
+          demoParticipantEligible: false,
+        }),
+      ]));
+      secondSocket = replacementSocket;
+
+      const blockedReconnectSessionId = `${raceSessionId}-reconnected-seat`;
+      const blockedReconnectIndex = firstSocket.messages.length;
+      replacementSocket.socket.send(JSON.stringify({
+        type: 'race-sync',
+        state: {
+          sessionId: blockedReconnectSessionId,
+          raceToken: restartedRace.room.flow.raceToken,
+          trackId: track.id,
+          raceState: 'racing',
+          riders: [{ id: 'demo-959-reconnected', playerId: 1, name: 'Demo · Bike 959' }],
+          summary: [],
+        },
+      }));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(firstSocket.messages.slice(blockedReconnectIndex).some(
+        (message) => message.type === 'race-sync'
+          && message.state?.sessionId === blockedReconnectSessionId,
+      )).toBe(false);
+
+      const reconnectMonitorResponse = await ownerRequest(monitorCookie, '/api/club-live/sessions');
+      expect(reconnectMonitorResponse.status).toBe(200);
+      const reconnectMonitor = await reconnectMonitorResponse.json();
+      const reconnectFirst = reconnectMonitor.sessions.find(
+        (session: { sessionId: string }) => session.sessionId === firstSessionId,
+      );
+      const reconnectSecond = reconnectMonitor.sessions.find(
+        (session: { sessionId: string }) => session.sessionId === secondSessionId,
+      );
+      const reconnectThird = reconnectMonitor.sessions.find(
+        (session: { sessionId: string }) => session.sessionId === thirdSessionId,
+      );
+      expect(reconnectFirst).toMatchObject({ presentation: 'shared' });
+      expect(reconnectThird).toMatchObject({
+        presentation: 'shared',
+        sharedViewId: reconnectFirst.sharedViewId,
+      });
+      expect(reconnectSecond).toMatchObject({ presentation: 'individual' });
+      expect(reconnectSecond).not.toHaveProperty('sharedViewId');
+
+      const reconnectDemoDevice = async (
+        enrollment: { deviceToken: string },
+      ) => {
+        const ticketResponse = await clubTabletDemoSocketTicket(enrollment.deviceToken);
+        expect(ticketResponse.status).toBe(201);
+        const ticket = await ticketResponse.json();
+        const connection = await openClubTabletSocketWithTicket(ticket.ticket);
+        const connected = await waitForSocketMessage(
+          connection,
+          (message) => message.type === 'connected',
+        );
+        connection.socket.send(JSON.stringify({
+          type: 'hello',
+          available: true,
+          bikeCount: 0,
+          track,
+        }));
+        await waitForSocketMessage(connection, (message) => message.type === 'welcome');
+        const joinIndex = connection.messages.length;
+        connection.socket.send(JSON.stringify(demoJoinMessage));
+        const joined = await waitForSocketMessage(
+          connection,
+          (message) => message.type === 'club-demo-joined',
+          joinIndex,
+        );
+        return { connection, connected, joined };
+      };
+
+      // Reconnect the remaining immutable participants one at a time. They
+      // remain waiting and cannot publish into the abandoned generation.
+      const firstReplacement = await reconnectDemoDevice(firstDevice);
+      firstSocket = firstReplacement.connection;
+      expect(firstReplacement.joined.room).toMatchObject({ demoRestartReady: false });
+      expect(firstReplacement.joined.room.members).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: firstReplacement.connected.clientId,
+          demoParticipantEligible: false,
+        }),
+      ]));
+
+      const thirdReplacement = await reconnectDemoDevice(thirdDevice);
+      thirdSocket = thirdReplacement.connection;
+      expect(thirdReplacement.joined.room).toMatchObject({ demoRestartReady: true });
+      expect(thirdReplacement.joined.room.members).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: thirdReplacement.connected.clientId,
+          demoParticipantEligible: false,
+        }),
+      ]));
+
+      const abandonedMonitorResponse = await ownerRequest(monitorCookie, '/api/club-live/sessions');
+      expect(abandonedMonitorResponse.status).toBe(200);
+      const abandonedMonitor = await abandonedMonitorResponse.json();
+      for (const sessionId of [firstSessionId, secondSessionId, thirdSessionId]) {
+        const session = abandonedMonitor.sessions.find(
+          (candidate: { sessionId: string }) => candidate.sessionId === sessionId,
+        );
+        expect(session).toMatchObject({ presentation: 'individual' });
+        expect(session).not.toHaveProperty('sharedViewId');
+      }
+
+      const reconnectSocketsByClientId = new Map<string, TestSocket>([
+        [firstReplacement.connected.clientId, firstReplacement.connection],
+        [replacementConnected.clientId, replacementSocket],
+        [thirdReplacement.connected.clientId, thirdReplacement.connection],
+      ]);
+      const restartHostSocket = reconnectSocketsByClientId.get(thirdReplacement.joined.room.hostId);
+      expect(restartHostSocket).toBeDefined();
+      const recoveredGenerationIndex = firstReplacement.connection.messages.length;
+      restartHostSocket!.socket.send(JSON.stringify({ type: 'club-demo-start' }));
+      const recoveredGeneration = await waitForSocketMessage(
+        firstReplacement.connection,
+        (message) => message.type === 'room-state'
+          && message.room?.flow?.raceToken !== restartedRace.room.flow.raceToken
+          && message.room?.demoRestartReady === false,
+        recoveredGenerationIndex,
+      );
+      expect(recoveredGeneration.room.members).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: firstReplacement.connected.clientId, demoParticipantEligible: true }),
+        expect.objectContaining({ id: replacementConnected.clientId, demoParticipantEligible: true }),
+        expect.objectContaining({ id: thirdReplacement.connected.clientId, demoParticipantEligible: true }),
+      ]));
+
+      thirdHeartbeatActive = false;
+      await heartbeatChain;
+      const stopThirdDemo = await deviceRequest(
+        thirdDevice.deviceToken,
+        '/api/club-tablet/demo-live',
+        {
+          method: 'DELETE',
+          body: JSON.stringify({ sessionId: thirdSessionId }),
+        },
+      );
+      expect(stopThirdDemo.status).toBe(200);
+
+      const primaryLobbyIndex = firstSocket.messages.length;
+      const otherTicketResponse = await clubTabletDemoSocketTicket(otherDevice.deviceToken);
+      expect(otherTicketResponse.status).toBe(201);
+      const otherTicket = await otherTicketResponse.json();
+      otherSocket = await openClubTabletSocketWithTicket(otherTicket.ticket);
+      const otherConnected = await waitForSocketMessage(
+        otherSocket,
+        (message) => message.type === 'connected',
+      );
+      otherSocket.socket.send(JSON.stringify({
+        type: 'hello',
+        available: true,
+        bikeCount: 0,
+        track,
+      }));
+      const otherWelcome = await waitForSocketMessage(otherSocket, (message) => message.type === 'welcome');
+      expect(otherWelcome.riders.map((rider: { id: string }) => rider.id)).not.toContain(
+        firstConnected.clientId,
+      );
+      expect(otherWelcome.riders.map((rider: { id: string }) => rider.id)).not.toContain(
+        secondConnected.clientId,
+      );
+      const otherJoinIndex = otherSocket.messages.length;
+      otherSocket.socket.send(JSON.stringify(demoJoinMessage));
+      const otherJoined = await waitForSocketMessage(
+        otherSocket,
+        (message) => message.type === 'club-demo-joined',
+        otherJoinIndex,
+      );
+      expect(otherJoined.room.id).not.toBe(firstRoomId);
+      expect(otherJoined.room).toMatchObject({ racerCount: 1, racerSeatCount: 1 });
+      const isolatedPrimaryLobby = await waitForSocketMessage(
+        firstSocket,
+        (message) => message.type === 'lobby-state',
+        primaryLobbyIndex,
+      );
+      expect(isolatedPrimaryLobby.riders.map((rider: { id: string }) => rider.id)).not.toContain(
+        otherConnected.clientId,
+      );
+      expect(isolatedPrimaryLobby.rooms.map((room: { id: string }) => room.id)).not.toContain(
+        otherJoined.room.id,
+      );
+
+      // Presence and multiplayer authority must not outlive the exact demo
+      // activity heartbeat. Keep the socket open, stop only this tablet's
+      // publisher heartbeat, then force the global expiry prune from an owner
+      // read. The server leaves its private room and closes the socket itself.
+      const otherSocketClosed = new Promise<{ code: number; reason: string }>((resolve) => {
+        otherSocket!.socket.once('close', (code, reason) => resolve({
+          code,
+          reason: reason.toString(),
+        }));
+      });
+      otherHeartbeatActive = false;
+      await heartbeatChain;
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      const expiryPrune = await ownerRequest(monitorCookie, '/api/club-live/sessions');
+      expect(expiryPrune.status).toBe(200);
+      const expiredSocket = await Promise.race([
+        otherSocketClosed,
+        new Promise<never>((_resolve, reject) => {
+          setTimeout(() => reject(new Error('Expired demo multiplayer socket remained open.')), 2_000);
+        }),
+      ]);
+      expect(expiredSocket).toMatchObject({
+        code: 1008,
+        reason: 'Club Tablet demo activity ended',
+      });
+      expect(otherSocket.messages).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'room-left',
+          roomId: otherJoined.room.id,
+          reason: 'club-tablet-demo-activity-ended',
+        }),
+      ]));
+
+      const ownerSessions = await ownerRequest(monitorCookie, '/api/club-live/sessions');
+      expect(ownerSessions.status).toBe(200);
+      const ownerSessionsPayload = await ownerSessions.json();
+      expect(ownerSessionsPayload.sessions).toHaveLength(2);
+      const firstOwnerSession = ownerSessionsPayload.sessions.find(
+        (session: { sessionId: string }) => session.sessionId === firstSessionId,
+      );
+      const secondOwnerSession = ownerSessionsPayload.sessions.find(
+        (session: { sessionId: string }) => session.sessionId === secondSessionId,
+      );
+      expect(firstOwnerSession).toMatchObject({
+        studioRiderId: `demo:${firstDevice.device.id}`,
+        riderName: 'Demo · Bike 701',
+        deviceId: firstDevice.device.id,
+        demo: true,
+        presentation: 'shared',
+        sharedViewId: expect.stringMatching(/^CLUBDEMO_[A-Za-z0-9_-]{24}$/),
+      });
+      expect(secondOwnerSession).toMatchObject({
+        studioRiderId: `demo:${secondDevice.device.id}`,
+        riderName: 'Demo · Bike 959',
+        deviceId: secondDevice.device.id,
+        demo: true,
+        presentation: 'shared',
+        sharedViewId: firstOwnerSession.sharedViewId,
+      });
+      expect(JSON.stringify(ownerSessionsPayload)).not.toMatch(/tokenHash|deviceToken/i);
+
+      const frameFor = (sessionId: string) => ({
+        sessionId,
+        jpegDataUrl: onePixelJpegDataUrl,
+        width: 1,
+        height: 1,
+        capturedAt: Date.now(),
+      });
+      const [firstFrame, secondFrame] = await Promise.all([
+        deviceRequest(firstDevice.deviceToken, '/api/club-live/frames', {
+          method: 'PUT',
+          body: JSON.stringify(frameFor(firstSessionId)),
+        }),
+        deviceRequest(secondDevice.deviceToken, '/api/club-live/frames', {
+          method: 'PUT',
+          body: JSON.stringify(frameFor(secondSessionId)),
+        }),
+      ]);
+      expect([firstFrame.status, secondFrame.status]).toEqual([200, 200]);
+      const ownerFrames = await ownerRequest(monitorCookie, '/api/club-live/frames');
+      expect(ownerFrames.status).toBe(200);
+      const ownerFramesPayload = await ownerFrames.json();
+      expect(ownerFramesPayload.frames).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          sessionId: firstSessionId,
+          studioRiderId: `demo:${firstDevice.device.id}`,
+          deviceId: firstDevice.device.id,
+          demo: true,
+        }),
+        expect.objectContaining({
+          sessionId: secondSessionId,
+          studioRiderId: `demo:${secondDevice.device.id}`,
+          deviceId: secondDevice.device.id,
+          demo: true,
+        }),
+      ]));
+
+      const [firstStreamTicketResponse, secondStreamTicketResponse] = await Promise.all([
+        deviceRequest(
+          firstDevice.deviceToken,
+          '/api/club-tablet/club-live-stream-ticket',
+          { method: 'POST' },
+        ),
+        deviceRequest(
+          secondDevice.deviceToken,
+          '/api/club-tablet/club-live-stream-ticket',
+          { method: 'POST' },
+        ),
+      ]);
+      expect([firstStreamTicketResponse.status, secondStreamTicketResponse.status]).toEqual([201, 201]);
+      const firstStreamTicket = await firstStreamTicketResponse.json();
+      const secondStreamTicket = await secondStreamTicketResponse.json();
+      firstStreamSocket = await openClubLiveStreamSocket({
+        clubTabletTicket: firstStreamTicket.ticket,
+      });
+      secondStreamSocket = await openClubLiveStreamSocket({
+        clubTabletTicket: secondStreamTicket.ticket,
+      });
+      firstStreamSocket.socket.send(JSON.stringify({
+        type: 'club-live-stream-register-publisher',
+        sessionId: firstSessionId,
+      }));
+      secondStreamSocket.socket.send(JSON.stringify({
+        type: 'club-live-stream-register-publisher',
+        sessionId: secondSessionId,
+      }));
+      const firstPublisher = await waitForSocketMessage(
+        firstStreamSocket,
+        (message) => message.type === 'club-live-stream-registered'
+          && message.role === 'publisher',
+      );
+      const secondPublisher = await waitForSocketMessage(
+        secondStreamSocket,
+        (message) => message.type === 'club-live-stream-registered'
+          && message.role === 'publisher',
+      );
+      expect(firstPublisher.publisher).toMatchObject({
+        demo: true,
+        presentation: 'shared',
+        sharedViewId: firstOwnerSession.sharedViewId,
+      });
+      expect(secondPublisher.publisher).toMatchObject({
+        demo: true,
+        presentation: 'shared',
+        sharedViewId: firstOwnerSession.sharedViewId,
+      });
+
+      const viewerTicket = await authWebSocketTicket(monitorCookie, 'club-live-stream');
+      ownerViewerSocket = await openClubLiveStreamSocket({ authTicket: viewerTicket.ticket });
+      ownerViewerSocket.socket.send(JSON.stringify({ type: 'club-live-stream-register-viewer' }));
+      const viewerRegistration = await waitForSocketMessage(
+        ownerViewerSocket,
+        (message) => message.type === 'club-live-stream-registered'
+          && message.role === 'viewer',
+      );
+      expect(viewerRegistration.publishers).toHaveLength(2);
+      expect(viewerRegistration.publishers.map(
+        (publisher: { sharedViewId: string }) => publisher.sharedViewId,
+      )).toEqual([firstOwnerSession.sharedViewId, firstOwnerSession.sharedViewId]);
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const leaderboard = await fetch(
+        `${baseUrl}/api/multiplayer/leaderboards?trackId=${encodeURIComponent(track.id)}`,
+        { headers: { Origin: baseUrl } },
+      );
+      expect(leaderboard.status).toBe(200);
+      const leaderboardText = JSON.stringify(await leaderboard.json());
+      expect(leaderboardText).not.toContain(raceSessionId);
+      expect(leaderboardText).not.toContain('Demo · Bike 701');
+      const ownerHistory = await ownerRequest(
+        monitorCookie,
+        `/api/training-sessions?from=${now - 1_000}&to=${Date.now() + 1_000}`,
+      );
+      expect(ownerHistory.status).toBe(200);
+      expect(JSON.stringify(await ownerHistory.json())).not.toContain(raceSessionId);
+
+      // Removing one member refreshes every affected owner presentation. The
+      // remaining tablet immediately becomes an individual screen again.
+      secondSocket.socket.close();
+      await new Promise<void>((resolve) => secondSocket!.socket.once('close', () => resolve()));
+      let remainingPresentation: Record<string, any> | undefined;
+      const presentationDeadline = Date.now() + 2_000;
+      while (Date.now() < presentationDeadline) {
+        const response = await ownerRequest(monitorCookie, '/api/club-live/sessions');
+        const payload = await response.json();
+        remainingPresentation = payload.sessions.find(
+          (session: { sessionId: string }) => session.sessionId === firstSessionId,
+        );
+        if (remainingPresentation?.presentation === 'individual') break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(remainingPresentation).toMatchObject({ presentation: 'individual' });
+      expect(remainingPresentation).not.toHaveProperty('sharedViewId');
+
+      await expectClubTabletTicketRejected(firstTicket.ticket);
+      expect(heartbeatError).toBeNull();
+    } finally {
+      clearInterval(heartbeat);
+      await heartbeatChain;
+      firstSocket?.socket.close();
+      secondSocket?.socket.close();
+      thirdSocket?.socket.close();
+      otherSocket?.socket.close();
+      firstStreamSocket?.socket.close();
+      secondStreamSocket?.socket.close();
+      ownerViewerSocket?.socket.close();
+      await Promise.all([
+        deviceRequest(firstDevice.deviceToken, '/api/club-tablet/demo-live', {
+          method: 'DELETE',
+          body: JSON.stringify({ sessionId: firstSessionId }),
+        }),
+        deviceRequest(secondDevice.deviceToken, '/api/club-tablet/demo-live', {
+          method: 'DELETE',
+          body: JSON.stringify({ sessionId: secondSessionId }),
+        }),
+        deviceRequest(thirdDevice.deviceToken, '/api/club-tablet/demo-live', {
+          method: 'DELETE',
+          body: JSON.stringify({ sessionId: thirdSessionId }),
+        }),
+        deviceRequest(otherDevice.deviceToken, '/api/club-tablet/demo-live', {
+          method: 'DELETE',
+          body: JSON.stringify({ sessionId: otherSessionId }),
+        }),
+      ]);
+      cookie = originalCookie;
+    }
+  }, 30_000);
+
+  it('holds late and reconnected Club Tablet demo Explore riders for the next server generation', async () => {
+    const originalCookie = cookie;
+    cookie = '';
+    const now = Date.now();
+    const password = 'demo-explore-correct-horse-battery-staple';
+    const email = 'demo-explore-admin@tracklab.test';
+    const register = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: {
+        Origin: baseUrl,
+        'Content-Type': 'application/json',
+        'X-Forwarded-For': '203.0.113.230',
+      },
+      body: JSON.stringify({ email, name: 'Demo Explore Generation Club', password }),
+    });
+    expect(register.status).toBe(201);
+    const ownerCookie = String(register.headers.get('set-cookie')).split(';')[0];
+    const login = async (forwardedFor: string) => {
+      const response = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: {
+          Origin: baseUrl,
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': forwardedFor,
+        },
+        body: JSON.stringify({ email, password }),
+      });
+      expect(response.status).toBe(200);
+      return String(response.headers.get('set-cookie')).split(';')[0];
+    };
+    const enroll = async (authCookie: string, name: string) => {
+      const response = await fetch(`${baseUrl}/api/club-tablet/devices`, {
+        method: 'POST',
+        headers: {
+          Origin: baseUrl,
+          Cookie: authCookie,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name }),
+      });
+      expect(response.status).toBe(201);
+      return response.json() as Promise<{
+        device: { id: string; clubId: string; name: string };
+        deviceToken: string;
+      }>;
+    };
+    const deviceRequest = (deviceToken: string, pathname: string, init: RequestInit = {}) => (
+      fetch(`${baseUrl}${pathname}`, {
+        ...init,
+        headers: {
+          Origin: baseUrl,
+          Authorization: `Bearer ${deviceToken}`,
+          ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+          ...init.headers,
+        },
+      })
+    );
+    // Enrollment turns that exact browser session into a kiosk session. Enroll
+    // first, then obtain a fresh owner session for the next physical tablet.
+    const firstDevice = await enroll(ownerCookie, 'Explore Bike 701');
+    const secondCookie = await login('203.0.113.231');
+    const secondDevice = await enroll(secondCookie, 'Explore Bike 959');
+    const thirdCookie = await login('203.0.113.232');
+    const thirdDevice = await enroll(thirdCookie, 'Explore Bike 729');
+    const monitorCookie = await login('203.0.113.233');
+    const devices = [firstDevice, secondDevice, thirdDevice];
+    const track = {
+      id: `club-demo-explore-track-${now}`,
+      name: 'Private Club Demo Explore Route',
+      country: 'United States',
+      state: 'California',
+    };
+    const route = {
+      id: `club-demo-explore-route-${now}`,
+      name: 'Demo Explore Route',
+      origin: { lat: 38.1, lng: -122.2 },
+      destination: { lat: 38.2, lng: -122.3 },
+      originLabel: 'Demo Start',
+      destinationLabel: 'Demo Finish',
+      travelMode: 'bicycle',
+      distanceMeters: 12_345,
+      durationSeconds: 2_400,
+      encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+      createdAt: now,
+    };
+    const configurationId = JSON.stringify(['v1', track.id]);
+    const sessionIds = devices.map((device, index) => (
+      `club-demo-explore-${device.device.id}-${now}-${index}`
+    ));
+    const publish = (deviceIndex: number) => deviceRequest(
+      devices[deviceIndex].deviceToken,
+      '/api/club-tablet/demo-live',
+      {
+        method: 'PUT',
+        body: JSON.stringify({
+          demo: true,
+          sessionId: sessionIds[deviceIndex],
+          activityType: 'explore',
+          status: 'active',
+          multiplayer: true,
+          trackName: track.name,
+          progress: { fraction: 0 },
+          metrics: { watts: 300, cadence: 80, speedKph: 20, distanceMeters: 0, elapsedMs: 0 },
+        }),
+      },
+    );
+    const initialPublish = await Promise.all(devices.map((_device, index) => publish(index)));
+    expect(initialPublish.map((response) => response.status)).toEqual([200, 200, 200]);
+
+    let heartbeatError: unknown = null;
+    let heartbeatChain = Promise.resolve();
+    const heartbeat = setInterval(() => {
+      heartbeatChain = heartbeatChain.then(async () => {
+        const responses = await Promise.all(devices.map((_device, index) => publish(index)));
+        if (responses.some((response) => response.status !== 200)) {
+          throw new Error(`Explore demo heartbeat failed: ${responses.map((response) => response.status).join(',')}`);
+        }
+      }).catch((error) => { heartbeatError = error; });
+    }, 200);
+
+    const sockets: TestSocket[] = [];
+    const connect = async (deviceIndex: number) => {
+      const ticketResponse = await clubTabletDemoSocketTicket(devices[deviceIndex].deviceToken);
+      expect(ticketResponse.status).toBe(201);
+      const ticket = await ticketResponse.json();
+      const connection = await openClubTabletSocketWithTicket(ticket.ticket);
+      sockets.push(connection);
+      const connected = await waitForSocketMessage(
+        connection,
+        (message) => message.type === 'connected',
+      );
+      connection.socket.send(JSON.stringify({ type: 'hello', available: true, bikeCount: 0, track }));
+      await waitForSocketMessage(connection, (message) => message.type === 'welcome');
+      const joinIndex = connection.messages.length;
+      connection.socket.send(JSON.stringify({
+        type: 'join-club-demo',
+        track,
+        activityType: 'explore',
+        configurationId,
+      }));
+      const joined = await waitForSocketMessage(
+        connection,
+        (message) => message.type === 'club-demo-joined',
+        joinIndex,
+      );
+      return { connection, connected, joined };
+    };
+
+    try {
+      const first = await connect(0);
+      const second = await connect(1);
+      expect(second.joined.room.id).toBe(first.joined.room.id);
+
+      const routeIndex = first.connection.messages.length;
+      first.connection.socket.send(JSON.stringify({ type: 'room-explore-route', route }));
+      const readyRoom = await waitForSocketMessage(
+        first.connection,
+        (message) => message.type === 'room-state'
+          && message.room?.exploreSession?.status === 'ready'
+          && message.room?.exploreRoute?.id === route.id,
+        routeIndex,
+      );
+      const startIndex = first.connection.messages.length;
+      first.connection.socket.send(JSON.stringify({ type: 'room-explore-action', action: 'start' }));
+      const firstRide = await waitForSocketMessage(
+        first.connection,
+        (message) => message.type === 'room-state'
+          && message.room?.exploreSession?.status === 'riding'
+          && message.room?.exploreSession?.id !== readyRoom.room.exploreSession.id,
+        startIndex,
+      );
+      expect(firstRide.room.members).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: first.connected.clientId, demoParticipantEligible: true }),
+        expect.objectContaining({ id: second.connected.clientId, demoParticipantEligible: true }),
+      ]));
+      await new Promise((resolve) => setTimeout(
+        resolve,
+        Math.max(0, Number(firstRide.room.exploreSession.startedAt) - Date.now() + 25),
+      ));
+
+      const third = await connect(2);
+      expect(third.joined.room.members).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: third.connected.clientId, demoParticipantEligible: false }),
+      ]));
+      const lateMonitorResponse = await fetch(`${baseUrl}/api/club-live/sessions`, {
+        headers: { Origin: baseUrl, Cookie: monitorCookie },
+      });
+      expect(lateMonitorResponse.status).toBe(200);
+      const lateMonitor = await lateMonitorResponse.json();
+      const lateFirstPresentation = lateMonitor.sessions.find(
+        (session: { sessionId: string }) => session.sessionId === sessionIds[0],
+      );
+      const lateSecondPresentation = lateMonitor.sessions.find(
+        (session: { sessionId: string }) => session.sessionId === sessionIds[1],
+      );
+      const lateThirdPresentation = lateMonitor.sessions.find(
+        (session: { sessionId: string }) => session.sessionId === sessionIds[2],
+      );
+      expect(lateFirstPresentation).toMatchObject({ presentation: 'shared' });
+      expect(lateSecondPresentation).toMatchObject({
+        presentation: 'shared',
+        sharedViewId: lateFirstPresentation.sharedViewId,
+      });
+      expect(lateThirdPresentation).toMatchObject({ presentation: 'individual' });
+      expect(lateThirdPresentation).not.toHaveProperty('sharedViewId');
+      const blockedLateSessionId = firstRide.room.exploreSession.id;
+      const blockedLateIndex = first.connection.messages.length;
+      third.connection.socket.send(JSON.stringify({
+        type: 'explore-sync',
+        state: {
+          sessionId: blockedLateSessionId,
+          routeId: route.id,
+          riders: [{
+            id: 'late-explore-rider',
+            playerId: 1,
+            name: 'Demo · Explore Bike 729',
+            distanceMeters: 10,
+            velocityMps: 2,
+            cadence: 80,
+          }],
+        },
+      }));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(first.connection.messages.slice(blockedLateIndex).some(
+        (message) => message.type === 'explore-sync'
+          && message.state?.clientId === third.connected.clientId,
+      )).toBe(false);
+
+      const replacement = await connect(1);
+      expect(replacement.joined.room.members).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: replacement.connected.clientId, demoParticipantEligible: false }),
+      ]));
+      const reconnectMonitorResponse = await fetch(`${baseUrl}/api/club-live/sessions`, {
+        headers: { Origin: baseUrl, Cookie: monitorCookie },
+      });
+      expect(reconnectMonitorResponse.status).toBe(200);
+      const reconnectMonitor = await reconnectMonitorResponse.json();
+      for (const sessionId of sessionIds) {
+        const session = reconnectMonitor.sessions.find(
+          (candidate: { sessionId: string }) => candidate.sessionId === sessionId,
+        );
+        expect(session).toMatchObject({ presentation: 'individual' });
+        expect(session).not.toHaveProperty('sharedViewId');
+      }
+
+      const resetIndex = first.connection.messages.length;
+      first.connection.socket.send(JSON.stringify({ type: 'room-explore-action', action: 'reset' }));
+      const resetRoom = await waitForSocketMessage(
+        first.connection,
+        (message) => message.type === 'room-state'
+          && message.room?.exploreSession?.status === 'ready'
+          && message.room?.exploreSession?.id !== firstRide.room.exploreSession.id,
+        resetIndex,
+      );
+      expect(resetRoom.room.members).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: third.connected.clientId, demoParticipantEligible: true }),
+        expect.objectContaining({ id: replacement.connected.clientId, demoParticipantEligible: true }),
+      ]));
+      const resetMonitorResponse = await fetch(`${baseUrl}/api/club-live/sessions`, {
+        headers: { Origin: baseUrl, Cookie: monitorCookie },
+      });
+      expect(resetMonitorResponse.status).toBe(200);
+      const resetMonitor = await resetMonitorResponse.json();
+      const resetSharedPresentations = resetMonitor.sessions.filter(
+        (session: { presentation?: string }) => session.presentation === 'shared',
+      );
+      expect(resetSharedPresentations).toHaveLength(3);
+      expect(new Set(resetSharedPresentations.map(
+        (session: { sharedViewId?: string }) => session.sharedViewId,
+      )).size).toBe(1);
+
+      const nextStartIndex = first.connection.messages.length;
+      first.connection.socket.send(JSON.stringify({ type: 'room-explore-action', action: 'start' }));
+      const nextRide = await waitForSocketMessage(
+        first.connection,
+        (message) => message.type === 'room-state'
+          && message.room?.exploreSession?.status === 'riding'
+          && message.room?.exploreSession?.id !== resetRoom.room.exploreSession.id,
+        nextStartIndex,
+      );
+      expect(nextRide.room.members).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: third.connected.clientId, demoParticipantEligible: true }),
+        expect.objectContaining({ id: replacement.connected.clientId, demoParticipantEligible: true }),
+      ]));
+      await new Promise((resolve) => setTimeout(
+        resolve,
+        Math.max(0, Number(nextRide.room.exploreSession.startedAt) - Date.now() + 25),
+      ));
+
+      const staleExploreIndex = first.connection.messages.length;
+      third.connection.socket.send(JSON.stringify({
+        type: 'explore-sync',
+        state: {
+          sessionId: firstRide.room.exploreSession.id,
+          routeId: route.id,
+          riders: [],
+        },
+      }));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(first.connection.messages.slice(staleExploreIndex).some(
+        (message) => message.type === 'explore-sync'
+          && message.state?.sessionId === firstRide.room.exploreSession.id,
+      )).toBe(false);
+
+      const acceptedExploreIndex = first.connection.messages.length;
+      third.connection.socket.send(JSON.stringify({
+        type: 'explore-sync',
+        state: {
+          sessionId: nextRide.room.exploreSession.id,
+          routeId: route.id,
+          riders: [{
+            id: 'next-explore-rider',
+            playerId: 1,
+            name: 'Demo · Explore Bike 729',
+            distanceMeters: 20,
+            velocityMps: 3,
+            cadence: 85,
+          }],
+        },
+      }));
+      await waitForSocketMessage(
+        first.connection,
+        (message) => message.type === 'explore-sync'
+          && message.state?.sessionId === nextRide.room.exploreSession.id
+          && message.state?.clientId === third.connected.clientId,
+        acceptedExploreIndex,
+      );
+
+      const publishExploreDistance = async (
+        connection: TestSocket,
+        clientId: string,
+        riderId: string,
+        distanceMeters: number,
+      ) => {
+        const messageIndex = first.connection.messages.length;
+        connection.socket.send(JSON.stringify({
+          type: 'explore-sync',
+          state: {
+            sessionId: nextRide.room.exploreSession.id,
+            routeId: route.id,
+            riders: [{
+              id: riderId,
+              playerId: 1,
+              name: riderId,
+              distanceMeters,
+              velocityMps: 3,
+              cadence: 85,
+            }],
+          },
+        }));
+        await waitForSocketMessage(
+          first.connection,
+          (message) => message.type === 'explore-sync'
+            && message.state?.sessionId === nextRide.room.exploreSession.id
+            && message.state?.clientId === clientId
+            && message.state?.riders?.[0]?.distanceMeters === distanceMeters,
+          messageIndex,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      };
+      const monitorPresentationCounts = async () => {
+        const response = await fetch(`${baseUrl}/api/club-live/sessions`, {
+          headers: { Origin: baseUrl, Cookie: monitorCookie },
+        });
+        expect(response.status).toBe(200);
+        const payload = await response.json();
+        const active = payload.sessions.filter((session: { sessionId: string }) => (
+          sessionIds.includes(session.sessionId)
+        ));
+        return {
+          shared: active.filter((session: { presentation?: string }) => session.presentation === 'shared'),
+          individual: active.filter((session: { presentation?: string }) => session.presentation === 'individual'),
+        };
+      };
+
+      await publishExploreDistance(first.connection, first.connected.clientId, 'Explore Bike 701', 0);
+      await publishExploreDistance(replacement.connection, replacement.connected.clientId, 'Explore Bike 959', 10);
+      await publishExploreDistance(third.connection, third.connected.clientId, 'Explore Bike 729', 20);
+      expect((await monitorPresentationCounts()).shared).toHaveLength(3);
+
+      await publishExploreDistance(third.connection, third.connected.clientId, 'Explore Bike 729', 150);
+      const oneBreakaway = await monitorPresentationCounts();
+      expect(oneBreakaway.shared).toHaveLength(2);
+      expect(oneBreakaway.individual).toHaveLength(1);
+
+      await publishExploreDistance(replacement.connection, replacement.connected.clientId, 'Explore Bike 959', 150);
+      await publishExploreDistance(third.connection, third.connected.clientId, 'Explore Bike 729', 300);
+      const allSeparated = await monitorPresentationCounts();
+      expect(allSeparated.shared).toHaveLength(0);
+      expect(allSeparated.individual).toHaveLength(3);
+
+      await publishExploreDistance(replacement.connection, replacement.connected.clientId, 'Explore Bike 959', 10);
+      await publishExploreDistance(third.connection, third.connected.clientId, 'Explore Bike 729', 20);
+      const regrouped = await monitorPresentationCounts();
+      expect(regrouped.shared).toHaveLength(3);
+      expect(new Set(regrouped.shared.map(
+        (session: { sharedViewId?: string }) => session.sharedViewId,
+      )).size).toBe(1);
+      expect(heartbeatError).toBeNull();
+    } finally {
+      clearInterval(heartbeat);
+      await heartbeatChain;
+      sockets.forEach((connection) => connection.socket.close());
+      await Promise.all(devices.map((device, index) => deviceRequest(
+        device.deviceToken,
+        '/api/club-tablet/demo-live',
+        { method: 'DELETE', body: JSON.stringify({ sessionId: sessionIds[index] }) },
+      )));
+      cookie = originalCookie;
+    }
+  }, 30_000);
 
   it('serializes shared tablet athlete selection across concurrent club requests', async () => {
     const originalCookie = cookie;

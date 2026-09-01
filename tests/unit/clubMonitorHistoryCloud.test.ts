@@ -210,6 +210,73 @@ describe('owner-operated Monitor View athlete history', () => {
     expect(clubStateResponse.status).toBe(200);
     const clubState = await clubStateResponse.json() as any;
     const clubId = clubState.ownedClub.id as string;
+    const mixedPowerStartedAt = Date.now() - 12_000;
+    const mixedPowerSessionId = `mixed-owner-power-${mixedPowerStartedAt}`;
+    const mixedPowerSave = await api('/api/training-sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        session: {
+          id: mixedPowerSessionId,
+          activityType: 'bmx-race',
+          title: 'Mixed claimed and unclaimed owner race',
+          startedAt: mixedPowerStartedAt,
+          endedAt: mixedPowerStartedAt + 5_000,
+          durationMs: 5_000,
+          distanceMeters: 72.5,
+          source: 'live',
+          createdAt: mixedPowerStartedAt,
+          details: {
+            peakWatts: 9_999,
+            summaries: [{
+              playerId: 1,
+              riderId: riderOne,
+              riderName: 'Monitor Athlete',
+              topWatts: 1_250,
+              averageWatts: 640,
+            }, {
+              playerId: 3,
+              riderId: unclaimedRider,
+              riderName: 'Not Claimed',
+              topWatts: 1_100,
+              averageWatts: 610,
+            }, {
+              playerId: 4,
+              riderName: 'Legacy name only',
+              topWatts: 1_050,
+              averageWatts: 590,
+            }],
+            zoneResults: [{
+              zoneId: 'mixed-zone',
+              riders: [{ playerId: 1, topWatts: 1_200, averageWatts: 630 },
+                { playerId: 3, topWatts: 1_080, averageWatts: 600 },
+                { playerId: 4, topWatts: 1_020, averageWatts: 580 }],
+            }],
+          },
+        },
+      }),
+    }, owner.cookie);
+    expect(mixedPowerSave.status).toBe(201);
+    const mixedOwnerHistoryResponse = await api('/api/training-sessions', {}, owner.cookie);
+    expect(mixedOwnerHistoryResponse.status).toBe(200);
+    const mixedOwnerSession = (await mixedOwnerHistoryResponse.json() as any).sessions.find(
+      (candidate: any) => candidate.id === mixedPowerSessionId,
+    );
+    expect(mixedOwnerSession).toBeDefined();
+    expect(mixedOwnerSession.details).not.toHaveProperty('peakWatts');
+    expect(mixedOwnerSession.details.summaries[0]).toMatchObject({
+      riderId: riderOne,
+      topWatts: 1_250,
+      averageWatts: 640,
+    });
+    expect(JSON.stringify(mixedOwnerSession.details.summaries[1])).not.toMatch(/watts?|power/i);
+    expect(JSON.stringify(mixedOwnerSession.details.summaries[2])).not.toMatch(/watts?|power/i);
+    expect(mixedOwnerSession.details.zoneResults[0].riders[0]).toMatchObject({
+      playerId: 1,
+      topWatts: 1_200,
+      averageWatts: 630,
+    });
+    expect(JSON.stringify(mixedOwnerSession.details.zoneResults[0].riders[1])).not.toMatch(/watts?|power/i);
+    expect(JSON.stringify(mixedOwnerSession.details.zoneResults[0].riders[2])).not.toMatch(/watts?|power/i);
     const armedAt = Date.now() - 6_000;
     const startedAt = armedAt + 1_000;
     const sessionId = `monitor-sprint:${riderOne}:${startedAt}`;
@@ -620,18 +687,17 @@ describe('owner-operated Monitor View athlete history', () => {
           playerId: 1,
           riderId: riderOne,
           riderName: 'Monitor Athlete',
+          averageWatts: 640,
+          peakWatts: 1_250,
           averageCadence: 156,
           peakCadence: 200,
         }],
       },
     });
-    expect(saved.session.details.riders[0]).not.toHaveProperty('averageWatts');
-    expect(saved.session.details.riders[0]).not.toHaveProperty('peakWatts');
     expect(saved.heartRate).toMatchObject({
       status: 'created',
       segment: {
         trainingSessionId: sessionId,
-        relayScope: 'studio-block',
         summary: {
           sampleCount: 3,
           coverageMs: 5_000,
@@ -642,7 +708,7 @@ describe('owner-operated Monitor View athlete history', () => {
         },
       },
     });
-    expect(JSON.stringify(saved.heartRate)).not.toMatch(/profileKey|pairingId|token|hash/i);
+    expect(JSON.stringify(saved.heartRate)).not.toMatch(/profileKey|pairingId|streamId|relayScope|token|hash/i);
 
     const athleteHeartRate = await api(
       `/api/heart-rate/streams?sessionId=${encodeURIComponent(sessionId)}`,
@@ -670,7 +736,7 @@ describe('owner-operated Monitor View athlete history', () => {
         summary: expect.objectContaining({ sampleCount: 3, averageBpm: 155 }),
       }),
     ]);
-    expect(JSON.stringify(clubHeartRateBody)).not.toMatch(/"riderId"|profileKey|pairingId|token|hash/i);
+    expect(JSON.stringify(clubHeartRateBody)).not.toMatch(/"(id|riderId|streamId|pairingId|relayScope)"|profileKey|token|hash/i);
 
     const [ownerEvent, athleteEvent] = await Promise.all([
       waitForEvent(ownerEvents, 'training-history-updated'),
@@ -896,11 +962,11 @@ describe('owner-operated Monitor View athlete history', () => {
     expect(secondSaved.heartRate).toMatchObject({
       status: 'created',
       segment: {
-        streamId: blockStream.id,
         trainingSessionId: secondSessionId,
         summary: { sampleCount: 3, averageBpm: 177.5, peakBpm: 185 },
       },
     });
+    expect(JSON.stringify(secondSaved.heartRate)).not.toMatch(/"(id|streamId|pairingId|relayScope)"/i);
     const blockEndedAt = secondStartedAt + 6_000;
     const finalizedBlockResponse = await api(
       `/api/heart-rate/streams/${blockStream.id}/finalize`,
@@ -950,9 +1016,8 @@ describe('owner-operated Monitor View athlete history', () => {
     ));
     expect(clubSession).toMatchObject({
       club: { id: clubId, studioRiderId: riderOne, role: 'owner' },
-      details: { riders: [{ peakCadence: 200 }] },
+      details: { riders: [{ averageWatts: 640, peakWatts: 1_250, peakCadence: 200 }] },
     });
-    expect(clubSession.details.riders[0]).not.toHaveProperty('peakWatts');
     const secondHistory = await api('/api/training-sessions', {}, secondAthlete.cookie);
     expect((await secondHistory.json() as any).sessions.some((candidate: any) => candidate.id === sessionId)).toBe(false);
 
