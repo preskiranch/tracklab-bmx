@@ -16142,6 +16142,68 @@ async function serveStatic(request, response) {
     await handleClubGroupTrainingHistoryApi(request, response, requestUrl);
     return;
   }
+  if (requestUrl.pathname === '/api/bike-shops/viewport') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (!enforceNoStoreRateLimit(
+      request,
+      response,
+      bikeShopDirectoryRateLimiter,
+      60,
+      'bike-shop-viewport',
+    )) return;
+    if (requestUrl.search) {
+      writeJson(response, 400, {
+        error: 'Viewport coordinates must be sent only in the JSON request body.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    try {
+      const payload = await readJsonBody(request, 1_024);
+      const result = await bikeShopDirectory.searchViewport(payload);
+      const approved = await persistence.loadApprovedBikeShopClaimIdentities(
+        result.shops.map((shop) => ({
+          source: 'openstreetmap',
+          osmElementType: shop.source?.elementType,
+          osmElementId: shop.source?.elementId,
+        })),
+      );
+      writeJson(response, 200, {
+        bounds: result.bounds,
+        shops: applyApprovedBikeShopClaims(result.shops, approved),
+        truncated: result.truncated,
+        attribution: result.attribution,
+      }, { 'Cache-Control': 'private, no-store' });
+    } catch (error) {
+      if (writeBikeShopClaimStorageUnavailable(error, response)) return;
+      if (error instanceof HttpRequestError) {
+        writeJson(response, error.statusCode, { error: error.message }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (error instanceof RangeError) {
+        writeJson(response, 400, { error: error.message }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      const timedOut = error?.name === 'AbortError';
+      const busy = error?.code === 'OVERPASS_BUSY';
+      cloudTelemetry.warn('bike_shop_viewport.upstream_failed', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      writeJson(response, busy ? 503 : timedOut ? 504 : 502, {
+        error: busy
+          ? 'The open bike shop directory is busy. Please retry shortly.'
+          : timedOut
+          ? 'The open bike shop directory timed out. Please try again.'
+          : 'The open bike shop directory is temporarily unavailable.',
+      }, {
+        'Cache-Control': 'no-store',
+        ...(busy ? { 'Retry-After': String(error.retryAfterSeconds || 3) } : {}),
+      });
+    }
+    return;
+  }
   if (requestUrl.pathname === '/api/bike-shops/nearby') {
     if (request.method !== 'POST') {
       writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });

@@ -9,8 +9,19 @@ export const bikeShopSearchLimits = Object.freeze({
   upstreamTimeoutMs: 12_000,
   cacheTtlMs: 15 * 60 * 1000,
   maximumCacheEntries: 256,
+  maximumViewportCacheEntries: 32,
+  maximumViewportCachedCandidates: 500,
+  maximumViewportCacheBytesPerEntry: 512 * 1024,
   maximumConcurrentUpstreamRequests: 4,
+  minimumViewportZoom: 11,
+  maximumViewportZoom: 22,
+  maximumViewportLatitudeSpan: 1.5,
+  maximumViewportLongitudeSpan: 2,
+  maximumViewportArea: 3,
+  maximumViewportDiagonalMiles: 100,
 });
+
+const maximumWebMercatorLatitude = 85.051129;
 
 function finiteNumber(value) {
   if (value === null || value === undefined || String(value).trim() === '') return null;
@@ -38,6 +49,59 @@ export function parseBikeShopSearch(input) {
     throw new RangeError('radiusMiles must be 5, 10, 15, 20, 25, 30, 35, 40, 45, or 50.');
   }
   return { latitude, longitude, radiusMiles };
+}
+
+function strictJsonNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function longitudeSpan(west, east) {
+  return west < east ? east - west : (180 - west) + (east + 180);
+}
+
+export function parseBikeShopViewport(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new RangeError('A viewport object is required.');
+  }
+  const north = strictJsonNumber(input.north);
+  const south = strictJsonNumber(input.south);
+  const east = strictJsonNumber(input.east);
+  const west = strictJsonNumber(input.west);
+  const zoom = strictJsonNumber(input.zoom);
+  if (
+    north === null || south === null
+    || north > maximumWebMercatorLatitude || north < -maximumWebMercatorLatitude
+    || south > maximumWebMercatorLatitude || south < -maximumWebMercatorLatitude
+    || north <= south
+  ) throw new RangeError('north and south must define a valid Web Mercator latitude span.');
+  if (
+    east === null || west === null
+    || east < -180 || east > 180 || west < -180 || west > 180
+    || east === west
+  ) throw new RangeError('east and west must define a valid longitude span.');
+  if (
+    zoom === null
+    || zoom < bikeShopSearchLimits.minimumViewportZoom
+    || zoom > bikeShopSearchLimits.maximumViewportZoom
+  ) {
+    throw new RangeError(
+      `zoom must be between ${bikeShopSearchLimits.minimumViewportZoom} and ${bikeShopSearchLimits.maximumViewportZoom}.`,
+    );
+  }
+  const latitudeSpan = north - south;
+  const viewportLongitudeSpan = longitudeSpan(west, east);
+  const diagonalMiles = distanceMiles(
+    { latitude: south, longitude: west },
+    { latitude: north, longitude: east },
+  );
+  if (
+    viewportLongitudeSpan <= 0
+    || latitudeSpan > bikeShopSearchLimits.maximumViewportLatitudeSpan
+    || viewportLongitudeSpan > bikeShopSearchLimits.maximumViewportLongitudeSpan
+    || latitudeSpan * viewportLongitudeSpan > bikeShopSearchLimits.maximumViewportArea
+    || diagonalMiles > bikeShopSearchLimits.maximumViewportDiagonalMiles
+  ) throw new RangeError('The map area is too large. Zoom in before searching this viewport.');
+  return { north, south, east, west, zoom };
 }
 
 const claimantRoles = new Set(['owner', 'manager', 'authorized-representative']);
@@ -98,14 +162,27 @@ function distanceMiles(from, to) {
 
 function addressFromTags(tags) {
   const line = [tags['addr:housenumber'], tags['addr:street']].filter(Boolean).join(' ');
-  const locality = tags['addr:city'] || tags['addr:town'] || tags['addr:village'];
-  const region = tags['addr:state'] || tags['addr:province'];
+  const locality = tags['addr:city']
+    || tags['addr:town']
+    || tags['addr:village']
+    || tags['is_in:city']
+    || tags['is_in:town'];
+  const region = tags['addr:state']
+    || tags['addr:province']
+    || tags['is_in:state']
+    || tags['is_in:province'];
+  const countryCode = [
+    tags['addr:country'],
+    tags['is_in:country_code'],
+    tags['ISO3166-1:alpha2'],
+  ].map((value) => safeText(value, 8).toUpperCase())
+    .find((value) => /^[A-Z]{2}$/u.test(value)) || '';
   return {
     line1: safeText(line),
     locality: safeText(locality),
     region: safeText(region),
     postalCode: safeText(tags['addr:postcode'], 40),
-    countryCode: safeText(tags['addr:country'], 8).toUpperCase(),
+    countryCode,
     formatted: safeText([line, locality, region, tags['addr:postcode']].filter(Boolean).join(', ')),
   };
 }
@@ -188,6 +265,44 @@ function bikeShopCandidatesForOrigin(candidates, origin, maximumResults = bikeSh
     }));
 }
 
+function viewportContains(viewport, shop) {
+  const latitudeInside = shop.latitude >= viewport.south && shop.latitude <= viewport.north;
+  const longitudeInside = viewport.west < viewport.east
+    ? shop.longitude >= viewport.west && shop.longitude <= viewport.east
+    : shop.longitude >= viewport.west || shop.longitude <= viewport.east;
+  return latitudeInside && longitudeInside;
+}
+
+function viewportCenter(viewport) {
+  const span = longitudeSpan(viewport.west, viewport.east);
+  let longitude = viewport.west + span / 2;
+  if (longitude > 180) longitude -= 360;
+  return {
+    latitude: (viewport.north + viewport.south) / 2,
+    longitude,
+  };
+}
+
+function bikeShopCandidatesForViewport(
+  candidates,
+  viewport,
+  maximumResults = bikeShopSearchLimits.maximumResults,
+) {
+  const center = viewportCenter(viewport);
+  const matches = candidates
+    .filter((shop) => viewportContains(viewport, shop))
+    .map((shop) => ({ shop, exactDistanceMiles: distanceMiles(center, shop) }))
+    .sort((a, b) => (
+      a.exactDistanceMiles - b.exactDistanceMiles
+      || a.shop.name.localeCompare(b.shop.name)
+      || a.shop.id.localeCompare(b.shop.id)
+    ));
+  return {
+    shops: matches.slice(0, maximumResults).map(({ shop }) => shop),
+    truncated: matches.length > maximumResults,
+  };
+}
+
 export function normalizeOverpassBikeShops(payload, origin, maximumResults = bikeShopSearchLimits.maximumResults) {
   return bikeShopCandidatesForOrigin(normalizeOverpassBikeShopCandidates(payload), origin, maximumResults);
 }
@@ -234,6 +349,7 @@ export function createBikeShopDirectory(options = {}) {
   const endpoint = options.endpoint ?? defaultEndpoint;
   const now = options.now ?? Date.now;
   const cache = new Map();
+  const viewportCache = new Map();
   const inFlight = new Map();
   let activeUpstreamRequests = 0;
 
@@ -243,10 +359,35 @@ export function createBikeShopDirectory(options = {}) {
     return `search:${search.latitude}:${search.longitude}:${search.radiusMiles}`;
   }
 
+  function viewportCacheEnvelope(viewport) {
+    const grid = 100;
+    const down = (value) => Number((Math.floor(value * grid) / grid).toFixed(2));
+    const up = (value) => Number((Math.ceil(value * grid) / grid).toFixed(2));
+    // Query an outward-rounded envelope and cache that envelope, never the first
+    // request's exact box. Nearby viewports can then safely reuse the candidate
+    // set while responseForViewport still applies their exact requested bounds.
+    return {
+      north: up(viewport.north),
+      south: down(viewport.south),
+      east: up(viewport.east),
+      west: down(viewport.west),
+    };
+  }
+
+  function viewportCacheKey(envelope) {
+    return `viewport:${envelope.north}:${envelope.south}:${envelope.east}:${envelope.west}`;
+  }
+
   function pruneCache() {
     const timestamp = now();
     for (const [key, entry] of cache) if (entry.expiresAt <= timestamp) cache.delete(key);
+    for (const [key, entry] of viewportCache) {
+      if (entry.expiresAt <= timestamp) viewportCache.delete(key);
+    }
     while (cache.size > bikeShopSearchLimits.maximumCacheEntries) cache.delete(cache.keys().next().value);
+    while (viewportCache.size > bikeShopSearchLimits.maximumViewportCacheEntries) {
+      viewportCache.delete(viewportCache.keys().next().value);
+    }
   }
 
   async function readBoundedJson(response) {
@@ -323,10 +464,59 @@ export function createBikeShopDirectory(options = {}) {
     return value;
   }
 
+  function overpassViewportClauses(viewport) {
+    const boxes = viewport.west < viewport.east
+      ? [[viewport.south, viewport.west, viewport.north, viewport.east]]
+      : [
+        [viewport.south, viewport.west, viewport.north, 180],
+        [viewport.south, -180, viewport.north, viewport.east],
+      ];
+    return boxes.flatMap((box) => {
+      const bounds = box.join(',');
+      return [
+        `nwr["shop"="bicycle"](${bounds});`,
+        `nwr["service:bicycle:repair"~"^(yes|only)$"](${bounds});`,
+      ];
+    }).join('');
+  }
+
+  async function loadViewport(viewport, key) {
+    const query = `[out:json][timeout:10];(${overpassViewportClauses(viewport)});out center tags;`;
+    const payload = await fetchOverpass(query);
+    const shops = normalizeOverpassBikeShopCandidates(payload);
+    const value = {
+      shops,
+      attribution: {
+        text: '© OpenStreetMap contributors',
+        url: 'https://www.openstreetmap.org/copyright',
+        license: 'ODbL',
+      },
+    };
+    const serializedBytes = Buffer.byteLength(JSON.stringify(value));
+    if (
+      shops.length <= bikeShopSearchLimits.maximumViewportCachedCandidates
+      && serializedBytes <= bikeShopSearchLimits.maximumViewportCacheBytesPerEntry
+    ) {
+      viewportCache.set(key, { value, expiresAt: now() + bikeShopSearchLimits.cacheTtlMs });
+    }
+    pruneCache();
+    return value;
+  }
+
   function responseForSearch(search, value) {
     return {
       origin: { ...search },
       shops: bikeShopCandidatesForOrigin(value.shops, search),
+      attribution: value.attribution,
+    };
+  }
+
+  function responseForViewport(viewport, value) {
+    const matches = bikeShopCandidatesForViewport(value.shops, viewport);
+    return {
+      bounds: { ...viewport },
+      shops: matches.shops,
+      truncated: matches.truncated,
       attribution: value.attribution,
     };
   }
@@ -363,6 +553,18 @@ export function createBikeShopDirectory(options = {}) {
       const cached = cache.get(key);
       if (cached) return responseForSearch(search, cached.value);
       return responseForSearch(search, await loadOnce(key, () => loadSearch(search, key)));
+    },
+    async searchViewport(input) {
+      const viewport = parseBikeShopViewport(input);
+      pruneCache();
+      const envelope = viewportCacheEnvelope(viewport);
+      const key = viewportCacheKey(envelope);
+      const cached = viewportCache.get(key);
+      if (cached) return responseForViewport(viewport, cached.value);
+      return responseForViewport(
+        viewport,
+        await loadOnce(key, () => loadViewport(envelope, key)),
+      );
     },
     async resolveClaim(candidate) {
       const osmElementType = safeText(candidate?.osmElementType, 16);

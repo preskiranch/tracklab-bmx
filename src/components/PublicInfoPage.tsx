@@ -103,7 +103,7 @@ function PrivacyPage() {
           This notice describes the current TrackLab BMX web and iPhone/iPad app behavior. TrackLab combines
           Wattbike telemetry, mapped tracks, training history, multiplayer rooms, and optional AI commentary.
         </p>
-        <span className="public-info-updated">Last updated August 31, 2026</span>
+        <span className="public-info-updated">Last updated September 1, 2026</span>
       </section>
 
       <section className="public-info-summary" aria-label="Privacy summary">
@@ -206,10 +206,12 @@ function PrivacyPage() {
                 to be visible to other TrackLab users.
               </p>
               <p>
-                The public Global Bike Shop Directory also accepts a city, ZIP code, or address, or requests a one-time
-                device location after you choose that action. TrackLab sends the search point and selected radius to the
-                OpenStreetMap directory service to find nearby shops. The search point is not saved to your TrackLab
-                account; nearby results may be held briefly in an in-memory service cache to improve reliability.
+                The public Global Bike Shop Directory displays a browsable world map and loads public bike-shop listings
+                for the visible area after you pan or zoom to a useful city or regional view. You can also enter a city,
+                ZIP code, or address, or request a one-time device location, to move the map there. TrackLab sends the
+                visible map bounds and zoom level—or the selected nearby-search point and radius—to the OpenStreetMap
+                directory service. Those map bounds and search points are not saved to your TrackLab account; directory
+                results may be held briefly in an in-memory service cache to improve reliability.
               </p>
 
               <h3>Rooms, messages, and optional microphone audio</h3>
@@ -330,9 +332,10 @@ function PrivacyPage() {
                   Street View, and elevation requests are handled by the Google mapping services used by the feature.
                 </li>
                 <li>
-                  <strong>OpenStreetMap:</strong> the Global Bike Shop Directory sends the chosen search coordinates and
-                  radius to OpenStreetMap&apos;s Overpass service and displays public shop listing data under the ODbL.
-                  Choosing a shop&apos;s map, directions, or Street View action opens Google Maps.
+                  <strong>OpenStreetMap:</strong> the Global Bike Shop Directory sends the visible map bounds and zoom
+                  level, or chosen nearby-search coordinates and radius, to OpenStreetMap&apos;s Overpass service and
+                  displays public shop listing data under the ODbL. Choosing a shop&apos;s map, directions, or Street View
+                  action opens Google Maps.
                 </li>
                 <li>
                   <strong>OpenAI:</strong> when AI commentary is enabled, limited race context—including supplied

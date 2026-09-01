@@ -19,6 +19,7 @@ type LatLngLiteral = {
 type GoogleMap = {
   addListener: (eventName: string, handler: (event?: GoogleMapClickEvent) => void) => GoogleMapsEventListener;
   fitBounds: (bounds: GoogleLatLngBounds, padding?: number) => void;
+  getBounds?: () => GoogleLatLngBounds | undefined;
   getCenter?: () => { toJSON: () => LatLngLiteral };
   getDiv?: () => HTMLElement;
   getHeading?: () => number | undefined;
@@ -46,6 +47,8 @@ type GoogleMapsEventListener = {
 
 type GoogleLatLngBounds = {
   extend: (point: LatLngLiteral) => void;
+  getNorthEast?: () => { toJSON: () => LatLngLiteral };
+  getSouthWest?: () => { toJSON: () => LatLngLiteral };
 };
 
 type GooglePolyline = {
@@ -496,6 +499,29 @@ export function loadGoogleMaps() {
     });
 
   return window.__trackLabGoogleMapsPromise;
+}
+
+/**
+ * Loads only the libraries needed for a conventional Google map. Directory
+ * maps should not fail because an unrelated Places or geometry API is
+ * restricted for the current key.
+ */
+export async function loadGoogleBaseMap() {
+  const google = await bootstrapGoogleMapsRuntime();
+  if (google.maps.importLibrary) {
+    const [coreLibrary, mapsLibrary, markerLibrary] = await Promise.all([
+      google.maps.importLibrary('core'),
+      google.maps.importLibrary('maps'),
+      google.maps.importLibrary('marker'),
+    ]);
+    mergeImportedGoogleLibrary(google.maps as unknown as Record<string, unknown>, coreLibrary as GoogleMapsLibraryImport);
+    mergeImportedGoogleLibrary(google.maps as unknown as Record<string, unknown>, mapsLibrary as GoogleMapsLibraryImport);
+    mergeImportedGoogleLibrary(google.maps as unknown as Record<string, unknown>, markerLibrary as GoogleMapsLibraryImport);
+  }
+  if (!google.maps.Map || !google.maps.Marker) {
+    throw new Error('Google Maps loaded without the map or marker constructor.');
+  }
+  return google;
 }
 
 export async function loadGoogleMaps3DLibrary(): Promise<GoogleMaps3DLibrary> {

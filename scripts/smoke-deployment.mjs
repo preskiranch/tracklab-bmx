@@ -180,6 +180,25 @@ assert(
 );
 results.push(['public bike-shop search boundary', bikeShopBoundaryRequest.durationMs]);
 
+const bikeShopViewportBoundaryRequest = await request('/api/bike-shops/viewport', {
+  method: 'POST',
+  headers: {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+    Origin: baseUrl,
+  },
+  body: JSON.stringify({ north: 1, south: -1, west: -2, east: 2, zoom: 2 }),
+});
+assert(
+  bikeShopViewportBoundaryRequest.response.status === 400,
+  `Public bike-shop viewport validation returned ${bikeShopViewportBoundaryRequest.response.status} instead of 400.`,
+);
+assert(
+  bikeShopViewportBoundaryRequest.response.headers.get('cache-control') === 'no-store',
+  'Public bike-shop viewport validation must be no-store.',
+);
+results.push(['public bike-shop viewport boundary', bikeShopViewportBoundaryRequest.durationMs]);
+
 const bikeShopClaimBoundaryRequest = await request('/api/bike-shops/claim-requests', {
   method: 'POST',
   headers: {

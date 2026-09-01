@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   applyApprovedBikeShopClaims,
+  bikeShopSearchLimits,
   createBikeShopDirectory,
   normalizeOverpassBikeShops,
   parseBikeShopClaimRequest,
   parseBikeShopSearch,
+  parseBikeShopViewport,
 } from '../../cloud/bikeShops.mjs';
 
 describe('bike shop directory backend', () => {
@@ -19,6 +21,157 @@ describe('bike shop directory backend', () => {
     expect(() => parseBikeShopSearch({ lat: '0', lng: '0', radiusMiles: '4.9' })).toThrow(/radiusMiles/);
     expect(() => parseBikeShopSearch({ lat: '0', lng: '0', radiusMiles: '12' })).toThrow(/radiusMiles/);
     expect(() => parseBikeShopSearch({ lat: '0', lng: '0', radiusMiles: '51' })).toThrow(/radiusMiles/);
+  });
+
+  it('accepts only bounded Web Mercator viewports and strict numeric zooms', () => {
+    expect(parseBikeShopViewport({
+      north: 39,
+      south: 38,
+      west: -122,
+      east: -121,
+      zoom: 11.5,
+    })).toEqual({ north: 39, south: 38, west: -122, east: -121, zoom: 11.5 });
+    expect(parseBikeShopViewport({
+      north: 10,
+      south: 9,
+      west: 179.5,
+      east: -179.5,
+      zoom: 11,
+    })).toEqual({ north: 10, south: 9, west: 179.5, east: -179.5, zoom: 11 });
+    expect(() => parseBikeShopViewport({
+      north: '39', south: 38, west: -122, east: -121, zoom: 11,
+    })).toThrow(/north and south/);
+    expect(() => parseBikeShopViewport({
+      north: 86, south: 84, west: -122, east: -121, zoom: 11,
+    })).toThrow(/Web Mercator/);
+    expect(() => parseBikeShopViewport({
+      north: 38, south: 39, west: -122, east: -121, zoom: 11,
+    })).toThrow(/latitude span/);
+    expect(() => parseBikeShopViewport({
+      north: 39, south: 38, west: -122, east: -122, zoom: 11,
+    })).toThrow(/longitude span/);
+    expect(() => parseBikeShopViewport({
+      north: 39, south: 38, west: 180, east: -180, zoom: 11,
+    })).toThrow(/too large/);
+    expect(() => parseBikeShopViewport({
+      north: 39, south: 38, west: -122, east: -121, zoom: 7,
+    })).toThrow(/zoom/);
+    expect(() => parseBikeShopViewport({
+      north: 39, south: 38, west: -122, east: -121, zoom: '10',
+    })).toThrow(/zoom/);
+    expect(() => parseBikeShopViewport({
+      north: 3, south: 0, west: 0, east: 1, zoom: 11,
+    })).toThrow(/too large/);
+    expect(() => parseBikeShopViewport({
+      north: 1, south: 0, west: 0, east: 4, zoom: 11,
+    })).toThrow(/too large/);
+    expect(() => parseBikeShopViewport({
+      north: 1.9, south: 0, west: 0, east: 2.5, zoom: 11,
+    })).toThrow(/too large/);
+  });
+
+  it('queries a viewport in the POST body, exactly filters it, caps results, and caches repeats', async () => {
+    const inside = Array.from({ length: 105 }, (_, index) => ({
+      type: 'node',
+      id: 10_000 + index,
+      lat: 38.1 + (index % 10) / 100,
+      lon: -121.9 + (index % 10) / 100,
+      tags: { shop: 'bicycle', name: `Viewport Bikes ${String(index).padStart(3, '0')}` },
+    }));
+    const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
+      expect(url).toBe('https://overpass.example/api/interpreter');
+      expect(url).not.toContain('38');
+      expect(url).not.toContain('-122');
+      const query = new URLSearchParams(String(init.body)).get('data') || '';
+      expect(query).toContain('[timeout:10]');
+      expect(query).toContain('nwr["shop"="bicycle"](38,-122,39,-121)');
+      return new Response(JSON.stringify({
+        elements: [
+          ...inside,
+          {
+            type: 'node', id: 99_999, lat: 37.999, lon: -121.5,
+            tags: { shop: 'bicycle', name: 'Outside Latitude' },
+          },
+          {
+            type: 'node', id: 99_998, lat: 38.5, lon: -120.999,
+            tags: { shop: 'bicycle', name: 'Outside Longitude' },
+          },
+        ],
+      }), { status: 200 });
+    });
+    const directory = createBikeShopDirectory({ fetchImpl, endpoint: 'https://overpass.example/api/interpreter' });
+    const viewport = { north: 39, south: 38, west: -122, east: -121, zoom: 11 };
+
+    const first = await directory.searchViewport(viewport);
+    const second = await directory.searchViewport(viewport);
+
+    expect(Object.keys(first).sort()).toEqual(['attribution', 'bounds', 'shops', 'truncated']);
+    expect(first.bounds).toEqual(viewport);
+    expect(first.shops).toHaveLength(100);
+    expect(first.truncated).toBe(true);
+    expect(first.shops.map((shop) => shop.id)).not.toContain('osm:node:99999');
+    expect(first.shops.map((shop) => shop.id)).not.toContain('osm:node:99998');
+    expect(first.attribution).toMatchObject({ text: '© OpenStreetMap contributors', license: 'ODbL' });
+    expect(first).not.toHaveProperty('cache');
+    expect(first).not.toHaveProperty('fetchedAt');
+    expect(second).toEqual(first);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('safely reuses an outward-rounded cache envelope while applying each exact viewport', async () => {
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      const query = new URLSearchParams(String(init.body)).get('data') || '';
+      expect(query).toContain('(38.3,-121.91,38.31,-121.9)');
+      return new Response(JSON.stringify({
+        elements: [{
+          type: 'node', id: 51, lat: 38.3015, lon: -121.905,
+          tags: { shop: 'bicycle', name: 'Envelope Edge Bikes' },
+        }, {
+          type: 'node', id: 52, lat: 38.305, lon: -121.905,
+          tags: { shop: 'bicycle', name: 'Shared Center Bikes' },
+        }],
+      }), { status: 200 });
+    });
+    const directory = createBikeShopDirectory({ fetchImpl });
+
+    const wider = await directory.searchViewport({
+      north: 38.309, south: 38.301, west: -121.909, east: -121.901, zoom: 14,
+    });
+    const narrower = await directory.searchViewport({
+      north: 38.308, south: 38.302, west: -121.908, east: -121.902, zoom: 15,
+    });
+
+    expect(wider.shops.map((shop) => shop.id).sort()).toEqual(['osm:node:51', 'osm:node:52']);
+    expect(narrower.shops.map((shop) => shop.id)).toEqual(['osm:node:52']);
+    expect(narrower.bounds.zoom).toBe(15);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('splits an antimeridian viewport and retains shops on both sides only', async () => {
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      const query = new URLSearchParams(String(init.body)).get('data') || '';
+      expect(query).toContain('(9,179.5,10,180)');
+      expect(query).toContain('(9,-180,10,-179.5)');
+      return new Response(JSON.stringify({
+        elements: [{
+          type: 'node', id: 1, lat: 9.5, lon: 179.7,
+          tags: { shop: 'bicycle', name: 'West Dateline Bikes' },
+        }, {
+          type: 'node', id: 2, lat: 9.5, lon: -179.7,
+          tags: { shop: 'bicycle', name: 'East Dateline Bikes' },
+        }, {
+          type: 'node', id: 3, lat: 9.5, lon: 0,
+          tags: { shop: 'bicycle', name: 'Outside Dateline Bikes' },
+        }],
+      }), { status: 200 });
+    });
+    const directory = createBikeShopDirectory({ fetchImpl });
+
+    const result = await directory.searchViewport({
+      north: 10, south: 9, west: 179.5, east: -179.5, zoom: 11,
+    });
+
+    expect(result.shops.map((shop) => shop.id).sort()).toEqual(['osm:node:1', 'osm:node:2']);
   });
 
   it('normalizes nodes and ways, sorts by distance, and bounds the result set', () => {
@@ -55,6 +208,127 @@ describe('bike shop directory backend', () => {
       services: { sales: true },
     });
     expect(shops[0].links.directions).toContain('google.com/maps/dir');
+  });
+
+  it('uses only trustworthy source-tag fallbacks for address hierarchy', () => {
+    const shops = normalizeOverpassBikeShops({
+      elements: [{
+        type: 'node', id: 61, lat: 38.3, lon: -121.9,
+        tags: {
+          shop: 'bicycle',
+          name: 'Fallback Address Bikes',
+          'is_in:city': 'Vacaville',
+          'is_in:state': 'California',
+          'addr:country': 'United States',
+          'ISO3166-1:alpha2': 'us',
+        },
+      }, {
+        type: 'node', id: 62, lat: 38.31, lon: -121.91,
+        tags: {
+          shop: 'bicycle',
+          name: 'Invalid Country Bikes',
+          'is_in:town': 'Elmira',
+          'is_in:province': 'California',
+          'is_in:country_code': 'USA',
+        },
+      }],
+    }, { latitude: 38.3, longitude: -121.9 });
+
+    expect(shops.find((shop) => shop.id === 'osm:node:61')?.address).toMatchObject({
+      locality: 'Vacaville',
+      region: 'California',
+      countryCode: 'US',
+      formatted: 'Vacaville, California',
+    });
+    expect(shops.find((shop) => shop.id === 'osm:node:62')?.address).toMatchObject({
+      locality: 'Elmira',
+      region: 'California',
+      countryCode: '',
+    });
+  });
+
+  it('evicts old viewport candidate sets at the dedicated cache-entry bound', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ elements: [] }), { status: 200 }));
+    const directory = createBikeShopDirectory({ fetchImpl });
+    const viewportAt = (index: number) => {
+      const south = 30 + index * 0.02;
+      return {
+        north: south + 0.005,
+        south,
+        west: -120,
+        east: -119.995,
+        zoom: 15,
+      };
+    };
+
+    for (let index = 0; index <= bikeShopSearchLimits.maximumViewportCacheEntries; index += 1) {
+      await directory.searchViewport(viewportAt(index));
+    }
+    expect(fetchImpl).toHaveBeenCalledTimes(bikeShopSearchLimits.maximumViewportCacheEntries + 1);
+
+    await directory.searchViewport(viewportAt(0));
+    expect(fetchImpl).toHaveBeenCalledTimes(bikeShopSearchLimits.maximumViewportCacheEntries + 2);
+  });
+
+  it('serves but does not retain oversized viewport candidate arrays', async () => {
+    const fetchImpl = vi.fn(async () => {
+      const generation = fetchImpl.mock.calls.length;
+      return new Response(JSON.stringify({
+        elements: Array.from({
+          length: bikeShopSearchLimits.maximumViewportCachedCandidates + 1,
+        }, (_, index) => ({
+          type: 'node',
+          id: generation * 10_000 + index + 1,
+          lat: 38.35,
+          lon: -121.95,
+          tags: { shop: 'bicycle', name: `Generation ${generation} Bike ${index}` },
+        })),
+      }), { status: 200 });
+    });
+    const directory = createBikeShopDirectory({ fetchImpl });
+    const viewport = { north: 38.4, south: 38.3, west: -122, east: -121.9, zoom: 14 };
+
+    const first = await directory.searchViewport(viewport);
+    const second = await directory.searchViewport(viewport);
+
+    expect(first.shops).toHaveLength(bikeShopSearchLimits.maximumResults);
+    expect(second.shops).toHaveLength(bikeShopSearchLimits.maximumResults);
+    expect(first.truncated).toBe(true);
+    expect(second.truncated).toBe(true);
+    expect(first.shops[0].id).not.toBe(second.shops[0].id);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retain a byte-heavy viewport entry below the candidate-count ceiling', async () => {
+    const candidateCount = bikeShopSearchLimits.maximumViewportCachedCandidates - 100;
+    const fetchImpl = vi.fn(async () => {
+      const generation = fetchImpl.mock.calls.length;
+      return new Response(JSON.stringify({
+        elements: Array.from({ length: candidateCount }, (_, index) => ({
+          type: 'node',
+          id: generation * 10_000 + index + 1,
+          lat: 38.35,
+          lon: -121.95,
+          tags: {
+            shop: 'bicycle',
+            name: `Generation ${generation} ${'N'.repeat(160)} ${index}`,
+            website: `https://example.test/${'w'.repeat(470)}`,
+            opening_hours: 'o'.repeat(300),
+            phone: '1'.repeat(80),
+            'addr:street': 's'.repeat(220),
+          },
+        })),
+      }), { status: 200 });
+    });
+    const directory = createBikeShopDirectory({ fetchImpl });
+    const viewport = { north: 38.4, south: 38.3, west: -122, east: -121.9, zoom: 14 };
+
+    const first = await directory.searchViewport(viewport);
+    const second = await directory.searchViewport(viewport);
+
+    expect(candidateCount).toBeLessThan(bikeShopSearchLimits.maximumViewportCachedCandidates);
+    expect(first.shops[0].id).not.toBe(second.shops[0].id);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it('uses a bounded cache for repeated nearby searches and sends a bounded Overpass query', async () => {

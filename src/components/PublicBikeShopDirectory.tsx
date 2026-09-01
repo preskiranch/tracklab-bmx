@@ -5,6 +5,7 @@ import {
   Clock3,
   ExternalLink,
   Globe2,
+  ListTree,
   LocateFixed,
   MapPin,
   Navigation,
@@ -20,10 +21,12 @@ import {
 import {
   bikeShopAddress,
   bikeShopClaimSourceUrl,
+  distanceBetweenMiles,
   listBikeShopClaimsForAdmin,
   listMyBikeShopClaimRequests,
   nearbyTracksForShop,
   reviewBikeShopClaimRequest,
+  searchBikeShopsInViewport,
   searchNearbyBikeShops,
   submitBikeShopClaimRequest,
   withdrawBikeShopClaimRequest,
@@ -34,10 +37,16 @@ import {
   type BikeShopClaimVerificationMethod,
   type BikeShopPoint,
   type BikeShopRecord,
+  type BikeShopViewport,
 } from '../lib/bikeShops';
 import { resolveLocationText } from '../lib/googleMaps';
 import { trackLocatorRelativeUrl } from '../lib/mapLinks';
 import type { TrackLocatorRecord, TrackRecord } from '../types';
+import {
+  BikeShopDirectoryMap,
+  bikeShopViewportMinimumZoom,
+  type BikeShopMapFocusRequest,
+} from './BikeShopDirectoryMap';
 import './PublicBikeShopDirectory.css';
 
 type PublicBikeShopDirectoryProps = {
@@ -49,7 +58,70 @@ type PublicBikeShopDirectoryProps = {
 
 type LocatedSearch = BikeShopPoint & { label: string };
 
+type ShopHierarchy = {
+  country: string;
+  region: string;
+  city: string;
+};
+
 const radiusOptions = Array.from({ length: 10 }, (_, index) => (index + 1) * 5);
+const allHierarchyValues = '__all__';
+const missingCountry = '__country-not-listed__';
+const missingRegion = '__region-not-listed__';
+const missingCity = '__city-not-listed__';
+
+function localizedCountryName(countryCode: string) {
+  if (!countryCode) return 'Country not listed';
+  try {
+    const DisplayNames = Intl.DisplayNames;
+    return DisplayNames ? new DisplayNames(undefined, { type: 'region' }).of(countryCode) || countryCode : countryCode;
+  } catch {
+    return countryCode;
+  }
+}
+
+function shopHierarchy(shop: BikeShopRecord): ShopHierarchy {
+  return {
+    country: shop.address.countryCode || missingCountry,
+    region: shop.address.region || missingRegion,
+    city: shop.address.locality || missingCity,
+  };
+}
+
+function hierarchyLabel(level: keyof ShopHierarchy, value: string) {
+  if (value === missingCountry) return 'Country not listed';
+  if (value === missingRegion) return 'State / province not listed';
+  if (value === missingCity) return 'City not listed';
+  return level === 'country' ? localizedCountryName(value) : value;
+}
+
+function sortedHierarchyValues(values: Iterable<string>, level: keyof ShopHierarchy) {
+  return [...new Set(values)].sort((left, right) => (
+    hierarchyLabel(level, left).localeCompare(hierarchyLabel(level, right), undefined, { sensitivity: 'base' })
+      || left.localeCompare(right)
+  ));
+}
+
+function mapFocusPoints(origin: BikeShopPoint, radiusMiles: number) {
+  const latitudeDelta = radiusMiles / 69;
+  const longitudeScale = Math.max(0.2, Math.cos(origin.latitude * Math.PI / 180));
+  const longitudeDelta = radiusMiles / (69 * longitudeScale);
+  return [
+    { latitude: Math.max(-85, origin.latitude - latitudeDelta), longitude: Math.max(-180, origin.longitude - longitudeDelta) },
+    { latitude: Math.min(85, origin.latitude + latitudeDelta), longitude: Math.min(180, origin.longitude + longitudeDelta) },
+  ];
+}
+
+function viewportCenter(viewport: BikeShopViewport): BikeShopPoint {
+  const longitudeSpan = viewport.east >= viewport.west
+    ? viewport.east - viewport.west
+    : viewport.east + 360 - viewport.west;
+  const longitude = viewport.west + longitudeSpan / 2;
+  return {
+    latitude: (viewport.north + viewport.south) / 2,
+    longitude: longitude > 180 ? longitude - 360 : longitude,
+  };
+}
 
 function currentPosition() {
   return new Promise<GeolocationPosition>((resolve, reject) => {
@@ -92,13 +164,19 @@ export function PublicBikeShopDirectory({
 }: PublicBikeShopDirectoryProps) {
   const [locationInput, setLocationInput] = useState('');
   const [radiusMiles, setRadiusMiles] = useState(25);
-  const [searchOrigin, setSearchOrigin] = useState<LocatedSearch | null>(null);
-  const [searchRadiusMiles, setSearchRadiusMiles] = useState<number | null>(null);
   const [shops, setShops] = useState<BikeShopRecord[]>([]);
   const [selectedShopId, setSelectedShopId] = useState('');
   const [status, setStatus] = useState<'idle' | 'locating' | 'searching' | 'ready'>('idle');
   const [error, setError] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
+  const [resultMode, setResultMode] = useState<'none' | 'nearby' | 'viewport'>('none');
+  const [nearbyContext, setNearbyContext] = useState<{ label: string; radiusMiles: number } | null>(null);
+  const [mapZoom, setMapZoom] = useState(2);
+  const [mapFocusRequest, setMapFocusRequest] = useState<BikeShopMapFocusRequest | null>(null);
+  const [viewportTruncated, setViewportTruncated] = useState(false);
+  const [countryFilter, setCountryFilter] = useState(allHierarchyValues);
+  const [regionFilter, setRegionFilter] = useState(allHierarchyValues);
+  const [cityFilter, setCityFilter] = useState(allHierarchyValues);
   const [claimShop, setClaimShop] = useState<BikeShopRecord | null>(null);
   const [claimRole, setClaimRole] = useState<BikeShopClaimRole>('owner');
   const [verificationMethod, setVerificationMethod] = useState<BikeShopClaimVerificationMethod>('business-email');
@@ -123,12 +201,26 @@ export function PublicBikeShopDirectory({
   const [reviewingClaimId, setReviewingClaimId] = useState('');
   const claimDialogRef = useRef<HTMLElement | null>(null);
   const claimTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const resultListRef = useRef<HTMLOListElement | null>(null);
+  const mapFocusGenerationRef = useRef(0);
+  const resultIntentGenerationRef = useRef(0);
   const accountIdRef = useRef(accountId);
-  const publicSearchRef = useRef<{ generation: number; controller: AbortController | null; busy: boolean }>({
+  const publicSearchRef = useRef<{
+    generation: number;
+    resultIntentGeneration: number;
+    controller: AbortController | null;
+    busy: boolean;
+  }>({
     generation: 0,
+    resultIntentGeneration: 0,
     controller: null,
     busy: false,
   });
+  const viewportRequestRef = useRef<{
+    generation: number;
+    controller: AbortController | null;
+    key: string;
+  }>({ generation: 0, controller: null, key: '' });
   const myClaimsRequestRef = useRef<{ generation: number; controller: AbortController | null }>({
     generation: 0,
     controller: null,
@@ -139,7 +231,33 @@ export function PublicBikeShopDirectory({
   });
   accountIdRef.current = accountId;
 
-  const selectedShop = shops.find((shop) => shop.id === selectedShopId) ?? shops[0] ?? null;
+  const countries = useMemo(
+    () => sortedHierarchyValues(shops.map((shop) => shopHierarchy(shop).country), 'country'),
+    [shops],
+  );
+  const regions = useMemo(() => sortedHierarchyValues(
+    shops
+      .filter((shop) => countryFilter === allHierarchyValues || shopHierarchy(shop).country === countryFilter)
+      .map((shop) => shopHierarchy(shop).region),
+    'region',
+  ), [countryFilter, shops]);
+  const cities = useMemo(() => sortedHierarchyValues(
+    shops
+      .filter((shop) => countryFilter === allHierarchyValues || shopHierarchy(shop).country === countryFilter)
+      .filter((shop) => regionFilter === allHierarchyValues || shopHierarchy(shop).region === regionFilter)
+      .map((shop) => shopHierarchy(shop).city),
+    'city',
+  ), [countryFilter, regionFilter, shops]);
+  const visibleShops = useMemo(() => shops
+    .filter((shop) => countryFilter === allHierarchyValues || shopHierarchy(shop).country === countryFilter)
+    .filter((shop) => regionFilter === allHierarchyValues || shopHierarchy(shop).region === regionFilter)
+    .filter((shop) => cityFilter === allHierarchyValues || shopHierarchy(shop).city === cityFilter), [
+    cityFilter,
+    countryFilter,
+    regionFilter,
+    shops,
+  ]);
+  const selectedShop = visibleShops.find((shop) => shop.id === selectedShopId) ?? visibleShops[0] ?? null;
   const nearbyTracks = useMemo(
     () => selectedShop ? nearbyTracksForShop(selectedShop, tracks, 50) : [],
     [selectedShop, tracks],
@@ -156,52 +274,195 @@ export function PublicBikeShopDirectory({
 
   const beginPublicSearch = () => {
     if (publicSearchRef.current.busy) return null;
+    viewportRequestRef.current.controller?.abort();
+    viewportRequestRef.current = {
+      generation: viewportRequestRef.current.generation + 1,
+      controller: null,
+      key: '',
+    };
     publicSearchRef.current.controller?.abort();
+    const resultIntentGeneration = resultIntentGenerationRef.current + 1;
+    resultIntentGenerationRef.current = resultIntentGeneration;
     const request = {
       generation: publicSearchRef.current.generation + 1,
+      resultIntentGeneration,
       controller: new AbortController(),
     };
     publicSearchRef.current = { ...request, busy: true };
     return request;
   };
 
-  const publicSearchIsCurrent = (request: { generation: number; controller: AbortController }) => (
+  const publicSearchIsCurrent = (request: {
+    generation: number;
+    resultIntentGeneration: number;
+    controller: AbortController;
+  }) => (
     !request.controller.signal.aborted
     && publicSearchRef.current.generation === request.generation
+    && publicSearchRef.current.resultIntentGeneration === request.resultIntentGeneration
     && publicSearchRef.current.controller === request.controller
+    && resultIntentGenerationRef.current === request.resultIntentGeneration
   );
 
-  const finishPublicSearch = (request: { generation: number; controller: AbortController }) => {
+  const finishPublicSearch = (request: {
+    generation: number;
+    resultIntentGeneration: number;
+    controller: AbortController;
+  }) => {
     if (!publicSearchIsCurrent(request)) return;
-    publicSearchRef.current = { generation: request.generation, controller: null, busy: false };
+    publicSearchRef.current = {
+      generation: request.generation,
+      resultIntentGeneration: request.resultIntentGeneration,
+      controller: null,
+      busy: false,
+    };
   };
 
-  const runSearch = async (
+  const focusMapAt = (origin: LocatedSearch, requestedRadiusMiles = radiusMiles) => {
+    mapFocusGenerationRef.current += 1;
+    setMapFocusRequest({
+      id: mapFocusGenerationRef.current,
+      points: mapFocusPoints(origin, requestedRadiusMiles),
+    });
+  };
+
+  const runNearbyFallbackSearch = async (
     origin: LocatedSearch,
-    request: { generation: number; controller: AbortController },
+    request: { generation: number; resultIntentGeneration: number; controller: AbortController },
   ) => {
     const requestedRadiusMiles = radiusMiles;
     if (!publicSearchIsCurrent(request)) return;
     setStatus('searching');
     setError('');
-    setSearchOrigin(origin);
-    setSearchRadiusMiles(requestedRadiusMiles);
     setHasSearched(true);
     try {
       const result = await searchNearbyBikeShops(origin, requestedRadiusMiles, fetch, request.controller.signal);
       if (!publicSearchIsCurrent(request)) return;
       setShops(result.shops);
       setSelectedShopId(result.shops[0]?.id ?? '');
-      setStatus('ready');
+      setResultMode('nearby');
+      setNearbyContext({ label: origin.label, radiusMiles: requestedRadiusMiles });
+      setViewportTruncated(false);
     } catch (caught) {
       if (!publicSearchIsCurrent(request)) return;
       setShops([]);
       setSelectedShopId('');
+      setResultMode('none');
+      setNearbyContext(null);
+      setError(caught instanceof Error ? caught.message : 'Bike shops could not be loaded. Please try again.');
+    } finally {
+      if (!publicSearchIsCurrent(request)) return;
+      focusMapAt(origin, requestedRadiusMiles);
+      setStatus('ready');
+      finishPublicSearch(request);
+    }
+  };
+
+  const loadMapViewport = async (
+    viewport: BikeShopViewport,
+    observedResultIntentGeneration: number,
+  ) => {
+    if (observedResultIntentGeneration !== resultIntentGenerationRef.current) return;
+    setMapZoom(viewport.zoom);
+    if (viewport.zoom < bikeShopViewportMinimumZoom) {
+      viewportRequestRef.current.controller?.abort();
+      viewportRequestRef.current = {
+        generation: viewportRequestRef.current.generation + 1,
+        controller: null,
+        key: '',
+      };
+      if (resultMode !== 'nearby') {
+        setShops([]);
+        setSelectedShopId('');
+        setHasSearched(false);
+        setResultMode('none');
+        setNearbyContext(null);
+        setViewportTruncated(false);
+      }
+      setStatus((current) => publicSearchRef.current.busy ? current : 'idle');
+      return;
+    }
+
+    const key = [viewport.north, viewport.south, viewport.east, viewport.west, viewport.zoom]
+      .map((value) => value.toFixed(5))
+      .join(':');
+    if (viewportRequestRef.current.key === key && !error) return;
+    publicSearchRef.current.controller?.abort();
+    publicSearchRef.current = {
+      generation: publicSearchRef.current.generation + 1,
+      resultIntentGeneration: publicSearchRef.current.resultIntentGeneration,
+      controller: null,
+      busy: false,
+    };
+    viewportRequestRef.current.controller?.abort();
+    const generation = viewportRequestRef.current.generation + 1;
+    const resultIntentGeneration = resultIntentGenerationRef.current + 1;
+    resultIntentGenerationRef.current = resultIntentGeneration;
+    const controller = new AbortController();
+    const preserveNearbyFallback = resultMode === 'nearby' && shops.length > 0;
+    viewportRequestRef.current = { generation, controller, key };
+    const isCurrent = () => (
+      !controller.signal.aborted
+      && viewportRequestRef.current.generation === generation
+      && viewportRequestRef.current.controller === controller
+      && resultIntentGenerationRef.current === resultIntentGeneration
+    );
+    setStatus('searching');
+    setError('');
+    setHasSearched(true);
+    try {
+      const result = await searchBikeShopsInViewport(viewport, fetch, controller.signal);
+      if (!isCurrent()) return;
+      const center = viewportCenter(result.viewport);
+      const locatedShops = result.shops
+        .map((shop) => ({ ...shop, distanceMiles: distanceBetweenMiles(center, shop) }))
+        .sort((left, right) => left.distanceMiles - right.distanceMiles
+          || left.name.localeCompare(right.name)
+          || left.id.localeCompare(right.id));
+      setShops(locatedShops);
+      setSelectedShopId((current) => locatedShops.some((shop) => shop.id === current)
+        ? current
+        : locatedShops[0]?.id ?? '');
+      setViewportTruncated(result.truncated);
+      setResultMode('viewport');
+      setNearbyContext(null);
+      setStatus('ready');
+    } catch (caught) {
+      if (!isCurrent()) return;
+      if (!preserveNearbyFallback) {
+        setShops([]);
+        setSelectedShopId('');
+        setResultMode('none');
+        setNearbyContext(null);
+        setViewportTruncated(false);
+      }
       setStatus('ready');
       setError(caught instanceof Error ? caught.message : 'Bike shops could not be loaded. Please try again.');
     } finally {
-      finishPublicSearch(request);
+      if (!isCurrent()) return;
+      viewportRequestRef.current = { generation, controller: null, key };
     }
+  };
+
+  const focusHierarchyShops = (matchingShops: BikeShopRecord[]) => {
+    if (matchingShops.length === 0) return;
+    mapFocusGenerationRef.current += 1;
+    setMapFocusRequest({
+      id: mapFocusGenerationRef.current,
+      points: matchingShops.map((shop) => ({ latitude: shop.latitude, longitude: shop.longitude })),
+    });
+    setSelectedShopId((current) => matchingShops.some((shop) => shop.id === current)
+      ? current
+      : matchingShops[0].id);
+  };
+
+  const selectShopFromMap = (shopId: string) => {
+    setSelectedShopId(shopId);
+    window.requestAnimationFrame(() => {
+      resultListRef.current?.querySelector<HTMLElement>('[data-selected-shop="true"]')?.scrollIntoView({
+        block: 'nearest',
+      });
+    });
   };
 
   const searchManualLocation = async (event: FormEvent) => {
@@ -225,7 +486,7 @@ export function PublicBikeShopDirectory({
         label: result.label || query,
       };
       setLocationInput(origin.label);
-      await runSearch(origin, request);
+      await runNearbyFallbackSearch(origin, request);
     } catch (caught) {
       if (!publicSearchIsCurrent(request)) return;
       setStatus('idle');
@@ -242,11 +503,13 @@ export function PublicBikeShopDirectory({
     try {
       const position = await currentPosition();
       if (!publicSearchIsCurrent(request)) return;
-      await runSearch({
+      const origin = {
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
         label: 'Current location',
-      }, request);
+      };
+      setLocationInput(origin.label);
+      await runNearbyFallbackSearch(origin, request);
     } catch (caught) {
       if (!publicSearchIsCurrent(request)) return;
       setStatus('idle');
@@ -493,12 +756,37 @@ export function PublicBikeShopDirectory({
     void refreshAdminClaims();
   }, [accountId, adminClaimFilter, adminClaimOffset, isAdmin]);
 
+  useEffect(() => {
+    if (countryFilter !== allHierarchyValues && !countries.includes(countryFilter)) {
+      setCountryFilter(allHierarchyValues);
+      setRegionFilter(allHierarchyValues);
+      setCityFilter(allHierarchyValues);
+      return;
+    }
+    if (regionFilter !== allHierarchyValues && !regions.includes(regionFilter)) {
+      setRegionFilter(allHierarchyValues);
+      setCityFilter(allHierarchyValues);
+      return;
+    }
+    if (cityFilter !== allHierarchyValues && !cities.includes(cityFilter)) {
+      setCityFilter(allHierarchyValues);
+    }
+  }, [cities, cityFilter, countries, countryFilter, regionFilter, regions]);
+
   useEffect(() => () => {
+    resultIntentGenerationRef.current += 1;
     publicSearchRef.current.controller?.abort();
     publicSearchRef.current = {
       generation: publicSearchRef.current.generation + 1,
+      resultIntentGeneration: publicSearchRef.current.resultIntentGeneration,
       controller: null,
       busy: false,
+    };
+    viewportRequestRef.current.controller?.abort();
+    viewportRequestRef.current = {
+      generation: viewportRequestRef.current.generation + 1,
+      controller: null,
+      key: '',
     };
     myClaimsRequestRef.current.controller?.abort();
     myClaimsRequestRef.current = {
@@ -521,14 +809,14 @@ export function PublicBikeShopDirectory({
           <div>
             <span className="eyebrow"><Globe2 size={14} /> Global bike shop directory</span>
             <h2 id="bike-shop-directory-title">Find a bike shop near you</h2>
-            <p>No TrackLab account is needed to search. Choose a starting point and see the closest mapped bike shops first.</p>
+            <p>No TrackLab account is needed to search. Explore the Google map, or jump to a location and browse shops in the visible area.</p>
           </div>
           <span><Store size={17} /> Public directory</span>
         </header>
 
         <form className="public-bike-shop-directory__search" onSubmit={(event) => void searchManualLocation(event)}>
           <label className="public-bike-shop-directory__location">
-            <span>Starting location</span>
+            <span>Jump to a location</span>
             <div>
               <MapPin size={18} />
               <input
@@ -541,13 +829,13 @@ export function PublicBikeShopDirectory({
             </div>
           </label>
           <label className="public-bike-shop-directory__radius">
-            <span>Search radius</span>
-            <select value={radiusMiles} onChange={(event) => setRadiusMiles(Number(event.currentTarget.value))}>
+            <span>Map area</span>
+            <select aria-label="Map area" value={radiusMiles} onChange={(event) => setRadiusMiles(Number(event.currentTarget.value))}>
               {radiusOptions.map((radius) => <option value={radius} key={radius}>{radius} miles</option>)}
             </select>
           </label>
           <button className="public-bike-shop-directory__submit" type="submit" disabled={busy}>
-            <Search size={18} /> {status === 'locating' ? 'Finding location…' : status === 'searching' ? 'Searching…' : 'Search shops'}
+            <Search size={18} /> {status === 'locating' ? 'Finding location…' : status === 'searching' ? 'Searching…' : 'Show on map'}
           </button>
           <button className="public-bike-shop-directory__locate" type="button" disabled={busy} onClick={() => void useCurrentLocation()}>
             <LocateFixed size={18} /> Use current location
@@ -557,53 +845,156 @@ export function PublicBikeShopDirectory({
         {error && <div className="public-bike-shop-directory__error" role="alert">{error}</div>}
 
         <div className="public-bike-shop-directory__layout">
-          <aside className="public-bike-shop-directory__results" aria-label="Nearby bike shops">
+          <div className="public-bike-shop-directory__map-panel">
+            <BikeShopDirectoryMap
+              shops={visibleShops}
+              selectedShopId={selectedShop?.id ?? ''}
+              busy={status === 'searching'}
+              requestError={error}
+              truncated={viewportTruncated}
+              focusRequest={mapFocusRequest}
+              getResultIntentGeneration={() => resultIntentGenerationRef.current}
+              onSelectShop={selectShopFromMap}
+              onViewportChange={(viewport, observedResultIntentGeneration) => (
+                void loadMapViewport(viewport, observedResultIntentGeneration)
+              )}
+            />
+          </div>
+
+          <aside className="public-bike-shop-directory__results" aria-label="Bike shops in the visible map area">
             <div className="public-bike-shop-directory__results-heading">
               <div>
-                <strong>{busy ? 'Searching nearby' : hasSearched ? `${shops.length} mapped bike ${shops.length === 1 ? 'shop' : 'shops'}` : 'Start your search'}</strong>
-                <small>{searchOrigin && searchRadiusMiles !== null ? `Near ${searchOrigin.label} · within ${searchRadiusMiles} miles` : 'Use your location or enter a place above'}</small>
+                <strong>{busy && shops.length === 0
+                  ? 'Loading this map area'
+                  : hasSearched
+                    ? `${visibleShops.length}${visibleShops.length !== shops.length ? ` of ${shops.length}` : ''} mapped bike ${visibleShops.length === 1 ? 'shop' : 'shops'}`
+                    : 'Explore the map'}</strong>
+                <small>{resultMode === 'nearby' && nearbyContext
+                  ? `Near ${nearbyContext.label} · within ${nearbyContext.radiusMiles} miles`
+                  : mapZoom < bikeShopViewportMinimumZoom
+                    ? `Zoom in to level ${bikeShopViewportMinimumZoom} to load individual shops`
+                  : 'The list refreshes automatically after you move or zoom the map'}</small>
+              </div>
+              {(countryFilter !== allHierarchyValues || regionFilter !== allHierarchyValues || cityFilter !== allHierarchyValues) && (
+                <button type="button" onClick={() => {
+                  setCountryFilter(allHierarchyValues);
+                  setRegionFilter(allHierarchyValues);
+                  setCityFilter(allHierarchyValues);
+                }}>Full visible area</button>
+              )}
+            </div>
+
+            <div className="public-bike-shop-directory__hierarchy" aria-label="Organize loaded shops by location">
+              <span><ListTree size={15} /> Loaded area: country → state / province → city</span>
+              <div>
+                <label>
+                  <span>Country</span>
+                  <select value={countryFilter} onChange={(event) => {
+                    const country = event.currentTarget.value;
+                    setCountryFilter(country);
+                    setRegionFilter(allHierarchyValues);
+                    setCityFilter(allHierarchyValues);
+                    if (country !== allHierarchyValues) {
+                      focusHierarchyShops(shops.filter((shop) => shopHierarchy(shop).country === country));
+                    }
+                  }}>
+                    <option value={allHierarchyValues}>All in visible area</option>
+                    {countries.map((country) => <option value={country} key={country}>{hierarchyLabel('country', country)}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>State / province</span>
+                  <select disabled={countryFilter === allHierarchyValues} value={regionFilter} onChange={(event) => {
+                    const region = event.currentTarget.value;
+                    setRegionFilter(region);
+                    setCityFilter(allHierarchyValues);
+                    if (region !== allHierarchyValues) {
+                      focusHierarchyShops(shops.filter((shop) => {
+                        const hierarchy = shopHierarchy(shop);
+                        return hierarchy.country === countryFilter && hierarchy.region === region;
+                      }));
+                    }
+                  }}>
+                    <option value={allHierarchyValues}>All states / provinces</option>
+                    {regions.map((region) => <option value={region} key={region}>{hierarchyLabel('region', region)}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>City</span>
+                  <select disabled={countryFilter === allHierarchyValues || regionFilter === allHierarchyValues} value={cityFilter} onChange={(event) => {
+                    const city = event.currentTarget.value;
+                    setCityFilter(city);
+                    if (city !== allHierarchyValues) {
+                      focusHierarchyShops(shops.filter((shop) => {
+                        const hierarchy = shopHierarchy(shop);
+                        return hierarchy.country === countryFilter
+                          && hierarchy.region === regionFilter
+                          && hierarchy.city === city;
+                      }));
+                    }
+                  }}>
+                    <option value={allHierarchyValues}>All cities</option>
+                    {cities.map((city) => <option value={city} key={city}>{hierarchyLabel('city', city)}</option>)}
+                  </select>
+                </label>
               </div>
             </div>
-            <div className="public-bike-shop-directory__result-list">
-              {shops.map((shop) => {
+
+            {viewportTruncated && (
+              <p className="public-bike-shop-directory__truncated" role="status">This area contains more shops than can be shown at once. Zoom in for a complete local view.</p>
+            )}
+
+            <ol ref={resultListRef} className="public-bike-shop-directory__result-list" aria-label="Loaded bike shop listings">
+              {visibleShops.map((shop) => {
                 const labels = serviceLabels(shop);
+                const selected = shop.id === selectedShop?.id;
                 return (
-                  <button
-                    type="button"
-                    className={shop.id === selectedShop?.id ? 'selected' : ''}
-                    aria-pressed={shop.id === selectedShop?.id}
-                    onClick={() => setSelectedShopId(shop.id)}
-                    key={shop.id}
-                  >
-                    <span className="public-bike-shop-directory__result-title"><strong>{shop.name}{shop.claimed ? ' · ✓ Claimed' : ''}</strong><b>{shop.distanceMiles.toFixed(1)} mi</b></span>
-                    <span><MapPin size={14} /> {bikeShopAddress(shop)}</span>
-                    {labels.length > 0 && <small>{labels.join(' · ')}</small>}
-                  </button>
+                  <li key={shop.id}>
+                    <button
+                      type="button"
+                      className={selected ? 'selected' : ''}
+                      aria-pressed={selected}
+                      data-selected-shop={selected ? 'true' : 'false'}
+                      onClick={() => setSelectedShopId(shop.id)}
+                    >
+                      <span className="public-bike-shop-directory__result-title"><strong>{shop.name}{shop.claimed ? ' · ✓ Claimed' : ''}</strong><b>{shop.distanceMiles.toFixed(1)} mi</b></span>
+                      <span><MapPin size={14} /> {bikeShopAddress(shop)}</span>
+                      {labels.length > 0 && <small>{labels.join(' · ')}</small>}
+                    </button>
+                  </li>
                 );
               })}
               {!busy && hasSearched && shops.length === 0 && !error && (
-                <div className="public-bike-shop-directory__empty">
+                <li className="public-bike-shop-directory__empty">
                   <Bike size={26} />
                   <strong>No mapped bike shops found</strong>
-                  <span>Try a larger radius or another nearby city.</span>
-                </div>
+                  <span>Move the map to another nearby area or zoom out slightly.</span>
+                </li>
+              )}
+              {shops.length > 0 && visibleShops.length === 0 && (
+                <li className="public-bike-shop-directory__empty">
+                  <ListTree size={26} />
+                  <strong>No shops match this location group</strong>
+                  <span>Choose Full visible area or a broader location above.</span>
+                </li>
               )}
               {!hasSearched && (
-                <div className="public-bike-shop-directory__empty">
+                <li className="public-bike-shop-directory__empty">
                   <Search size={26} />
-                  <strong>Search anywhere</strong>
-                  <span>Find nearby shops without signing in.</span>
-                </div>
+                  <strong>Zoom closer to browse shops</strong>
+                  <span>No button is required. Shops load automatically at city level.</span>
+                </li>
               )}
-            </div>
+            </ol>
           </aside>
+        </div>
 
-          <div className="public-bike-shop-directory__detail">
+        <div className="public-bike-shop-directory__detail">
             {selectedShop ? (
               <>
                 <div className="public-bike-shop-directory__shop-card">
                   <div className="public-bike-shop-directory__shop-intro">
-                    <span className="eyebrow">{selectedShop.distanceMiles.toFixed(1)} miles from your search</span>
+                    <span className="eyebrow">{selectedShop.distanceMiles.toFixed(1)} miles from {resultMode === 'nearby' ? 'your chosen location' : 'the map center'}</span>
                     <h3>{selectedShop.name}</h3>
                     <p><MapPin size={16} /> {bikeShopAddress(selectedShop)}</p>
                   </div>
@@ -661,12 +1052,11 @@ export function PublicBikeShopDirectory({
             ) : (
               <div className="public-bike-shop-directory__detail-placeholder">
                 <Store size={34} />
-                <strong>{busy ? 'Finding nearby bike shops…' : 'Select a nearby shop'}</strong>
+                <strong>{busy ? 'Finding bike shops in this map area…' : 'Select a bike shop'}</strong>
                 <span>Shop details, map links, and nearby BMX tracks will appear here.</span>
               </div>
             )}
           </div>
-        </div>
 
         {accountId && (
           <section className="public-bike-shop-directory__tracks" aria-labelledby="my-bike-shop-claims-title" style={{ marginTop: 14 }}>

@@ -1,13 +1,24 @@
 # Global Bike Shop Directory
 
 TrackLab's Global Bike Shop Directory is a free public feature. Visitors can
-search without creating an account by entering a place or deliberately sharing
-their current location, then choosing a radius from 5 to 50 miles in five-mile
-increments.
+browse the Google road map without creating an account. After the visitor pans
+or zooms to a useful city or regional view, TrackLab loads the bike shops in the
+visible area and places them on the map. Entering a place or deliberately
+sharing current location is an optional shortcut for moving the map; it is not
+required to discover shops.
+
+The earlier 5-to-50-mile nearby search remains available as a focused fallback.
+The primary experience is the synchronized map, shop list, and shop details.
+Selecting either a marker or a list item selects the same directory record.
+Dense groups of markers are clustered so that the map remains readable.
+The directory list groups the shops currently loaded for the map as Country →
+State/Province → City, with clear fallback labels when a source listing does
+not include one of those address fields. A visitor can use that hierarchy or
+the map without already knowing a shop name.
 
 ## Data and links
 
-- Nearby shop records come from OpenStreetMap's Overpass service and retain
+- Bike-shop records come from OpenStreetMap's Overpass service and retain
   visible OpenStreetMap/ODbL attribution.
 - Shop websites are displayed only when they use an allowlisted `http` or
   `https` URL.
@@ -19,11 +30,13 @@ increments.
 
 ## Privacy and reliability
 
-Nearby searches use `POST` so precise coordinates are not written into URL
-query strings. Searches are rate-limited, time-bounded, response-size-bounded,
-deduplicated while in flight, and cached briefly in memory. Location is
-requested only after a visitor presses the current-location button; manual
-place search remains available.
+Viewport and nearby searches use `POST` so map bounds and precise coordinates
+are not written into URL query strings. Requests are rate-limited,
+time-bounded, response-size-bounded, deduplicated while in flight, and cached
+briefly in memory. The map does not query the entire planet at once: it asks the
+visitor to zoom closer, then loads only the current visible bounds after map
+movement settles. Location is requested only after a visitor presses the
+current-location button; manual place search remains available.
 
 The public Overpass service can be temporarily unavailable. The directory must
 show a retryable error without blocking the rest of TrackLab or hiding source

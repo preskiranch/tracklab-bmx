@@ -52,6 +52,21 @@ export type BikeShopDirectoryResponse = {
   };
 };
 
+export type BikeShopViewport = {
+  north: number;
+  south: number;
+  east: number;
+  west: number;
+  zoom: number;
+};
+
+export type BikeShopViewportResponse = {
+  viewport: BikeShopViewport;
+  shops: BikeShopRecord[];
+  attribution: BikeShopDirectoryResponse['attribution'];
+  truncated: boolean;
+};
+
 export type NearbyBikeShopTrack = {
   track: TrackRecord | TrackLocatorRecord;
   distanceMiles: number;
@@ -116,6 +131,7 @@ export type BikeShopAdminClaimPage = {
 const minimumRadiusMiles = 5;
 const maximumRadiusMiles = 50;
 const maximumResponseShops = 100;
+const maximumViewportResponseShops = 500;
 const earthRadiusMiles = 3958.7613;
 
 function finiteNumber(value: unknown) {
@@ -407,11 +423,10 @@ export async function reviewBikeShopClaimRequest(
   return claims;
 }
 
-function normalizeDirectoryResponse(value: unknown, requestedOrigin: BikeShopPoint & { radiusMiles: number }) {
-  const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
-  const rawShops = Array.isArray(record.shops) ? record.shops : [];
+function normalizeShops(value: unknown, maximumShops = maximumResponseShops) {
+  const rawShops = Array.isArray(value) ? value : [];
   const seen = new Set<string>();
-  const shops = rawShops
+  return rawShops
     .map(normalizeShop)
     .filter((shop): shop is BikeShopRecord => Boolean(shop))
     .filter((shop) => {
@@ -419,18 +434,26 @@ function normalizeDirectoryResponse(value: unknown, requestedOrigin: BikeShopPoi
       seen.add(shop.id);
       return true;
     })
-    .slice(0, maximumResponseShops);
-  const rawAttribution = record.attribution && typeof record.attribution === 'object'
-    ? record.attribution as Record<string, unknown>
+    .slice(0, maximumShops);
+}
+
+function normalizeAttribution(value: unknown) {
+  const rawAttribution = value && typeof value === 'object'
+    ? value as Record<string, unknown>
     : {};
   return {
+    text: cleanText(rawAttribution.text, 120) || '© OpenStreetMap contributors',
+    url: cleanExternalUrl(rawAttribution.url) || 'https://www.openstreetmap.org/copyright',
+    license: cleanText(rawAttribution.license, 40) || 'ODbL',
+  };
+}
+
+function normalizeDirectoryResponse(value: unknown, requestedOrigin: BikeShopPoint & { radiusMiles: number }) {
+  const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  return {
     origin: requestedOrigin,
-    shops,
-    attribution: {
-      text: cleanText(rawAttribution.text, 120) || '© OpenStreetMap contributors',
-      url: cleanExternalUrl(rawAttribution.url) || 'https://www.openstreetmap.org/copyright',
-      license: cleanText(rawAttribution.license, 40) || 'ODbL',
-    },
+    shops: normalizeShops(record.shops),
+    attribution: normalizeAttribution(record.attribution),
   } satisfies BikeShopDirectoryResponse;
 }
 
@@ -558,6 +581,62 @@ export async function searchNearbyBikeShops(
     );
   }
   return normalizeDirectoryResponse(payload, { ...origin, radiusMiles });
+}
+
+function normalizeBikeShopViewport(viewport: BikeShopViewport) {
+  const north = finiteNumber(viewport.north);
+  const south = finiteNumber(viewport.south);
+  const east = finiteNumber(viewport.east);
+  const west = finiteNumber(viewport.west);
+  const zoom = finiteNumber(viewport.zoom);
+  if (
+    north === null || north < -90 || north > 90
+    || south === null || south < -90 || south > 90
+    || north <= south
+    || east === null || east < -180 || east > 180
+    || west === null || west < -180 || west > 180
+    || zoom === null || zoom < 0 || zoom > 24
+  ) {
+    throw new BikeShopDirectoryError('Move or zoom the map to choose a valid search area.', 400);
+  }
+  return {
+    north,
+    south,
+    east,
+    west,
+    zoom: Math.round(zoom * 10) / 10,
+  } satisfies BikeShopViewport;
+}
+
+export async function searchBikeShopsInViewport(
+  requestedViewport: BikeShopViewport,
+  fetcher: typeof fetch = fetch,
+  signal?: AbortSignal,
+) {
+  const viewport = normalizeBikeShopViewport(requestedViewport);
+  const response = await fetcher('/api/bike-shops/viewport', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(viewport),
+    ...(signal ? { signal } : {}),
+  });
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok) {
+    throw new BikeShopDirectoryError(
+      cleanText(payload.error, 240) || `The bike shop directory returned ${response.status}.`,
+      response.status,
+    );
+  }
+  return {
+    viewport,
+    shops: normalizeShops(payload.shops, maximumViewportResponseShops),
+    attribution: normalizeAttribution(payload.attribution),
+    truncated: payload.truncated === true,
+  } satisfies BikeShopViewportResponse;
 }
 
 export function distanceBetweenMiles(from: BikeShopPoint, to: BikeShopPoint) {

@@ -157,7 +157,9 @@ test('public bike shop search is useful and contained on phone, tablet, and desk
   await expect(directory.getByText('No TrackLab account is needed to search.')).toBeVisible();
   expect(authRequests).toBeGreaterThan(0);
 
-  const radius = directory.getByLabel('Search radius');
+  const radiusField = directory.locator('.public-bike-shop-directory__radius');
+  await expect(radiusField.getByText('Map area', { exact: true })).toBeVisible();
+  const radius = radiusField.locator('select');
   await expect(radius.locator('option')).toHaveCount(10);
   expect(await radius.locator('option').evaluateAll((options) => options.map((option) => ({
     label: option.textContent?.trim(),
@@ -169,7 +171,7 @@ test('public bike shop search is useful and contained on phone, tablet, and desk
   await expect(radius).toHaveValue('25');
 
   await directory.getByRole('button', { name: 'Use current location' }).click();
-  await expect(directory.getByRole('button', { name: 'Searching…' })).toBeDisabled();
+  await expect(directory.getByText('Loading this map area', { exact: true })).toBeVisible();
   await directory.locator('form').dispatchEvent('submit');
   await expect(directory.getByText('2 mapped bike shops', { exact: true })).toBeVisible();
   expect(nearbyRequestCount, 'Enter/submit while busy does not duplicate the search').toBe(1);
@@ -186,7 +188,7 @@ test('public bike shop search is useful and contained on phone, tablet, and desk
   await radius.selectOption('50');
   await expect(directory.getByText('Near Current location · within 25 miles', { exact: true })).toBeVisible();
 
-  const results = directory.locator('.public-bike-shop-directory__result-list').getByRole('button');
+  const results = directory.getByRole('list', { name: 'Loaded bike shop listings' }).getByRole('button');
   await expect(results).toHaveCount(2);
   await expect(results.nth(0)).toContainText(nearestShop.name);
   await expect(results.nth(0)).toContainText('1.2 mi');
