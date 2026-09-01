@@ -191,6 +191,7 @@ test('iPhone portrait shell is fixed-width with readable navigation and headers'
 
   const watchIndicator = page.locator('.side-nav .watch-connect-indicator');
   await expect(watchIndicator).toBeVisible();
+  await expect(page.locator('.recovery-alert-card')).toBeVisible();
   await watchIndicator.locator('.watch-connect-indicator-label').evaluate((label) => {
     label.textContent = 'Watch disconnected';
   });
