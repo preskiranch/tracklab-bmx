@@ -80,6 +80,7 @@ import { fetchExploreElevationProfile } from './exploreElevation.mjs';
 import { generateSmartExplorePlan } from './exploreSmartRoute.mjs';
 import { createAuthSessionCache } from './authSessionCache.mjs';
 import { moderateRoomChatText } from './roomChatModeration.mjs';
+import { createBikeShopDirectory } from './bikeShops.mjs';
 import {
   ApnsProvider,
   apnsConfigurationFromEnv,
@@ -176,6 +177,7 @@ const voteTimers = new Map();
 const routeSelectTimers = new Map();
 const userDataWriteChains = new Map();
 const exploreElevationCache = new Map();
+const bikeShopDirectory = createBikeShopDirectory();
 const globalRaceViewProfileKey = 'global:developer-race-view';
 let commentarySpeechProviderStatus = 'unknown';
 let commentarySpeechProviderRetryAt = 0;
@@ -331,6 +333,7 @@ const appleNotificationRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 100
 const nativeRuntimeConfigRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const map3DLoadRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const exploreRouteRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
+const bikeShopDirectoryRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const smartExploreRouteRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const commentaryRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const clubConnectRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
@@ -16097,6 +16100,42 @@ async function serveStatic(request, response) {
     || requestUrl.pathname === '/api/club-live/assigned-training-sessions'
   ) {
     await handleClubGroupTrainingHistoryApi(request, response, requestUrl);
+    return;
+  }
+  if (requestUrl.pathname === '/api/bike-shops/nearby') {
+    if (request.method !== 'GET') {
+      writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (!enforceNoStoreRateLimit(
+      request,
+      response,
+      bikeShopDirectoryRateLimiter,
+      60,
+      'bike-shop-directory',
+    )) return;
+    try {
+      const result = await bikeShopDirectory.search({
+        latitude: requestUrl.searchParams.get('lat'),
+        longitude: requestUrl.searchParams.get('lng'),
+        radiusMiles: requestUrl.searchParams.get('radiusMiles'),
+      });
+      writeJson(response, 200, result, { 'Cache-Control': 'private, no-store' });
+    } catch (error) {
+      if (error instanceof RangeError) {
+        writeJson(response, 400, { error: error.message }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      const timedOut = error?.name === 'AbortError';
+      cloudTelemetry.warn('bike_shop_directory.upstream_failed', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      writeJson(response, timedOut ? 504 : 502, {
+        error: timedOut
+          ? 'The open bike shop directory timed out. Please try again.'
+          : 'The open bike shop directory is temporarily unavailable.',
+      }, { 'Cache-Control': 'no-store' });
+    }
     return;
   }
   if (requestUrl.pathname === '/api/health') {
