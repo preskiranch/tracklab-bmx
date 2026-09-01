@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  claimClubTabletSharedRecoveryAttempt,
+  claimClubTabletSharedRecoveryErrorDelivery,
   clubTabletAutoRestoreMayRun,
   selectClubTabletAutoRestoreMatch,
   type ClubTabletRecoveryHint,
@@ -21,6 +23,34 @@ const baseDevice: ClubTabletDevice = {
 };
 
 describe('Club Tablet automatic restore matching', () => {
+  it('delivers a terminal recovery failure to the active follower after a remount', async () => {
+    let rejectRecovery: (error: unknown) => void = () => undefined;
+    const recovery = new Promise<never>((_resolve, reject) => {
+      rejectRecovery = reject;
+    });
+    const attemptKey = `remount-failure:${Date.now()}:${Math.random()}`;
+    const starter = claimClubTabletSharedRecoveryAttempt(attemptKey, () => recovery);
+    const follower = claimClubTabletSharedRecoveryAttempt(attemptKey, () => recovery);
+    expect(starter?.started).toBe(true);
+    expect(follower?.started).toBe(false);
+    if (!starter || !follower) throw new Error('Expected a shared recovery attempt.');
+
+    const terminalError = new Error('Recovery rejected with 409');
+    const inactiveStarter = starter.attempt.promise.catch((error) => ({
+      delivered: false,
+      error,
+    }));
+    const activeFollower = follower.attempt.promise.catch((error) => ({
+      delivered: claimClubTabletSharedRecoveryErrorDelivery(attemptKey, follower.attempt),
+      error,
+    }));
+    rejectRecovery(terminalError);
+
+    await expect(inactiveStarter).resolves.toEqual({ delivered: false, error: terminalError });
+    await expect(activeFollower).resolves.toEqual({ delivered: true, error: terminalError });
+    expect(claimClubTabletSharedRecoveryErrorDelivery(attemptKey, starter.attempt)).toBe(false);
+  });
+
   it('never auto-converts a personal web browser into a shared kiosk', () => {
     expect(clubTabletAutoRestoreMayRun({
       hasDeviceCredential: false,

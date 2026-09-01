@@ -7,7 +7,12 @@ import {
   type ClubTabletDeviceCredential,
 } from '../lib/clubTablet';
 import { loadNativeClubTabletRecoveryBinding } from '../lib/nativeClubTabletCredential';
-import { selectClubTabletAutoRestoreMatch } from '../lib/clubTabletAutoRestore';
+import {
+  claimClubTabletSharedRecoveryAttempt,
+  claimClubTabletSharedRecoveryErrorDelivery,
+  selectClubTabletAutoRestoreMatch,
+  updateClubTabletSharedRecoveryAttempt,
+} from '../lib/clubTabletAutoRestore';
 
 type ClubTabletRecoveryDiscovery = Readonly<{
   scopeKey: string;
@@ -25,60 +30,7 @@ type ClubTabletAutoRestoreCoordinatorProps = Readonly<{
   onRecoveryError?: (error: unknown) => void;
 }>;
 
-type SharedRecoveryAttempt = {
-  attempts: number;
-  promise: Promise<ClubTabletDeviceCredential>;
-  state: 'failed' | 'in-flight' | 'retry-ready' | 'succeeded';
-  updatedAt: number;
-};
-
-const sharedRecoveryAttempts = new Map<string, SharedRecoveryAttempt>();
-const sharedRecoveryAttemptTtlMs = 30_000;
 const clubTabletAutoRestoreRetryEvent = 'tracklab:club-tablet-auto-restore-retry';
-
-function claimSharedRecoveryAttempt(
-  attemptKey: string,
-  recover: () => Promise<ClubTabletDeviceCredential>,
-) {
-  const now = Date.now();
-  let existing = sharedRecoveryAttempts.get(attemptKey);
-  if (
-    existing
-    && existing.state !== 'in-flight'
-    && now - existing.updatedAt >= sharedRecoveryAttemptTtlMs
-  ) {
-    sharedRecoveryAttempts.delete(attemptKey);
-    existing = undefined;
-  } else if (existing?.state === 'in-flight' || existing?.state === 'succeeded') {
-    return { attempt: existing, started: false } as const;
-  } else if (existing && existing.state !== 'retry-ready') {
-    return null;
-  }
-  const attempts = existing?.attempts ?? 0;
-  if (attempts >= 2) return null;
-  const promise = Promise.resolve().then(recover);
-  const attempt: SharedRecoveryAttempt = {
-    attempts: attempts + 1,
-    promise,
-    state: 'in-flight',
-    updatedAt: now,
-  };
-  sharedRecoveryAttempts.set(attemptKey, attempt);
-  return { attempt, started: true } as const;
-}
-
-function updateSharedRecoveryAttempt(
-  attemptKey: string,
-  state: SharedRecoveryAttempt['state'],
-) {
-  const existing = sharedRecoveryAttempts.get(attemptKey);
-  if (!existing) return;
-  sharedRecoveryAttempts.set(attemptKey, {
-    ...existing,
-    state,
-    updatedAt: Date.now(),
-  });
-}
 
 /**
  * Converts an authenticated owner installation back into its existing kiosk
@@ -170,7 +122,7 @@ export default function ClubTabletAutoRestoreCoordinator({
     if (!match) return;
 
     const attemptKey = `${scopeKey}:${match.device.id}`;
-    const claimed = claimSharedRecoveryAttempt(
+    const claimed = claimClubTabletSharedRecoveryAttempt(
       attemptKey,
       () => Promise.resolve(onBeforeRecover())
         .then(() => recoverClubTabletDevice(match.device.id)),
@@ -181,7 +133,7 @@ export default function ClubTabletAutoRestoreCoordinator({
     void claimed.attempt.promise
       .then((credential) => {
         if (claimed.started) {
-          updateSharedRecoveryAttempt(attemptKey, 'succeeded');
+          updateClubTabletSharedRecoveryAttempt(attemptKey, 'succeeded');
           void import('./NativeNotificationsCoordinator')
             .then(({ clearNativePushAccountBoundary }) => clearNativePushAccountBoundary())
             .catch(() => undefined);
@@ -198,20 +150,26 @@ export default function ClubTabletAutoRestoreCoordinator({
         // have rotated the bearer and consumed the owner session. Retry only
         // an explicit server-side 5xx, which means recovery did not commit.
         if (
-          claimed.started
-          && claimed.attempt.attempts === 1
+          claimed.attempt.attempts === 1
           && error instanceof ClubTabletRequestError
           && error.status >= 500
         ) {
-          updateSharedRecoveryAttempt(attemptKey, 'retry-ready');
-          window.setTimeout(() => {
-            window.dispatchEvent(new Event(clubTabletAutoRestoreRetryEvent));
-          }, 1_500);
+          if (claimed.started) {
+            updateClubTabletSharedRecoveryAttempt(attemptKey, 'retry-ready');
+            window.setTimeout(() => {
+              window.dispatchEvent(new Event(clubTabletAutoRestoreRetryEvent));
+            }, 1_500);
+          }
           return;
         }
         if (claimed.started) {
-          updateSharedRecoveryAttempt(attemptKey, 'failed');
-          if (active) onRecoveryError?.(error);
+          updateClubTabletSharedRecoveryAttempt(attemptKey, 'failed');
+        }
+        if (
+          active
+          && claimClubTabletSharedRecoveryErrorDelivery(attemptKey, claimed.attempt)
+        ) {
+          onRecoveryError?.(error);
         }
       });
     return () => {
