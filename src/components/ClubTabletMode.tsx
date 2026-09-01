@@ -134,19 +134,17 @@ export function clubTabletBikeAccessReady(
 }
 
 /**
- * A successful recovery rotates the selected row's bearer and consumes the
- * owner's authorizing session. Keep that row out of this installation's
- * restore picker even if an already-running list request returns afterward.
+ * The server recovery state describes a row migration/credential rotation; it
+ * cannot prove that this physical iPad still has the corresponding Keychain
+ * credential. When the current installation is unclaimed, every non-revoked
+ * row remains an explicit recovery choice. A successful recovery is removed
+ * locally so a stale list response cannot offer it again during the handoff.
  */
 export function clubTabletRestoreCandidates(
   devices: readonly ClubTabletDevice[],
   consumedDeviceIds: ReadonlySet<string>,
 ) {
-  return devices.filter((device) => (
-    device.recoveryState === 'pending'
-    && !device.recoveryCompleted
-    && !consumedDeviceIds.has(device.id)
-  ));
+  return devices.filter((device) => !consumedDeviceIds.has(device.id));
 }
 
 export function clubTabletWatchStatusRequestIsCurrent(requestKey: string, currentKey: string) {
@@ -268,9 +266,6 @@ export default function ClubTabletMode({
     managedDevices,
     consumedRestoreDeviceIdsRef.current,
   );
-  const completedRecoveryDevices = managedDevices.filter((device) => (
-    !restoreCandidates.some((candidate) => candidate.id === device.id)
-  ));
 
   const activeSession = sessionCredential && sessionCredential.session.expiresAt > Date.now()
     ? sessionCredential
@@ -804,7 +799,7 @@ export default function ClubTabletMode({
             </div>
             <div className="club-tablet-device-list">
               {restoreCandidates.length > 0 && (
-                <p className="club-tablet-device-group-title">Needs restoration on this iPad</p>
+                <p className="club-tablet-device-group-title">Restore this iPad's previous assignment</p>
               )}
               {restoreCandidates.map((device) => (
                 <article key={device.id}>
@@ -812,6 +807,9 @@ export default function ClubTabletMode({
                   <span>
                     <strong>{device.name}</strong>
                     <small>{device.lastSeenAt ? `Last seen ${new Date(device.lastSeenAt).toLocaleString()}` : 'Not used yet'}</small>
+                    {device.pairedBike && (
+                      <small>Saved Wattbike: {bikeLabel(device.pairedBike)}</small>
+                    )}
                   </span>
                   <div className="club-tablet-device-actions">
                     <button
@@ -835,38 +833,6 @@ export default function ClubTabletMode({
                   </div>
                 </article>
               ))}
-              {completedRecoveryDevices.length > 0 && (
-                <details className="club-tablet-completed-devices">
-                  <summary>Manage already restored tablets ({completedRecoveryDevices.length})</summary>
-                  <div>
-                    {completedRecoveryDevices.map((device) => (
-                      <article className="recovery-complete" key={device.id}>
-                        <TabletSmartphone size={23} />
-                        <span>
-                          <strong>{device.name}</strong>
-                          <small>{device.recoveryState === 'restored'
-                            ? 'Restored authorization is active'
-                            : 'Authorization is already complete'}</small>
-                          {device.pairedBike && (
-                            <small>Saved Wattbike: {bikeLabel(device.pairedBike)}</small>
-                          )}
-                        </span>
-                        <div className="club-tablet-device-actions">
-                          <span className="club-tablet-recovery-badge">No restore needed</span>
-                          <button
-                            type="button"
-                            disabled={deviceManagementBusy}
-                            onClick={() => void revokeDevice(device)}
-                            aria-label={`Revoke ${device.name}`}
-                          >
-                            <Trash2 size={17} /> Revoke
-                          </button>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                </details>
-              )}
               {!deviceManagementBusy && managedDevices.length === 0 && <p>No authorized tablets yet.</p>}
               {deviceManagementBusy && <p>Loading authorized tablets…</p>}
             </div>

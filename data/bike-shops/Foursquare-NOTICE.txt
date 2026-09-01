@@ -1,0 +1,8 @@
+Copyright 2024 Foursquare Labs, Inc. All rights reserved.
+
+Foursquare data in the Overture Maps Places source was transformed to the
+Overture schema by the Overture Maps Foundation. TrackLab further filtered,
+selected fields from, and deduplicated the pinned Overture Places release on
+2026-09-01 for its global bicycle-shop directory.
+
+The applicable Apache License, Version 2.0 is included in Apache-2.0.txt.

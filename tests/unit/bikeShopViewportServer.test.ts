@@ -127,6 +127,24 @@ afterAll(async () => {
 });
 
 describe('public bike shop viewport API', () => {
+  it('serves a public data-attribution page and the complete bundled license texts', async () => {
+    const page = await request('/legal/bike-shop-directory-data');
+    expect(page.status).toBe(200);
+    expect(page.headers.get('content-type')).toContain('text/html');
+    const markup = await page.text();
+    expect(markup).toContain('Global Bike Shop Directory data and licenses');
+    expect(markup).toContain('September 1, 2026');
+    expect(markup).toContain('/legal/bike-shop-directory-data/cdla-permissive-2.0.txt');
+    const cdla = await request('/legal/bike-shop-directory-data/cdla-permissive-2.0.txt');
+    expect(cdla.status).toBe(200);
+    expect(cdla.headers.get('content-type')).toContain('text/plain');
+    expect(await cdla.text()).toContain('Community Data License Agreement - Permissive - Version 2.0');
+    const apache = await request('/legal/bike-shop-directory-data/apache-2.0.txt');
+    expect(await apache.text()).toContain('Apache License');
+    const foursquare = await request('/legal/bike-shop-directory-data/foursquare-notice.txt');
+    expect(await foursquare.text()).toContain('TrackLab further filtered');
+  });
+
   it('uses a bounded body-only contract with exact post-filtering and private responses', async () => {
     expect((await request('/api/bike-shops/viewport')).status).toBe(405);
     expect((await request('/api/bike-shops/viewport?north=38.4', {
@@ -145,13 +163,15 @@ describe('public bike shop viewport API', () => {
     expect(response.headers.get('cache-control')).toContain('no-store');
     expect(response.headers.get('ratelimit-limit')).toBe('60');
     const body = await response.json() as any;
-    expect(Object.keys(body).sort()).toEqual(['attribution', 'bounds', 'shops', 'truncated']);
+    expect(Object.keys(body).sort()).toEqual(['attribution', 'attributions', 'bounds', 'shops', 'truncated']);
     expect(body).toMatchObject({
       bounds: viewport,
-      shops: [{ id: 'osm:node:7001', claimed: false }],
       truncated: false,
       attribution: { text: '© OpenStreetMap contributors', license: 'ODbL' },
     });
+    expect(body.shops).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'osm:node:7001', claimed: false }),
+    ]));
     expect(body).not.toHaveProperty('cache');
     expect(body).not.toHaveProperty('fetchedAt');
     expect(overpassUrls).toEqual(['/api/interpreter']);
@@ -182,7 +202,9 @@ describe('public bike shop viewport API', () => {
     const response = await request('/api/bike-shops/viewport', { method: 'POST', body: viewport });
     expect(response.status).toBe(200);
     const body = await response.json() as any;
-    expect(body.shops).toMatchObject([{ id: 'osm:node:7001', claimed: true }]);
+    expect(body.shops).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'osm:node:7001', claimed: true }),
+    ]));
     expect(JSON.stringify(body)).not.toContain('owner@viewport.example');
     expect(JSON.stringify(body)).not.toContain('Business identity verified');
     expect(overpassUrls).toEqual(['/api/interpreter', '/api/interpreter']);

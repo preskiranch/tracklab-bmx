@@ -172,6 +172,15 @@
   font-weight: 750;
 }
 
+.public-bike-shop-directory__notice {
+  padding: 11px 14px;
+  border-inline: 1px solid #e6c87e;
+  background: #fff8df;
+  color: #705315;
+  font-size: 14px;
+  font-weight: 750;
+}
+
 .public-bike-shop-directory__layout {
   display: grid;
   grid-template-columns: minmax(0, 1.65fr) minmax(310px, 0.75fr);
@@ -346,6 +355,13 @@
 
 .public-bike-shop-directory__hierarchy select:disabled {
   opacity: 0.55;
+}
+
+.public-bike-shop-directory__hierarchy-error {
+  color: #8b2424;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.4;
 }
 
 .public-bike-shop-directory__truncated {
@@ -660,6 +676,31 @@
   gap: 3px;
   color: #2f7023;
   font-size: 12px;
+}
+
+.public-bike-shop-directory__claim-snapshot {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #d9e2e8;
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.public-bike-shop-directory__claim-snapshot > strong,
+.public-bike-shop-directory__claim-snapshot a {
+  color: var(--ink);
+}
+
+.public-bike-shop-directory__claim-snapshot a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 
 .public-bike-shop-directory__attribution {

@@ -143,6 +143,65 @@ describe('bike shop claim persistence', () => {
     await persistence.deleteAuthUserAccount(reviewerUserId);
   });
 
+  it('allows competing pending requests but approves only one cross-catalog identity alias', async () => {
+    const suffix = Date.now().toString();
+    const overtureId = randomUUID();
+    const osmElementId = String(BigInt(`8${suffix.slice(-15)}`));
+    const firstClaimantUserId = randomUUID();
+    const secondClaimantUserId = randomUUID();
+    const reviewerUserId = randomUUID();
+    await persistence.createAuthUser(testUser(firstClaimantUserId, `alias-a-${suffix}@tracklab.test`, 'Alias Owner A'));
+    await persistence.createAuthUser(testUser(secondClaimantUserId, `alias-b-${suffix}@tracklab.test`, 'Alias Owner B'));
+    await persistence.createAuthUser(testUser(reviewerUserId, `alias-review-${suffix}@tracklab.test`, 'Alias Reviewer'));
+    const aliases = [
+      { source: 'overture', osmElementType: 'place', osmElementId: overtureId },
+      { source: 'openstreetmap', osmElementType: 'node', osmElementId },
+    ];
+    const first = await persistence.createBikeShopClaimRequest({
+      ...claimCandidate(firstClaimantUserId, `${suffix}-a`),
+      source: 'openstreetmap',
+      osmElementType: 'node',
+      osmElementId,
+      claimAliases: aliases,
+    });
+    const second = await persistence.createBikeShopClaimRequest({
+      ...claimCandidate(secondClaimantUserId, `${suffix}-b`),
+      source: 'overture',
+      osmElementType: 'place',
+      osmElementId: overtureId,
+      claimAliases: aliases,
+    });
+    expect(first).toMatchObject({ status: 'pending', source: 'openstreetmap' });
+    expect(second).toMatchObject({ status: 'pending', source: 'overture' });
+    await expect(persistence.reviewBikeShopClaimRequest({
+      claimId: first?.id,
+      reviewerUserId,
+      status: 'approved',
+      reviewNote: 'First canonical identity verified.',
+    })).resolves.toMatchObject({ status: 'approved' });
+    await expect(persistence.loadApprovedBikeShopClaimIdentities([aliases[0]])).resolves.toEqual([{
+      ...aliases[0],
+      claimed: true,
+    }]);
+    await expect(persistence.reviewBikeShopClaimRequest({
+      claimId: second?.id,
+      reviewerUserId,
+      status: 'approved',
+      reviewNote: 'Must not approve the same physical shop twice.',
+    })).resolves.toBeNull();
+    await expect(persistence.createBikeShopClaimRequest({
+      ...claimCandidate(secondClaimantUserId, `${suffix}-retry`),
+      source: 'openstreetmap',
+      osmElementType: 'node',
+      osmElementId,
+      claimAliases: aliases,
+    })).resolves.toBeNull();
+
+    await persistence.deleteAuthUserAccount(firstClaimantUserId);
+    await persistence.deleteAuthUserAccount(secondClaimantUserId);
+    await persistence.deleteAuthUserAccount(reviewerUserId);
+  });
+
   it('uses failure-propagating wrappers for every PostgreSQL claim operation', async () => {
     const source = await readFile(new URL('../../cloud/persistence.mjs', import.meta.url), 'utf8');
     const claimPersistence = source.slice(
@@ -154,6 +213,7 @@ describe('bike shop claim persistence', () => {
     expect(claimPersistence).toContain('bikeShopClaimQuery(');
     expect(claimPersistence).not.toContain('const result = await query(');
     expect(claimPersistence).not.toContain('const result = await withPersistenceLock(');
+    expect(claimPersistence).toContain('claim.identity_aliases ? requested.identity_key');
     expect(source).toContain("WHERE claimant_user_id = $1 AND status = 'pending'");
     expect(source).toContain('SET claimant_user_id = NULL');
   });

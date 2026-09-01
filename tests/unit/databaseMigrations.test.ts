@@ -305,6 +305,31 @@ describe('database migration runner', () => {
     expect(statements).toContain("WHERE claimant_user_id IS NOT NULL");
   });
 
+  it('extends moderated ownership claims to canonical Overture place listings', () => {
+    const migration = databaseMigrations().find((candidate) => candidate.version === 39);
+    const statements = migration?.statements.join('\n') ?? '';
+    expect(migration).toMatchObject({
+      version: 39,
+      name: 'support Overture bike shop ownership claims',
+    });
+    expect(statements).toContain("source IN ('openstreetmap', 'overture')");
+    expect(statements).toContain("source = 'overture' AND osm_element_type = 'place'");
+    expect(statements).toContain("source = 'openstreetmap' AND osm_element_type IN ('node', 'way', 'relation')");
+    expect(statements).toContain("[0-9a-f]{8}-[0-9a-f]{4}");
+  });
+
+  it('persists cross-catalog identity aliases for one moderated shop claim', () => {
+    const migration = databaseMigrations().find((candidate) => candidate.version === 40);
+    const statements = migration?.statements.join('\n') ?? '';
+    expect(migration).toMatchObject({
+      version: 40,
+      name: 'preserve equivalent bike shop claim identities',
+    });
+    expect(statements).toContain('identity_aliases JSONB');
+    expect(statements).toContain('jsonb_build_array');
+    expect(statements).toContain('USING GIN (identity_aliases)');
+  });
+
   it('adds accountable administrator review fields to community reports', () => {
     const moderationMigration = databaseMigrations().find((candidate) => candidate.version === 32);
     const statements = moderationMigration?.statements.join('\n') ?? '';

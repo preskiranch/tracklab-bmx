@@ -14,6 +14,13 @@ export type BikeShopAddress = {
   formatted: string;
 };
 
+export type BikeShopSourceIdentity = {
+  provider: string;
+  elementType: string;
+  elementId: string;
+  url: string;
+};
+
 export type BikeShopRecord = BikeShopPoint & {
   id: string;
   name: string;
@@ -29,11 +36,10 @@ export type BikeShopRecord = BikeShopPoint & {
     rental: boolean;
     ebike: boolean;
   };
-  source: {
-    provider: string;
-    elementType: string;
-    elementId: string;
-    url: string;
+  source: BikeShopSourceIdentity & {
+    aliases?: BikeShopSourceIdentity[];
+    provenance?: string[];
+    catalogProvenance?: string[];
   };
   links: {
     maps: string;
@@ -42,14 +48,19 @@ export type BikeShopRecord = BikeShopPoint & {
   };
 };
 
+export type BikeShopAttribution = {
+  text: string;
+  url: string;
+  license: string;
+};
+
 export type BikeShopDirectoryResponse = {
   origin: BikeShopPoint & { radiusMiles: number };
   shops: BikeShopRecord[];
-  attribution: {
-    text: string;
-    url: string;
-    license: string;
-  };
+  attribution: BikeShopAttribution;
+  attributions: BikeShopAttribution[];
+  degraded: boolean;
+  notice: string;
 };
 
 export type BikeShopViewport = {
@@ -64,7 +75,32 @@ export type BikeShopViewportResponse = {
   viewport: BikeShopViewport;
   shops: BikeShopRecord[];
   attribution: BikeShopDirectoryResponse['attribution'];
+  attributions: BikeShopAttribution[];
   truncated: boolean;
+  degraded: boolean;
+  notice: string;
+};
+
+export type BikeShopHierarchyLevel = 'country' | 'region' | 'city';
+
+export type BikeShopHierarchyItem = {
+  value: string;
+  count: number;
+};
+
+export type BikeShopHierarchyResponse = {
+  level: BikeShopHierarchyLevel;
+  items: BikeShopHierarchyItem[];
+  attributions: BikeShopAttribution[];
+};
+
+export type BikeShopCityBrowseResponse = {
+  location: { countryCode: string; region: string; locality: string };
+  shops: BikeShopRecord[];
+  total: number;
+  truncated: boolean;
+  bounds: { north: number; south: number; east: number; west: number } | null;
+  attributions: BikeShopAttribution[];
 };
 
 export type NearbyBikeShopTrack = {
@@ -93,14 +129,26 @@ export type BikeShopClaimReceipt = {
 
 export type BikeShopClaimStatus = 'pending' | 'approved' | 'rejected' | 'withdrawn';
 
+export type BikeShopClaimSnapshot = {
+  id: string;
+  name: string;
+  address: BikeShopAddress;
+  phone: string;
+  website: string;
+  openingHours: string;
+  services: BikeShopRecord['services'];
+  source: BikeShopRecord['source'];
+};
+
 export type BikeShopClaimRecord = {
   id: string;
-  source: 'openstreetmap';
-  osmElementType: 'node' | 'way' | 'relation';
+  source: 'openstreetmap' | 'overture';
+  osmElementType: 'node' | 'way' | 'relation' | 'place';
   osmElementId: string;
   shopName: string;
   latitude: number;
   longitude: number;
+  shopSnapshot: BikeShopClaimSnapshot | null;
   claimantRole: BikeShopClaimRole;
   verificationMethod: BikeShopClaimVerificationMethod;
   businessEmail: string;
@@ -141,6 +189,60 @@ function finiteNumber(value: unknown) {
 
 function cleanText(value: unknown, maximumLength = 240) {
   return typeof value === 'string' ? value.trim().slice(0, maximumLength) : '';
+}
+
+function normalizeSourceIdentity(value: unknown): BikeShopSourceIdentity | null {
+  const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const provider = cleanText(record.provider, 80);
+  const elementType = cleanText(record.elementType, 24);
+  const elementId = cleanText(record.elementId, 80);
+  const source = provider === 'Overture Maps'
+    ? 'overture'
+    : provider === 'OpenStreetMap'
+      ? 'openstreetmap'
+      : '';
+  const validIdentity = (
+    source === 'openstreetmap'
+    && ['node', 'way', 'relation'].includes(elementType)
+    && /^[1-9][0-9]{0,30}$/.test(elementId)
+  ) || (
+    source === 'overture'
+    && elementType === 'place'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(elementId)
+  );
+  if (!validIdentity) return null;
+  return { provider, elementType, elementId, url: cleanExternalUrl(record.url) };
+}
+
+function normalizeShopSource(value: unknown): BikeShopRecord['source'] {
+  const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const primary = normalizeSourceIdentity(record);
+  const aliases = new Map<string, BikeShopSourceIdentity>();
+  for (const aliasValue of Array.isArray(record.aliases) ? record.aliases : []) {
+    const alias = normalizeSourceIdentity(aliasValue);
+    if (!alias) continue;
+    const key = `${alias.provider}:${alias.elementType}:${alias.elementId}`;
+    if (!primary || key !== `${primary.provider}:${primary.elementType}:${primary.elementId}`) {
+      aliases.set(key, alias);
+    }
+  }
+  return {
+    provider: primary?.provider || cleanText(record.provider, 80) || 'OpenStreetMap',
+    elementType: primary?.elementType || cleanText(record.elementType, 24),
+    elementId: primary?.elementId || cleanText(record.elementId, 80),
+    url: primary?.url || cleanExternalUrl(record.url),
+    aliases: [...aliases.values()].slice(0, 8),
+    provenance: [...new Set((Array.isArray(record.provenance)
+      ? record.provenance
+      : [record.provider])
+      .map((entry) => cleanText(entry, 80))
+      .filter(Boolean))].slice(0, 8),
+    catalogProvenance: [...new Set((Array.isArray(record.catalogProvenance)
+      ? record.catalogProvenance
+      : [])
+      .map((entry) => cleanText(entry, 500))
+      .filter(Boolean))].slice(0, 32),
+  };
 }
 
 function cleanExternalUrl(value: unknown) {
@@ -228,17 +330,47 @@ function normalizeShop(value: unknown): BikeShopRecord | null {
       rental: rawServices.rental === true,
       ebike: rawServices.ebike === true,
     },
-    source: {
-      provider: cleanText(rawSource.provider, 80) || 'OpenStreetMap',
-      elementType: cleanText(rawSource.elementType, 24),
-      elementId: cleanText(rawSource.elementId, 80),
-      url: cleanExternalUrl(rawSource.url),
-    },
+    source: normalizeShopSource(rawSource),
     links: {
       maps: cleanExternalUrl(rawLinks.maps) || fallbackLinks.maps,
       directions: cleanExternalUrl(rawLinks.directions) || fallbackLinks.directions,
       streetView: cleanExternalUrl(rawLinks.streetView) || fallbackLinks.streetView,
     },
+  };
+}
+
+function normalizeClaimSnapshot(value: unknown): BikeShopClaimSnapshot | null {
+  const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const rawAddress = record.address && typeof record.address === 'object'
+    ? record.address as Record<string, unknown>
+    : {};
+  const rawServices = record.services && typeof record.services === 'object'
+    ? record.services as Record<string, unknown>
+    : {};
+  const id = cleanText(record.id, 180);
+  const name = cleanText(record.name, 180);
+  if (!id || !name) return null;
+  return {
+    id,
+    name,
+    address: {
+      line1: cleanText(rawAddress.line1),
+      locality: cleanText(rawAddress.locality),
+      region: cleanText(rawAddress.region),
+      postalCode: cleanText(rawAddress.postalCode, 40),
+      countryCode: cleanText(rawAddress.countryCode, 8).toUpperCase(),
+      formatted: cleanText(rawAddress.formatted, 500),
+    },
+    phone: cleanText(record.phone, 80),
+    website: cleanExternalUrl(record.website),
+    openingHours: cleanText(record.openingHours, 300),
+    services: {
+      sales: rawServices.sales === true,
+      repair: rawServices.repair === true,
+      rental: rawServices.rental === true,
+      ebike: rawServices.ebike === true,
+    },
+    source: normalizeShopSource(record.source),
   };
 }
 
@@ -252,11 +384,18 @@ function normalizeClaimRecord(value: unknown): BikeShopClaimRecord | null {
   const verificationMethod = cleanText(record.verificationMethod, 40);
   const status = cleanText(record.status, 20);
   const point = validPoint(record);
+  const validSourceIdentity = (
+    source === 'openstreetmap'
+    && ['node', 'way', 'relation'].includes(osmElementType)
+    && /^[1-9][0-9]{0,30}$/.test(osmElementId)
+  ) || (
+    source === 'overture'
+    && osmElementType === 'place'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(osmElementId)
+  );
   if (
     !id
-    || source !== 'openstreetmap'
-    || !['node', 'way', 'relation'].includes(osmElementType)
-    || !/^[1-9][0-9]{0,30}$/.test(osmElementId)
+    || !validSourceIdentity
     || !['owner', 'manager', 'authorized-representative'].includes(claimantRole)
     || !['business-email', 'business-phone', 'documentation'].includes(verificationMethod)
     || !['pending', 'approved', 'rejected', 'withdrawn'].includes(status)
@@ -264,11 +403,12 @@ function normalizeClaimRecord(value: unknown): BikeShopClaimRecord | null {
   ) return null;
   return {
     id,
-    source: 'openstreetmap',
+    source: source as BikeShopClaimRecord['source'],
     osmElementType: osmElementType as BikeShopClaimRecord['osmElementType'],
     osmElementId,
     shopName: cleanText(record.shopName, 180),
     ...point,
+    shopSnapshot: normalizeClaimSnapshot(record.shopSnapshot),
     claimantRole: claimantRole as BikeShopClaimRole,
     verificationMethod: verificationMethod as BikeShopClaimVerificationMethod,
     businessEmail: cleanText(record.businessEmail, 254),
@@ -378,11 +518,16 @@ export function bikeShopClaimSourceUrl(
   claim: Pick<BikeShopClaimRecord, 'source' | 'osmElementType' | 'osmElementId'>,
 ) {
   if (
-    claim.source !== 'openstreetmap'
-    || !['node', 'way', 'relation'].includes(claim.osmElementType)
-    || !/^[1-9][0-9]{0,30}$/.test(claim.osmElementId)
-  ) return '';
-  return `https://www.openstreetmap.org/${claim.osmElementType}/${claim.osmElementId}`;
+    claim.source === 'openstreetmap'
+    && ['node', 'way', 'relation'].includes(claim.osmElementType)
+    && /^[1-9][0-9]{0,30}$/.test(claim.osmElementId)
+  ) return `https://www.openstreetmap.org/${claim.osmElementType}/${claim.osmElementId}`;
+  if (
+    claim.source === 'overture'
+    && claim.osmElementType === 'place'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(claim.osmElementId)
+  ) return 'https://docs.overturemaps.org/guides/places/';
+  return '';
 }
 
 export async function reviewBikeShopClaimRequest(
@@ -448,13 +593,130 @@ function normalizeAttribution(value: unknown) {
   };
 }
 
+function normalizeAttributions(value: unknown, fallback?: BikeShopAttribution) {
+  const seen = new Set<string>();
+  const normalized = (Array.isArray(value) ? value : [])
+    .map((entry) => normalizeAttribution(entry))
+    .filter((entry) => {
+      const key = `${entry.text}\u0000${entry.url}\u0000${entry.license}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 8);
+  return normalized.length > 0 ? normalized : [fallback ?? normalizeAttribution(null)];
+}
+
 function normalizeDirectoryResponse(value: unknown, requestedOrigin: BikeShopPoint & { radiusMiles: number }) {
   const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const attribution = normalizeAttribution(record.attribution);
   return {
     origin: requestedOrigin,
     shops: normalizeShops(record.shops),
-    attribution: normalizeAttribution(record.attribution),
+    attribution,
+    attributions: normalizeAttributions(record.attributions, attribution),
+    degraded: record.degraded === true,
+    notice: cleanText(record.notice, 240),
   } satisfies BikeShopDirectoryResponse;
+}
+
+export async function listBikeShopHierarchy(
+  input: { countryCode?: string; region?: string } = {},
+  fetcher: typeof fetch = fetch,
+  signal?: AbortSignal,
+) {
+  const countryCode = cleanText(input.countryCode, 8).toUpperCase();
+  const region = cleanText(input.region, 160);
+  if (countryCode && !/^[A-Z]{2}$/.test(countryCode)) {
+    throw new BikeShopDirectoryError('Choose a valid country.', 400);
+  }
+  if (region && !countryCode) {
+    throw new BikeShopDirectoryError('Choose a country before choosing a state or province.', 400);
+  }
+  const query = new URLSearchParams();
+  if (countryCode) query.set('countryCode', countryCode);
+  if (region) query.set('region', region);
+  const response = await fetcher(`/api/bike-shops/hierarchy${query.size ? `?${query}` : ''}`, {
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json' },
+    ...(signal ? { signal } : {}),
+  });
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok) {
+    throw new BikeShopDirectoryError(
+      cleanText(payload.error, 240) || `The bike shop location directory returned ${response.status}.`,
+      response.status,
+    );
+  }
+  const expectedLevel: BikeShopHierarchyLevel = region ? 'city' : countryCode ? 'region' : 'country';
+  if (payload.level !== expectedLevel || !Array.isArray(payload.items)) {
+    throw new BikeShopDirectoryError('TrackLab received an invalid bike shop location directory.', 502);
+  }
+  const seen = new Set<string>();
+  const items = payload.items.map((entry) => {
+    const record = entry && typeof entry === 'object' ? entry as Record<string, unknown> : {};
+    const value = cleanText(record.value, 160);
+    const count = Math.round(finiteNumber(record.count) ?? -1);
+    return value && count >= 0 && count <= 200_000 ? { value, count } : null;
+  }).filter((entry): entry is BikeShopHierarchyItem => {
+    if (!entry || seen.has(entry.value)) return false;
+    seen.add(entry.value);
+    return true;
+  }).slice(0, 5_000);
+  return {
+    level: expectedLevel,
+    items,
+    attributions: normalizeAttributions(payload.attributions),
+  } satisfies BikeShopHierarchyResponse;
+}
+
+export async function browseBikeShopsByCity(
+  location: { countryCode: string; region: string; locality: string },
+  fetcher: typeof fetch = fetch,
+  signal?: AbortSignal,
+) {
+  const countryCode = cleanText(location.countryCode, 8).toUpperCase();
+  const region = cleanText(location.region, 160);
+  const locality = cleanText(location.locality, 160);
+  if (!/^[A-Z]{2}$/.test(countryCode) || !region || !locality) {
+    throw new BikeShopDirectoryError('Choose a country, state or province, and city.', 400);
+  }
+  const response = await fetcher('/api/bike-shops/browse', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ countryCode, region, locality }),
+    ...(signal ? { signal } : {}),
+  });
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok) {
+    throw new BikeShopDirectoryError(
+      cleanText(payload.error, 240) || `The bike shop city directory returned ${response.status}.`,
+      response.status,
+    );
+  }
+  const rawBounds = payload.bounds && typeof payload.bounds === 'object'
+    ? payload.bounds as Record<string, unknown>
+    : {};
+  const north = finiteNumber(rawBounds.north);
+  const south = finiteNumber(rawBounds.south);
+  const east = finiteNumber(rawBounds.east);
+  const west = finiteNumber(rawBounds.west);
+  const bounds = north !== null && south !== null && east !== null && west !== null
+    && north >= south && north <= 90 && south >= -90
+    && east >= -180 && east <= 180 && west >= -180 && west <= 180
+    ? { north, south, east, west }
+    : null;
+  const shops = normalizeShops(payload.shops, maximumViewportResponseShops);
+  const total = Math.max(shops.length, Math.min(200_000, Math.round(finiteNumber(payload.total) ?? shops.length)));
+  return {
+    location: { countryCode, region, locality },
+    shops,
+    total,
+    truncated: payload.truncated === true || total > shops.length,
+    bounds,
+    attributions: normalizeAttributions(payload.attributions),
+  } satisfies BikeShopCityBrowseResponse;
 }
 
 export class BikeShopDirectoryError extends Error {
@@ -470,17 +732,22 @@ export class BikeShopDirectoryError extends Error {
 function claimShopIdentity(shop: BikeShopRecord) {
   const elementType = shop.source.elementType;
   const elementId = shop.source.elementId;
-  if (!['node', 'way', 'relation'].includes(elementType) || !/^[1-9][0-9]{0,30}$/.test(elementId)) {
+  const source = shop.source.provider === 'Overture Maps' ? 'overture' : 'openstreetmap';
+  const valid = source === 'openstreetmap'
+    ? ['node', 'way', 'relation'].includes(elementType) && /^[1-9][0-9]{0,30}$/.test(elementId)
+    : elementType === 'place'
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(elementId);
+  if (!valid) {
     throw new BikeShopDirectoryError('This open-directory listing cannot be claimed yet.', 400);
   }
-  return { elementType, elementId };
+  return { source, elementType, elementId };
 }
 
 export async function submitBikeShopClaimRequest(
   request: BikeShopClaimRequest,
   fetcher: typeof fetch = fetch,
 ) {
-  const { elementType, elementId } = claimShopIdentity(request.shop);
+  const { source, elementType, elementId } = claimShopIdentity(request.shop);
   const businessEmail = cleanText(request.businessEmail, 254).toLowerCase();
   const businessPhone = cleanText(request.businessPhone, 80);
   const verificationNote = cleanText(request.verificationNote, 1_000);
@@ -509,7 +776,9 @@ export async function submitBikeShopClaimRequest(
     },
     body: JSON.stringify({
       shop: {
-        id: `osm:${elementType}:${elementId}`,
+        id: source === 'overture'
+          ? `overture:${elementId}`
+          : `osm:${elementType}:${elementId}`,
         name: request.shop.name,
         latitude: request.shop.latitude,
         longitude: request.shop.longitude,
@@ -631,11 +900,15 @@ export async function searchBikeShopsInViewport(
       response.status,
     );
   }
+  const attribution = normalizeAttribution(payload.attribution);
   return {
     viewport,
     shops: normalizeShops(payload.shops, maximumViewportResponseShops),
-    attribution: normalizeAttribution(payload.attribution),
+    attribution,
+    attributions: normalizeAttributions(payload.attributions, attribution),
     truncated: payload.truncated === true,
+    degraded: payload.degraded === true,
+    notice: cleanText(payload.notice, 240),
   } satisfies BikeShopViewportResponse;
 }
 

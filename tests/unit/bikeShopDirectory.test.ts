@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   applyApprovedBikeShopClaims,
+  applyApprovedBikeShopClaimsBestEffort,
+  bikeShopClaimIdentities,
   bikeShopSearchLimits,
   createBikeShopDirectory,
   normalizeOverpassBikeShops,
@@ -105,7 +107,7 @@ describe('bike shop directory backend', () => {
     const first = await directory.searchViewport(viewport);
     const second = await directory.searchViewport(viewport);
 
-    expect(Object.keys(first).sort()).toEqual(['attribution', 'bounds', 'shops', 'truncated']);
+    expect(Object.keys(first).sort()).toEqual(['attribution', 'attributions', 'bounds', 'shops', 'truncated']);
     expect(first.bounds).toEqual(viewport);
     expect(first.shops).toHaveLength(100);
     expect(first.truncated).toBe(true);
@@ -441,7 +443,7 @@ describe('bike shop directory backend', () => {
     expect(() => parseBikeShopClaimRequest({
       shop: { id: 'google:place:secret', name: 'Shop', latitude: 1, longitude: 2 },
       claimantRole: 'owner', verificationMethod: 'business-email', businessEmail: 'owner@example.com',
-    })).toThrow(/OpenStreetMap/);
+    })).toThrow(/directory bike shop ID/);
   });
 
   it('rehydrates claim identity from the exact canonical OpenStreetMap element', async () => {
@@ -527,12 +529,309 @@ describe('bike shop directory backend', () => {
     expect(JSON.stringify(marked)).not.toContain('private');
   });
 
-  it('does not cache an unsuccessful upstream response', async () => {
+  it('treats a matching cross-catalog identity alias as the same approved shop', async () => {
+    const shop = {
+      id: 'overture:11111111-1111-4111-8111-111111111111',
+      claimed: false,
+      source: {
+        provider: 'Overture Maps',
+        elementType: 'place',
+        elementId: '11111111-1111-4111-8111-111111111111',
+        aliases: [{
+          provider: 'OpenStreetMap', elementType: 'node', elementId: '77',
+          url: 'https://www.openstreetmap.org/node/77',
+        }],
+      },
+    };
+    expect(bikeShopClaimIdentities(shop)).toEqual([
+      { source: 'overture', osmElementType: 'place', osmElementId: '11111111-1111-4111-8111-111111111111' },
+      { source: 'openstreetmap', osmElementType: 'node', osmElementId: '77' },
+    ]);
+    expect(applyApprovedBikeShopClaims([shop], [{
+      source: 'openstreetmap', osmElementType: 'node', osmElementId: '77',
+    }])).toMatchObject([{ claimed: true }]);
+    const loader = vi.fn(async () => [{
+      source: 'openstreetmap', osmElementType: 'node', osmElementId: '77',
+    }]);
+    await expect(applyApprovedBikeShopClaimsBestEffort([shop], loader)).resolves.toMatchObject([
+      { claimed: true },
+    ]);
+    expect(loader).toHaveBeenCalledWith([
+      { source: 'overture', osmElementType: 'place', osmElementId: '11111111-1111-4111-8111-111111111111' },
+      { source: 'openstreetmap', osmElementType: 'node', osmElementId: '77' },
+    ]);
+  });
+
+  it('keeps the public directory available without unverified badges when claim storage fails', async () => {
+    const shops = [{
+      id: 'osm:node:77',
+      claimed: true,
+      source: { provider: 'OpenStreetMap', elementType: 'node', elementId: '77' },
+    }];
+    const report = vi.fn();
+    await expect(applyApprovedBikeShopClaimsBestEffort(
+      shops,
+      vi.fn(async () => { throw new Error('database unavailable'); }),
+      report,
+    )).resolves.toEqual([{ ...shops[0], claimed: false }]);
+    expect(report).toHaveBeenCalledOnce();
+  });
+
+  it('cools down an unsuccessful upstream endpoint instead of retrying on every search', async () => {
     const fetchImpl = vi.fn(async () => new Response('', { status: 429 }));
-    const directory = createBikeShopDirectory({ fetchImpl });
+    const directory = createBikeShopDirectory({
+      fetchImpl,
+      endpoint: 'https://overpass.example/api/interpreter',
+    });
     await expect(directory.search({ lat: 38, lng: -121, radiusMiles: 5 })).rejects.toThrow(/failed \(429\)/);
-    await expect(directory.search({ lat: 38, lng: -121, radiusMiles: 5 })).rejects.toThrow(/failed \(429\)/);
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    await expect(directory.search({ lat: 38, lng: -121, radiusMiles: 5 })).rejects.toMatchObject({
+      code: 'OVERPASS_COOLDOWN',
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails over to a healthy OpenStreetMap mirror and cools down a failed mirror', async () => {
+    const fetchImpl = vi.fn(async (url: string) => (
+      url.includes('primary')
+        ? new Response('', { status: 504 })
+        : new Response(JSON.stringify({ elements: [{
+          type: 'node', id: 701, lat: 38.3, lon: -121.9,
+          tags: { shop: 'bicycle', name: 'Mirror Bikes' },
+        }] }), { status: 200 })
+    ));
+    const directory = createBikeShopDirectory({
+      fetchImpl,
+      endpoints: [
+        'https://primary.example/api/interpreter',
+        'https://secondary.example/api/interpreter',
+      ],
+    });
+    const first = await directory.search({ lat: 38.3, lng: -121.9, radiusMiles: 5 });
+    const second = await directory.search({ lat: 38.31, lng: -121.9, radiusMiles: 5 });
+    expect(first.shops.map((shop) => shop.name)).toContain('Mirror Bikes');
+    expect(second.shops.map((shop) => shop.name)).toContain('Mirror Bikes');
+    expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([
+      'https://primary.example/api/interpreter',
+      'https://secondary.example/api/interpreter',
+      'https://secondary.example/api/interpreter',
+    ]);
+  });
+
+  it('serves the preloaded catalog during an upstream outage and merges OSM when live', async () => {
+    const catalogShop = {
+      id: 'overture:11111111-1111-4111-8111-111111111111',
+      name: "Ray's Cycle",
+      latitude: 38.356,
+      longitude: -121.987,
+      address: { line1: '', locality: 'Vacaville', region: 'CA', postalCode: '', countryCode: 'US', formatted: 'Vacaville, CA' },
+      phone: '', website: '', openingHours: '',
+      services: { sales: true, repair: false, rental: false, ebike: false },
+      source: { provider: 'Overture Maps', elementType: 'place', elementId: '11111111-1111-4111-8111-111111111111', url: 'https://docs.overturemaps.org/guides/places/' },
+      links: {},
+    };
+    const offlineFetch = vi.fn(async () => new Response('', { status: 503 }));
+    const offline = createBikeShopDirectory({
+      endpoint: 'https://overpass.example/api/interpreter',
+      fetchImpl: offlineFetch,
+      loadSearch: vi.fn(async () => [catalogShop]),
+    });
+    const fallback = await offline.search({ lat: 38.35, lng: -121.99, radiusMiles: 5 });
+    expect(fallback).toMatchObject({
+      degraded: true,
+      shops: [{ name: "Ray's Cycle", source: { provider: 'Overture Maps' } }],
+    });
+    expect(fallback.notice).toMatch(/recently known/i);
+    await expect(offline.search({ lat: 38.36, lng: -121.99, radiusMiles: 5 })).resolves.toMatchObject({
+      degraded: true,
+      shops: [{ name: "Ray's Cycle" }],
+    });
+    expect(offlineFetch).toHaveBeenCalledTimes(1);
+
+    const online = createBikeShopDirectory({
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify({ elements: [{
+        type: 'node', id: 702, lat: 38.3561, lon: -121.9871,
+        tags: { shop: 'bicycle', name: "Ray's Cycle", phone: '555-0100' },
+      }] }), { status: 200 })),
+      loadSearch: vi.fn(async () => [catalogShop]),
+    });
+    const merged = await online.search({ lat: 38.35, lng: -121.99, radiusMiles: 5 });
+    expect(merged.shops).toHaveLength(1);
+    expect(merged.shops[0]).toMatchObject({
+      id: 'overture:11111111-1111-4111-8111-111111111111',
+      phone: '',
+      address: { locality: 'Vacaville' },
+      source: {
+        provider: 'Overture Maps',
+        aliases: [{ provider: 'OpenStreetMap', elementType: 'node', elementId: '702' }],
+      },
+    });
+    expect(JSON.stringify(merged.shops[0])).not.toContain('555-0100');
+  });
+
+  it('returns the preloaded catalog promptly while slow OSM mirrors enrich in the background', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const fetchImpl = vi.fn(async () => {
+      await gate;
+      return new Response(JSON.stringify({ elements: [] }), { status: 200 });
+    });
+    const directory = createBikeShopDirectory({
+      fetchImpl,
+      catalogLiveWaitMs: 25,
+      loadSearch: vi.fn(async () => [{
+        id: 'overture:11111111-1111-4111-8111-111111111111',
+        name: 'Immediate Catalog Bikes',
+        latitude: 38.3,
+        longitude: -121.9,
+        address: {}, services: {}, phone: '', website: '', openingHours: '', links: {},
+        source: { provider: 'Overture Maps', elementType: 'place', elementId: '11111111-1111-4111-8111-111111111111' },
+      }]),
+    });
+    const startedAt = performance.now();
+    const result = await directory.search({ lat: 38.3, lng: -121.9, radiusMiles: 5 });
+    expect(performance.now() - startedAt).toBeLessThan(250);
+    expect(result).toMatchObject({
+      degraded: true,
+      shops: [{ name: 'Immediate Catalog Bikes' }],
+    });
+    release();
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+  });
+
+  it('merges a dense preloaded catalog without quadratic search latency', async () => {
+    const catalog = Array.from({ length: 5_000 }, (_, index) => ({
+      id: `overture:${String(index).padStart(8, '0')}-1111-4111-8111-111111111111`,
+      name: `Catalog Bikes ${index}`,
+      latitude: 38.3 + (index % 50) / 10_000,
+      longitude: -121.9 + Math.floor(index / 50) / 10_000,
+      address: {}, services: {}, phone: '', website: '', openingHours: '', links: {},
+      source: {
+        provider: 'Overture Maps',
+        elementType: 'place',
+        elementId: `${String(index).padStart(8, '0')}-1111-4111-8111-111111111111`,
+      },
+    }));
+    const directory = createBikeShopDirectory({
+      endpoint: 'https://overpass.example/api/interpreter',
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify({ elements: [{
+        type: 'node',
+        id: 704,
+        lat: catalog[2_500].latitude,
+        lon: catalog[2_500].longitude,
+        tags: { shop: 'bicycle', name: catalog[2_500].name },
+      }] }), { status: 200 })),
+      loadSearch: vi.fn(async () => catalog),
+    });
+    const startedAt = performance.now();
+    const result = await directory.search({ lat: 38.3, lng: -121.9, radiusMiles: 5 });
+    expect(performance.now() - startedAt).toBeLessThan(1_200);
+    expect(result.shops).toHaveLength(100);
+  });
+
+  it('caches only the bounded exact nearby result instead of every dense-radius candidate', async () => {
+    let coordinateReads = 0;
+    const denseCatalog = Array.from({ length: 1_000 }, (_, index) => {
+      const latitude = 38.3 + (index % 20) / 100_000;
+      const longitude = -121.9 + Math.floor(index / 20) / 100_000;
+      return {
+        id: `overture:${String(index).padStart(8, '0')}-1111-4111-8111-111111111111`,
+        name: `Dense Cache Bikes ${String(index).padStart(4, '0')}`,
+        get latitude() { coordinateReads += 1; return latitude; },
+        get longitude() { coordinateReads += 1; return longitude; },
+        address: {}, services: {}, phone: '', website: '', openingHours: '', links: {},
+        source: {
+          provider: 'Overture Maps',
+          elementType: 'place',
+          elementId: `${String(index).padStart(8, '0')}-1111-4111-8111-111111111111`,
+        },
+      };
+    });
+    const loadSearch = vi.fn(async () => denseCatalog);
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ elements: [] }), { status: 200 }));
+    const directory = createBikeShopDirectory({ loadSearch, fetchImpl });
+    const input = { lat: 38.3, lng: -121.9, radiusMiles: 5 };
+    const first = await directory.search(input);
+    expect(first.shops).toHaveLength(100);
+    coordinateReads = 0;
+    const second = await directory.search(input);
+    expect(second).toEqual(first);
+    expect(coordinateReads).toBeLessThan(1_000);
+    expect(loadSearch).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('serves an expired successful response as stale when refresh fails', async () => {
+    let timestamp = 1_700_000_000_000;
+    let online = true;
+    const directory = createBikeShopDirectory({
+      endpoint: 'https://overpass.example/api/interpreter',
+      now: () => timestamp,
+      fetchImpl: vi.fn(async () => online
+        ? new Response(JSON.stringify({ elements: [{
+          type: 'node', id: 703, lat: 38.3, lon: -121.9,
+          tags: { shop: 'bicycle', name: 'Stale Bikes' },
+        }] }), { status: 200 })
+        : new Response('', { status: 503 })),
+    });
+    const input = { lat: 38.3, lng: -121.9, radiusMiles: 5 };
+    await directory.search(input);
+    timestamp += bikeShopSearchLimits.cacheTtlMs + 1;
+    online = false;
+    const stale = await directory.search(input);
+    expect(stale).toMatchObject({ degraded: true, shops: [{ name: 'Stale Bikes' }] });
+  });
+
+  it('canonically verifies an Overture catalog claim without trusting the client snapshot', async () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+    const canonical = {
+      id: `overture:${id}`,
+      name: 'Canonical Catalog Bikes', latitude: 38.3, longitude: -121.9,
+      address: {}, services: {}, phone: '', website: '', openingHours: '', links: {},
+      source: { provider: 'Overture Maps', elementType: 'place', elementId: id, url: 'https://docs.overturemaps.org/guides/places/' },
+    };
+    const resolveCatalogShop = vi.fn(async () => canonical);
+    const directory = createBikeShopDirectory({ resolveCatalogShop });
+    const parsed = parseBikeShopClaimRequest({
+      shop: { id: `overture:${id}`, name: 'Attacker Name' },
+      claimantRole: 'owner', verificationMethod: 'business-email', businessEmail: 'owner@example.com',
+    });
+    const claim = await directory.resolveClaim(parsed);
+    expect(claim).toMatchObject({ source: 'overture', shopName: 'Canonical Catalog Bikes' });
+    expect(JSON.stringify(claim)).not.toContain('Attacker Name');
+    expect(resolveCatalogShop).toHaveBeenCalledWith(id);
+  });
+
+  it('resolves an OSM claim through the durable Overture canonical alias', async () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+    const directory = createBikeShopDirectory({
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify({ elements: [{
+        type: 'node', id: 702, lat: 38.3561, lon: -121.9871,
+        tags: { shop: 'bicycle', name: "Ray's Cycle", phone: '555-0100' },
+      }] }), { status: 200 })),
+      loadSearch: vi.fn(async () => [{
+        id: `overture:${id}`,
+        name: "Ray's Cycle",
+        latitude: 38.356,
+        longitude: -121.987,
+        address: { locality: 'Vacaville' },
+        phone: '', website: '', openingHours: '', services: {}, links: {},
+        source: { provider: 'Overture Maps', elementType: 'place', elementId: id },
+      }]),
+    });
+    const claim = await directory.resolveClaim(parseBikeShopClaimRequest({
+      shop: { id: 'osm:node:702' },
+      claimantRole: 'owner', verificationMethod: 'business-email', businessEmail: 'owner@example.com',
+    }));
+    expect(claim).toMatchObject({
+      source: 'openstreetmap',
+      shopName: "Ray's Cycle",
+      shopSnapshot: { id: `overture:${id}`, source: { provider: 'Overture Maps' } },
+      claimAliases: [
+        { source: 'overture', osmElementType: 'place', osmElementId: id },
+        { source: 'openstreetmap', osmElementType: 'node', osmElementId: '702' },
+      ],
+    });
+    expect(JSON.stringify(claim.shopSnapshot)).not.toContain('555-0100');
   });
 
   it('rejects an oversized upstream response before parsing it', async () => {

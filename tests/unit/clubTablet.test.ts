@@ -303,7 +303,7 @@ describe('Club Tablet client state', () => {
     expect(clubTabletBikeAccessReady('active', true)).toBe(true);
   });
 
-  it('removes a consumed recovery row from stale and current device lists', () => {
+  it('offers every server record to an unclaimed iPad and removes only the consumed row', () => {
     const devices = [
       deviceCredential.device,
       { ...deviceCredential.device, id: 'tablet-2', name: 'Bike 2 iPad' },
@@ -312,10 +312,11 @@ describe('Club Tablet client state', () => {
       devices,
       new Set([deviceCredential.device.id]),
     )).toEqual([devices[1]]);
-    expect(clubTabletRestoreCandidates([
-      { ...devices[1], recoveryState: 'complete', recoveryCompleted: true },
-      { ...devices[1], id: 'tablet-3', recoveryState: 'restored', recoveryCompleted: true },
-    ], new Set())).toEqual([]);
+    const migratedRows = [
+      { ...devices[1], recoveryState: 'complete' as const, recoveryCompleted: true },
+      { ...devices[1], id: 'tablet-3', recoveryState: 'restored' as const, recoveryCompleted: true },
+    ];
+    expect(clubTabletRestoreCandidates(migratedRows, new Set())).toEqual(migratedRows);
     expect(clubTabletAuthorizationTimeoutMs).toBe(15_000);
   });
 

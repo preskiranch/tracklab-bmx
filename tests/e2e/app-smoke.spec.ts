@@ -459,7 +459,7 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   await expect(page.getByLabel('Required profile')).toBeVisible();
   await expect(page.locator('#track-locator').getByRole('heading', { name: 'North Bay BMX' })).toBeVisible();
 
-  await page.getByLabel('Name').fill('Playwright Rider');
+  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Playwright Rider');
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill('playwright-pass-2026');
   const createAccount = page.getByLabel('Required profile').locator('button[type="submit"]');
@@ -7652,8 +7652,11 @@ test('native club owner sign-in restores the uniquely assigned Wattbike tablet i
     clubName: 'Preski Ranch LLC',
     createdAt: now,
     lastSeenAt: now,
-    recoveryState: 'pending',
-    recoveryCompleted: false,
+    // This is server history, not proof that the current installation still
+    // owns the bearer. An updated iPad with the uniquely assigned Wattbike
+    // must remain recoverable even when the row was rotated in the past.
+    recoveryState: 'restored',
+    recoveryCompleted: true,
     pairedBike: {
       deviceId: 58701,
       label: 'WattbikePM25058701',

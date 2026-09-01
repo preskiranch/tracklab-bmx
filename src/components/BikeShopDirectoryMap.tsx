@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { LoaderCircle, MapPinned, Search } from 'lucide-react';
 import {
   loadGoogleBaseMap,
@@ -90,6 +90,8 @@ export function BikeShopDirectoryMap({
   const idleListenerRef = useRef<GoogleMapsEventListener | null>(null);
   const markerEntriesRef = useRef<Array<{ marker: GoogleMarker; listener: GoogleMapsEventListener }>>([]);
   const debounceRef = useRef<number | null>(null);
+  const suppressViewportIdleRef = useRef(false);
+  const releaseSuppressedIdleRef = useRef<number | null>(null);
   const viewportCallbackRef = useRef(onViewportChange);
   const resultIntentGenerationRef = useRef(getResultIntentGeneration);
   const selectCallbackRef = useRef(onSelectShop);
@@ -101,11 +103,42 @@ export function BikeShopDirectoryMap({
   resultIntentGenerationRef.current = getResultIntentGeneration;
   selectCallbackRef.current = onSelectShop;
 
+  const clearSuppressedProgrammaticIdle = useCallback(() => {
+    suppressViewportIdleRef.current = false;
+    if (releaseSuppressedIdleRef.current !== null) {
+      window.clearTimeout(releaseSuppressedIdleRef.current);
+      releaseSuppressedIdleRef.current = null;
+    }
+  }, []);
+
+  const suppressNextProgrammaticIdle = useCallback(() => {
+    suppressViewportIdleRef.current = true;
+    if (debounceRef.current !== null) {
+      window.clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    if (releaseSuppressedIdleRef.current !== null) {
+      window.clearTimeout(releaseSuppressedIdleRef.current);
+      releaseSuppressedIdleRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    // Clearing a nearby/hierarchy result explicitly returns control to map
+    // browsing. If a test map or browser did not emit the camera's synthetic
+    // idle event, do not leave the next genuine user move suppressed.
+    if (focusRequest === null) clearSuppressedProgrammaticIdle();
+  }, [clearSuppressedProgrammaticIdle, focusRequest]);
+
   useLayoutEffect(() => {
     let cancelled = false;
     let resizeObserver: ResizeObserver | null = null;
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
+    const releaseForUserGesture = () => clearSuppressedProgrammaticIdle();
+    canvas.addEventListener('pointerdown', releaseForUserGesture, true);
+    canvas.addEventListener('wheel', releaseForUserGesture, true);
+    canvas.addEventListener('keydown', releaseForUserGesture, true);
 
     void loadGoogleBaseMap().then((google) => {
       if (cancelled) return;
@@ -126,14 +159,29 @@ export function BikeShopDirectoryMap({
       mapRef.current = map;
       idleListenerRef.current = map.addListener('idle', () => {
         if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
+        const currentZoom = map.getZoom?.() ?? 2;
+        setZoom(currentZoom);
+        setHasLoadedViewport(true);
+        if (suppressViewportIdleRef.current) {
+          // fitBounds/setCenter are presentation updates for a hierarchy or
+          // nearby result that is already loaded. Do not let their synthetic
+          // idle event replace that result with a viewport request. Keep a
+          // short quiet window so multi-step Google camera animations cannot
+          // leak a second programmatic idle; the next real user gesture loads.
+          if (releaseSuppressedIdleRef.current !== null) {
+            window.clearTimeout(releaseSuppressedIdleRef.current);
+          }
+          releaseSuppressedIdleRef.current = window.setTimeout(() => {
+            suppressViewportIdleRef.current = false;
+            releaseSuppressedIdleRef.current = null;
+          }, 250);
+          return;
+        }
         const observedResultIntentGeneration = resultIntentGenerationRef.current();
         debounceRef.current = window.setTimeout(() => {
           const bounds = map.getBounds?.();
           const northEast = bounds?.getNorthEast?.().toJSON();
           const southWest = bounds?.getSouthWest?.().toJSON();
-          const currentZoom = map.getZoom?.() ?? 2;
-          setZoom(currentZoom);
-          setHasLoadedViewport(true);
           if (!northEast || !southWest) return;
           viewportCallbackRef.current({
             north: northEast.lat,
@@ -147,7 +195,10 @@ export function BikeShopDirectoryMap({
       resizeObserver = new ResizeObserver(() => {
         const center = map.getCenter?.().toJSON();
         google.maps.event?.trigger(map, 'resize');
-        if (center) map.setCenter?.(center);
+        if (center) {
+          suppressNextProgrammaticIdle();
+          map.setCenter?.(center);
+        }
       });
       resizeObserver.observe(canvas);
       setMapStatus('ready');
@@ -159,10 +210,14 @@ export function BikeShopDirectoryMap({
 
     return () => {
       cancelled = true;
+      canvas.removeEventListener('pointerdown', releaseForUserGesture, true);
+      canvas.removeEventListener('wheel', releaseForUserGesture, true);
+      canvas.removeEventListener('keydown', releaseForUserGesture, true);
       resizeObserver?.disconnect();
       idleListenerRef.current?.remove();
       idleListenerRef.current = null;
       if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
+      clearSuppressedProgrammaticIdle();
       markerEntriesRef.current.forEach(({ marker, listener }) => {
         listener.remove();
         marker.setMap(null);
@@ -171,12 +226,13 @@ export function BikeShopDirectoryMap({
       mapRef.current = null;
       googleRef.current = null;
     };
-  }, []);
+  }, [clearSuppressedProgrammaticIdle, suppressNextProgrammaticIdle]);
 
   useEffect(() => {
     const map = mapRef.current;
     const google = googleRef.current;
     if (!map || !google || !focusRequest || focusRequest.points.length === 0) return;
+    suppressNextProgrammaticIdle();
     if (focusRequest.points.length === 1) {
       const point = focusRequest.points[0];
       map.setCenter?.({ lat: point.latitude, lng: point.longitude });
@@ -186,7 +242,7 @@ export function BikeShopDirectoryMap({
     const bounds = new google.maps.LatLngBounds();
     focusRequest.points.forEach((point) => bounds.extend({ lat: point.latitude, lng: point.longitude }));
     map.fitBounds(bounds, 52);
-  }, [focusRequest, mapStatus]);
+  }, [focusRequest, mapStatus, suppressNextProgrammaticIdle]);
 
   const clusters = useMemo(() => clusterShops(shops, zoom), [shops, zoom]);
 

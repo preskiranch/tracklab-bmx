@@ -2141,6 +2141,62 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           WHERE claimant_user_id IS NOT NULL AND status IN ('pending', 'approved')`,
       ],
     },
+    {
+      version: 39,
+      name: 'support Overture bike shop ownership claims',
+      statements: [
+        `ALTER TABLE ${schema}.bike_shop_claim_requests
+          DROP CONSTRAINT IF EXISTS bike_shop_claim_requests_source_check`,
+        `ALTER TABLE ${schema}.bike_shop_claim_requests
+          DROP CONSTRAINT IF EXISTS bike_shop_claim_requests_osm_element_type_check`,
+        `ALTER TABLE ${schema}.bike_shop_claim_requests
+          DROP CONSTRAINT IF EXISTS bike_shop_claim_requests_osm_element_id_check`,
+        `ALTER TABLE ${schema}.bike_shop_claim_requests
+          ADD CONSTRAINT bike_shop_claim_requests_source_check
+          CHECK (source IN ('openstreetmap', 'overture')) NOT VALID`,
+        `ALTER TABLE ${schema}.bike_shop_claim_requests
+          ADD CONSTRAINT bike_shop_claim_requests_element_type_check
+          CHECK (
+            (source = 'openstreetmap' AND osm_element_type IN ('node', 'way', 'relation'))
+            OR (source = 'overture' AND osm_element_type = 'place')
+          ) NOT VALID`,
+        `ALTER TABLE ${schema}.bike_shop_claim_requests
+          ADD CONSTRAINT bike_shop_claim_requests_element_id_check
+          CHECK (
+            (source = 'openstreetmap' AND osm_element_id ~ '^[1-9][0-9]{0,30}$')
+            OR (
+              source = 'overture'
+              AND osm_element_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+            )
+          ) NOT VALID`,
+        `ALTER TABLE ${schema}.bike_shop_claim_requests
+          VALIDATE CONSTRAINT bike_shop_claim_requests_source_check`,
+        `ALTER TABLE ${schema}.bike_shop_claim_requests
+          VALIDATE CONSTRAINT bike_shop_claim_requests_element_type_check`,
+        `ALTER TABLE ${schema}.bike_shop_claim_requests
+          VALIDATE CONSTRAINT bike_shop_claim_requests_element_id_check`,
+      ],
+    },
+    {
+      version: 40,
+      name: 'preserve equivalent bike shop claim identities',
+      statements: [
+        `ALTER TABLE ${schema}.bike_shop_claim_requests
+          ADD COLUMN IF NOT EXISTS identity_aliases JSONB NOT NULL DEFAULT '[]'::jsonb`,
+        `UPDATE ${schema}.bike_shop_claim_requests
+          SET identity_aliases = jsonb_build_array(
+            source || ':' || osm_element_type || ':' || osm_element_id
+          )
+          WHERE jsonb_array_length(identity_aliases) = 0`,
+        `ALTER TABLE ${schema}.bike_shop_claim_requests
+          ADD CONSTRAINT bike_shop_claim_requests_identity_aliases_array
+          CHECK (jsonb_typeof(identity_aliases) = 'array') NOT VALID`,
+        `ALTER TABLE ${schema}.bike_shop_claim_requests
+          VALIDATE CONSTRAINT bike_shop_claim_requests_identity_aliases_array`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_bike_shop_claim_identity_aliases
+          ON ${schema}.bike_shop_claim_requests USING GIN (identity_aliases)`,
+      ],
+    },
   ];
 }
 

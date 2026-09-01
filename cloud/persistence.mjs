@@ -12888,6 +12888,40 @@ function bikeShopClaimIdentityKey(source, osmElementType, osmElementId) {
   return `${String(source || '')}:${String(osmElementType || '')}:${String(osmElementId || '')}`;
 }
 
+function bikeShopClaimIdentityKeys(candidate) {
+  const rawIdentities = [{
+    source: candidate?.source,
+    osmElementType: candidate?.osmElementType,
+    osmElementId: candidate?.osmElementId,
+  }, ...(Array.isArray(candidate?.claimAliases) ? candidate.claimAliases : [])];
+  const keys = new Set();
+  for (const identity of rawIdentities) {
+    const source = String(identity?.source || '');
+    const osmElementType = String(identity?.osmElementType || '');
+    const osmElementId = String(identity?.osmElementId || '');
+    const valid = (
+      source === 'openstreetmap'
+      && ['node', 'way', 'relation'].includes(osmElementType)
+      && /^[1-9][0-9]{0,30}$/.test(osmElementId)
+    ) || (
+      source === 'overture'
+      && osmElementType === 'place'
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(osmElementId)
+    );
+    if (valid) keys.add(bikeShopClaimIdentityKey(source, osmElementType, osmElementId));
+  }
+  return [...keys].sort().slice(0, 16);
+}
+
+function bikeShopClaimIdentitySetsOverlap(left, right) {
+  const leftKeys = new Set(Array.isArray(left?.identityAliases)
+    ? left.identityAliases
+    : bikeShopClaimIdentityKeys(left));
+  return (Array.isArray(right?.identityAliases)
+    ? right.identityAliases
+    : bikeShopClaimIdentityKeys(right)).some((key) => leftKeys.has(key));
+}
+
 function bikeShopClaimWithMinimumEvidence(candidate) {
   const verificationMethod = String(candidate?.verificationMethod || '');
   return {
@@ -12907,19 +12941,23 @@ function bikeShopClaimWithMinimumEvidence(candidate) {
 export async function createBikeShopClaimRequest(candidate, { maximumPending = 10 } = {}) {
   const claimantUserId = String(candidate?.claimantUserId || '');
   if (!claimantUserId) return null;
-  const minimalCandidate = bikeShopClaimWithMinimumEvidence(candidate);
+  const minimalCandidate = {
+    ...bikeShopClaimWithMinimumEvidence(candidate),
+    identityAliases: bikeShopClaimIdentityKeys(candidate),
+  };
   const id = randomUUID();
   const boundedMaximumPending = Math.max(1, Math.min(25, Math.round(Number(maximumPending)) || 10));
   requireBikeShopClaimStorageOrMemoryMode();
   if (!pool) {
-    return withMemoryPersistenceLock(`bike-shop-claims:${claimantUserId}`, async () => {
-      const claims = [...memoryBikeShopClaimRequests.values()]
+    return withMemoryPersistenceLock('bike-shop-claims', async () => {
+      const allClaims = [...memoryBikeShopClaimRequests.values()];
+      const claims = allClaims
         .filter((claim) => claim.claimantUserId === claimantUserId);
-      if (claims.some((claim) => (
-        ['pending', 'approved'].includes(claim.status)
-        && claim.source === minimalCandidate.source
-        && claim.osmElementType === minimalCandidate.osmElementType
-        && claim.osmElementId === minimalCandidate.osmElementId
+      if (allClaims.some((claim) => (
+        (claim.status === 'approved' || (
+          claim.status === 'pending' && claim.claimantUserId === claimantUserId
+        ))
+        && bikeShopClaimIdentitySetsOverlap(claim, minimalCandidate)
       ))) return null;
       if (claims.filter((claim) => claim.status === 'pending').length >= boundedMaximumPending) return null;
       const timestamp = new Date().toISOString();
@@ -12937,26 +12975,37 @@ export async function createBikeShopClaimRequest(candidate, { maximumPending = 1
     });
   }
   const result = await withBikeShopClaimPersistenceLock(
-    `bike-shop-claims:${claimantUserId}`,
+    'bike-shop-claims',
     (client) => client.query(
     `INSERT INTO ${schema}.bike_shop_claim_requests (
        id, claimant_user_id, source, osm_element_type, osm_element_id,
-       shop_name, latitude, longitude, shop_snapshot, claimant_role,
+       shop_name, latitude, longitude, shop_snapshot, identity_aliases, claimant_role,
        verification_method, business_email, business_phone, verification_note
      )
-     SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14
+     SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14, $15
      WHERE (
-       SELECT count(*) < $15
+       SELECT count(*) < $16
        FROM ${schema}.bike_shop_claim_requests
        WHERE claimant_user_id = $2 AND status = 'pending'
      )
+       AND NOT EXISTS (
+         SELECT 1
+         FROM ${schema}.bike_shop_claim_requests AS active
+         WHERE active.identity_aliases ?| ARRAY(
+             SELECT jsonb_array_elements_text($10::jsonb)
+           )
+           AND (
+             active.status = 'approved'
+             OR (active.status = 'pending' AND active.claimant_user_id = $2)
+           )
+       )
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [
       id, claimantUserId, minimalCandidate.source, minimalCandidate.osmElementType,
       minimalCandidate.osmElementId, minimalCandidate.shopName, minimalCandidate.latitude,
-      minimalCandidate.longitude, json(minimalCandidate.shopSnapshot), minimalCandidate.claimantRole,
-      minimalCandidate.verificationMethod, minimalCandidate.businessEmail,
+      minimalCandidate.longitude, json(minimalCandidate.shopSnapshot), json(minimalCandidate.identityAliases),
+      minimalCandidate.claimantRole, minimalCandidate.verificationMethod, minimalCandidate.businessEmail,
       minimalCandidate.businessPhone, minimalCandidate.verificationNote, boundedMaximumPending,
     ],
     ),
@@ -13055,14 +13104,13 @@ export async function reviewBikeShopClaimRequest({
   if (!claimId || !reviewerUserId || !['approved', 'rejected'].includes(status)) return null;
   requireBikeShopClaimStorageOrMemoryMode();
   if (!pool) {
-    return withMemoryPersistenceLock('bike-shop-claim-review', async () => {
+    return withMemoryPersistenceLock('bike-shop-claims', async () => {
       const claim = memoryBikeShopClaimRequests.get(claimId);
       if (!claim || claim.status !== 'pending' || !memoryAuthUsersById.has(reviewerUserId)) return null;
       if (status === 'approved' && [...memoryBikeShopClaimRequests.values()].some((candidate) => (
         candidate.id !== claimId
         && candidate.status === 'approved'
-        && bikeShopClaimIdentityKey(candidate.source, candidate.osmElementType, candidate.osmElementId)
-          === bikeShopClaimIdentityKey(claim.source, claim.osmElementType, claim.osmElementId)
+        && bikeShopClaimIdentitySetsOverlap(candidate, claim)
       ))) return null;
       const reviewedAt = new Date().toISOString();
       const reviewed = {
@@ -13078,7 +13126,7 @@ export async function reviewBikeShopClaimRequest({
     });
   }
   const result = await withBikeShopClaimPersistenceLock(
-    'bike-shop-claim-review',
+    'bike-shop-claims',
     (client) => client.query(
     `WITH reviewed AS (
        UPDATE ${schema}.bike_shop_claim_requests AS claim
@@ -13094,9 +13142,9 @@ export async function reviewBikeShopClaimRequest({
            OR NOT EXISTS (
              SELECT 1 FROM ${schema}.bike_shop_claim_requests AS approved
              WHERE approved.status = 'approved'
-               AND approved.source = claim.source
-               AND approved.osm_element_type = claim.osm_element_type
-               AND approved.osm_element_id = claim.osm_element_id
+               AND approved.identity_aliases ?| ARRAY(
+                 SELECT jsonb_array_elements_text(claim.identity_aliases)
+               )
                AND approved.id <> claim.id
            )
          )
@@ -13114,46 +13162,84 @@ export async function reviewBikeShopClaimRequest({
 }
 
 export async function loadApprovedBikeShopClaimIdentities(identities = []) {
-  const normalized = identities
+  const normalizedByKey = new Map();
+  identities
     .map((identity) => ({
       source: String(identity?.source || ''),
       osmElementType: String(identity?.osmElementType || ''),
       osmElementId: String(identity?.osmElementId || ''),
     }))
     .filter((identity) => (
-      identity.source === 'openstreetmap'
-      && ['node', 'way', 'relation'].includes(identity.osmElementType)
-      && /^[1-9][0-9]{0,30}$/.test(identity.osmElementId)
+      (
+        identity.source === 'openstreetmap'
+        && ['node', 'way', 'relation'].includes(identity.osmElementType)
+        && /^[1-9][0-9]{0,30}$/.test(identity.osmElementId)
+      ) || (
+        identity.source === 'overture'
+        && identity.osmElementType === 'place'
+        && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identity.osmElementId)
+      )
     ))
-    .slice(0, 100);
+    .forEach((identity) => {
+      const key = bikeShopClaimIdentityKey(
+        identity.source,
+        identity.osmElementType,
+        identity.osmElementId,
+      );
+      if (!normalizedByKey.has(key)) normalizedByKey.set(key, identity);
+    });
+  // A 500-result viewport can contain one canonical identity plus one
+  // cross-catalog alias per shop. Keep the badge lookup bounded while
+  // covering both identities for every public result.
+  const normalized = [...normalizedByKey.values()].slice(0, 1_000);
   if (normalized.length === 0) return [];
-  const requestedKeys = new Set(normalized.map((identity) => (
-    bikeShopClaimIdentityKey(identity.source, identity.osmElementType, identity.osmElementId)
-  )));
   requireBikeShopClaimStorageOrMemoryMode();
   if (!pool) {
-    return [...memoryBikeShopClaimRequests.values()]
-      .filter((claim) => claim.status === 'approved' && requestedKeys.has(
-        bikeShopClaimIdentityKey(claim.source, claim.osmElementType, claim.osmElementId),
-      ))
-      .map((claim) => ({
-        source: claim.source,
-        osmElementType: claim.osmElementType,
-        osmElementId: claim.osmElementId,
+    const approvedKeys = new Set([...memoryBikeShopClaimRequests.values()]
+      .filter((claim) => claim.status === 'approved')
+      .flatMap((claim) => (
+        Array.isArray(claim.identityAliases)
+          ? claim.identityAliases
+          : bikeShopClaimIdentityKeys(claim)
+      )));
+    return normalized
+      .filter((identity) => approvedKeys.has(bikeShopClaimIdentityKey(
+        identity.source,
+        identity.osmElementType,
+        identity.osmElementId,
+      )))
+      .map((identity) => ({
+        ...identity,
         claimed: true,
       }));
   }
   const values = [];
   const tuples = normalized.map((identity, index) => {
-    const base = index * 3;
-    values.push(identity.source, identity.osmElementType, identity.osmElementId);
-    return `($${base + 1}, $${base + 2}, $${base + 3})`;
+    const base = index * 4;
+    const identityKey = bikeShopClaimIdentityKey(
+      identity.source,
+      identity.osmElementType,
+      identity.osmElementId,
+    );
+    values.push(identity.source, identity.osmElementType, identity.osmElementId, identityKey);
+    return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4})`;
   });
   const result = await bikeShopClaimQuery(
-    `SELECT source, osm_element_type, osm_element_id
-     FROM ${schema}.bike_shop_claim_requests
-     WHERE status = 'approved'
-       AND (source, osm_element_type, osm_element_id) IN (${tuples.join(', ')})`,
+    `WITH requested(source, osm_element_type, osm_element_id, identity_key) AS (
+       VALUES ${tuples.join(', ')}
+     )
+     SELECT DISTINCT requested.source, requested.osm_element_type, requested.osm_element_id
+     FROM requested
+     JOIN ${schema}.bike_shop_claim_requests AS claim
+       ON claim.status = 'approved'
+      AND (
+        claim.identity_aliases ? requested.identity_key
+        OR (
+          claim.source = requested.source
+          AND claim.osm_element_type = requested.osm_element_type
+          AND claim.osm_element_id = requested.osm_element_id
+        )
+      )`,
     values,
   );
   return (result?.rows ?? []).map((row) => ({

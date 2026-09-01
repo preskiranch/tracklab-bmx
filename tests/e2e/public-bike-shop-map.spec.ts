@@ -264,6 +264,73 @@ async function mockPublicDirectoryShell(page: Page) {
   await page.route('**/data/track-locator.json', async (route) => {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ tracks: [] }) });
   });
+  await page.route('**/api/bike-shops/hierarchy*', async (route) => {
+    const url = new URL(route.request().url());
+    const country = url.searchParams.get('countryCode') || '';
+    const region = url.searchParams.get('region') || '';
+    const response = !country
+      ? { level: 'country', items: [{ value: 'CA', count: 1 }, { value: 'US', count: 3 }] }
+      : !region
+        ? {
+            level: 'region',
+            items: country === 'US'
+              ? [{ value: 'CA', count: 2 }, { value: 'OR', count: 1 }]
+              : [{ value: 'BC', count: 1 }],
+          }
+        : {
+            level: 'city',
+            items: region === 'CA'
+              ? [{ value: 'Oakland', count: 1 }, { value: 'Sacramento', count: 1 }]
+              : region === 'OR'
+                ? [{ value: 'Portland', count: 1 }]
+                : [{ value: 'Vancouver', count: 1 }],
+          };
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ...response,
+        attributions: [{
+          text: 'Overture Maps Foundation',
+          url: 'https://docs.overturemaps.org/attribution/',
+          license: 'CDLA-Permissive-2.0',
+        }],
+      }),
+    });
+  });
+  await page.route('**/api/bike-shops/browse', async (route) => {
+    const body = route.request().postDataJSON() as {
+      countryCode: string;
+      region: string;
+      locality: string;
+    };
+    const cityShop = shop(
+      'overture:11111111-1111-4111-8111-111111111111',
+      `${body.locality} Cycle Center`,
+      38.58,
+      -121.49,
+      { locality: body.locality, region: body.region, countryCode: body.countryCode },
+    );
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        location: body,
+        shops: [cityShop],
+        total: 1,
+        truncated: false,
+        bounds: {
+          north: cityShop.latitude,
+          south: cityShop.latitude,
+          east: cityShop.longitude,
+          west: cityShop.longitude,
+        },
+        attributions: [{
+          text: 'Overture Maps Foundation',
+          url: 'https://docs.overturemaps.org/attribution/',
+          license: 'CDLA-Permissive-2.0',
+        }],
+      }),
+    });
+  });
 }
 
 test('global shop map loads by viewport, debounces map idle, and synchronizes markers with the list', async ({ page }) => {
@@ -395,9 +462,10 @@ test('global shop map preserves an antimeridian viewport, reports truncation, an
   expect(overflowing).toEqual([]);
 });
 
-test('loaded shops can be narrowed country to state or province to city, then reset with markers kept in sync', async ({ page }) => {
+test('global hierarchy browses country to state or province to city, then returns to synchronized map browsing', async ({ page }) => {
   await installGoogleMapMock(page);
   await mockPublicDirectoryShell(page);
+  let viewportRequestCount = 0;
   const loadedShops = [
     shop('osm:node:401', 'Sacramento Cycle Center', 38.58, -121.49),
     shop('osm:node:402', 'Oakland Bicycle Works', 37.80, -122.27, {
@@ -419,6 +487,7 @@ test('loaded shops can be narrowed country to state or province to city, then re
   ];
 
   await page.route('**/api/bike-shops/viewport', async (route) => {
+    viewportRequestCount += 1;
     const body = route.request().postDataJSON() as Viewport;
     await route.fulfill({
       contentType: 'application/json',
@@ -443,45 +512,52 @@ test('loaded shops can be narrowed country to state or province to city, then re
   }, sacramentoViewport);
   await expect(directory.getByText('4 mapped bike shops', { exact: true })).toBeVisible();
 
-  const country = directory.getByLabel('Country');
-  const region = directory.getByLabel('State / province');
-  const city = directory.getByLabel('City');
+  const country = directory.getByRole('combobox', { name: 'Country', exact: true });
+  const region = directory.getByRole('combobox', { name: 'State / province', exact: true });
+  const city = directory.getByRole('combobox', { name: 'City', exact: true });
   const results = directory.getByRole('list', { name: 'Loaded bike shop listings' }).getByRole('button');
-  await expect(country.getByRole('option', { name: 'United States', exact: true })).toHaveAttribute('value', 'US');
-  await expect(country.getByRole('option', { name: 'Canada', exact: true })).toHaveAttribute('value', 'CA');
+  await expect(country.getByRole('option', { name: 'United States (3)', exact: true })).toHaveAttribute('value', 'US');
+  await expect(country.getByRole('option', { name: 'Canada (1)', exact: true })).toHaveAttribute('value', 'CA');
   await expect(region).toBeDisabled();
   await expect(city).toBeDisabled();
 
   await country.selectOption('US');
-  await expect(directory.getByText('3 of 4 mapped bike shops', { exact: true })).toBeVisible();
   await expect(region).toBeEnabled();
   await expect(city).toBeDisabled();
-  await expect(results).toHaveCount(3);
+  await expect(region.getByRole('option', { name: 'CA (2)', exact: true })).toHaveAttribute('value', 'CA');
+  await expect(region.getByRole('option', { name: 'OR (1)', exact: true })).toHaveAttribute('value', 'OR');
+  await expect(results).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => (
     (window as any).__tracklabBikeShopMapTest.activeMarkers().map((marker: any) => marker.title).sort()
-  ))).toEqual(['Oakland Bicycle Works', 'Portland Pedal House', 'Sacramento Cycle Center']);
+  ))).toEqual([]);
 
   await region.selectOption('CA');
-  await expect(directory.getByText('2 of 4 mapped bike shops', { exact: true })).toBeVisible();
   await expect(city).toBeEnabled();
-  await expect(city.getByRole('option', { name: 'Oakland', exact: true })).toHaveAttribute('value', 'Oakland');
-  await expect(city.getByRole('option', { name: 'Sacramento', exact: true })).toHaveAttribute('value', 'Sacramento');
-  await expect(results).toHaveCount(2);
+  await expect(city.getByRole('option', { name: 'Oakland (1)', exact: true })).toHaveAttribute('value', 'Oakland');
+  await expect(city.getByRole('option', { name: 'Sacramento (1)', exact: true })).toHaveAttribute('value', 'Sacramento');
 
   await city.selectOption('Sacramento');
-  await expect(directory.getByText('1 of 4 mapped bike shop', { exact: true })).toBeVisible();
+  await expect(directory.getByText('1 mapped bike shop', { exact: true })).toBeVisible();
   await expect(results).toHaveCount(1);
   await expect(results.first()).toContainText('Sacramento Cycle Center');
   await expect.poll(() => page.evaluate(() => (
     (window as any).__tracklabBikeShopMapTest.activeMarkers().map((marker: any) => marker.title)
   ))).toEqual(['Sacramento Cycle Center']);
+  await page.waitForTimeout(800);
+  expect(viewportRequestCount, 'programmatic city fit does not replace the hierarchy result').toBe(1);
+  await expect(directory.getByText('1 mapped bike shop', { exact: true })).toBeVisible();
+  await expect(results).toHaveCount(1);
 
-  await directory.getByRole('button', { name: 'Full visible area' }).click();
+  await directory.getByRole('button', { name: 'Return to map browsing' }).click();
   await expect(country).toHaveValue('__all__');
   await expect(region).toHaveValue('__all__');
   await expect(region).toBeDisabled();
   await expect(city).toHaveValue('__all__');
   await expect(city).toBeDisabled();
+  await expect(results).toHaveCount(0);
+  await page.evaluate((viewport) => {
+    (window as any).__tracklabBikeShopMapTest.setViewport(viewport);
+  }, sacramentoViewport);
   await expect(directory.getByText('4 mapped bike shops', { exact: true })).toBeVisible();
   await expect(results).toHaveCount(4);
   await expect.poll(() => page.evaluate(() => (

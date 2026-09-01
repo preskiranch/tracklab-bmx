@@ -81,10 +81,11 @@ import { generateSmartExplorePlan } from './exploreSmartRoute.mjs';
 import { createAuthSessionCache } from './authSessionCache.mjs';
 import { moderateRoomChatText } from './roomChatModeration.mjs';
 import {
-  applyApprovedBikeShopClaims,
+  applyApprovedBikeShopClaimsBestEffort,
   createBikeShopDirectory,
   parseBikeShopClaimRequest,
 } from './bikeShops.mjs';
+import { createOvertureBikeShopCatalog } from './overtureBikeShops.mjs';
 import {
   ApnsProvider,
   apnsConfigurationFromEnv,
@@ -101,6 +102,21 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDirectory = path.resolve(__dirname, '..');
 const distDirectory = path.join(rootDirectory, 'dist');
+const bikeShopDataDirectory = path.join(rootDirectory, 'data', 'bike-shops');
+const bikeShopDataLicenseDocuments = new Map([
+  ['/legal/bike-shop-directory-data/cdla-permissive-2.0.txt', {
+    fileName: 'CDLA-Permissive-2.0.txt',
+    contentType: 'text/plain; charset=utf-8',
+  }],
+  ['/legal/bike-shop-directory-data/apache-2.0.txt', {
+    fileName: 'Apache-2.0.txt',
+    contentType: 'text/plain; charset=utf-8',
+  }],
+  ['/legal/bike-shop-directory-data/foursquare-notice.txt', {
+    fileName: 'Foursquare-NOTICE.txt',
+    contentType: 'text/plain; charset=utf-8',
+  }],
+]);
 const port = Number(process.env.PORT ?? 10000);
 const websocketPath = '/multiplayer';
 const clubLiveStreamWebsocketPath = '/club-live-stream';
@@ -181,9 +197,38 @@ const voteTimers = new Map();
 const routeSelectTimers = new Map();
 const userDataWriteChains = new Map();
 const exploreElevationCache = new Map();
+const overtureBikeShopCatalog = createOvertureBikeShopCatalog();
+const bikeShopDirectoryAttributions = Object.freeze([
+  Object.freeze({
+    text: 'Overture Maps Foundation',
+    url: 'https://docs.overturemaps.org/attribution/',
+    license: 'CDLA-Permissive-2.0 and compatible source licenses',
+  }),
+  Object.freeze({
+    text: '© OpenStreetMap contributors',
+    url: 'https://www.openstreetmap.org/copyright',
+    license: 'ODbL',
+  }),
+]);
+const configuredOverpassEndpoints = String(
+  process.env.TRACKLAB_OVERPASS_ENDPOINTS || process.env.TRACKLAB_OVERPASS_ENDPOINT || '',
+).split(',').map((value) => value.trim()).filter(Boolean);
 const bikeShopDirectory = createBikeShopDirectory({
-  endpoint: process.env.TRACKLAB_OVERPASS_ENDPOINT || undefined,
+  ...(configuredOverpassEndpoints.length > 0 ? { endpoints: configuredOverpassEndpoints } : {}),
+  loadSearch: (search) => overtureBikeShopCatalog.search(search),
+  loadViewport: (viewport) => overtureBikeShopCatalog.searchViewport(viewport),
+  resolveCatalogShop: (elementId) => overtureBikeShopCatalog.resolve(elementId),
 });
+async function publicBikeShopsWithClaimBadges(shops, requestKind) {
+  return applyApprovedBikeShopClaimsBestEffort(
+    shops,
+    (identities) => persistence.loadApprovedBikeShopClaimIdentities(identities),
+    (error) => cloudTelemetry.warn('bike_shop_claim_badges.lookup_failed', {
+      requestKind,
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    }),
+  );
+}
 const globalRaceViewProfileKey = 'global:developer-race-view';
 let commentarySpeechProviderStatus = 'unknown';
 let commentarySpeechProviderRetryAt = 0;
@@ -2967,6 +3012,41 @@ function writeJson(response, statusCode, payload, headers = {}) {
     ...headers,
   });
   response.end(JSON.stringify(payload));
+}
+
+function writePublicDocument(request, response, contentType, body) {
+  const content = Buffer.isBuffer(body) ? body : Buffer.from(String(body));
+  response.writeHead(200, {
+    'Content-Type': contentType,
+    'Cache-Control': 'public, max-age=86400',
+    'Content-Length': content.byteLength,
+  });
+  response.end(request.method === 'HEAD' ? undefined : content);
+}
+
+function bikeShopDataLicensePage() {
+  return `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TrackLab Bike Shop Directory Data</title></head>
+<body>
+<main>
+<h1>Global Bike Shop Directory data and licenses</h1>
+<p>TrackLab's preloaded bike-shop catalog is derived from Overture Maps Places release 2026-08-19.0. It is filtered to bike_store and bike_repair_maintenance, excludes records marked closed or permanently closed, and uses a 0.50 confidence floor. TrackLab modified the source catalog on September 1, 2026. Listings are not guaranteed to be exhaustive or currently open.</p>
+<p>Live OpenStreetMap bicycle-shop and bicycle-repair records are displayed as a separate, independently attributed source.</p>
+<h2>Attribution</h2>
+<ul>
+<li><a href="https://docs.overturemaps.org/attribution/">Overture Maps Foundation attribution</a></li>
+<li><a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors (ODbL)</a></li>
+</ul>
+<h2>Included license and notice texts</h2>
+<ul>
+<li><a href="/legal/bike-shop-directory-data/cdla-permissive-2.0.txt">CDLA-Permissive-2.0</a></li>
+<li><a href="/legal/bike-shop-directory-data/apache-2.0.txt">Apache License 2.0</a></li>
+<li><a href="/legal/bike-shop-directory-data/foursquare-notice.txt">Foursquare source and TrackLab change notice</a></li>
+</ul>
+</main>
+</body>
+</html>`;
 }
 
 function requestAbortSignal(request, response) {
@@ -16045,6 +16125,23 @@ async function handleAppleBillingApi(request, response, requestUrl) {
 
 async function serveStatic(request, response) {
   const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host}`);
+  if (
+    requestUrl.pathname === '/legal/bike-shop-directory-data'
+    || bikeShopDataLicenseDocuments.has(requestUrl.pathname)
+  ) {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (requestUrl.pathname === '/legal/bike-shop-directory-data') {
+      writePublicDocument(request, response, 'text/html; charset=utf-8', bikeShopDataLicensePage());
+      return;
+    }
+    const document = bikeShopDataLicenseDocuments.get(requestUrl.pathname);
+    const body = await readFile(path.join(bikeShopDataDirectory, document.fileName));
+    writePublicDocument(request, response, document.contentType, body);
+    return;
+  }
   if (requestUrl.pathname === '/api/native/runtime-config') {
     if (!requestIsNativeApp(request)) {
       writeJson(response, 403, { error: 'Native app request required.' }, { 'Cache-Control': 'no-store' });
@@ -16142,6 +16239,89 @@ async function serveStatic(request, response) {
     await handleClubGroupTrainingHistoryApi(request, response, requestUrl);
     return;
   }
+  if (requestUrl.pathname === '/api/bike-shops/hierarchy') {
+    if (request.method !== 'GET') {
+      writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (!enforceNoStoreRateLimit(
+      request,
+      response,
+      bikeShopDirectoryRateLimiter,
+      120,
+      'bike-shop-hierarchy',
+    )) return;
+    const unsupportedParameters = [...requestUrl.searchParams.keys()]
+      .filter((key) => !['countryCode', 'region'].includes(key));
+    if (unsupportedParameters.length > 0) {
+      writeJson(response, 400, {
+        error: 'Only countryCode and region hierarchy filters are supported.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    try {
+      const hierarchy = await overtureBikeShopCatalog.hierarchy({
+        countryCode: requestUrl.searchParams.get('countryCode') || '',
+        region: requestUrl.searchParams.get('region') || '',
+      });
+      writeJson(response, 200, {
+        ...hierarchy,
+        attributions: bikeShopDirectoryAttributions.slice(0, 1),
+      }, { 'Cache-Control': 'public, max-age=86400' });
+    } catch (error) {
+      if (error instanceof RangeError) {
+        writeJson(response, 400, { error: error.message }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      cloudTelemetry.warn('bike_shop_hierarchy.catalog_failed', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      writeJson(response, 503, {
+        error: 'The bike shop location directory is temporarily unavailable.',
+      }, { 'Cache-Control': 'no-store' });
+    }
+    return;
+  }
+  if (requestUrl.pathname === '/api/bike-shops/browse') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (!enforceNoStoreRateLimit(
+      request,
+      response,
+      bikeShopDirectoryRateLimiter,
+      60,
+      'bike-shop-browse',
+    )) return;
+    try {
+      const payload = await readJsonBody(request, 1_024);
+      const result = await overtureBikeShopCatalog.browse(payload);
+      const shops = await publicBikeShopsWithClaimBadges(result.shops, 'browse');
+      writeJson(response, 200, {
+        ...result,
+        shops,
+        attributions: bikeShopDirectoryAttributions.slice(0, 1),
+      }, { 'Cache-Control': 'private, no-store' });
+    } catch (error) {
+      if (writeBikeShopClaimStorageUnavailable(error, response)) return;
+      if (error instanceof HttpRequestError) {
+        writeJson(response, error.statusCode, { error: error.message }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (error instanceof RangeError) {
+        writeJson(response, 400, { error: error.message }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      cloudTelemetry.warn('bike_shop_browse.catalog_failed', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      writeJson(response, 503, {
+        error: 'Bike shops for this city are temporarily unavailable.',
+      }, { 'Cache-Control': 'no-store' });
+    }
+    return;
+  }
   if (requestUrl.pathname === '/api/bike-shops/viewport') {
     if (request.method !== 'POST') {
       writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
@@ -16163,18 +16343,14 @@ async function serveStatic(request, response) {
     try {
       const payload = await readJsonBody(request, 1_024);
       const result = await bikeShopDirectory.searchViewport(payload);
-      const approved = await persistence.loadApprovedBikeShopClaimIdentities(
-        result.shops.map((shop) => ({
-          source: 'openstreetmap',
-          osmElementType: shop.source?.elementType,
-          osmElementId: shop.source?.elementId,
-        })),
-      );
+      const shops = await publicBikeShopsWithClaimBadges(result.shops, 'viewport');
       writeJson(response, 200, {
         bounds: result.bounds,
-        shops: applyApprovedBikeShopClaims(result.shops, approved),
+        shops,
         truncated: result.truncated,
         attribution: result.attribution,
+        attributions: result.attributions,
+        ...(result.degraded ? { degraded: true, notice: result.notice } : {}),
       }, { 'Cache-Control': 'private, no-store' });
     } catch (error) {
       if (writeBikeShopClaimStorageUnavailable(error, response)) return;
@@ -16187,7 +16363,7 @@ async function serveStatic(request, response) {
         return;
       }
       const timedOut = error?.name === 'AbortError';
-      const busy = error?.code === 'OVERPASS_BUSY';
+      const busy = ['OVERPASS_BUSY', 'OVERPASS_COOLDOWN'].includes(error?.code);
       cloudTelemetry.warn('bike_shop_viewport.upstream_failed', {
         errorName: error instanceof Error ? error.name : 'UnknownError',
       });
@@ -16219,16 +16395,10 @@ async function serveStatic(request, response) {
     try {
       const payload = await readJsonBody(request, 2_048);
       const result = await bikeShopDirectory.search(payload);
-      const approved = await persistence.loadApprovedBikeShopClaimIdentities(
-        result.shops.map((shop) => ({
-          source: 'openstreetmap',
-          osmElementType: shop.source?.elementType,
-          osmElementId: shop.source?.elementId,
-        })),
-      );
+      const shops = await publicBikeShopsWithClaimBadges(result.shops, 'nearby');
       writeJson(response, 200, {
         ...result,
-        shops: applyApprovedBikeShopClaims(result.shops, approved),
+        shops,
       }, { 'Cache-Control': 'private, no-store' });
     } catch (error) {
       if (writeBikeShopClaimStorageUnavailable(error, response)) return;
@@ -16241,7 +16411,7 @@ async function serveStatic(request, response) {
         return;
       }
       const timedOut = error?.name === 'AbortError';
-      const busy = error?.code === 'OVERPASS_BUSY';
+      const busy = ['OVERPASS_BUSY', 'OVERPASS_COOLDOWN'].includes(error?.code);
       cloudTelemetry.warn('bike_shop_directory.upstream_failed', {
         errorName: error instanceof Error ? error.name : 'UnknownError',
       });
@@ -16286,9 +16456,18 @@ async function serveStatic(request, response) {
         const payload = await readJsonBody(request, 12_000);
         const parsedClaim = parseBikeShopClaimRequest(payload);
         // Never persist the claimant's copy of the listing. Resolve the exact
-        // OpenStreetMap element again so name, coordinates, public details, and
-        // the review link all come from the canonical directory source.
+        // pinned directory record again so name, coordinates, public details,
+        // and the review link all come from the canonical source.
         const candidate = await bikeShopDirectory.resolveClaim(parsedClaim);
+        const approvedAliases = await persistence.loadApprovedBikeShopClaimIdentities(
+          Array.isArray(candidate.claimAliases) ? candidate.claimAliases : [],
+        );
+        if (approvedAliases.length > 0) {
+          writeJson(response, 409, {
+            error: 'This bike shop already has an approved claim under a matching directory listing.',
+          }, { 'Cache-Control': 'no-store' });
+          return;
+        }
         const claim = await persistence.createBikeShopClaimRequest({
           ...candidate,
           claimantUserId: userId,
@@ -16307,7 +16486,7 @@ async function serveStatic(request, response) {
           return;
         }
         const timedOut = error?.name === 'AbortError';
-        const busy = error?.code === 'OVERPASS_BUSY';
+      const busy = ['OVERPASS_BUSY', 'OVERPASS_COOLDOWN'].includes(error?.code);
         cloudTelemetry.warn('bike_shop_claim.canonical_lookup_failed', {
           errorName: error instanceof Error ? error.name : 'UnknownError',
         });
@@ -16315,8 +16494,8 @@ async function serveStatic(request, response) {
           error: busy
             ? 'The open bike shop directory is busy. Please retry shortly.'
             : timedOut
-              ? 'The OpenStreetMap listing verification timed out. Please try again.'
-              : 'The OpenStreetMap listing could not be verified right now. Please try again.',
+              ? 'The directory listing verification timed out. Please try again.'
+              : 'The directory listing could not be verified right now. Please try again.',
         }, {
           'Cache-Control': 'no-store',
           ...(busy ? { 'Retry-After': String(error.retryAfterSeconds || 3) } : {}),

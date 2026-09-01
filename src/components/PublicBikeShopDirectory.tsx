@@ -21,7 +21,9 @@ import {
 import {
   bikeShopAddress,
   bikeShopClaimSourceUrl,
+  browseBikeShopsByCity,
   distanceBetweenMiles,
+  listBikeShopHierarchy,
   listBikeShopClaimsForAdmin,
   listMyBikeShopClaimRequests,
   nearbyTracksForShop,
@@ -35,6 +37,7 @@ import {
   type BikeShopClaimRole,
   type BikeShopClaimStatus,
   type BikeShopClaimVerificationMethod,
+  type BikeShopHierarchyItem,
   type BikeShopPoint,
   type BikeShopRecord,
   type BikeShopViewport,
@@ -80,6 +83,15 @@ function localizedCountryName(countryCode: string) {
   }
 }
 
+function claimSnapshotAddress(claim: BikeShopClaimRecord) {
+  const address = claim.shopSnapshot?.address;
+  if (!address) return '';
+  return address.formatted
+    || [address.line1, address.locality, address.region, address.postalCode, address.countryCode]
+      .filter(Boolean)
+      .join(', ');
+}
+
 function shopHierarchy(shop: BikeShopRecord): ShopHierarchy {
   return {
     country: shop.address.countryCode || missingCountry,
@@ -93,13 +105,6 @@ function hierarchyLabel(level: keyof ShopHierarchy, value: string) {
   if (value === missingRegion) return 'State / province not listed';
   if (value === missingCity) return 'City not listed';
   return level === 'country' ? localizedCountryName(value) : value;
-}
-
-function sortedHierarchyValues(values: Iterable<string>, level: keyof ShopHierarchy) {
-  return [...new Set(values)].sort((left, right) => (
-    hierarchyLabel(level, left).localeCompare(hierarchyLabel(level, right), undefined, { sensitivity: 'base' })
-      || left.localeCompare(right)
-  ));
 }
 
 function mapFocusPoints(origin: BikeShopPoint, radiusMiles: number) {
@@ -168,8 +173,9 @@ export function PublicBikeShopDirectory({
   const [selectedShopId, setSelectedShopId] = useState('');
   const [status, setStatus] = useState<'idle' | 'locating' | 'searching' | 'ready'>('idle');
   const [error, setError] = useState('');
+  const [directoryNotice, setDirectoryNotice] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
-  const [resultMode, setResultMode] = useState<'none' | 'nearby' | 'viewport'>('none');
+  const [resultMode, setResultMode] = useState<'none' | 'nearby' | 'viewport' | 'hierarchy'>('none');
   const [nearbyContext, setNearbyContext] = useState<{ label: string; radiusMiles: number } | null>(null);
   const [mapZoom, setMapZoom] = useState(2);
   const [mapFocusRequest, setMapFocusRequest] = useState<BikeShopMapFocusRequest | null>(null);
@@ -177,6 +183,11 @@ export function PublicBikeShopDirectory({
   const [countryFilter, setCountryFilter] = useState(allHierarchyValues);
   const [regionFilter, setRegionFilter] = useState(allHierarchyValues);
   const [cityFilter, setCityFilter] = useState(allHierarchyValues);
+  const [hierarchyCountries, setHierarchyCountries] = useState<BikeShopHierarchyItem[]>([]);
+  const [hierarchyRegions, setHierarchyRegions] = useState<BikeShopHierarchyItem[]>([]);
+  const [hierarchyCities, setHierarchyCities] = useState<BikeShopHierarchyItem[]>([]);
+  const [hierarchyStatus, setHierarchyStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [hierarchyError, setHierarchyError] = useState('');
   const [claimShop, setClaimShop] = useState<BikeShopRecord | null>(null);
   const [claimRole, setClaimRole] = useState<BikeShopClaimRole>('owner');
   const [verificationMethod, setVerificationMethod] = useState<BikeShopClaimVerificationMethod>('business-email');
@@ -231,30 +242,14 @@ export function PublicBikeShopDirectory({
   });
   accountIdRef.current = accountId;
 
-  const countries = useMemo(
-    () => sortedHierarchyValues(shops.map((shop) => shopHierarchy(shop).country), 'country'),
-    [shops],
-  );
-  const regions = useMemo(() => sortedHierarchyValues(
-    shops
-      .filter((shop) => countryFilter === allHierarchyValues || shopHierarchy(shop).country === countryFilter)
-      .map((shop) => shopHierarchy(shop).region),
-    'region',
-  ), [countryFilter, shops]);
-  const cities = useMemo(() => sortedHierarchyValues(
-    shops
-      .filter((shop) => countryFilter === allHierarchyValues || shopHierarchy(shop).country === countryFilter)
-      .filter((shop) => regionFilter === allHierarchyValues || shopHierarchy(shop).region === regionFilter)
-      .map((shop) => shopHierarchy(shop).city),
-    'city',
-  ), [countryFilter, regionFilter, shops]);
-  const visibleShops = useMemo(() => shops
-    .filter((shop) => countryFilter === allHierarchyValues || shopHierarchy(shop).country === countryFilter)
-    .filter((shop) => regionFilter === allHierarchyValues || shopHierarchy(shop).region === regionFilter)
-    .filter((shop) => cityFilter === allHierarchyValues || shopHierarchy(shop).city === cityFilter), [
+  const visibleShops = useMemo(() => resultMode === 'hierarchy' ? shops
+    .filter((shop) => shopHierarchy(shop).country === countryFilter)
+    .filter((shop) => shopHierarchy(shop).region === regionFilter)
+    .filter((shop) => shopHierarchy(shop).city === cityFilter) : shops, [
     cityFilter,
     countryFilter,
     regionFilter,
+    resultMode,
     shops,
   ]);
   const selectedShop = visibleShops.find((shop) => shop.id === selectedShopId) ?? visibleShops[0] ?? null;
@@ -318,6 +313,33 @@ export function PublicBikeShopDirectory({
     };
   };
 
+  const clearPublicResults = () => {
+    resultIntentGenerationRef.current += 1;
+    publicSearchRef.current.controller?.abort();
+    publicSearchRef.current = {
+      generation: publicSearchRef.current.generation + 1,
+      resultIntentGeneration: resultIntentGenerationRef.current,
+      controller: null,
+      busy: false,
+    };
+    viewportRequestRef.current.controller?.abort();
+    viewportRequestRef.current = {
+      generation: viewportRequestRef.current.generation + 1,
+      controller: null,
+      key: '',
+    };
+    setShops([]);
+    setSelectedShopId('');
+    setStatus('idle');
+    setError('');
+    setDirectoryNotice('');
+    setHasSearched(false);
+    setResultMode('none');
+    setNearbyContext(null);
+    setViewportTruncated(false);
+    setMapFocusRequest(null);
+  };
+
   const focusMapAt = (origin: LocatedSearch, requestedRadiusMiles = radiusMiles) => {
     mapFocusGenerationRef.current += 1;
     setMapFocusRequest({
@@ -334,6 +356,7 @@ export function PublicBikeShopDirectory({
     if (!publicSearchIsCurrent(request)) return;
     setStatus('searching');
     setError('');
+    setDirectoryNotice('');
     setHasSearched(true);
     try {
       const result = await searchNearbyBikeShops(origin, requestedRadiusMiles, fetch, request.controller.signal);
@@ -343,6 +366,7 @@ export function PublicBikeShopDirectory({
       setResultMode('nearby');
       setNearbyContext({ label: origin.label, radiusMiles: requestedRadiusMiles });
       setViewportTruncated(false);
+      setDirectoryNotice(result.degraded ? result.notice : '');
     } catch (caught) {
       if (!publicSearchIsCurrent(request)) return;
       setShops([]);
@@ -350,6 +374,7 @@ export function PublicBikeShopDirectory({
       setResultMode('none');
       setNearbyContext(null);
       setError(caught instanceof Error ? caught.message : 'Bike shops could not be loaded. Please try again.');
+      setDirectoryNotice('');
     } finally {
       if (!publicSearchIsCurrent(request)) return;
       focusMapAt(origin, requestedRadiusMiles);
@@ -371,7 +396,7 @@ export function PublicBikeShopDirectory({
         controller: null,
         key: '',
       };
-      if (resultMode !== 'nearby') {
+      if (!['nearby', 'hierarchy'].includes(resultMode)) {
         setShops([]);
         setSelectedShopId('');
         setHasSearched(false);
@@ -399,7 +424,7 @@ export function PublicBikeShopDirectory({
     const resultIntentGeneration = resultIntentGenerationRef.current + 1;
     resultIntentGenerationRef.current = resultIntentGeneration;
     const controller = new AbortController();
-    const preserveNearbyFallback = resultMode === 'nearby' && shops.length > 0;
+    const preserveSearchFallback = ['nearby', 'hierarchy'].includes(resultMode) && shops.length > 0;
     viewportRequestRef.current = { generation, controller, key };
     const isCurrent = () => (
       !controller.signal.aborted
@@ -409,6 +434,7 @@ export function PublicBikeShopDirectory({
     );
     setStatus('searching');
     setError('');
+    setDirectoryNotice('');
     setHasSearched(true);
     try {
       const result = await searchBikeShopsInViewport(viewport, fetch, controller.signal);
@@ -426,10 +452,11 @@ export function PublicBikeShopDirectory({
       setViewportTruncated(result.truncated);
       setResultMode('viewport');
       setNearbyContext(null);
+      setDirectoryNotice(result.degraded ? result.notice : '');
       setStatus('ready');
     } catch (caught) {
       if (!isCurrent()) return;
-      if (!preserveNearbyFallback) {
+      if (!preserveSearchFallback) {
         setShops([]);
         setSelectedShopId('');
         setResultMode('none');
@@ -438,6 +465,7 @@ export function PublicBikeShopDirectory({
       }
       setStatus('ready');
       setError(caught instanceof Error ? caught.message : 'Bike shops could not be loaded. Please try again.');
+      if (!preserveSearchFallback) setDirectoryNotice('');
     } finally {
       if (!isCurrent()) return;
       viewportRequestRef.current = { generation, controller: null, key };
@@ -469,6 +497,9 @@ export function PublicBikeShopDirectory({
     event.preventDefault();
     const request = beginPublicSearch();
     if (!request) return;
+    setCountryFilter(allHierarchyValues);
+    setRegionFilter(allHierarchyValues);
+    setCityFilter(allHierarchyValues);
     const query = locationInput.trim();
     if (!query) {
       setError('Enter a city, ZIP code, or address.');
@@ -498,6 +529,9 @@ export function PublicBikeShopDirectory({
   const useCurrentLocation = async () => {
     const request = beginPublicSearch();
     if (!request) return;
+    setCountryFilter(allHierarchyValues);
+    setRegionFilter(allHierarchyValues);
+    setCityFilter(allHierarchyValues);
     setStatus('locating');
     setError('');
     try {
@@ -516,6 +550,46 @@ export function PublicBikeShopDirectory({
       setError(locationPermissionDenied(caught)
         ? 'Location permission was denied. Enter a city, ZIP code, or address instead.'
         : caught instanceof Error ? caught.message : 'Your current location could not be found.');
+      finishPublicSearch(request);
+    }
+  };
+
+  const browseHierarchyCity = async (locality: string) => {
+    if (
+      countryFilter === allHierarchyValues
+      || regionFilter === allHierarchyValues
+      || locality === allHierarchyValues
+    ) return;
+    const request = beginPublicSearch();
+    if (!request) return;
+    setStatus('searching');
+    setError('');
+    setDirectoryNotice('');
+    setHasSearched(true);
+    try {
+      const result = await browseBikeShopsByCity({
+        countryCode: countryFilter,
+        region: regionFilter,
+        locality,
+      }, fetch, request.controller.signal);
+      if (!publicSearchIsCurrent(request)) return;
+      setShops(result.shops);
+      setSelectedShopId(result.shops[0]?.id ?? '');
+      setResultMode('hierarchy');
+      setNearbyContext(null);
+      setViewportTruncated(result.truncated);
+      if (result.shops.length > 0) focusHierarchyShops(result.shops);
+    } catch (caught) {
+      if (!publicSearchIsCurrent(request)) return;
+      setShops([]);
+      setSelectedShopId('');
+      setResultMode('none');
+      setNearbyContext(null);
+      setViewportTruncated(false);
+      setError(caught instanceof Error ? caught.message : 'Bike shops for this city could not be loaded.');
+    } finally {
+      if (!publicSearchIsCurrent(request)) return;
+      setStatus('ready');
       finishPublicSearch(request);
     }
   };
@@ -757,21 +831,61 @@ export function PublicBikeShopDirectory({
   }, [accountId, adminClaimFilter, adminClaimOffset, isAdmin]);
 
   useEffect(() => {
-    if (countryFilter !== allHierarchyValues && !countries.includes(countryFilter)) {
-      setCountryFilter(allHierarchyValues);
-      setRegionFilter(allHierarchyValues);
-      setCityFilter(allHierarchyValues);
-      return;
-    }
-    if (regionFilter !== allHierarchyValues && !regions.includes(regionFilter)) {
-      setRegionFilter(allHierarchyValues);
-      setCityFilter(allHierarchyValues);
-      return;
-    }
-    if (cityFilter !== allHierarchyValues && !cities.includes(cityFilter)) {
-      setCityFilter(allHierarchyValues);
-    }
-  }, [cities, cityFilter, countries, countryFilter, regionFilter, regions]);
+    const controller = new AbortController();
+    setHierarchyStatus('loading');
+    setHierarchyError('');
+    void listBikeShopHierarchy({}, fetch, controller.signal).then((result) => {
+      if (controller.signal.aborted) return;
+      setHierarchyCountries(result.items);
+      setHierarchyStatus('ready');
+    }).catch((caught) => {
+      if (controller.signal.aborted) return;
+      setHierarchyCountries([]);
+      setHierarchyStatus('error');
+      setHierarchyError(caught instanceof Error ? caught.message : 'Countries could not be loaded.');
+    });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    setHierarchyRegions([]);
+    setHierarchyCities([]);
+    if (countryFilter === allHierarchyValues) return undefined;
+    const controller = new AbortController();
+    setHierarchyStatus('loading');
+    setHierarchyError('');
+    void listBikeShopHierarchy({ countryCode: countryFilter }, fetch, controller.signal).then((result) => {
+      if (controller.signal.aborted) return;
+      setHierarchyRegions(result.items);
+      setHierarchyStatus('ready');
+    }).catch((caught) => {
+      if (controller.signal.aborted) return;
+      setHierarchyStatus('error');
+      setHierarchyError(caught instanceof Error ? caught.message : 'States and provinces could not be loaded.');
+    });
+    return () => controller.abort();
+  }, [countryFilter]);
+
+  useEffect(() => {
+    setHierarchyCities([]);
+    if (countryFilter === allHierarchyValues || regionFilter === allHierarchyValues) return undefined;
+    const controller = new AbortController();
+    setHierarchyStatus('loading');
+    setHierarchyError('');
+    void listBikeShopHierarchy({
+      countryCode: countryFilter,
+      region: regionFilter,
+    }, fetch, controller.signal).then((result) => {
+      if (controller.signal.aborted) return;
+      setHierarchyCities(result.items);
+      setHierarchyStatus('ready');
+    }).catch((caught) => {
+      if (controller.signal.aborted) return;
+      setHierarchyStatus('error');
+      setHierarchyError(caught instanceof Error ? caught.message : 'Cities could not be loaded.');
+    });
+    return () => controller.abort();
+  }, [countryFilter, regionFilter]);
 
   useEffect(() => () => {
     resultIntentGenerationRef.current += 1;
@@ -821,6 +935,7 @@ export function PublicBikeShopDirectory({
               <MapPin size={18} />
               <input
                 type="search"
+                disabled={busy}
                 value={locationInput}
                 onChange={(event) => setLocationInput(event.currentTarget.value.slice(0, 240))}
                 placeholder="City, ZIP code, or address"
@@ -830,7 +945,7 @@ export function PublicBikeShopDirectory({
           </label>
           <label className="public-bike-shop-directory__radius">
             <span>Map area</span>
-            <select aria-label="Map area" value={radiusMiles} onChange={(event) => setRadiusMiles(Number(event.currentTarget.value))}>
+            <select aria-label="Map area" value={radiusMiles} disabled={busy} onChange={(event) => setRadiusMiles(Number(event.currentTarget.value))}>
               {radiusOptions.map((radius) => <option value={radius} key={radius}>{radius} miles</option>)}
             </select>
           </label>
@@ -843,6 +958,9 @@ export function PublicBikeShopDirectory({
         </form>
 
         {error && <div className="public-bike-shop-directory__error" role="alert">{error}</div>}
+        {directoryNotice && (
+          <div className="public-bike-shop-directory__notice" role="status">{directoryNotice}</div>
+        )}
 
         <div className="public-bike-shop-directory__layout">
           <div className="public-bike-shop-directory__map-panel">
@@ -871,73 +989,63 @@ export function PublicBikeShopDirectory({
                     : 'Explore the map'}</strong>
                 <small>{resultMode === 'nearby' && nearbyContext
                   ? `Near ${nearbyContext.label} · within ${nearbyContext.radiusMiles} miles`
+                  : resultMode === 'hierarchy' && cityFilter !== allHierarchyValues
+                    ? `${hierarchyLabel('city', cityFilter)}, ${hierarchyLabel('region', regionFilter)} · ${hierarchyLabel('country', countryFilter)}`
                   : mapZoom < bikeShopViewportMinimumZoom
                     ? `Zoom in to level ${bikeShopViewportMinimumZoom} to load individual shops`
                   : 'The list refreshes automatically after you move or zoom the map'}</small>
               </div>
-              {(countryFilter !== allHierarchyValues || regionFilter !== allHierarchyValues || cityFilter !== allHierarchyValues) && (
+              {resultMode === 'hierarchy' && cityFilter !== allHierarchyValues && (
                 <button type="button" onClick={() => {
+                  clearPublicResults();
                   setCountryFilter(allHierarchyValues);
                   setRegionFilter(allHierarchyValues);
                   setCityFilter(allHierarchyValues);
-                }}>Full visible area</button>
+                }}>Return to map browsing</button>
               )}
             </div>
 
-            <div className="public-bike-shop-directory__hierarchy" aria-label="Organize loaded shops by location">
-              <span><ListTree size={15} /> Loaded area: country → state / province → city</span>
+            <div className="public-bike-shop-directory__hierarchy" aria-label="Browse the global directory by country, state or province, and city">
+              <span><ListTree size={15} /> Global list: country → state / province → city</span>
               <div>
                 <label>
                   <span>Country</span>
                   <select value={countryFilter} onChange={(event) => {
                     const country = event.currentTarget.value;
+                    clearPublicResults();
                     setCountryFilter(country);
                     setRegionFilter(allHierarchyValues);
                     setCityFilter(allHierarchyValues);
-                    if (country !== allHierarchyValues) {
-                      focusHierarchyShops(shops.filter((shop) => shopHierarchy(shop).country === country));
-                    }
-                  }}>
-                    <option value={allHierarchyValues}>All in visible area</option>
-                    {countries.map((country) => <option value={country} key={country}>{hierarchyLabel('country', country)}</option>)}
+                  }} disabled={busy || (hierarchyStatus === 'loading' && hierarchyCountries.length === 0)}>
+                    <option value={allHierarchyValues}>{hierarchyStatus === 'loading' && hierarchyCountries.length === 0 ? 'Loading countries…' : 'Choose a country'}</option>
+                    {hierarchyCountries.map((item) => <option value={item.value} key={item.value}>{hierarchyLabel('country', item.value)} ({item.count.toLocaleString()})</option>)}
                   </select>
                 </label>
                 <label>
                   <span>State / province</span>
-                  <select disabled={countryFilter === allHierarchyValues} value={regionFilter} onChange={(event) => {
+                  <select disabled={busy || countryFilter === allHierarchyValues} value={regionFilter} onChange={(event) => {
                     const region = event.currentTarget.value;
+                    clearPublicResults();
                     setRegionFilter(region);
                     setCityFilter(allHierarchyValues);
-                    if (region !== allHierarchyValues) {
-                      focusHierarchyShops(shops.filter((shop) => {
-                        const hierarchy = shopHierarchy(shop);
-                        return hierarchy.country === countryFilter && hierarchy.region === region;
-                      }));
-                    }
                   }}>
-                    <option value={allHierarchyValues}>All states / provinces</option>
-                    {regions.map((region) => <option value={region} key={region}>{hierarchyLabel('region', region)}</option>)}
+                    <option value={allHierarchyValues}>{hierarchyStatus === 'loading' && countryFilter !== allHierarchyValues && hierarchyRegions.length === 0 ? 'Loading states / provinces…' : 'Choose a state / province'}</option>
+                    {hierarchyRegions.map((item) => <option value={item.value} key={item.value}>{hierarchyLabel('region', item.value)} ({item.count.toLocaleString()})</option>)}
                   </select>
                 </label>
                 <label>
                   <span>City</span>
-                  <select disabled={countryFilter === allHierarchyValues || regionFilter === allHierarchyValues} value={cityFilter} onChange={(event) => {
+                  <select disabled={busy || countryFilter === allHierarchyValues || regionFilter === allHierarchyValues} value={cityFilter} onChange={(event) => {
                     const city = event.currentTarget.value;
                     setCityFilter(city);
-                    if (city !== allHierarchyValues) {
-                      focusHierarchyShops(shops.filter((shop) => {
-                        const hierarchy = shopHierarchy(shop);
-                        return hierarchy.country === countryFilter
-                          && hierarchy.region === regionFilter
-                          && hierarchy.city === city;
-                      }));
-                    }
+                    if (city !== allHierarchyValues) void browseHierarchyCity(city);
                   }}>
-                    <option value={allHierarchyValues}>All cities</option>
-                    {cities.map((city) => <option value={city} key={city}>{hierarchyLabel('city', city)}</option>)}
+                    <option value={allHierarchyValues}>{hierarchyStatus === 'loading' && regionFilter !== allHierarchyValues && hierarchyCities.length === 0 ? 'Loading cities…' : 'Choose a city'}</option>
+                    {hierarchyCities.map((item) => <option value={item.value} key={item.value}>{hierarchyLabel('city', item.value)} ({item.count.toLocaleString()})</option>)}
                   </select>
                 </label>
               </div>
+              {hierarchyError && <small className="public-bike-shop-directory__hierarchy-error" role="alert">{hierarchyError}</small>}
             </div>
 
             {viewportTruncated && (
@@ -957,7 +1065,7 @@ export function PublicBikeShopDirectory({
                       data-selected-shop={selected ? 'true' : 'false'}
                       onClick={() => setSelectedShopId(shop.id)}
                     >
-                      <span className="public-bike-shop-directory__result-title"><strong>{shop.name}{shop.claimed ? ' · ✓ Claimed' : ''}</strong><b>{shop.distanceMiles.toFixed(1)} mi</b></span>
+                      <span className="public-bike-shop-directory__result-title"><strong>{shop.name}{shop.claimed ? ' · ✓ Claimed' : ''}</strong>{resultMode !== 'hierarchy' && <b>{shop.distanceMiles.toFixed(1)} mi</b>}</span>
                       <span><MapPin size={14} /> {bikeShopAddress(shop)}</span>
                       {labels.length > 0 && <small>{labels.join(' · ')}</small>}
                     </button>
@@ -994,9 +1102,14 @@ export function PublicBikeShopDirectory({
               <>
                 <div className="public-bike-shop-directory__shop-card">
                   <div className="public-bike-shop-directory__shop-intro">
-                    <span className="eyebrow">{selectedShop.distanceMiles.toFixed(1)} miles from {resultMode === 'nearby' ? 'your chosen location' : 'the map center'}</span>
+                    <span className="eyebrow">{resultMode === 'hierarchy'
+                      ? 'Global directory listing'
+                      : `${selectedShop.distanceMiles.toFixed(1)} miles from ${resultMode === 'nearby' ? 'your chosen location' : 'the map center'}`}</span>
                     <h3>{selectedShop.name}</h3>
                     <p><MapPin size={16} /> {bikeShopAddress(selectedShop)}</p>
+                    <p>Directory {selectedShop.source.provenance && selectedShop.source.provenance.length > 1 ? 'sources' : 'source'}: {(selectedShop.source.provenance?.length
+                      ? selectedShop.source.provenance
+                      : [selectedShop.source.provider]).join(' + ')}</p>
                   </div>
 
                   <div className="public-bike-shop-directory__services" aria-label={`Services listed for ${selectedShop.name}`}>
@@ -1115,9 +1228,26 @@ export function PublicBikeShopDirectory({
                   <p style={{ margin: 0 }}>
                     <strong>Canonical source:</strong>{' '}
                     <a href={bikeShopClaimSourceUrl(claim)} target="_blank" rel="noopener noreferrer">
-                      OpenStreetMap {claim.osmElementType} {claim.osmElementId} <ExternalLink size={13} />
+                      {claim.source === 'overture'
+                        ? `Overture Maps place ${claim.osmElementId}`
+                        : `OpenStreetMap ${claim.osmElementType} ${claim.osmElementId}`} <ExternalLink size={13} />
                     </a>
                   </p>
+                  {claim.shopSnapshot && (
+                    <section className="public-bike-shop-directory__claim-snapshot" aria-label={`Canonical listing details for ${claim.shopSnapshot.name}`}>
+                      <strong>Canonical listing snapshot</strong>
+                      <span>{claim.shopSnapshot.name}</span>
+                      {claimSnapshotAddress(claim) && <span>{claimSnapshotAddress(claim)}</span>}
+                      <span>
+                        Source:{' '}
+                        {claim.shopSnapshot.source.url
+                          ? <a href={claim.shopSnapshot.source.url} target="_blank" rel="noopener noreferrer">{claim.shopSnapshot.source.provider} <ExternalLink size={13} /></a>
+                          : claim.shopSnapshot.source.provider}
+                      </span>
+                      {claim.shopSnapshot.phone && <span>Listed phone: {claim.shopSnapshot.phone}</span>}
+                      {claim.shopSnapshot.website && <span>Listed website: <a href={claim.shopSnapshot.website} target="_blank" rel="noopener noreferrer">{claim.shopSnapshot.website} <ExternalLink size={13} /></a></span>}
+                    </section>
+                  )}
                   <p style={{ margin: 0 }}><strong>Relationship:</strong> {claim.claimantRole} · <strong>Method:</strong> {claim.verificationMethod}</p>
                   {claim.businessEmail && <p style={{ margin: 0 }}><strong>Business email:</strong> {claim.businessEmail}</p>}
                   {claim.businessPhone && <p style={{ margin: 0 }}><strong>Business phone:</strong> {claim.businessPhone}</p>}
@@ -1153,7 +1283,9 @@ export function PublicBikeShopDirectory({
 
         <footer className="public-bike-shop-directory__attribution">
           <span>Shop data: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">© OpenStreetMap contributors (ODbL)</a></span>
+          <span>Preloaded catalog: <a href="https://docs.overturemaps.org/attribution/" target="_blank" rel="noopener noreferrer">Overture Maps</a></span>
           <span>Maps, directions, and Street View: <a href="https://www.google.com/maps" target="_blank" rel="noopener noreferrer">Google Maps</a></span>
+          <span><a href="/legal/bike-shop-directory-data" target="_blank" rel="noopener noreferrer">Bike shop data licenses and change notice</a></span>
           <small>Directory details may change. Contact the shop before traveling or relying on a listed service.</small>
         </footer>
       </div>

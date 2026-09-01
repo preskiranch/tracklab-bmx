@@ -92,6 +92,37 @@ test.use({
   permissions: ['geolocation'],
 });
 
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/bike-shops/hierarchy*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        level: 'country',
+        items: [],
+        attributions: [{
+          text: 'Overture Maps Foundation',
+          url: 'https://docs.overturemaps.org/attribution/',
+          license: 'CDLA-Permissive-2.0',
+        }],
+      }),
+    });
+  });
+  await page.route('**/api/bike-shops/browse', async (route) => {
+    const location = route.request().postDataJSON();
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        location,
+        shops: [],
+        total: 0,
+        truncated: false,
+        bounds: null,
+        attributions: [],
+      }),
+    });
+  });
+});
+
 test('public bike shop search is useful and contained on phone, tablet, and desktop', async ({ page }) => {
   let authRequests = 0;
   let nearbyRequestCount = 0;
@@ -289,6 +320,21 @@ test('administrator claim review exposes canonical sources and paginates the ful
     shopName: `Review Shop ${String(index + 1).padStart(2, '0')}`,
     latitude: 38.5,
     longitude: -121.5,
+    ...(index === 1 ? {
+      shopSnapshot: {
+        id: 'overture:11111111-1111-4111-8111-111111111111',
+        name: 'Canonical Overture Bicycle Works',
+        address: { line1: '12 Main St', locality: 'Vacaville', region: 'CA', postalCode: '95688', countryCode: 'US', formatted: '12 Main St, Vacaville, CA 95688' },
+        phone: '555-0100',
+        website: 'https://canonical-bikes.example/',
+        openingHours: '',
+        services: { sales: true, repair: true, rental: false, ebike: false },
+        source: {
+          provider: 'Overture Maps', elementType: 'place', elementId: '11111111-1111-4111-8111-111111111111',
+          url: 'https://docs.overturemaps.org/guides/places/',
+        },
+      },
+    } : {}),
     claimantRole: 'owner',
     verificationMethod: 'business-email',
     businessEmail: `owner${index + 1}@example.com`,
@@ -340,6 +386,17 @@ test('administrator claim review exposes canonical sources and paginates the ful
   const firstSource = review.getByRole('link', { name: 'OpenStreetMap node 101' });
   await expect(firstSource).toHaveAttribute('href', 'https://www.openstreetmap.org/node/101');
   await expect(firstSource).toHaveAttribute('target', '_blank');
+  const canonicalSnapshot = review.getByRole('region', { name: 'Canonical listing details for Canonical Overture Bicycle Works' });
+  await expect(canonicalSnapshot).toContainText('12 Main St, Vacaville, CA 95688');
+  await expect(canonicalSnapshot).toContainText('555-0100');
+  await expect(canonicalSnapshot.getByRole('link', { name: /Overture Maps/ })).toHaveAttribute(
+    'href',
+    'https://docs.overturemaps.org/guides/places/',
+  );
+  await expect(canonicalSnapshot.getByRole('link', { name: /canonical-bikes\.example/ })).toHaveAttribute(
+    'href',
+    'https://canonical-bikes.example/',
+  );
 
   await page.setViewportSize({ width: 390, height: 844 });
   await review.scrollIntoViewIfNeeded();
