@@ -72,7 +72,7 @@ import {
 } from './lib/bikeRaceAudio';
 import { safeSetLocalStorage } from './lib/browserStorage';
 import { resolveHeartRateResultsMetricState } from './lib/heartRateMetric';
-import { trackLabServiceOrigin } from './lib/serviceOrigins';
+import { isTrackLabNativeShell, trackLabServiceOrigin } from './lib/serviceOrigins';
 import {
   clubTabletRaceStartAllowed,
   type RaceStartSource,
@@ -290,7 +290,11 @@ import type {
   ClubLiveActivityState,
   ClubLiveExploreState,
 } from './components/ClubLiveAthleteBridge';
-import { clearNativeClubTabletCredential } from './lib/nativeClubTabletCredential';
+import {
+  clearNativeClubTabletCredential,
+  saveNativeClubTabletRecoveryBinding,
+} from './lib/nativeClubTabletCredential';
+import { clubTabletAutoRestoreMayRun } from './lib/clubTabletAutoRestore';
 import { authenticatedRacerBikeSeatLimit, shouldStopAdvancedConnector } from './lib/advancedConnectorPolicy';
 import {
   loginAuthUser,
@@ -446,6 +450,9 @@ const ClubLiveAthleteBridge = lazy(() => import('./components/ClubLiveAthleteBri
 const ClubLiveAccessNotice = lazy(() => import('./components/ClubLiveAccessNotice'));
 const ClubTabletMode = lazy(() => import('./components/ClubTabletMode'));
 const ClubTabletRuntime = lazy(() => import('./components/ClubTabletRuntime'));
+const ClubTabletAutoRestoreCoordinator = lazy(
+  () => import('./components/ClubTabletAutoRestoreCoordinator'),
+);
 const AppleBillingCoordinator = lazy(() => import('./components/AppleBillingCoordinator').then((module) => ({
   default: module.AppleBillingCoordinator,
 })));
@@ -10154,6 +10161,40 @@ export default function App() {
   ]);
   clubTabletEmergencyExitRef.current = returnToClubTablet;
 
+  const prepareClubTabletAuthorization = useCallback(async () => {
+    const pendingRaceViewSave = queueCloudUserDataPatch(cloudProfileKey, {
+      raceViewPreferences: raceViewPreferencesRef.current,
+    });
+    await flushCloudUserDataPatches(cloudProfileKey);
+    await pendingRaceViewSave;
+  }, [cloudProfileKey]);
+
+  const handleClubTabletAutoRestoreError = useCallback(() => {
+    // Keep the normal owner recovery screen available when automatic
+    // discovery cannot safely finish (offline, revoked, or ambiguous).
+    setAppMode('club-tablet');
+  }, []);
+
+  const clubTabletRecoveryBindingSignatureRef = useRef('');
+  const rememberClubTabletRecoveryBinding = useCallback((device: ClubTabletRoster['device']) => {
+    const signature = JSON.stringify([
+      device.id,
+      device.name,
+      device.clubId,
+      device.clubName,
+      device.pairedBike?.deviceId ?? null,
+      device.pairedBike?.label ?? null,
+    ]);
+    if (clubTabletRecoveryBindingSignatureRef.current === signature) return;
+    clubTabletRecoveryBindingSignatureRef.current = signature;
+    void saveNativeClubTabletRecoveryBinding(device).catch(() => {
+      // A later roster poll may retry a failed Keychain refresh.
+      if (clubTabletRecoveryBindingSignatureRef.current === signature) {
+        clubTabletRecoveryBindingSignatureRef.current = '';
+      }
+    });
+  }, []);
+
   const handleClubTabletDeviceChange = useCallback((next: ClubTabletDeviceCredential | null) => {
     setLiveHeartRateByRider({});
     clearRaceCaptureForClubTablet();
@@ -10237,8 +10278,9 @@ export default function App() {
   ) => {
     setClubTabletRoster(nextRoster);
     setClubTabletDeviceStatus('active');
+    rememberClubTabletRecoveryBinding(nextRoster.device);
     setAppMode((current) => (hasStoredSession ? current : 'club-tablet'));
-  }, []);
+  }, [rememberClubTabletRecoveryBinding]);
 
   const handleClubTabletDeviceError = useCallback(() => {
     setClubTabletDeviceStatus('error');
@@ -10253,10 +10295,13 @@ export default function App() {
 
   const handleClubTabletRosterChange = useCallback((nextRoster: ClubTabletRoster | null) => {
     setClubTabletRoster(nextRoster);
+    if (nextRoster) {
+      rememberClubTabletRecoveryBinding(nextRoster.device);
+    }
     if (nextRoster && nextRoster.device.id === clubTabletDevice?.device.id) {
       setClubTabletDeviceStatus('active');
     }
-  }, [clubTabletDevice?.device.id]);
+  }, [clubTabletDevice?.device.id, rememberClubTabletRecoveryBinding]);
 
   const handleClubTabletDeviceRevoked = useCallback(() => {
     handleClubTabletDeviceChange(null);
@@ -11639,7 +11684,28 @@ export default function App() {
           onAccessStatusChange={setClubLiveAccessStatus}
         />
       </Suspense>
-    ) : null;
+  ) : null;
+  const clubTabletAutoRestoreCoordinator = authUser && ownedClub ? (
+    <Suspense fallback={null} key="club-tablet-auto-restore">
+      <ClubTabletAutoRestoreCoordinator
+        clubId={ownedClub.id}
+        connectedBikeDeviceIds={bluetooth.devices
+          .filter((bike) => bike.connected)
+          .map((bike) => bike.deviceId)}
+        enabled={clubTabletAutoRestoreMayRun({
+          hasDeviceCredential: Boolean(clubTabletDevice),
+          nativeShell: isTrackLabNativeShell(),
+          ownerReady: authStatus === 'signed-in'
+            && clubOwnerActive
+            && cloudUserDataStatus !== 'loading',
+        })}
+        ownerUserId={authUser.id}
+        onBeforeRecover={prepareClubTabletAuthorization}
+        onRecovered={handleClubTabletDeviceChange}
+        onRecoveryError={handleClubTabletAutoRestoreError}
+      />
+    </Suspense>
+  ) : null;
   const clubTabletRuntime = clubTabletDevice ? (
     <Suspense fallback={null}>
       <ClubTabletRuntime
@@ -11745,6 +11811,7 @@ export default function App() {
     return (
       <>
         {clubLiveAthleteBridge}
+        {clubTabletAutoRestoreCoordinator}
         {heartRateStudioInviteDialog}
         {heartRateAccountBlockCoordinator}
         {watchConnectCoordinator}
@@ -11911,6 +11978,7 @@ export default function App() {
         </Suspense>
       )}
       {clubLiveAthleteBridge}
+      {clubTabletAutoRestoreCoordinator}
       {clubTabletRuntime}
       {(clubTabletSessionActive || (clubTabletKioskMode && demoMode))
         && appMode !== 'club-tablet'
@@ -12766,6 +12834,7 @@ export default function App() {
           <Suspense fallback={lazyLoadingFallback}>
             <ClubTabletMode
               canAuthorize={clubOwnerActive && !clubTabletDevice}
+              authorizationClubId={ownedClub?.id ?? ''}
               device={clubTabletDevice}
               status={clubTabletDeviceStatus}
               ready={clubTabletDeviceActive}
@@ -12788,13 +12857,7 @@ export default function App() {
                 await bluetooth.reconnectSavedBikes();
               }}
               retryAuthorization={retryClubTabletAuthorization}
-              beforeAuthorize={async () => {
-                const pendingRaceViewSave = queueCloudUserDataPatch(cloudProfileKey, {
-                  raceViewPreferences: raceViewPreferencesRef.current,
-                });
-                await flushCloudUserDataPatches(cloudProfileKey);
-                await pendingRaceViewSave;
-              }}
+              beforeAuthorize={prepareClubTabletAuthorization}
               demoActive={demoMode}
               setDemoActive={handleClubTabletDemoModeChange}
               onClubEventLaunch={openClubEventLaunch}

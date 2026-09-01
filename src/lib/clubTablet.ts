@@ -22,9 +22,10 @@ import {
   type ClubTabletSessionCredential,
 } from './clubTabletStorage';
 import { recordedBikeMetricsAreAccepted } from './bikeSampleSanity';
+import { safeSetLocalStorage } from './browserStorage';
 import { clearNativeAuthToken } from './nativeAuthSession';
 import {
-  clearNativeClubTabletCredential,
+  forgetNativeClubTabletAuthorization,
   saveNativeClubTabletCredential,
 } from './nativeClubTabletCredential';
 import {
@@ -41,6 +42,157 @@ export class ClubTabletRequestError extends Error {
     super(message);
     this.name = 'ClubTabletRequestError';
     this.status = status;
+  }
+}
+
+const clubTabletNativePersistencePendingKey = 'tracklab.club-tablet-native-persistence-pending.v1';
+
+type ClubTabletNativePersistencePending = Readonly<{
+  version: 1;
+  operation: 'enroll' | 'recover';
+  deviceId: string;
+  clubId: string;
+  requestedName: string;
+}>;
+
+let volatileNativePersistencePending: ClubTabletNativePersistencePending | null = null;
+let volatileNativePersistenceCredential: ClubTabletDeviceCredential | null = null;
+
+function normalizeNativePersistencePending(value: unknown): ClubTabletNativePersistencePending | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Partial<ClubTabletNativePersistencePending>;
+  const operation = candidate.operation === 'enroll' || candidate.operation === 'recover'
+    ? candidate.operation
+    : null;
+  const deviceId = text(candidate.deviceId, 120);
+  const clubId = text(candidate.clubId, 120);
+  const requestedName = text(candidate.requestedName, 80);
+  if (candidate.version !== 1 || !operation || !deviceId || !clubId) return null;
+  return { version: 1, operation, deviceId, clubId, requestedName };
+}
+
+function readNativePersistencePending() {
+  if (volatileNativePersistencePending) return volatileNativePersistencePending;
+  if (typeof window === 'undefined') return null;
+  try {
+    const pending = normalizeNativePersistencePending(JSON.parse(
+      window.localStorage.getItem(clubTabletNativePersistencePendingKey) ?? 'null',
+    ));
+    volatileNativePersistencePending = pending;
+    return pending;
+  } catch {
+    return null;
+  }
+}
+
+function rememberNativePersistencePending(
+  operation: ClubTabletNativePersistencePending['operation'],
+  credential: ClubTabletDeviceCredential,
+  requestedName = '',
+) {
+  const pending: ClubTabletNativePersistencePending = {
+    version: 1,
+    operation,
+    deviceId: credential.device.id,
+    clubId: credential.device.clubId,
+    requestedName: text(requestedName, 80),
+  };
+  volatileNativePersistencePending = pending;
+  volatileNativePersistenceCredential = credential;
+  if (typeof window !== 'undefined') {
+    safeSetLocalStorage(clubTabletNativePersistencePendingKey, JSON.stringify(pending));
+  }
+}
+
+function forgetNativePersistencePending() {
+  volatileNativePersistencePending = null;
+  volatileNativePersistenceCredential = null;
+  try {
+    window.localStorage.removeItem(clubTabletNativePersistencePendingKey);
+  } catch {
+    // The in-memory marker is enough to prevent a duplicate request during
+    // this run when browser storage is unavailable.
+  }
+}
+
+async function persistClubTabletCredential(
+  operation: ClubTabletNativePersistencePending['operation'],
+  credential: ClubTabletDeviceCredential,
+  requestedName = '',
+) {
+  storeClubTabletDevice(credential);
+  rememberNativePersistencePending(operation, credential, requestedName);
+  // Do not retire the administrator's native session unless the new kiosk
+  // bearer is durably present in Keychain. The local credential and marker
+  // intentionally remain available if both writes fail, allowing an exact
+  // later retry without rotating the server credential a second time.
+  let persistenceError: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await saveNativeClubTabletCredential(credential);
+      persistenceError = null;
+      break;
+    } catch (error) {
+      persistenceError = error;
+    }
+  }
+  if (persistenceError) throw persistenceError;
+  forgetNativePersistencePending();
+  await clearNativeAuthToken();
+  return credential;
+}
+
+function pendingClubTabletCredential(
+  operation: ClubTabletNativePersistencePending['operation'],
+  expectedDeviceId = '',
+  expectedName = '',
+  expectedClubId = '',
+) {
+  const pending = readNativePersistencePending();
+  const credential = readStoredClubTabletDevice() ?? volatileNativePersistenceCredential;
+  if (
+    !pending
+    || pending.operation !== operation
+    || !credential
+    || pending.deviceId !== credential.device.id
+    || pending.clubId !== credential.device.clubId
+    || (expectedDeviceId && pending.deviceId !== expectedDeviceId)
+    || (expectedName && pending.requestedName !== expectedName)
+    || (expectedClubId && pending.clubId !== expectedClubId)
+  ) return null;
+  return credential;
+}
+
+function discardRejectedNativePersistencePending(
+  credential: ClubTabletDeviceCredential,
+) {
+  const stored = readStoredClubTabletDevice();
+  forgetNativePersistencePending();
+  if (
+    stored?.device.id === credential.device.id
+    && stored.deviceToken === credential.deviceToken
+  ) {
+    clearStoredClubTabletDevice();
+  }
+}
+
+async function validatePendingClubTabletCredential(
+  credential: ClubTabletDeviceCredential,
+) {
+  try {
+    await loadClubTabletRoster(credential);
+  } catch (error) {
+    // A definitive authorization response means the pending bearer can never
+    // be committed safely. Forget only that matching local attempt so a newly
+    // signed-in owner can perform a fresh recovery. Offline and server errors
+    // retain it for a non-mutating retry.
+    if (
+      error instanceof ClubTabletRequestError
+      && (error.status === 401 || error.status === 403)
+    ) {
+      discardRejectedNativePersistencePending(credential);
+    }
+    throw error;
   }
 }
 
@@ -335,27 +487,37 @@ export async function saveClubTabletTrainingSession(
   return saveQueuedClubTabletArtifact(entry, credential);
 }
 
-export async function enrollClubTablet(name: string) {
+export async function enrollClubTablet(name: string, clubId: string) {
+  const safeName = text(name, 80);
+  const safeClubId = text(clubId, 120);
+  if (!safeClubId) throw new Error('TrackLab could not identify the owner club for this tablet.');
+  const pendingCredential = pendingClubTabletCredential('enroll', '', safeName, safeClubId);
+  if (pendingCredential) {
+    // Revalidate the bearer before moving it into Keychain. An owner may have
+    // revoked this row after the previous local write failed.
+    await validatePendingClubTabletCredential(pendingCredential);
+    return persistClubTabletCredential('enroll', pendingCredential, safeName);
+  }
   const payload = await tabletFetch('/api/club-tablet/devices', {
     method: 'POST',
-    body: JSON.stringify({ name: text(name, 80) }),
+    body: JSON.stringify({ name: safeName }),
   });
   const credential = normalizeClubTabletDeviceCredential(payload);
   if (!credential) throw new Error('TrackLab returned an invalid tablet authorization.');
-  storeClubTabletDevice(credential);
   // WKWebView data is origin-scoped and can be replaced when a native release
   // moves from hosted content to the packaged app. Keep the opaque enrollment
   // in the device-only native store as the durable source for future updates.
-  await saveNativeClubTabletCredential(credential).catch(() => undefined);
-  // Enrollment atomically retires the owner's cloud session. Mirror that
-  // boundary in the device-only Keychain before any kiosk request can reuse it.
-  await clearNativeAuthToken();
-  return credential;
+  return persistClubTabletCredential('enroll', credential, safeName);
 }
 
 export async function recoverClubTabletDevice(deviceId: string) {
   const safeDeviceId = text(deviceId, 120);
   if (!safeDeviceId) throw new Error('Choose the authorized tablet to restore.');
+  const pendingCredential = pendingClubTabletCredential('recover', safeDeviceId);
+  if (pendingCredential) {
+    await validatePendingClubTabletCredential(pendingCredential);
+    return persistClubTabletCredential('recover', pendingCredential);
+  }
   const payload = await tabletFetch(`/api/club-tablet/devices/${encodeURIComponent(safeDeviceId)}/recover`, {
     method: 'POST',
   });
@@ -363,12 +525,7 @@ export async function recoverClubTabletDevice(deviceId: string) {
   if (!credential || credential.device.id !== safeDeviceId) {
     throw new Error('TrackLab returned an invalid tablet recovery.');
   }
-  storeClubTabletDevice(credential);
-  await saveNativeClubTabletCredential(credential).catch(() => undefined);
-  // Recovery, like first enrollment, converts the signed-in owner browser
-  // into the shared kiosk. Never retain the administrator Keychain session.
-  await clearNativeAuthToken();
-  return credential;
+  return persistClubTabletCredential('recover', credential);
 }
 
 export async function loadClubTabletDevices() {
@@ -467,7 +624,9 @@ export async function revokeClubTabletDevice(deviceId: string) {
   if (current?.device.id === deviceId) {
     clearStoredClubTabletSession();
     clearStoredClubTabletDevice();
-    await clearNativeClubTabletCredential().catch(() => undefined);
+    // An owner revoke is the one path that intentionally forgets the durable
+    // native recovery hint as well as the current bearer.
+    await forgetNativeClubTabletAuthorization().catch(() => undefined);
   }
 }
 

@@ -83,26 +83,40 @@ describe('bundled native service transport', () => {
     expect(nativePlugin).toContain('loadClubTabletCredential');
     expect(nativePlugin).toContain('saveClubTabletCredential');
     expect(nativePlugin).toContain('clearClubTabletCredential');
+    expect(nativePlugin).toContain('loadClubTabletRecoveryBinding');
+    expect(nativePlugin).toContain('saveClubTabletRecoveryBinding');
+    expect(nativePlugin).toContain('clearClubTabletRecoveryBinding');
     expect(nativePlugin).toContain('loadSavedBluetoothDevices');
     expect(nativePlugin).toContain('saveBluetoothDevice');
     expect(nativePlugin).toContain('com.preskilranch.tracklabbmx.club-tablet');
     expect(nativePlugin).toContain('device-credential-v1');
+    expect(nativePlugin).toContain('com.preskilranch.tracklabbmx.club-tablet-recovery');
+    expect(nativePlugin).toContain('device-binding-v1');
     expect(nativePlugin).toContain('com.preskilranch.tracklabbmx.bluetooth');
     expect(nativePlugin).toContain('peripheral-ids-v1');
-    expect(nativePlugin.match(/kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly/gu)).toHaveLength(3);
-    expect(nativePlugin.match(/kSecAttrSynchronizable as String\]\s*=\s*false/gu)).toHaveLength(3);
+    expect(nativePlugin.match(/kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly/gu)).toHaveLength(4);
+    expect(nativePlugin.match(/kSecAttrSynchronizable as String\]\s*=\s*false/gu)).toHaveLength(4);
     const personalClear = nativePlugin.slice(
       nativePlugin.indexOf('@objc public func clearSession'),
       nativePlugin.indexOf('@objc public func loadClubTabletCredential'),
     );
     const clubClear = nativePlugin.slice(
       nativePlugin.indexOf('@objc public func clearClubTabletCredential'),
-      nativePlugin.indexOf('private static func query()'),
+      nativePlugin.indexOf('@objc public func loadClubTabletRecoveryBinding'),
+    );
+    const recoveryClear = nativePlugin.slice(
+      nativePlugin.indexOf('@objc public func clearClubTabletRecoveryBinding'),
+      nativePlugin.indexOf('@objc public func loadSavedBluetoothDevices'),
     );
     expect(personalClear).toContain('Self.query()');
     expect(personalClear).not.toContain('clubTabletQuery');
     expect(clubClear).toContain('Self.clubTabletQuery()');
     expect(clubClear).not.toContain('Self.query()');
+    expect(clubClear).not.toContain('clubTabletRecoveryQuery');
+    expect(recoveryClear).toContain('Self.clubTabletRecoveryQuery()');
+    expect(nativeClubTablet).toContain('loadNativeClubTabletRecoveryBinding');
+    expect(nativeClubTablet).toContain('saveNativeClubTabletRecoveryBinding');
+    expect(nativeClubTablet).toContain('forgetNativeClubTabletAuthorization');
     expect(nativeClubTablet).toContain('restoreNativeClubTabletCredential');
     expect(main.indexOf('await restoreNativeClubTabletCredential()'))
       .toBeLessThan(main.indexOf("await import('./App')"));

@@ -97,6 +97,7 @@ const clubTabletPrograms = [
 
 type ClubTabletModeProps = {
   canAuthorize: boolean;
+  authorizationClubId: string;
   device: ClubTabletDeviceCredential | null;
   status: ClubTabletDeviceStatus;
   ready: boolean;
@@ -216,6 +217,7 @@ function enrichClubTabletSession(
 
 export default function ClubTabletMode({
   canAuthorize,
+  authorizationClubId,
   device: deviceCredential,
   status: deviceStatus,
   ready: accessReady,
@@ -419,7 +421,7 @@ export default function ClubTabletMode({
     setMessage(null);
     try {
       await onBeforeAuthorize?.();
-      const credential = await enrollClubTablet(tabletName);
+      const credential = await enrollClubTablet(tabletName, authorizationClubId);
       // Enrollment atomically revokes the owner's server session and push
       // delivery. Also unregister this physical app before kiosk state mounts;
       // that local operation still runs if the best-effort DELETE is now 401.

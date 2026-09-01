@@ -10,6 +10,8 @@ private enum NativeSessionError: LocalizedError {
     case writeFailed(OSStatus)
     case clubTabletReadFailed(OSStatus)
     case clubTabletWriteFailed(OSStatus)
+    case clubTabletRecoveryReadFailed(OSStatus)
+    case clubTabletRecoveryWriteFailed(OSStatus)
     case bluetoothReadFailed(OSStatus)
     case bluetoothWriteFailed(OSStatus)
 
@@ -29,11 +31,105 @@ private enum NativeSessionError: LocalizedError {
             return "The device could not read its club tablet authorization."
         case .clubTabletWriteFailed:
             return "The device could not securely save its club tablet authorization."
+        case .clubTabletRecoveryReadFailed:
+            return "The device could not read its club tablet recovery identity."
+        case .clubTabletRecoveryWriteFailed:
+            return "The device could not securely save its club tablet recovery identity."
         case .bluetoothReadFailed:
             return "The device could not read its saved Wattbike pairing."
         case .bluetoothWriteFailed:
             return "The device could not securely save its Wattbike pairing."
         }
+    }
+}
+
+/// Token-free identity used to find this same logical Club Tablet after its
+/// bearer is rotated, invalidated, or lost with WebKit data. This is kept in a
+/// separate Keychain item so clearing an unusable authorization never removes
+/// the information needed for an owner-authorized recovery.
+private struct StoredClubTabletRecoveryBinding: Codable {
+    static let currentVersion = 1
+
+    let version: Int
+    let deviceId: String
+    let deviceName: String
+    let clubId: String
+    let clubName: String
+    let pairedBikeDeviceId: Int?
+    let pairedBikeLabel: String?
+
+    init(
+        credential: StoredClubTabletCredential,
+        preservingBikeFrom existing: StoredClubTabletRecoveryBinding? = nil
+    ) {
+        self.version = Self.currentVersion
+        self.deviceId = credential.deviceId
+        self.deviceName = credential.deviceName
+        self.clubId = credential.clubId
+        self.clubName = credential.clubName
+        let sameLogicalTablet = existing?.deviceId == credential.deviceId
+            && existing?.clubId == credential.clubId
+        self.pairedBikeDeviceId = sameLogicalTablet ? existing?.pairedBikeDeviceId : nil
+        self.pairedBikeLabel = sameLogicalTablet ? existing?.pairedBikeLabel : nil
+    }
+
+    init?(call: CAPPluginCall) {
+        guard call.getInt("version") == Self.currentVersion,
+              let deviceId = Self.normalizedText(call.getString("deviceId"), maxLength: 120),
+              let deviceName = Self.normalizedText(call.getString("deviceName"), maxLength: 80),
+              let clubId = Self.normalizedText(call.getString("clubId"), maxLength: 120),
+              let clubName = Self.normalizedText(call.getString("clubName"), maxLength: 120) else {
+            return nil
+        }
+        let suppliedBikeDeviceId = call.getInt("pairedBikeDeviceId")
+        let suppliedBikeLabel = Self.normalizedText(call.getString("pairedBikeLabel"), maxLength: 120)
+        guard (suppliedBikeDeviceId == nil && suppliedBikeLabel == nil)
+                || (suppliedBikeDeviceId != nil && suppliedBikeLabel != nil),
+              suppliedBikeDeviceId.map({ $0 > 0 }) ?? true else {
+            return nil
+        }
+        self.version = Self.currentVersion
+        self.deviceId = deviceId
+        self.deviceName = deviceName
+        self.clubId = clubId
+        self.clubName = clubName
+        self.pairedBikeDeviceId = suppliedBikeDeviceId
+        self.pairedBikeLabel = suppliedBikeLabel
+    }
+
+    var wireValue: JSObject {
+        var value: JSObject = [
+            "version": version,
+            "deviceId": deviceId,
+            "deviceName": deviceName,
+            "clubId": clubId,
+            "clubName": clubName,
+        ]
+        value["pairedBikeDeviceId"] = pairedBikeDeviceId ?? NSNull()
+        value["pairedBikeLabel"] = pairedBikeLabel ?? NSNull()
+        return value
+    }
+
+    var valid: Bool {
+        version == Self.currentVersion
+            && Self.normalizedText(deviceId, maxLength: 120) == deviceId
+            && Self.normalizedText(deviceName, maxLength: 80) == deviceName
+            && Self.normalizedText(clubId, maxLength: 120) == clubId
+            && Self.normalizedText(clubName, maxLength: 120) == clubName
+            && ((pairedBikeDeviceId == nil && pairedBikeLabel == nil)
+                || (pairedBikeDeviceId.map({ $0 > 0 }) == true
+                    && Self.normalizedText(pairedBikeLabel, maxLength: 120) == pairedBikeLabel))
+    }
+
+    private static func normalizedText(_ value: String?, maxLength: Int) -> String? {
+        guard let value else { return nil }
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty,
+              normalized.count <= maxLength,
+              normalized.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else {
+            return nil
+        }
+        return normalized
     }
 }
 
@@ -168,6 +264,9 @@ public final class NativeSessionPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "loadClubTabletCredential", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "saveClubTabletCredential", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "clearClubTabletCredential", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "loadClubTabletRecoveryBinding", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "saveClubTabletRecoveryBinding", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "clearClubTabletRecoveryBinding", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "loadSavedBluetoothDevices", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "saveBluetoothDevice", returnType: CAPPluginReturnPromise),
     ]
@@ -176,6 +275,8 @@ public final class NativeSessionPlugin: CAPPlugin, CAPBridgedPlugin {
     private static let account = "server-session-v1"
     private static let clubTabletService = "com.preskilranch.tracklabbmx.club-tablet"
     private static let clubTabletAccount = "device-credential-v1"
+    private static let clubTabletRecoveryService = "com.preskilranch.tracklabbmx.club-tablet-recovery"
+    private static let clubTabletRecoveryAccount = "device-binding-v1"
     private static let bluetoothService = "com.preskilranch.tracklabbmx.bluetooth"
     private static let bluetoothAccount = "peripheral-ids-v1"
     private let queue = DispatchQueue(label: "com.preskilranch.tracklabbmx.native-session")
@@ -224,6 +325,11 @@ public final class NativeSessionPlugin: CAPPlugin, CAPBridgedPlugin {
         queue.async {
             do {
                 if let credential = try Self.loadClubTabletCredential() {
+                    // Migrate authorizations written by native builds that
+                    // predate the token-free recovery item. A recovery write
+                    // must never hide an otherwise usable bearer; it will be
+                    // retried on the next launch if protected data is busy.
+                    try? Self.refreshClubTabletRecoveryBinding(for: credential)
                     call.resolve(["credential": credential.wireValue])
                 } else {
                     call.resolve([:])
@@ -242,6 +348,11 @@ public final class NativeSessionPlugin: CAPPlugin, CAPBridgedPlugin {
         queue.async {
             do {
                 try Self.storeClubTabletCredential(credential)
+                // Seed the non-secret recovery item in the same native call so
+                // a WebView crash cannot leave a newly issued bearer as the
+                // installation's only durable identity. Preserve a known bike
+                // when this is merely a token rotation for the same tablet.
+                try Self.refreshClubTabletRecoveryBinding(for: credential)
                 call.resolve(["saved": true])
             } catch {
                 call.reject(error.localizedDescription)
@@ -254,6 +365,46 @@ public final class NativeSessionPlugin: CAPPlugin, CAPBridgedPlugin {
             let status = SecItemDelete(Self.clubTabletQuery() as CFDictionary)
             guard status == errSecSuccess || status == errSecItemNotFound else {
                 call.reject(NativeSessionError.clubTabletWriteFailed(status).localizedDescription)
+                return
+            }
+            call.resolve(["cleared": true])
+        }
+    }
+
+    @objc public func loadClubTabletRecoveryBinding(_ call: CAPPluginCall) {
+        queue.async {
+            do {
+                if let binding = try Self.loadClubTabletRecoveryBinding() {
+                    call.resolve(["binding": binding.wireValue])
+                } else {
+                    call.resolve([:])
+                }
+            } catch {
+                call.reject(error.localizedDescription)
+            }
+        }
+    }
+
+    @objc public func saveClubTabletRecoveryBinding(_ call: CAPPluginCall) {
+        guard let binding = StoredClubTabletRecoveryBinding(call: call) else {
+            call.reject(NativeSessionError.invalidClubTabletCredential.localizedDescription)
+            return
+        }
+        queue.async {
+            do {
+                try Self.storeClubTabletRecoveryBinding(binding)
+                call.resolve(["saved": true])
+            } catch {
+                call.reject(error.localizedDescription)
+            }
+        }
+    }
+
+    @objc public func clearClubTabletRecoveryBinding(_ call: CAPPluginCall) {
+        queue.async {
+            let status = SecItemDelete(Self.clubTabletRecoveryQuery() as CFDictionary)
+            guard status == errSecSuccess || status == errSecItemNotFound else {
+                call.reject(NativeSessionError.clubTabletRecoveryWriteFailed(status).localizedDescription)
                 return
             }
             call.resolve(["cleared": true])
@@ -306,6 +457,14 @@ public final class NativeSessionPlugin: CAPPlugin, CAPBridgedPlugin {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: clubTabletService,
             kSecAttrAccount as String: clubTabletAccount,
+        ]
+    }
+
+    private static func clubTabletRecoveryQuery() -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: clubTabletRecoveryService,
+            kSecAttrAccount as String: clubTabletRecoveryAccount,
         ]
     }
 
@@ -404,6 +563,68 @@ public final class NativeSessionPlugin: CAPPlugin, CAPBridgedPlugin {
         guard addStatus == errSecSuccess else {
             throw NativeSessionError.clubTabletWriteFailed(addStatus)
         }
+    }
+
+    private static func loadClubTabletRecoveryBinding() throws -> StoredClubTabletRecoveryBinding? {
+        var request = clubTabletRecoveryQuery()
+        request[kSecReturnData as String] = true
+        request[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(request as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else {
+            throw NativeSessionError.clubTabletRecoveryReadFailed(status)
+        }
+        guard let data = result as? Data,
+              let binding = try? JSONDecoder().decode(StoredClubTabletRecoveryBinding.self, from: data),
+              binding.valid else {
+            _ = SecItemDelete(clubTabletRecoveryQuery() as CFDictionary)
+            return nil
+        }
+        return binding
+    }
+
+    private static func storeClubTabletRecoveryBinding(
+        _ binding: StoredClubTabletRecoveryBinding
+    ) throws {
+        let encoded: Data
+        do {
+            encoded = try JSONEncoder().encode(binding)
+        } catch {
+            throw NativeSessionError.invalidClubTabletCredential
+        }
+        let updateStatus = SecItemUpdate(
+            clubTabletRecoveryQuery() as CFDictionary,
+            [kSecValueData as String: encoded] as CFDictionary
+        )
+        if updateStatus == errSecSuccess { return }
+        guard updateStatus == errSecItemNotFound else {
+            throw NativeSessionError.clubTabletRecoveryWriteFailed(updateStatus)
+        }
+        var insertion = clubTabletRecoveryQuery()
+        insertion[kSecValueData as String] = encoded
+        insertion[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        insertion[kSecAttrSynchronizable as String] = false
+        let addStatus = SecItemAdd(insertion as CFDictionary, nil)
+        guard addStatus == errSecSuccess else {
+            throw NativeSessionError.clubTabletRecoveryWriteFailed(addStatus)
+        }
+    }
+
+    private static func refreshClubTabletRecoveryBinding(
+        for credential: StoredClubTabletCredential
+    ) throws {
+        // If an old or unreadable item is present, store() still performs an
+        // update using the stable service/account pair. Names refresh on every
+        // token rotation while a paired-bike hint is retained only for this
+        // exact device and club.
+        let existing = try? loadClubTabletRecoveryBinding()
+        try storeClubTabletRecoveryBinding(
+            StoredClubTabletRecoveryBinding(
+                credential: credential,
+                preservingBikeFrom: existing
+            )
+        )
     }
 
     private static func loadSavedBluetoothDevices() throws -> StoredBluetoothDeviceIds? {
