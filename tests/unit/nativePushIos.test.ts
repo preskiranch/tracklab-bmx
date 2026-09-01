@@ -53,10 +53,11 @@ describe('native iOS push integration', () => {
     expect(installation).toContain('deadline: .now() + 1.0');
   });
 
-  it('enables app push, preserves Watch capability scope, and ships build 37', () => {
+  it('enables app push, preserves Watch capability scope, and ships build 38', () => {
     expect(entitlements).toContain('<key>aps-environment</key>');
     expect(project).toContain('com.apple.Push');
-    expect(project.match(/CURRENT_PROJECT_VERSION = 37;/gu)).toHaveLength(4);
+    expect(project.match(/CURRENT_PROJECT_VERSION = 38;/gu)).toHaveLength(4);
+    expect(project).not.toContain('CURRENT_PROJECT_VERSION = 37;');
     expect(project).not.toContain('CURRENT_PROJECT_VERSION = 36;');
     expect(project).not.toContain('CURRENT_PROJECT_VERSION = 35;');
     expect(project).not.toContain('CURRENT_PROJECT_VERSION = 34;');
