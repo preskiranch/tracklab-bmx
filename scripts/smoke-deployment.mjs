@@ -161,6 +161,40 @@ assert(
 );
 results.push([`track locator (${locator.trackCount} tracks)`, locatorRequest.durationMs]);
 
+const bikeShopBoundaryRequest = await request('/api/bike-shops/nearby', {
+  method: 'POST',
+  headers: {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+    Origin: baseUrl,
+  },
+  body: JSON.stringify({ latitude: 0, longitude: 0, radiusMiles: 12 }),
+});
+assert(
+  bikeShopBoundaryRequest.response.status === 400,
+  `Public bike-shop search validation returned ${bikeShopBoundaryRequest.response.status} instead of 400.`,
+);
+assert(
+  bikeShopBoundaryRequest.response.headers.get('cache-control') === 'no-store',
+  'Public bike-shop search validation must be no-store.',
+);
+results.push(['public bike-shop search boundary', bikeShopBoundaryRequest.durationMs]);
+
+const bikeShopClaimBoundaryRequest = await request('/api/bike-shops/claim-requests', {
+  method: 'POST',
+  headers: {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+    Origin: baseUrl,
+  },
+  body: JSON.stringify({}),
+});
+assert(
+  bikeShopClaimBoundaryRequest.response.status === 401,
+  `Anonymous bike-shop claim boundary returned ${bikeShopClaimBoundaryRequest.response.status} instead of 401.`,
+);
+results.push(['anonymous bike-shop claim boundary', bikeShopClaimBoundaryRequest.durationMs]);
+
 const authRequest = await request('/api/auth/me');
 assert(authRequest.response.ok, `/api/auth/me returned ${authRequest.response.status}.`);
 const auth = await authRequest.response.json();

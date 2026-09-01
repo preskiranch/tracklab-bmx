@@ -2049,6 +2049,98 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           VALIDATE CONSTRAINT club_tablet_devices_paired_bike_complete`,
       ],
     },
+    {
+      version: 37,
+      name: 'add moderated bike shop ownership claims',
+      statements: [
+        `CREATE TABLE IF NOT EXISTS ${schema}.bike_shop_claim_requests (
+          id TEXT PRIMARY KEY CHECK (char_length(id) BETWEEN 32 AND 64),
+          claimant_user_id TEXT NOT NULL
+            REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          source TEXT NOT NULL DEFAULT 'openstreetmap'
+            CHECK (source = 'openstreetmap'),
+          osm_element_type TEXT NOT NULL
+            CHECK (osm_element_type IN ('node', 'way', 'relation')),
+          osm_element_id TEXT NOT NULL
+            CHECK (osm_element_id ~ '^[1-9][0-9]{0,30}$'),
+          shop_name TEXT NOT NULL CHECK (char_length(shop_name) BETWEEN 1 AND 180),
+          latitude DOUBLE PRECISION NOT NULL CHECK (latitude BETWEEN -90 AND 90),
+          longitude DOUBLE PRECISION NOT NULL CHECK (longitude BETWEEN -180 AND 180),
+          shop_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb
+            CHECK (jsonb_typeof(shop_snapshot) = 'object'),
+          claimant_role TEXT NOT NULL
+            CHECK (claimant_role IN ('owner', 'manager', 'authorized-representative')),
+          verification_method TEXT NOT NULL
+            CHECK (verification_method IN ('business-email', 'business-phone', 'documentation')),
+          business_email TEXT NOT NULL DEFAULT '' CHECK (char_length(business_email) <= 254),
+          business_phone TEXT NOT NULL DEFAULT '' CHECK (char_length(business_phone) <= 80),
+          verification_note TEXT NOT NULL DEFAULT '' CHECK (char_length(verification_note) <= 1000),
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending', 'approved', 'rejected', 'withdrawn')),
+          reviewer_user_id TEXT
+            REFERENCES ${schema}.auth_users(id) ON DELETE SET NULL,
+          review_note TEXT NOT NULL DEFAULT '' CHECK (char_length(review_note) <= 1000),
+          reviewed_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (claimant_user_id, source, osm_element_type, osm_element_id),
+          CHECK (
+            (status = 'pending' AND reviewer_user_id IS NULL AND reviewed_at IS NULL)
+            OR (status = 'withdrawn' AND reviewer_user_id IS NULL AND reviewed_at IS NULL)
+            OR (status IN ('approved', 'rejected') AND reviewed_at IS NOT NULL)
+          )
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_bike_shop_claim_review_queue
+          ON ${schema}.bike_shop_claim_requests (status, created_at, id)`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_bike_shop_claim_claimant_recent
+          ON ${schema}.bike_shop_claim_requests (claimant_user_id, updated_at DESC, id)`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_tracklab_bike_shop_claim_approved_shop
+          ON ${schema}.bike_shop_claim_requests (source, osm_element_type, osm_element_id)
+          WHERE status = 'approved'`,
+      ],
+    },
+    {
+      version: 38,
+      name: 'harden bike shop claim retries and erasure retention',
+      statements: [
+        `DO $migration$
+        DECLARE
+          legacy_unique_name TEXT;
+        BEGIN
+          SELECT constraint_name INTO legacy_unique_name
+          FROM information_schema.table_constraints
+          WHERE table_schema = '${schema}'
+            AND table_name = 'bike_shop_claim_requests'
+            AND constraint_type = 'UNIQUE'
+          ORDER BY constraint_name
+          LIMIT 1;
+          IF legacy_unique_name IS NOT NULL THEN
+            EXECUTE format(
+              'ALTER TABLE %I.%I DROP CONSTRAINT %I',
+              '${schema}', 'bike_shop_claim_requests', legacy_unique_name
+            );
+          END IF;
+        END;
+        $migration$`,
+        `ALTER TABLE ${schema}.bike_shop_claim_requests
+          DROP CONSTRAINT IF EXISTS bike_shop_claim_requests_claimant_user_id_fkey`,
+        `ALTER TABLE ${schema}.bike_shop_claim_requests
+          ALTER COLUMN claimant_user_id DROP NOT NULL`,
+        `ALTER TABLE ${schema}.bike_shop_claim_requests
+          ADD CONSTRAINT bike_shop_claim_requests_claimant_user_id_fkey
+          FOREIGN KEY (claimant_user_id) REFERENCES ${schema}.auth_users(id) ON DELETE SET NULL`,
+        `ALTER TABLE ${schema}.bike_shop_claim_requests
+          ADD CONSTRAINT bike_shop_claim_requests_pending_claimant_required
+          CHECK (status <> 'pending' OR claimant_user_id IS NOT NULL) NOT VALID`,
+        `ALTER TABLE ${schema}.bike_shop_claim_requests
+          VALIDATE CONSTRAINT bike_shop_claim_requests_pending_claimant_required`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_tracklab_bike_shop_claim_active_claimant_shop
+          ON ${schema}.bike_shop_claim_requests (
+            claimant_user_id, source, osm_element_type, osm_element_id
+          )
+          WHERE claimant_user_id IS NOT NULL AND status IN ('pending', 'approved')`,
+      ],
+    },
   ];
 }
 

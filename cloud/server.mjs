@@ -80,7 +80,11 @@ import { fetchExploreElevationProfile } from './exploreElevation.mjs';
 import { generateSmartExplorePlan } from './exploreSmartRoute.mjs';
 import { createAuthSessionCache } from './authSessionCache.mjs';
 import { moderateRoomChatText } from './roomChatModeration.mjs';
-import { createBikeShopDirectory } from './bikeShops.mjs';
+import {
+  applyApprovedBikeShopClaims,
+  createBikeShopDirectory,
+  parseBikeShopClaimRequest,
+} from './bikeShops.mjs';
 import {
   ApnsProvider,
   apnsConfigurationFromEnv,
@@ -177,7 +181,9 @@ const voteTimers = new Map();
 const routeSelectTimers = new Map();
 const userDataWriteChains = new Map();
 const exploreElevationCache = new Map();
-const bikeShopDirectory = createBikeShopDirectory();
+const bikeShopDirectory = createBikeShopDirectory({
+  endpoint: process.env.TRACKLAB_OVERPASS_ENDPOINT || undefined,
+});
 const globalRaceViewProfileKey = 'global:developer-race-view';
 let commentarySpeechProviderStatus = 'unknown';
 let commentarySpeechProviderRetryAt = 0;
@@ -334,6 +340,7 @@ const nativeRuntimeConfigRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1
 const map3DLoadRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const exploreRouteRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const bikeShopDirectoryRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
+const bikeShopClaimRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const smartExploreRouteRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const commentaryRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const clubConnectRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
@@ -2015,6 +2022,39 @@ async function requirePersonalAccountSession(request, response) {
     return null;
   }
   return session;
+}
+
+async function requirePersonalBikeShopClaimSession(request, response) {
+  if (
+    request.tracklabClubTabletSession
+    || String(request.headers['x-tracklab-club-tablet-session'] || '').trim()
+    || nonPersonalBearerCredentialPresented(request)
+  ) {
+    writeJson(response, 403, {
+      error: 'Bike shop claims are available only from a personal signed-in account.',
+    }, { 'Cache-Control': 'no-store' });
+    return null;
+  }
+  const session = await currentAuthSession(request, personalAuthSessions);
+  if (!session?.user) {
+    writeJson(response, 401, { error: 'Sign in to continue.' }, { 'Cache-Control': 'no-store' });
+    return null;
+  }
+  return session;
+}
+
+function writeBikeShopClaimStorageUnavailable(error, response) {
+  if (
+    !(error instanceof persistence.BikeShopClaimPersistenceUnavailableError)
+    && error?.code !== 'TRACKLAB_BIKE_SHOP_CLAIM_PERSISTENCE_UNAVAILABLE'
+  ) return false;
+  writeJson(response, 503, {
+    error: 'Bike shop claim storage is temporarily unavailable. Please try again.',
+  }, {
+    'Cache-Control': 'no-store',
+    'Retry-After': '3',
+  });
+  return true;
 }
 
 async function requirePersonalTrackSession(request, response) {
@@ -16103,7 +16143,7 @@ async function serveStatic(request, response) {
     return;
   }
   if (requestUrl.pathname === '/api/bike-shops/nearby') {
-    if (request.method !== 'GET') {
+    if (request.method !== 'POST') {
       writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
       return;
     }
@@ -16115,27 +16155,240 @@ async function serveStatic(request, response) {
       'bike-shop-directory',
     )) return;
     try {
-      const result = await bikeShopDirectory.search({
-        latitude: requestUrl.searchParams.get('lat'),
-        longitude: requestUrl.searchParams.get('lng'),
-        radiusMiles: requestUrl.searchParams.get('radiusMiles'),
-      });
-      writeJson(response, 200, result, { 'Cache-Control': 'private, no-store' });
+      const payload = await readJsonBody(request, 2_048);
+      const result = await bikeShopDirectory.search(payload);
+      const approved = await persistence.loadApprovedBikeShopClaimIdentities(
+        result.shops.map((shop) => ({
+          source: 'openstreetmap',
+          osmElementType: shop.source?.elementType,
+          osmElementId: shop.source?.elementId,
+        })),
+      );
+      writeJson(response, 200, {
+        ...result,
+        shops: applyApprovedBikeShopClaims(result.shops, approved),
+      }, { 'Cache-Control': 'private, no-store' });
     } catch (error) {
+      if (writeBikeShopClaimStorageUnavailable(error, response)) return;
+      if (error instanceof HttpRequestError) {
+        writeJson(response, error.statusCode, { error: error.message }, { 'Cache-Control': 'no-store' });
+        return;
+      }
       if (error instanceof RangeError) {
         writeJson(response, 400, { error: error.message }, { 'Cache-Control': 'no-store' });
         return;
       }
       const timedOut = error?.name === 'AbortError';
+      const busy = error?.code === 'OVERPASS_BUSY';
       cloudTelemetry.warn('bike_shop_directory.upstream_failed', {
         errorName: error instanceof Error ? error.name : 'UnknownError',
       });
-      writeJson(response, timedOut ? 504 : 502, {
-        error: timedOut
+      writeJson(response, busy ? 503 : timedOut ? 504 : 502, {
+        error: busy
+          ? 'The open bike shop directory is busy. Please retry shortly.'
+          : timedOut
           ? 'The open bike shop directory timed out. Please try again.'
           : 'The open bike shop directory is temporarily unavailable.',
-      }, { 'Cache-Control': 'no-store' });
+      }, {
+        'Cache-Control': 'no-store',
+        ...(busy ? { 'Retry-After': String(error.retryAfterSeconds || 3) } : {}),
+      });
     }
+    return;
+  }
+  if (
+    requestUrl.pathname === '/api/bike-shops/claim-requests'
+    || requestUrl.pathname.startsWith('/api/bike-shops/claim-requests/')
+  ) {
+    const session = await requirePersonalBikeShopClaimSession(request, response);
+    if (!session) return;
+    const userId = String(session.user.id || '');
+    if (requestUrl.pathname === '/api/bike-shops/claim-requests' && request.method === 'GET') {
+      try {
+        const claims = await persistence.listBikeShopClaimRequestsForUser(userId, { limit: 50 });
+        writeJson(response, 200, { claims }, { 'Cache-Control': 'private, no-store' });
+      } catch (error) {
+        if (!writeBikeShopClaimStorageUnavailable(error, response)) throw error;
+      }
+      return;
+    }
+    if (requestUrl.pathname === '/api/bike-shops/claim-requests' && request.method === 'POST') {
+      if (!enforceNoStoreRateLimit(
+        request,
+        response,
+        bikeShopClaimRateLimiter,
+        20,
+        `bike-shop-claims:${userId}`,
+      )) return;
+      try {
+        const payload = await readJsonBody(request, 12_000);
+        const parsedClaim = parseBikeShopClaimRequest(payload);
+        // Never persist the claimant's copy of the listing. Resolve the exact
+        // OpenStreetMap element again so name, coordinates, public details, and
+        // the review link all come from the canonical directory source.
+        const candidate = await bikeShopDirectory.resolveClaim(parsedClaim);
+        const claim = await persistence.createBikeShopClaimRequest({
+          ...candidate,
+          claimantUserId: userId,
+        }, { maximumPending: 10 });
+        if (!claim) {
+          writeJson(response, 409, {
+            error: 'This shop already has a claim from your account, or your pending-claim limit was reached.',
+          }, { 'Cache-Control': 'no-store' });
+          return;
+        }
+        writeJson(response, 201, { claim }, { 'Cache-Control': 'private, no-store' });
+      } catch (error) {
+        if (writeBikeShopClaimStorageUnavailable(error, response)) return;
+        if (error instanceof RangeError || Number(error?.statusCode) === 400) {
+          writeJson(response, 400, { error: error.message }, { 'Cache-Control': 'no-store' });
+          return;
+        }
+        const timedOut = error?.name === 'AbortError';
+        const busy = error?.code === 'OVERPASS_BUSY';
+        cloudTelemetry.warn('bike_shop_claim.canonical_lookup_failed', {
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+        });
+        writeJson(response, busy ? 503 : timedOut ? 504 : 502, {
+          error: busy
+            ? 'The open bike shop directory is busy. Please retry shortly.'
+            : timedOut
+              ? 'The OpenStreetMap listing verification timed out. Please try again.'
+              : 'The OpenStreetMap listing could not be verified right now. Please try again.',
+        }, {
+          'Cache-Control': 'no-store',
+          ...(busy ? { 'Retry-After': String(error.retryAfterSeconds || 3) } : {}),
+        });
+        return;
+      }
+      return;
+    }
+    if (request.method === 'DELETE') {
+      if (!enforceNoStoreRateLimit(
+        request,
+        response,
+        bikeShopClaimRateLimiter,
+        20,
+        `bike-shop-claims:${userId}`,
+      )) return;
+      let claimId = '';
+      try {
+        claimId = decodeURIComponent(requestUrl.pathname.slice('/api/bike-shops/claim-requests/'.length));
+      } catch {
+        writeJson(response, 400, { error: 'A valid claim request ID is required.' }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (!/^[a-f0-9-]{36}$/iu.test(claimId)) {
+        writeJson(response, 400, { error: 'A valid claim request ID is required.' }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      let withdrawn;
+      try {
+        withdrawn = await persistence.withdrawPendingBikeShopClaimRequest(userId, claimId);
+      } catch (error) {
+        if (writeBikeShopClaimStorageUnavailable(error, response)) return;
+        throw error;
+      }
+      if (!withdrawn) {
+        writeJson(response, 404, {
+          error: 'Pending claim request not found. Reviewed claims cannot be withdrawn here.',
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      response.writeHead(204, { 'Cache-Control': 'no-store' });
+      response.end();
+      return;
+    }
+    writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+  if (
+    requestUrl.pathname === '/api/admin/bike-shop-claims'
+    || requestUrl.pathname.startsWith('/api/admin/bike-shop-claims/')
+  ) {
+    const session = await requirePersonalBikeShopClaimSession(request, response);
+    if (!session) return;
+    if (!session.user.admin && !isAdminEmail(session.user.email)) {
+      writeJson(response, 403, { error: 'Administrator access is required.' }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+    if (requestUrl.pathname === '/api/admin/bike-shop-claims') {
+      if (request.method !== 'GET') {
+        writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      const status = sanitizeText(requestUrl.searchParams.get('status'), 'pending', 16).toLowerCase();
+      if (!['pending', 'approved', 'rejected', 'withdrawn', 'all'].includes(status)) {
+        writeJson(response, 400, { error: 'Choose a valid bike shop claim status.' }, {
+          'Cache-Control': 'no-store',
+        });
+        return;
+      }
+      const offset = Math.max(0, Math.min(10_000, Math.round(Number(requestUrl.searchParams.get('offset'))) || 0));
+      const limit = Math.max(1, Math.min(100, Math.round(Number(requestUrl.searchParams.get('limit'))) || 25));
+      let queue;
+      try {
+        queue = await persistence.listBikeShopClaimRequestsForReview({ status, offset, limit });
+      } catch (error) {
+        if (writeBikeShopClaimStorageUnavailable(error, response)) return;
+        throw error;
+      }
+      writeJson(response, 200, { ...queue, status, offset, limit }, { 'Cache-Control': 'private, no-store' });
+      return;
+    }
+    const claimMatch = /^\/api\/admin\/bike-shop-claims\/([a-f0-9-]{36})$/iu.exec(requestUrl.pathname);
+    if (!claimMatch) {
+      writeJson(response, 404, { error: 'Bike shop claim request not found.' }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+    if (request.method !== 'PATCH') {
+      writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (!enforceNoStoreRateLimit(
+      request,
+      response,
+      bikeShopClaimRateLimiter,
+      120,
+      `bike-shop-claim-review:${session.user.id}`,
+    )) return;
+    const payload = await readJsonBody(request, 4_000);
+    const decision = sanitizeText(payload?.decision, '', 16).toLowerCase();
+    const reviewNote = sanitizeText(payload?.reviewNote, '', 1_000);
+    if (!['approved', 'rejected'].includes(decision)) {
+      writeJson(response, 400, { error: 'Choose approve or reject.' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (reviewNote.length < 3) {
+      writeJson(response, 400, { error: 'Add a concise claimant-visible review note for the audit history.' }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+    let claim;
+    try {
+      claim = await persistence.reviewBikeShopClaimRequest({
+        claimId: claimMatch[1],
+        reviewerUserId: session.user.id,
+        status: decision,
+        reviewNote,
+      });
+    } catch (error) {
+      if (writeBikeShopClaimStorageUnavailable(error, response)) return;
+      throw error;
+    }
+    if (!claim) {
+      writeJson(response, 409, {
+        error: 'This claim is no longer pending or another claim already verifies this shop.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    cloudTelemetry.increment('tracklab_bike_shop_claim_reviews_total', { decision });
+    writeJson(response, 200, { claim }, { 'Cache-Control': 'private, no-store' });
     return;
   }
   if (requestUrl.pathname === '/api/health') {

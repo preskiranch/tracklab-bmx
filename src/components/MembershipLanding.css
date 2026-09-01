@@ -91,3 +91,16 @@
     grid-template-columns: 1fr;
   }
 }
+.membership-nav-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.shop-claim-account-prompt {
+  padding: 9px 10px;
+  border: 1px solid rgba(45, 143, 232, 0.38);
+  border-radius: 8px;
+  background: rgba(45, 143, 232, 0.08);
+  color: #174f7c !important;
+  font-weight: 800;
+}

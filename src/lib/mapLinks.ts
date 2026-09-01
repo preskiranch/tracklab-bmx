@@ -60,6 +60,13 @@ export function trackLocatorShareUrl(trackId: unknown, origin?: string) {
   }
 }
 
+export function trackLocatorRelativeUrl(trackId: unknown) {
+  const normalizedTrackId = normalizeTrackLocatorId(trackId);
+  if (!normalizedTrackId) return '';
+  const params = new URLSearchParams({ locator: normalizedTrackId });
+  return `/?${params.toString()}#track-locator`;
+}
+
 export function trackLocatorIdFromHref(value: unknown) {
   if (typeof value !== 'string' || value.length > 2_048) return '';
   try {

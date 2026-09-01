@@ -142,6 +142,12 @@ function PrivacyPage() {
                 passwords. You may add a rider photo. Studio and Club Connect features can also store rider names,
                 nicknames, photos, club relationships, and invite status.
               </p>
+              <p>
+                A signed-in user who asks to claim a bike-shop listing supplies the shop identity, their relationship
+                to the business, a business email or phone number or documentation note, and the request&apos;s review
+                status. Claim evidence and claimant/reviewer identities remain private to the requester and authorized
+                TrackLab reviewers even after a decision. An approved listing publicly shows only a claimed-and-verified badge.
+              </p>
 
               <h3>Friends, handles, and safety information</h3>
               <p>
@@ -199,6 +205,12 @@ function PrivacyPage() {
                 than continuous device GPS. Developer-published track mappings and custom mapped tracks are designed
                 to be visible to other TrackLab users.
               </p>
+              <p>
+                The public Global Bike Shop Directory also accepts a city, ZIP code, or address, or requests a one-time
+                device location after you choose that action. TrackLab sends the search point and selected radius to the
+                OpenStreetMap directory service to find nearby shops. The search point is not saved to your TrackLab
+                account; nearby results may be held briefly in an in-memory service cache to improve reliability.
+              </p>
 
               <h3>Rooms, messages, and optional microphone audio</h3>
               <p>
@@ -245,6 +257,7 @@ function PrivacyPage() {
                 <li>Operate private rooms, room chat, short-lived friend live-audio alerts, optional voice, challenges, and live race state.</li>
                 <li>Deliver optional account-chosen app alerts through Apple Push Notification service.</li>
                 <li>Load maps, resolve route locations, calculate routes and elevation, and show track information.</li>
+                <li>Find nearby bike shops and connect a selected shop to nearby BMX tracks in the public directory.</li>
                 <li>Generate optional pre-race and live commentary from current race context.</li>
                 <li>Process memberships, prevent misuse, monitor reliability, and troubleshoot the service.</li>
               </ul>
@@ -317,6 +330,11 @@ function PrivacyPage() {
                   Street View, and elevation requests are handled by the Google mapping services used by the feature.
                 </li>
                 <li>
+                  <strong>OpenStreetMap:</strong> the Global Bike Shop Directory sends the chosen search coordinates and
+                  radius to OpenStreetMap&apos;s Overpass service and displays public shop listing data under the ODbL.
+                  Choosing a shop&apos;s map, directions, or Street View action opens Google Maps.
+                </li>
+                <li>
                   <strong>OpenAI:</strong> when AI commentary is enabled, limited race context—including supplied
                   rider display names and live race facts—can be sent to generate commentary and speech.
                 </li>
@@ -353,7 +371,10 @@ function PrivacyPage() {
                 <li>You can choose whether your account appears in rider search and friend suggestions.</li>
                 <li>You can approve or decline ordinary friend requests, remove friends, and block or report an account.</li>
                 <li>Verified club and founder connections are added by default, but each can be removed or blocked.</li>
-                <li>Current location is requested only after you choose the current-location action.</li>
+                <li>
+                  Current location is requested only after you choose the current-location action. Explore and bike-shop
+                  search both offer a typed-location alternative when you do not want to grant device location.
+                </li>
                 <li>Room and friend-live microphone access starts only after you explicitly turn voice on.</li>
                 <li>
                   App notification permission is requested only after you choose Enable notifications. You can select

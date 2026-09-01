@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { runDatabaseMigrations } from './migrations.mjs';
 import { cloudTelemetry } from './telemetry.mjs';
 import { appleAppAccountTokenLineageHash } from './appleBilling.mjs';
@@ -16,6 +16,14 @@ export class ClubEventPersistenceUnavailableError extends Error {
     super(message);
     this.name = 'ClubEventPersistenceUnavailableError';
     this.code = 'TRACKLAB_CLUB_EVENT_PERSISTENCE_UNAVAILABLE';
+  }
+}
+
+export class BikeShopClaimPersistenceUnavailableError extends Error {
+  constructor(message = 'Bike shop claim storage is temporarily unavailable.') {
+    super(message);
+    this.name = 'BikeShopClaimPersistenceUnavailableError';
+    this.code = 'TRACKLAB_BIKE_SHOP_CLAIM_PERSISTENCE_UNAVAILABLE';
   }
 }
 
@@ -100,6 +108,7 @@ const memoryReconciledOfficialFriendUserIds = new Set();
 const memoryAccountTrackFavorites = new Map();
 const memoryAccountTrackShares = new Map();
 const memoryAccountTrackShareIdByParticipantsAndTrack = new Map();
+const memoryBikeShopClaimRequests = new Map();
 const memoryPushInstallations = new Map();
 const memoryPushInstallationIdByFingerprint = new Map();
 const memoryPushPreferences = new Map();
@@ -517,6 +526,27 @@ async function withPersistenceLock(lockKey, operation) {
     return null;
   } finally {
     client?.release();
+  }
+}
+
+async function bikeShopClaimQuery(text, params = []) {
+  const result = await query(text, params);
+  if (!result) throw new BikeShopClaimPersistenceUnavailableError();
+  return result;
+}
+
+async function withBikeShopClaimPersistenceLock(lockKey, operation) {
+  const wrapped = await withPersistenceLock(lockKey, async (client) => ({
+    completed: true,
+    value: await operation(client),
+  }));
+  if (!wrapped?.completed) throw new BikeShopClaimPersistenceUnavailableError();
+  return wrapped.value;
+}
+
+function requireBikeShopClaimStorageOrMemoryMode() {
+  if (!pool && databaseConfigured) {
+    throw new BikeShopClaimPersistenceUnavailableError();
   }
 }
 
@@ -1359,6 +1389,27 @@ async function deleteMemoryAuthUserAccount(userId) {
       memoryAccountTrackFavorites,
       (favorite) => favorite.userId === userId,
     );
+    for (const [claimId, claim] of memoryBikeShopClaimRequests) {
+      if (claim.claimantUserId === userId) {
+        if (claim.status === 'pending') {
+          memoryBikeShopClaimRequests.delete(claimId);
+          continue;
+        }
+        memoryBikeShopClaimRequests.set(claimId, {
+          ...claim,
+          claimantUserId: null,
+          businessEmail: '',
+          businessPhone: '',
+          verificationNote: '',
+          reviewNote: '',
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      const retained = memoryBikeShopClaimRequests.get(claimId);
+      if (retained?.reviewerUserId === userId) {
+        memoryBikeShopClaimRequests.set(claimId, { ...retained, reviewerUserId: null });
+      }
+    }
     deleteMemoryEntries(memoryAccountTrackShares, (share) => (
       share.senderUserId === userId || share.recipientUserId === userId
     ));
@@ -1633,6 +1684,24 @@ async function deletePostgresAuthUserAccount(userId) {
     await client.query(`DELETE FROM ${schema}.group_members WHERE guest_key = $1`, [profileKey]);
     await client.query(`DELETE FROM ${schema}.groups WHERE owner_guest_key = $1`, [profileKey]);
     await client.query(`DELETE FROM ${schema}.profiles WHERE guest_key = $1`, [profileKey]);
+
+    // A pending shop claim cannot be completed after its claimant account is
+    // erased. Retain terminal moderation state (including approved directory
+    // identity) without the claimant link, evidence, contact details, or
+    // free-form notes that could carry personal information.
+    await client.query(
+      `DELETE FROM ${schema}.bike_shop_claim_requests
+       WHERE claimant_user_id = $1 AND status = 'pending'`,
+      [userId],
+    );
+    await client.query(
+      `UPDATE ${schema}.bike_shop_claim_requests
+       SET claimant_user_id = NULL,
+         business_email = '', business_phone = '', verification_note = '', review_note = '',
+         updated_at = now()
+       WHERE claimant_user_id = $1`,
+      [userId],
+    );
 
     // official_friend_accounts is deliberately RESTRICT so an operator identity
     // cannot be deleted accidentally through a generic cascade.
@@ -12771,6 +12840,328 @@ function removeMemoryTrackSharesForPair(userIdA, userIdB) {
       accountTrackShareKey(share.senderUserId, share.recipientUserId, share.trackId),
     );
   }
+}
+
+function bikeShopClaimRecord(row) {
+  if (!row) return null;
+  return {
+    id: String(row.id || ''),
+    source: String(row.source || 'openstreetmap'),
+    osmElementType: String(row.osm_element_type ?? row.osmElementType ?? ''),
+    osmElementId: String(row.osm_element_id ?? row.osmElementId ?? ''),
+    shopName: String(row.shop_name ?? row.shopName ?? ''),
+    latitude: Number(row.latitude),
+    longitude: Number(row.longitude),
+    shopSnapshot: cloneJson(row.shop_snapshot ?? row.shopSnapshot, {}),
+    claimantRole: String(row.claimant_role ?? row.claimantRole ?? ''),
+    verificationMethod: String(row.verification_method ?? row.verificationMethod ?? ''),
+    businessEmail: String(row.business_email ?? row.businessEmail ?? ''),
+    businessPhone: String(row.business_phone ?? row.businessPhone ?? ''),
+    verificationNote: String(row.verification_note ?? row.verificationNote ?? ''),
+    status: String(row.status || 'pending'),
+    reviewNote: String(row.review_note ?? row.reviewNote ?? ''),
+    reviewedAt: row.reviewed_at ?? row.reviewedAt
+      ? new Date(row.reviewed_at ?? row.reviewedAt).toISOString()
+      : null,
+    createdAt: new Date(row.created_at ?? row.createdAt).toISOString(),
+    updatedAt: new Date(row.updated_at ?? row.updatedAt).toISOString(),
+  };
+}
+
+function bikeShopClaimAdminRecord(row, claimant = null) {
+  const claim = bikeShopClaimRecord(row);
+  if (!claim) return null;
+  const claimantRecord = claimant ?? (row ? {
+    displayName: row.claimant_display_name,
+    email: row.claimant_email,
+  } : null);
+  return {
+    ...claim,
+    claimant: {
+      displayName: String(claimantRecord?.displayName || ''),
+      email: String(claimantRecord?.email || ''),
+    },
+  };
+}
+
+function bikeShopClaimIdentityKey(source, osmElementType, osmElementId) {
+  return `${String(source || '')}:${String(osmElementType || '')}:${String(osmElementId || '')}`;
+}
+
+function bikeShopClaimWithMinimumEvidence(candidate) {
+  const verificationMethod = String(candidate?.verificationMethod || '');
+  return {
+    ...candidate,
+    businessEmail: verificationMethod === 'business-email'
+      ? String(candidate?.businessEmail || '')
+      : '',
+    businessPhone: verificationMethod === 'business-phone'
+      ? String(candidate?.businessPhone || '')
+      : '',
+    verificationNote: verificationMethod === 'documentation'
+      ? String(candidate?.verificationNote || '')
+      : '',
+  };
+}
+
+export async function createBikeShopClaimRequest(candidate, { maximumPending = 10 } = {}) {
+  const claimantUserId = String(candidate?.claimantUserId || '');
+  if (!claimantUserId) return null;
+  const minimalCandidate = bikeShopClaimWithMinimumEvidence(candidate);
+  const id = randomUUID();
+  const boundedMaximumPending = Math.max(1, Math.min(25, Math.round(Number(maximumPending)) || 10));
+  requireBikeShopClaimStorageOrMemoryMode();
+  if (!pool) {
+    return withMemoryPersistenceLock(`bike-shop-claims:${claimantUserId}`, async () => {
+      const claims = [...memoryBikeShopClaimRequests.values()]
+        .filter((claim) => claim.claimantUserId === claimantUserId);
+      if (claims.some((claim) => (
+        ['pending', 'approved'].includes(claim.status)
+        && claim.source === minimalCandidate.source
+        && claim.osmElementType === minimalCandidate.osmElementType
+        && claim.osmElementId === minimalCandidate.osmElementId
+      ))) return null;
+      if (claims.filter((claim) => claim.status === 'pending').length >= boundedMaximumPending) return null;
+      const timestamp = new Date().toISOString();
+      const stored = {
+        ...minimalCandidate,
+        id,
+        claimantUserId,
+        status: 'pending',
+        reviewNote: '',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      memoryBikeShopClaimRequests.set(id, stored);
+      return bikeShopClaimRecord(stored);
+    });
+  }
+  const result = await withBikeShopClaimPersistenceLock(
+    `bike-shop-claims:${claimantUserId}`,
+    (client) => client.query(
+    `INSERT INTO ${schema}.bike_shop_claim_requests (
+       id, claimant_user_id, source, osm_element_type, osm_element_id,
+       shop_name, latitude, longitude, shop_snapshot, claimant_role,
+       verification_method, business_email, business_phone, verification_note
+     )
+     SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14
+     WHERE (
+       SELECT count(*) < $15
+       FROM ${schema}.bike_shop_claim_requests
+       WHERE claimant_user_id = $2 AND status = 'pending'
+     )
+     ON CONFLICT DO NOTHING
+     RETURNING *`,
+    [
+      id, claimantUserId, minimalCandidate.source, minimalCandidate.osmElementType,
+      minimalCandidate.osmElementId, minimalCandidate.shopName, minimalCandidate.latitude,
+      minimalCandidate.longitude, json(minimalCandidate.shopSnapshot), minimalCandidate.claimantRole,
+      minimalCandidate.verificationMethod, minimalCandidate.businessEmail,
+      minimalCandidate.businessPhone, minimalCandidate.verificationNote, boundedMaximumPending,
+    ],
+    ),
+  );
+  return bikeShopClaimRecord(result?.rows?.[0]);
+}
+
+export async function listBikeShopClaimRequestsForUser(claimantUserId, { limit = 50 } = {}) {
+  const boundedLimit = Math.max(1, Math.min(100, Math.round(Number(limit)) || 50));
+  requireBikeShopClaimStorageOrMemoryMode();
+  if (!pool) {
+    return [...memoryBikeShopClaimRequests.values()]
+      .filter((claim) => claim.claimantUserId === claimantUserId)
+      .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+      .slice(0, boundedLimit)
+      .map(bikeShopClaimRecord);
+  }
+  const result = await bikeShopClaimQuery(
+    `SELECT * FROM ${schema}.bike_shop_claim_requests
+     WHERE claimant_user_id = $1
+     ORDER BY created_at DESC, id
+     LIMIT $2`,
+    [claimantUserId, boundedLimit],
+  );
+  return (result?.rows ?? []).map(bikeShopClaimRecord).filter(Boolean);
+}
+
+export async function withdrawPendingBikeShopClaimRequest(claimantUserId, claimId) {
+  if (!claimantUserId || !claimId) return false;
+  requireBikeShopClaimStorageOrMemoryMode();
+  if (!pool) {
+    return withMemoryPersistenceLock(`bike-shop-claims:${claimantUserId}`, async () => {
+      const claim = memoryBikeShopClaimRequests.get(claimId);
+      if (!claim || claim.claimantUserId !== claimantUserId || claim.status !== 'pending') return false;
+      const updatedAt = new Date().toISOString();
+      memoryBikeShopClaimRequests.set(claimId, { ...claim, status: 'withdrawn', updatedAt });
+      return true;
+    });
+  }
+  const result = await bikeShopClaimQuery(
+    `UPDATE ${schema}.bike_shop_claim_requests
+     SET status = 'withdrawn', updated_at = now()
+     WHERE id = $1 AND claimant_user_id = $2 AND status = 'pending'
+     RETURNING id`,
+    [claimId, claimantUserId],
+  );
+  return Boolean(result?.rows?.[0]);
+}
+
+export async function listBikeShopClaimRequestsForReview({ status = 'pending', offset = 0, limit = 25 } = {}) {
+  const allowedStatuses = new Set(['pending', 'approved', 'rejected', 'withdrawn', 'all']);
+  const normalizedStatus = allowedStatuses.has(status) ? status : 'pending';
+  const boundedOffset = Math.max(0, Math.min(10_000, Math.round(Number(offset)) || 0));
+  const boundedLimit = Math.max(1, Math.min(100, Math.round(Number(limit)) || 25));
+  requireBikeShopClaimStorageOrMemoryMode();
+  if (!pool) {
+    const matching = [...memoryBikeShopClaimRequests.values()]
+      .filter((claim) => normalizedStatus === 'all' || claim.status === normalizedStatus)
+      .sort((left, right) => (
+        Date.parse(left.createdAt) - Date.parse(right.createdAt)
+        || String(left.id).localeCompare(String(right.id))
+      ));
+    return {
+      items: matching
+        .slice(boundedOffset, boundedOffset + boundedLimit)
+        .map((claim) => bikeShopClaimAdminRecord(claim, memoryAuthUsersById.get(claim.claimantUserId)))
+        .filter(Boolean),
+      total: matching.length,
+    };
+  }
+  const result = await bikeShopClaimQuery(
+    `SELECT claim.*,
+       claimant.display_name AS claimant_display_name,
+       claimant.email AS claimant_email,
+       count(*) OVER() AS total_count
+     FROM ${schema}.bike_shop_claim_requests AS claim
+     LEFT JOIN ${schema}.auth_users AS claimant ON claimant.id = claim.claimant_user_id
+     WHERE $1 = 'all' OR claim.status = $1
+     ORDER BY claim.created_at, claim.id
+     OFFSET $2 LIMIT $3`,
+    [normalizedStatus, boundedOffset, boundedLimit],
+  );
+  const rows = result?.rows ?? [];
+  return {
+    items: rows.map((row) => bikeShopClaimAdminRecord(row)).filter(Boolean),
+    total: Number(rows[0]?.total_count) || 0,
+  };
+}
+
+export async function reviewBikeShopClaimRequest({
+  claimId,
+  reviewerUserId,
+  status,
+  reviewNote = '',
+}) {
+  if (!claimId || !reviewerUserId || !['approved', 'rejected'].includes(status)) return null;
+  requireBikeShopClaimStorageOrMemoryMode();
+  if (!pool) {
+    return withMemoryPersistenceLock('bike-shop-claim-review', async () => {
+      const claim = memoryBikeShopClaimRequests.get(claimId);
+      if (!claim || claim.status !== 'pending' || !memoryAuthUsersById.has(reviewerUserId)) return null;
+      if (status === 'approved' && [...memoryBikeShopClaimRequests.values()].some((candidate) => (
+        candidate.id !== claimId
+        && candidate.status === 'approved'
+        && bikeShopClaimIdentityKey(candidate.source, candidate.osmElementType, candidate.osmElementId)
+          === bikeShopClaimIdentityKey(claim.source, claim.osmElementType, claim.osmElementId)
+      ))) return null;
+      const reviewedAt = new Date().toISOString();
+      const reviewed = {
+        ...claim,
+        status,
+        reviewerUserId,
+        reviewNote,
+        reviewedAt,
+        updatedAt: reviewedAt,
+      };
+      memoryBikeShopClaimRequests.set(claimId, reviewed);
+      return bikeShopClaimAdminRecord(reviewed, memoryAuthUsersById.get(claim.claimantUserId));
+    });
+  }
+  const result = await withBikeShopClaimPersistenceLock(
+    'bike-shop-claim-review',
+    (client) => client.query(
+    `WITH reviewed AS (
+       UPDATE ${schema}.bike_shop_claim_requests AS claim
+       SET status = $3,
+         reviewer_user_id = $2,
+         review_note = $4,
+         reviewed_at = now(),
+         updated_at = now()
+       WHERE claim.id = $1
+         AND claim.status = 'pending'
+         AND (
+           $3 <> 'approved'
+           OR NOT EXISTS (
+             SELECT 1 FROM ${schema}.bike_shop_claim_requests AS approved
+             WHERE approved.status = 'approved'
+               AND approved.source = claim.source
+               AND approved.osm_element_type = claim.osm_element_type
+               AND approved.osm_element_id = claim.osm_element_id
+               AND approved.id <> claim.id
+           )
+         )
+       RETURNING claim.*
+     )
+     SELECT reviewed.*,
+       claimant.display_name AS claimant_display_name,
+       claimant.email AS claimant_email
+     FROM reviewed
+     LEFT JOIN ${schema}.auth_users AS claimant ON claimant.id = reviewed.claimant_user_id`,
+    [claimId, reviewerUserId, status, reviewNote],
+    ),
+  );
+  return bikeShopClaimAdminRecord(result?.rows?.[0]);
+}
+
+export async function loadApprovedBikeShopClaimIdentities(identities = []) {
+  const normalized = identities
+    .map((identity) => ({
+      source: String(identity?.source || ''),
+      osmElementType: String(identity?.osmElementType || ''),
+      osmElementId: String(identity?.osmElementId || ''),
+    }))
+    .filter((identity) => (
+      identity.source === 'openstreetmap'
+      && ['node', 'way', 'relation'].includes(identity.osmElementType)
+      && /^[1-9][0-9]{0,30}$/.test(identity.osmElementId)
+    ))
+    .slice(0, 100);
+  if (normalized.length === 0) return [];
+  const requestedKeys = new Set(normalized.map((identity) => (
+    bikeShopClaimIdentityKey(identity.source, identity.osmElementType, identity.osmElementId)
+  )));
+  requireBikeShopClaimStorageOrMemoryMode();
+  if (!pool) {
+    return [...memoryBikeShopClaimRequests.values()]
+      .filter((claim) => claim.status === 'approved' && requestedKeys.has(
+        bikeShopClaimIdentityKey(claim.source, claim.osmElementType, claim.osmElementId),
+      ))
+      .map((claim) => ({
+        source: claim.source,
+        osmElementType: claim.osmElementType,
+        osmElementId: claim.osmElementId,
+        claimed: true,
+      }));
+  }
+  const values = [];
+  const tuples = normalized.map((identity, index) => {
+    const base = index * 3;
+    values.push(identity.source, identity.osmElementType, identity.osmElementId);
+    return `($${base + 1}, $${base + 2}, $${base + 3})`;
+  });
+  const result = await bikeShopClaimQuery(
+    `SELECT source, osm_element_type, osm_element_id
+     FROM ${schema}.bike_shop_claim_requests
+     WHERE status = 'approved'
+       AND (source, osm_element_type, osm_element_id) IN (${tuples.join(', ')})`,
+    values,
+  );
+  return (result?.rows ?? []).map((row) => ({
+    source: String(row.source),
+    osmElementType: String(row.osm_element_type),
+    osmElementId: String(row.osm_element_id),
+    claimed: true,
+  }));
 }
 
 export async function listAccountTrackFavorites(userId, { limit = 500 } = {}) {

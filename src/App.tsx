@@ -22,6 +22,7 @@ import {
   RefreshCcw,
   Route,
   Settings,
+  Store,
   TabletSmartphone,
   Usb,
   UserCircle,
@@ -9796,6 +9797,13 @@ export default function App() {
     }, 0);
   }, [requireAccountProfile]);
 
+  const openBikeShopDirectory = useCallback(() => {
+    setShowMembershipLanding(true);
+    window.setTimeout(() => {
+      document.getElementById('bike-shop-directory')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 0);
+  }, []);
+
   const handleAppleConnectionCountChange = useCallback((bikeSeats: number) => {
     setAppleConnectionCount(clampAppleWattbikeConnections(bikeSeats));
     setAppleBillingMessage(null);
@@ -12577,6 +12585,9 @@ export default function App() {
               </button>
               <button type="button" onClick={openTrackLocator}>
                 <MapPinned size={17} /> Track Locator
+              </button>
+              <button type="button" onClick={openBikeShopDirectory}>
+                <Store size={17} /> Global Bike Shop Directory
               </button>
               <button
                 className={(clubOwnerActive ? clubMonitorReleasesLocalBikes : appMode === 'monitor') ? 'selected' : ''}

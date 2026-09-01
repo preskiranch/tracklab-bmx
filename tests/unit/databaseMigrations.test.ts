@@ -258,6 +258,53 @@ describe('database migration runner', () => {
     expect(statements).toContain('club_tablet_devices_paired_bike_complete');
   });
 
+  it('queues bike shop ownership claims for private manual verification', () => {
+    const claimMigration = databaseMigrations().find((candidate) => candidate.version === 37);
+    const statements = claimMigration?.statements.join('\n') ?? '';
+
+    expect(claimMigration).toMatchObject({
+      version: 37,
+      name: 'add moderated bike shop ownership claims',
+    });
+    expect(statements).toContain('bike_shop_claim_requests');
+    expect(statements).toContain("source = 'openstreetmap'");
+    expect(statements).toContain("osm_element_type IN ('node', 'way', 'relation')");
+    expect(statements).toContain("status IN ('pending', 'approved', 'rejected', 'withdrawn')");
+    expect(statements).toContain('claimant_user_id');
+    expect(statements).toContain('reviewer_user_id');
+    expect(statements).toContain('ON DELETE SET NULL');
+    expect(statements).toContain("status = 'withdrawn' AND reviewer_user_id IS NULL AND reviewed_at IS NULL");
+    expect(statements).toContain("status IN ('approved', 'rejected') AND reviewed_at IS NOT NULL");
+    expect(statements).not.toContain(
+      "status IN ('approved', 'rejected') AND reviewer_user_id IS NOT NULL",
+    );
+    expect(statements).toContain("WHERE status = 'approved'");
+    expect(statements).not.toContain('auto_approved');
+
+    const copyScript = readFileSync(
+      new URL('../../scripts/migrate-tracklab-postgres.mjs', import.meta.url),
+      'utf8',
+    );
+    expect(copyScript).toContain("'bike_shop_claim_requests'");
+  });
+
+  it('allows corrected shop claim retries and anonymizes terminal history on account erasure', () => {
+    const claimHardeningMigration = databaseMigrations().find((candidate) => candidate.version === 38);
+    const statements = claimHardeningMigration?.statements.join('\n') ?? '';
+
+    expect(claimHardeningMigration).toMatchObject({
+      version: 38,
+      name: 'harden bike shop claim retries and erasure retention',
+    });
+    expect(statements).toContain('legacy_unique_name');
+    expect(statements).toContain('ALTER COLUMN claimant_user_id DROP NOT NULL');
+    expect(statements).toContain('ON DELETE SET NULL');
+    expect(statements).toContain("status <> 'pending' OR claimant_user_id IS NOT NULL");
+    expect(statements).toContain('idx_tracklab_bike_shop_claim_active_claimant_shop');
+    expect(statements).toContain("status IN ('pending', 'approved')");
+    expect(statements).toContain("WHERE claimant_user_id IS NOT NULL");
+  });
+
   it('adds accountable administrator review fields to community reports', () => {
     const moderationMigration = databaseMigrations().find((candidate) => candidate.version === 32);
     const statements = moderationMigration?.statements.join('\n') ?? '';

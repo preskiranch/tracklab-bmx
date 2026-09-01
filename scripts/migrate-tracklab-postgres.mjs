@@ -27,6 +27,7 @@ const tables = [
   'user_data',
   'public_track_mappings',
   'ghost_laps',
+  'bike_shop_claim_requests',
 ];
 const sourceUrl = process.env.TRACKLAB_SOURCE_DATABASE_URL?.trim() || process.env.DATABASE_URL?.trim();
 const targetUrl = process.env.TRACKLAB_TARGET_DATABASE_URL?.trim();

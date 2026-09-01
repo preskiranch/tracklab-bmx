@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import {
   Activity,
   Bike,
@@ -11,6 +11,7 @@ import {
   Radio,
   RefreshCcw,
   Smartphone,
+  Store,
   Users,
 } from 'lucide-react';
 import type { AuthMode } from '../lib/auth';
@@ -20,6 +21,7 @@ import {
   type MembershipState,
 } from '../lib/membership';
 import type { TrackRecord } from '../types';
+import { PublicBikeShopDirectory } from './PublicBikeShopDirectory';
 import { PublicTrackLocator } from './PublicTrackLocator';
 import './PublicTrackLocator.css';
 import './MembershipLanding.css';
@@ -116,6 +118,7 @@ export function MembershipLanding({
     && membership.bikeSeats !== bikeSeats;
   const billingBusy = billingStatus === 'loading';
   const profileSubmitPendingRef = useRef(false);
+  const [shopClaimPrompt, setShopClaimPrompt] = useState('');
   const consumeLocator = () => {
     const url = new URL(window.location.href);
     if (url.searchParams.has('locator')) {
@@ -137,6 +140,14 @@ export function MembershipLanding({
       profileSubmitPendingRef.current = false;
     }
   };
+  const requireFreeAccountForShopClaim = (shopName: string) => {
+    setShopClaimPrompt(`Create or sign in to a free TrackLab account to request ownership of ${shopName}.`);
+    window.requestAnimationFrame(() => {
+      const gate = document.getElementById('free-account-gate');
+      gate?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      window.setTimeout(() => gate?.querySelector<HTMLInputElement>('input')?.focus(), 350);
+    });
+  };
 
   return (
     <main className="membership-page">
@@ -155,6 +166,10 @@ export function MembershipLanding({
           <a className="secondary-button" href="#track-locator">
             <MapPinned size={16} />
             Find a Track
+          </a>
+          <a className="secondary-button" href="#bike-shop-directory">
+            <Store size={16} />
+            Global Bike Shop Directory
           </a>
           {profileComplete && (
             <button className="secondary-button" type="button" onClick={onSignOut}>
@@ -210,7 +225,14 @@ export function MembershipLanding({
 
       <PublicTrackLocator accountId={profileComplete ? profileEmail : null} catalogReady={catalogReady} tracks={tracks} />
 
-      <section className={`profile-gate ${profileComplete ? 'complete' : ''}`} aria-label="Required profile">
+      <PublicBikeShopDirectory
+        accountId={profileComplete ? profileEmail : null}
+        isAdmin={isAdminProfile}
+        tracks={tracks}
+        onRequireFreeAccount={(shop) => requireFreeAccountForShopClaim(shop.name)}
+      />
+
+      <section id="free-account-gate" className={`profile-gate ${profileComplete ? 'complete' : ''}`} aria-label="Required profile">
         <div>
           <span className="eyebrow">Login required</span>
           <h2>{profileComplete ? 'Account ready' : creatingAccount ? 'Create your free TrackLab account' : 'Sign in to TrackLab'}</h2>
@@ -218,6 +240,7 @@ export function MembershipLanding({
             Every spectator and racer signs in before entering TrackLab. Free accounts can watch live sessions;
             racer accounts can connect Wattbikes and join private rooms.
           </p>
+          {shopClaimPrompt && !profileComplete && <p className="shop-claim-account-prompt" role="status">{shopClaimPrompt}</p>}
         </div>
         <form
           className="profile-gate-form"
@@ -307,11 +330,12 @@ export function MembershipLanding({
           <span className="eyebrow">Spectator</span>
           <h3>Free membership</h3>
           <p>
-            Watch live rooms, follow race activity, and explore the public BMX track directory without a paid bike seat.
+            Watch live rooms, follow race activity, and explore the public BMX track and mapped bike shop directories without a paid bike seat.
           </p>
           <ul>
             <li>Live race viewing</li>
             <li>Public track directory</li>
+            <li>Mapped bike shop directory</li>
             <li>Community profile</li>
           </ul>
           <button className="secondary-button full-width" type="button" onClick={profileComplete ? () => enterFromLocator(onJoinFree) : () => { void submitProfile(); }} disabled={!profileComplete && authLoading}>
