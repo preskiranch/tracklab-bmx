@@ -85,6 +85,7 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
   const [shareSearch, setShareSearch] = useState('');
   const [shareLoading, setShareLoading] = useState(false);
   const [sharingProfileId, setSharingProfileId] = useState('');
+  const [earthExplorerActive, setEarthExplorerActive] = useState(false);
   const accountGenerationRef = useRef(0);
   const favoriteMutationRef = useRef<object | null>(null);
   const shareDialogRef = useRef<HTMLElement | null>(null);
@@ -262,6 +263,24 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
     setSelectedTrackId(track.id);
     const href = trackLocatorShareUrl(track.id, window.location.origin);
     if (href) window.history.replaceState(window.history.state, '', href);
+  };
+
+  const selectTrackFromEarthExplorer = (track: TrackLocatorRecord) => {
+    setQuery('');
+    setCountry(allCountries);
+    setRegion(allRegions);
+    setTrackCategory('all');
+    selectTrack(track);
+    window.requestAnimationFrame(() => {
+      document.querySelector('.public-track-details')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  };
+
+  const toggleEarthExplorer = () => {
+    setEarthExplorerActive((current) => !current);
+    window.requestAnimationFrame(() => {
+      document.querySelector('.public-track-map')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
   };
 
   const handleCountryChange = (nextCountry: string) => {
@@ -509,7 +528,12 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
           <div className="public-locator-preview">
             {selectedTrack ? (
               <>
-                <PublicTrackMap track={selectedTrack} />
+                <PublicTrackMap
+                  exploreAll={earthExplorerActive}
+                  onTrackSelect={selectTrackFromEarthExplorer}
+                  track={selectedTrack}
+                  tracks={sortedTracks}
+                />
                 {(selectedExternalLinks.websiteUrl
                   || selectedExternalLinks.facebookUrl
                   || selectedExternalLinks.instagramUrl
@@ -582,31 +606,39 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
                         <button type="button" aria-pressed={selectedFavorite} disabled={favoritesLoading || favoriteSaving} onClick={() => void toggleFavorite()}>
                           <Star size={16} fill={selectedFavorite ? 'currentColor' : 'none'} /> {selectedFavorite ? 'Saved' : 'Favorite'}
                         </button>
-                        <button ref={shareTriggerRef} type="button" onClick={() => void openShareDialog()}><Share2 size={16} /> Share with friend</button>
-                        <button type="button" onClick={() => void copySelectedTrackLink()}><Copy size={16} /> Copy link</button>
+                        <button ref={shareTriggerRef} type="button" aria-label="Share with friend" onClick={() => void openShareDialog()}><Share2 size={16} /> Share</button>
+                        <button type="button" aria-label="Copy link" onClick={() => void copySelectedTrackLink()}><Copy size={16} /> Copy</button>
                       </div>
                     </div>
                     <div className="public-track-link-group" role="group" aria-label={`Directions to ${selectedTrack.name}`}>
                       <span>Directions</span>
                       <div className="public-track-actions">
-                        <a href={trackGoogleMapsDirectionsUrl(selectedTrack)} target="_blank" rel="noopener noreferrer">
-                          <Navigation size={16} /> Google Maps
+                        <a aria-label="Google Maps" href={trackGoogleMapsDirectionsUrl(selectedTrack)} target="_blank" rel="noopener noreferrer">
+                          <Navigation size={16} /> Maps
                         </a>
                       </div>
                     </div>
-                    <div className="public-track-link-group public-track-earth-group" role="group" aria-label="Explore in 3D—not directions">
-                      <span>Explore in 3D</span>
+                    <div className="public-track-link-group public-track-earth-group" role="group" aria-label="Global satellite explorer—not directions">
+                      <span>Global satellite explorer</span>
                       <div className="public-track-actions">
+                        <button
+                          type="button"
+                          aria-pressed={earthExplorerActive}
+                          aria-label={earthExplorerActive ? 'Show selected track only' : 'Explore all tracks'}
+                          onClick={toggleEarthExplorer}
+                        >
+                          <Globe2 size={16} /> {earthExplorerActive ? 'Selected only' : 'All tracks'}
+                        </button>
                         <a
                           href={trackGoogleEarthUrl(selectedTrack)}
                           target="_blank"
                           rel="noopener noreferrer"
-                          aria-label={`Explore ${selectedTrack.name} in Google Earth—not turn-by-turn directions`}
+                          aria-label={`Open selected track ${selectedTrack.name} in Google Earth—not turn-by-turn directions`}
                         >
                           <ExternalLink size={16} /> Google Earth
                         </a>
                       </div>
-                      <small>3D exploration—not turn-by-turn directions.</small>
+                      <small>In-app satellite: all TrackLab markers. External Google Earth: selected track only.</small>
                     </div>
                   </div>
                 </div>

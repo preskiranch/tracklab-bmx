@@ -9,7 +9,9 @@ describe('iOS Watch Connect bridge bootstrap', () => {
   it('replaces the storyboard controller with the app-owned bridge when the scene connects', () => {
     const sceneDelegate = source('ios/App/App/SceneDelegate.swift');
 
-    expect(sceneDelegate).toMatch(/guard let windowScene = scene as\? UIWindowScene else \{ return \}/);
+    expect(sceneDelegate).toMatch(
+      /guard let windowScene = scene as\? UIWindowScene,\s*session\.role == \.windowApplication else \{ return \}/,
+    );
     expect(sceneDelegate).toMatch(/window\s*=\s*UIWindow\(windowScene:\s*windowScene\)/);
     expect(sceneDelegate).toMatch(
       /window\?\.rootViewController\s*=\s*TrackLabBridgeViewController\(\)/,

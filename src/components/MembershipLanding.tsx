@@ -24,6 +24,7 @@ import {
   maxAppleWattbikeConnections,
   type MembershipState,
 } from '../lib/membership';
+import { readPublicBikeShopDirectoryState } from '../lib/publicBikeShopDirectoryState';
 import type { TrackRecord } from '../types';
 import { PublicBikeShopDirectory } from './PublicBikeShopDirectory';
 import { PublicTrackLocator } from './PublicTrackLocator';
@@ -168,7 +169,14 @@ export function MembershipLanding({
           : activeTab === 'results'
             ? 'membership-results'
             : 'membership-hub-content-top');
+    const restoredShopScrollY = activeTab === 'shops'
+      ? readPublicBikeShopDirectoryState()?.pageScrollY ?? 0
+      : 0;
     const frame = window.requestAnimationFrame(() => {
+      // The directory restores a saved tab position after returning from a
+      // full-page nearby-track link. Do not begin a competing smooth scroll
+      // that can win after the directory has restored its exact list position.
+      if (activeTab === 'shops' && restoredShopScrollY > 0) return;
       document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
     return () => window.cancelAnimationFrame(frame);

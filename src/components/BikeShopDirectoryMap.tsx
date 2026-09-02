@@ -23,9 +23,11 @@ type BikeShopDirectoryMapProps = {
   requestError: string;
   truncated: boolean;
   focusRequest: BikeShopMapFocusRequest | null;
+  initialViewport?: BikeShopViewport | null;
   getResultIntentGeneration: () => number;
   onSelectShop: (shopId: string) => void;
   onViewportChange: (viewport: BikeShopViewport, observedResultIntentGeneration: number) => void;
+  onViewportObserved?: (viewport: BikeShopViewport) => void;
 };
 
 type ShopCluster = {
@@ -73,6 +75,31 @@ function readableMapError(error: unknown) {
   return message || 'Google Maps could not be loaded. The accessible shop list remains available.';
 }
 
+function viewportCenter(viewport: BikeShopViewport) {
+  const longitudeSpan = viewport.east >= viewport.west
+    ? viewport.east - viewport.west
+    : viewport.east + 360 - viewport.west;
+  const longitude = viewport.west + longitudeSpan / 2;
+  return {
+    lat: (viewport.north + viewport.south) / 2,
+    lng: longitude > 180 ? longitude - 360 : longitude,
+  };
+}
+
+function mapViewport(map: GoogleMap): BikeShopViewport | null {
+  const bounds = map.getBounds?.();
+  const northEast = bounds?.getNorthEast?.().toJSON();
+  const southWest = bounds?.getSouthWest?.().toJSON();
+  if (!northEast || !southWest) return null;
+  return {
+    north: northEast.lat,
+    south: southWest.lat,
+    east: northEast.lng,
+    west: southWest.lng,
+    zoom: Math.floor(map.getZoom?.() ?? 2),
+  };
+}
+
 export function BikeShopDirectoryMap({
   shops,
   selectedShopId,
@@ -80,9 +107,11 @@ export function BikeShopDirectoryMap({
   requestError,
   truncated,
   focusRequest,
+  initialViewport = null,
   getResultIntentGeneration,
   onSelectShop,
   onViewportChange,
+  onViewportObserved,
 }: BikeShopDirectoryMapProps) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<GoogleMap | null>(null);
@@ -91,8 +120,11 @@ export function BikeShopDirectoryMap({
   const markerEntriesRef = useRef<Array<{ marker: GoogleMarker; listener: GoogleMapsEventListener }>>([]);
   const debounceRef = useRef<number | null>(null);
   const suppressViewportIdleRef = useRef(false);
+  const restoringInitialViewportRef = useRef(Boolean(initialViewport));
   const releaseSuppressedIdleRef = useRef<number | null>(null);
+  const initialViewportRef = useRef(initialViewport);
   const viewportCallbackRef = useRef(onViewportChange);
+  const observedViewportCallbackRef = useRef(onViewportObserved);
   const resultIntentGenerationRef = useRef(getResultIntentGeneration);
   const selectCallbackRef = useRef(onSelectShop);
   const [mapStatus, setMapStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -100,6 +132,7 @@ export function BikeShopDirectoryMap({
   const [zoom, setZoom] = useState(2);
   const [hasLoadedViewport, setHasLoadedViewport] = useState(false);
   viewportCallbackRef.current = onViewportChange;
+  observedViewportCallbackRef.current = onViewportObserved;
   resultIntentGenerationRef.current = getResultIntentGeneration;
   selectCallbackRef.current = onSelectShop;
 
@@ -127,7 +160,7 @@ export function BikeShopDirectoryMap({
     // Clearing a nearby/hierarchy result explicitly returns control to map
     // browsing. If a test map or browser did not emit the camera's synthetic
     // idle event, do not leave the next genuine user move suppressed.
-    if (focusRequest === null) clearSuppressedProgrammaticIdle();
+    if (focusRequest === null && !restoringInitialViewportRef.current) clearSuppressedProgrammaticIdle();
   }, [clearSuppressedProgrammaticIdle, focusRequest]);
 
   useLayoutEffect(() => {
@@ -135,7 +168,10 @@ export function BikeShopDirectoryMap({
     let resizeObserver: ResizeObserver | null = null;
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
-    const releaseForUserGesture = () => clearSuppressedProgrammaticIdle();
+    const releaseForUserGesture = () => {
+      restoringInitialViewportRef.current = false;
+      clearSuppressedProgrammaticIdle();
+    };
     canvas.addEventListener('pointerdown', releaseForUserGesture, true);
     canvas.addEventListener('wheel', releaseForUserGesture, true);
     canvas.addEventListener('keydown', releaseForUserGesture, true);
@@ -143,9 +179,16 @@ export function BikeShopDirectoryMap({
     void loadGoogleBaseMap().then((google) => {
       if (cancelled) return;
       googleRef.current = google;
+      const restoredViewport = initialViewportRef.current;
+      // A restored result already has an authoritative list. Start at the
+      // saved camera and suppress the map's first synthetic idle so its
+      // initial camera cannot replace that list with a viewport query. Restore
+      // from center + zoom: rebuilding a LatLngBounds from opposite corners
+      // expands antimeridian-crossing views into a nearly worldwide envelope.
+      if (restoredViewport) suppressNextProgrammaticIdle();
       const map = new google.maps.Map(canvas, {
-        center: mapDefaultCenter,
-        zoom: 2,
+        center: restoredViewport ? viewportCenter(restoredViewport) : mapDefaultCenter,
+        zoom: restoredViewport?.zoom ?? 2,
         minZoom: 2,
         maxZoom: 20,
         mapTypeId: 'roadmap',
@@ -159,15 +202,21 @@ export function BikeShopDirectoryMap({
       mapRef.current = map;
       idleListenerRef.current = map.addListener('idle', () => {
         if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
-        const currentZoom = map.getZoom?.() ?? 2;
-        setZoom(currentZoom);
+        const viewport = mapViewport(map);
+        if (!viewport) return;
+        setZoom(viewport.zoom);
         setHasLoadedViewport(true);
+        observedViewportCallbackRef.current?.(viewport);
         if (suppressViewportIdleRef.current) {
           // fitBounds/setCenter are presentation updates for a hierarchy or
           // nearby result that is already loaded. Do not let their synthetic
           // idle event replace that result with a viewport request. Keep a
           // short quiet window so multi-step Google camera animations cannot
           // leak a second programmatic idle; the next real user gesture loads.
+          // Initial hydration must stay suppressed until a real gesture. Google
+          // can emit delayed idle events long after fitBounds, and treating one
+          // as user movement would overwrite the restored public listing.
+          if (restoringInitialViewportRef.current) return;
           if (releaseSuppressedIdleRef.current !== null) {
             window.clearTimeout(releaseSuppressedIdleRef.current);
           }
@@ -179,17 +228,8 @@ export function BikeShopDirectoryMap({
         }
         const observedResultIntentGeneration = resultIntentGenerationRef.current();
         debounceRef.current = window.setTimeout(() => {
-          const bounds = map.getBounds?.();
-          const northEast = bounds?.getNorthEast?.().toJSON();
-          const southWest = bounds?.getSouthWest?.().toJSON();
-          if (!northEast || !southWest) return;
-          viewportCallbackRef.current({
-            north: northEast.lat,
-            south: southWest.lat,
-            east: northEast.lng,
-            west: southWest.lng,
-            zoom: Math.floor(currentZoom),
-          }, observedResultIntentGeneration);
+          const latestViewport = mapViewport(map);
+          if (latestViewport) viewportCallbackRef.current(latestViewport, observedResultIntentGeneration);
         }, viewportDebounceMilliseconds);
       });
       resizeObserver = new ResizeObserver(() => {

@@ -80,10 +80,10 @@ async function installGoogleMapMock(page: Page) {
       west: number;
 
       constructor(southWest?: Point, northEast?: Point) {
-        this.north = northEast?.lat ?? 70;
-        this.south = southWest?.lat ?? -70;
-        this.east = northEast?.lng ?? 170;
-        this.west = southWest?.lng ?? -170;
+        this.north = northEast?.lat ?? -Infinity;
+        this.south = southWest?.lat ?? Infinity;
+        this.east = northEast?.lng ?? -Infinity;
+        this.west = southWest?.lng ?? Infinity;
       }
 
       extend(point: Point) {
@@ -103,13 +103,44 @@ async function installGoogleMapMock(page: Page) {
       }
     }
 
+    function storedViewportMatchingCamera(center: Point, zoom: number) {
+      try {
+        const serialized = window.sessionStorage.getItem('tracklab:public-bike-shop-directory:v1');
+        const stored = serialized ? JSON.parse(serialized) as { mapViewport?: Viewport } : null;
+        const viewport = stored?.mapViewport;
+        if (!viewport || ![
+          viewport.north,
+          viewport.south,
+          viewport.east,
+          viewport.west,
+          viewport.zoom,
+        ].every(Number.isFinite)) return null;
+        const longitudeSpan = viewport.east >= viewport.west
+          ? viewport.east - viewport.west
+          : viewport.east + 360 - viewport.west;
+        const rawLongitude = viewport.west + longitudeSpan / 2;
+        const expectedCenter = {
+          lat: (viewport.north + viewport.south) / 2,
+          lng: rawLongitude > 180 ? rawLongitude - 360 : rawLongitude,
+        };
+        const longitudeDifference = Math.abs(((center.lng - expectedCenter.lng + 540) % 360) - 180);
+        return Math.abs(center.lat - expectedCenter.lat) < 1e-9
+          && longitudeDifference < 1e-9
+          && zoom === viewport.zoom
+          ? viewport
+          : null;
+      } catch {
+        return null;
+      }
+    }
+
     const state: {
       maps: MockMap[];
       markers: MockMarker[];
     } = { maps: [], markers: [] };
 
     class MockMap {
-      bounds = new MockBounds();
+      bounds = new MockBounds({ lat: -70, lng: -170 }, { lat: 70, lng: 170 });
       center: Point;
       zoom: number;
       listeners = new Map<string, Set<Callback>>();
@@ -117,6 +148,17 @@ async function installGoogleMapMock(page: Page) {
       constructor(_element: HTMLElement, options: Record<string, unknown>) {
         this.center = options.center as Point;
         this.zoom = Number(options.zoom ?? 2);
+        const restoredViewport = storedViewportMatchingCamera(this.center, this.zoom);
+        if (restoredViewport) {
+          this.bounds = new MockBounds(
+            { lat: restoredViewport.south, lng: restoredViewport.west },
+            { lat: restoredViewport.north, lng: restoredViewport.east },
+          );
+          // LatLngBounds may cross the antimeridian even though its numeric
+          // west edge is greater than its east edge.
+          this.bounds.west = restoredViewport.west;
+          this.bounds.east = restoredViewport.east;
+        }
         state.maps.push(this);
         window.setTimeout(() => this.emit('idle'), 0);
       }
@@ -214,6 +256,17 @@ async function installGoogleMapMock(page: Page) {
           map.bounds.east = viewport.east;
           map.zoom = viewport.zoom;
           for (let index = 0; index < idleBursts; index += 1) map.emit('idle');
+        },
+        viewport() {
+          const map = state.maps.at(-1);
+          if (!map) return null;
+          return {
+            north: map.bounds.north,
+            south: map.bounds.south,
+            east: map.bounds.east,
+            west: map.bounds.west,
+            zoom: map.zoom,
+          };
         },
         activeMarkers() {
           return state.markers.filter((marker) => marker.map !== null).map((marker) => ({
@@ -410,6 +463,66 @@ test('global shop map loads by viewport, debounces map idle, and synchronizes ma
   ))).toBe('#7dff35');
 });
 
+test('restores a public directory browse after a full-page track trip without replacing its saved map view', async ({ page }) => {
+  await installGoogleMapMock(page);
+  const viewportRequests: Viewport[] = [];
+  await mockPublicDirectoryShell(page);
+  await page.route('**/api/bike-shops/viewport', async (route) => {
+    const body = route.request().postDataJSON() as Viewport;
+    viewportRequests.push(body);
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        bounds: body,
+        shops: [
+          shop('osm:node:711', 'First Saved Shop', 38.575, -121.505),
+          shop('osm:node:712', 'Second Saved Shop', 38.605, -121.455),
+        ],
+        truncated: false,
+        attribution: {
+          text: '© OpenStreetMap contributors',
+          url: 'https://www.openstreetmap.org/copyright',
+          license: 'ODbL',
+        },
+      }),
+    });
+  });
+
+  await page.goto('/#bike-shop-directory');
+  const directory = page.locator('#bike-shop-directory');
+  await page.waitForFunction(() => Boolean((window as any).__tracklabBikeShopMapTest?.mapReady()));
+  await page.evaluate((viewport) => {
+    (window as any).__tracklabBikeShopMapTest.setViewport(viewport);
+  }, sacramentoViewport);
+  await expect(directory.getByText('2 mapped bike shops', { exact: true })).toBeVisible();
+  const results = directory.getByRole('list', { name: 'Loaded bike shop listings' }).getByRole('button');
+  await results.nth(1).click();
+  await expect(results.nth(1)).toHaveAttribute('aria-pressed', 'true');
+  await directory.locator('.public-bike-shop-directory__radius select').selectOption('35');
+  await directory.locator('input[type="search"]').fill('Sacramento saved search');
+  await page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight, left: 0 }));
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+
+  const nearbyTracks = directory.getByRole('region', { name: 'BMX tracks within 50 miles' });
+  const nearbyTrackLink = nearbyTracks.getByRole('link').first();
+  await expect(nearbyTrackLink).toHaveAttribute('href', /\?locator=.*#track-locator$/);
+  // This is a full-page same-origin navigation, not a tab switch.
+  await nearbyTrackLink.click();
+  await expect(page).toHaveURL(/\?locator=.*#track-locator$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/#bike-shop-directory$/);
+  await expect(directory).toBeVisible();
+  await expect(directory.locator('.public-bike-shop-directory__radius select')).toHaveValue('35');
+  await expect(directory.locator('input[type="search"]')).toHaveValue('Sacramento saved search');
+  await expect(results).toHaveCount(2);
+  await expect(results.nth(1)).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => (window as any).__tracklabBikeShopMapTest.viewport()))
+    .toEqual(sacramentoViewport);
+  await page.waitForTimeout(800);
+  expect(viewportRequests, 'a delayed restored camera idle never replaces the saved result').toEqual([sacramentoViewport]);
+});
+
 test('global shop map preserves an antimeridian viewport, reports truncation, and stays contained on phones', async ({ page }) => {
   await installGoogleMapMock(page);
   const viewportRequests: Viewport[] = [];
@@ -457,6 +570,15 @@ test('global shop map preserves an antimeridian viewport, reports truncation, an
   const resultList = directory.getByRole('list', { name: 'Loaded bike shop listings' });
   await expect(resultList.getByText('West Meridian Bikes', { exact: true })).toBeVisible();
   await expect(resultList.getByText('East Meridian Bikes', { exact: true })).toBeVisible();
+
+  await page.reload();
+  await page.waitForFunction(() => Boolean((window as any).__tracklabBikeShopMapTest?.mapReady()));
+  await expect(directory.getByText('2 mapped bike shops', { exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as any).__tracklabBikeShopMapTest.viewport()))
+    .toEqual(crossingViewport);
+  await page.waitForTimeout(800);
+  expect(viewportRequests, 'restoring a crossing camera neither expands it nor reloads the saved results')
+    .toEqual([crossingViewport]);
 
   const overflowing = await directory.evaluate((element) => {
     const selectors = [
@@ -604,16 +726,35 @@ test('country selection immediately lists Australian catalog shops before a city
         countryCode: String(body.countryCode || 'AU'),
       },
     );
+    const listings = body.locality ? [
+      listing,
+      ...Array.from({ length: 17 }, (_, index) => shop(
+        `osm:node:${9_100 + index}`,
+        `${areaName} Bicycle Works ${index + 2}`,
+        -33.869 + index * 0.001,
+        151.211 + index * 0.001,
+        {
+          locality: String(body.locality),
+          region: String(body.region || 'NSW'),
+          countryCode: String(body.countryCode || 'AU'),
+        },
+      )),
+    ] : [listing];
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
         location: body,
-        shops: [listing],
+        shops: listings,
         offset: body.offset || 0,
-        limit: 1,
-        total: 1,
+        limit: listings.length,
+        total: listings.length,
         truncated: false,
-        bounds: { north: listing.latitude, south: listing.latitude, east: listing.longitude, west: listing.longitude },
+        bounds: {
+          north: Math.max(...listings.map((shopRecord) => shopRecord.latitude)),
+          south: Math.min(...listings.map((shopRecord) => shopRecord.latitude)),
+          east: Math.max(...listings.map((shopRecord) => shopRecord.longitude)),
+          west: Math.min(...listings.map((shopRecord) => shopRecord.longitude)),
+        },
         attributions: [],
       }),
     });
@@ -623,14 +764,47 @@ test('country selection immediately lists Australian catalog shops before a city
   const directory = page.locator('#bike-shop-directory');
   const country = directory.getByRole('combobox', { name: 'Country', exact: true });
   const region = directory.getByRole('combobox', { name: 'State / province', exact: true });
-  const results = directory.getByRole('list', { name: 'Loaded bike shop listings' }).getByRole('button');
+  const city = directory.getByRole('combobox', { name: 'City', exact: true });
+  const resultList = directory.getByRole('list', { name: 'Loaded bike shop listings' });
+  const results = resultList.getByRole('button');
   await expect(country.locator('option').nth(1)).toHaveText(/United States/);
   await country.selectOption('AU');
   await expect(directory.getByText('1 mapped bike shop', { exact: true })).toBeVisible();
   await expect(results).toHaveCount(1);
   await expect(results.first()).toContainText('AU Bicycle Works');
   await expect(region.getByRole('option', { name: 'NSW (2)', exact: true })).toHaveAttribute('value', 'NSW');
-  expect(browseBodies[0]).toEqual({ countryCode: 'AU' });
+  await region.selectOption('NSW');
+  await expect(city.getByRole('option', { name: 'Sydney (2)', exact: true })).toHaveAttribute('value', 'Sydney');
+  await city.selectOption('Sydney');
+  await expect(results.first()).toContainText('Sydney Bicycle Works');
+  await expect(results).toHaveCount(18);
+  const savedResultListScrollTop = 173;
+  await expect.poll(() => resultList.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  await resultList.evaluate((element, scrollTop) => {
+    element.scrollTop = scrollTop;
+    element.dispatchEvent(new Event('scroll', { bubbles: true }));
+  }, savedResultListScrollTop);
+  await expect.poll(() => resultList.evaluate((element) => element.scrollTop)).toBe(savedResultListScrollTop);
+
+  const navigation = page.getByRole('navigation', { name: 'TrackLab home navigation' });
+  await navigation.getByRole('button', { name: 'Home', exact: true }).click();
+  await expect(directory).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => {
+    const serialized = window.sessionStorage.getItem('tracklab:public-bike-shop-directory:v1');
+    return serialized ? JSON.parse(serialized).resultListScrollTop : null;
+  })).toBe(savedResultListScrollTop);
+  await navigation.getByRole('button', { name: 'Bike Shops', exact: true }).click();
+  await expect(directory).toBeVisible();
+  await expect(country).toHaveValue('AU');
+  await expect(region).toHaveValue('NSW');
+  await expect(city).toHaveValue('Sydney');
+  await expect(results.first()).toContainText('Sydney Bicycle Works');
+  await expect.poll(() => resultList.evaluate((element) => element.scrollTop)).toBe(savedResultListScrollTop);
+  expect(browseBodies).toEqual([
+    { countryCode: 'AU' },
+    { countryCode: 'AU', region: 'NSW' },
+    { countryCode: 'AU', region: 'NSW', locality: 'Sydney' },
+  ]);
 });
 
 test('current-location nearby search still returns an accessible shop list when Google Maps fails to load', async ({ page, context }) => {

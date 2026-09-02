@@ -82,13 +82,14 @@ test('track contacts and map actions stay clear, callable, and responsive', asyn
   await expect(directions.getByRole('link', { name: 'Google Maps' })).toHaveAttribute('href', /google\.com\/maps\/dir\/.*destination=/);
   await expect(directions.getByRole('link')).toHaveCount(1);
 
-  const earth = locator.getByRole('group', { name: 'Explore in 3D—not directions' });
-  await expect(earth.getByText('Explore in 3D', { exact: true })).toBeVisible();
-  await expect(earth.getByRole('link', { name: /Google Earth—not turn-by-turn directions/ })).toHaveAttribute(
+  const earth = locator.getByRole('group', { name: 'Global satellite explorer—not directions' });
+  await expect(earth.getByText('Global satellite explorer', { exact: true })).toBeVisible();
+  await expect(earth.getByRole('button', { name: 'Explore all tracks' })).toBeVisible();
+  await expect(earth.getByRole('link', { name: /Open selected track .* Google Earth—not turn-by-turn directions/ })).toHaveAttribute(
     'href',
     /earth\.google\.com/,
   );
-  await expect(earth.getByText('3D exploration—not turn-by-turn directions.')).toBeVisible();
+  await expect(earth.getByText(/In-app satellite: all TrackLab markers/)).toBeVisible();
   await expect(directions.getByRole('link', { name: /Google Earth/ })).toHaveCount(0);
 
   const actionTargets = locator.locator(
@@ -106,8 +107,11 @@ test('track contacts and map actions stay clear, callable, and responsive', asyn
     if (!layout || !map || !preview || !details) throw new Error('Public locator layout is incomplete');
     return {
       actionControlRows: [...element.querySelectorAll<HTMLElement>('.public-track-link-group')]
-        .map((group) => new Set([...group.querySelectorAll<HTMLElement>('.public-track-actions > *')]
-          .map((control) => Math.round(control.getBoundingClientRect().top))).size),
+        .map((group) => ({
+          earthExplorer: group.classList.contains('public-track-earth-group'),
+          rows: new Set([...group.querySelectorAll<HTMLElement>('.public-track-actions > *')]
+            .map((control) => Math.round(control.getBoundingClientRect().top))).size,
+        })),
       detailsBottom: details.getBoundingClientRect().bottom,
       layoutHeight: layout.getBoundingClientRect().height,
       layoutFits: layout.scrollWidth <= layout.clientWidth + 1 && layout.scrollHeight <= layout.clientHeight + 1,
@@ -126,7 +130,7 @@ test('track contacts and map actions stay clear, callable, and responsive', asyn
   expect(desktopGeometry.previewFits).toBe(true);
   expect(desktopGeometry.officialLinkRows).toBe(2);
   expect(desktopGeometry.officialLinkHeights.every((height) => height === 44)).toBe(true);
-  expect(desktopGeometry.actionControlRows.every((rows) => rows === 1)).toBe(true);
+  expect(desktopGeometry.actionControlRows.every(({ rows }) => rows === 1)).toBe(true);
   expect(desktopGeometry.detailsBottom).toBeLessThanOrEqual(desktopGeometry.previewBottom + 1);
 
   for (const viewport of [

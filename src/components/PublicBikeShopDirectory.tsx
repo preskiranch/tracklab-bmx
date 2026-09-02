@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   Bike,
   Check,
@@ -51,6 +51,11 @@ import {
   type PlacePredictionOption,
 } from '../lib/googleMaps';
 import { trackLocatorRelativeUrl } from '../lib/mapLinks';
+import {
+  readPublicBikeShopDirectoryState,
+  writePublicBikeShopDirectoryState,
+  type PublicBikeShopDirectoryState,
+} from '../lib/publicBikeShopDirectoryState';
 import type { TrackLocatorRecord, TrackRecord } from '../types';
 import {
   BikeShopDirectoryMap,
@@ -184,37 +189,39 @@ export function PublicBikeShopDirectory({
   tracks,
   onRequireFreeAccount,
 }: PublicBikeShopDirectoryProps) {
-  const [locationInput, setLocationInput] = useState('');
-  const [shopSearchMode, setShopSearchMode] = useState<'location' | 'name'>('location');
+  const [restoredBrowseState] = useState<PublicBikeShopDirectoryState | null>(() => readPublicBikeShopDirectoryState());
+  const [locationInput, setLocationInput] = useState(() => restoredBrowseState?.locationInput ?? '');
+  const [shopSearchMode, setShopSearchMode] = useState<'location' | 'name'>(() => restoredBrowseState?.shopSearchMode ?? 'location');
   const [locationPrediction, setLocationPrediction] = useState<PlacePredictionOption | null>(null);
   const [locationPredictions, setLocationPredictions] = useState<PlacePredictionOption[]>([]);
   const [locationPredictionStatus, setLocationPredictionStatus] = useState('');
-  const [radiusMiles, setRadiusMiles] = useState(25);
-  const [shops, setShops] = useState<BikeShopRecord[]>([]);
-  const [selectedShopId, setSelectedShopId] = useState('');
-  const [status, setStatus] = useState<'idle' | 'locating' | 'searching' | 'ready'>('idle');
+  const [radiusMiles, setRadiusMiles] = useState(() => restoredBrowseState?.radiusMiles ?? 25);
+  const [shops, setShops] = useState<BikeShopRecord[]>(() => restoredBrowseState?.shops ?? []);
+  const [selectedShopId, setSelectedShopId] = useState(() => restoredBrowseState?.selectedShopId ?? '');
+  const [status, setStatus] = useState<'idle' | 'locating' | 'searching' | 'ready'>(() => restoredBrowseState?.hasSearched ? 'ready' : 'idle');
   const [error, setError] = useState('');
   const [directoryNotice, setDirectoryNotice] = useState('');
-  const [hasSearched, setHasSearched] = useState(false);
-  const [resultMode, setResultMode] = useState<'none' | 'nearby' | 'viewport' | 'hierarchy' | 'name'>('none');
-  const [nearbyContext, setNearbyContext] = useState<{ label: string; radiusMiles: number } | null>(null);
-  const [mapZoom, setMapZoom] = useState(2);
+  const [hasSearched, setHasSearched] = useState(() => restoredBrowseState?.hasSearched ?? false);
+  const [resultMode, setResultMode] = useState<'none' | 'nearby' | 'viewport' | 'hierarchy' | 'name'>(() => restoredBrowseState?.resultMode ?? 'none');
+  const [nearbyContext, setNearbyContext] = useState<{ label: string; radiusMiles: number } | null>(() => restoredBrowseState?.nearbyContext ?? null);
+  const [mapZoom, setMapZoom] = useState(() => restoredBrowseState?.mapViewport?.zoom ?? 2);
+  const [mapViewport, setMapViewport] = useState<BikeShopViewport | null>(() => restoredBrowseState?.mapViewport ?? null);
   const [mapFocusRequest, setMapFocusRequest] = useState<BikeShopMapFocusRequest | null>(null);
-  const [viewportTruncated, setViewportTruncated] = useState(false);
-  const [countryFilter, setCountryFilter] = useState(allHierarchyValues);
-  const [regionFilter, setRegionFilter] = useState(allHierarchyValues);
-  const [cityFilter, setCityFilter] = useState(allHierarchyValues);
+  const [viewportTruncated, setViewportTruncated] = useState(() => restoredBrowseState?.viewportTruncated ?? false);
+  const [countryFilter, setCountryFilter] = useState(() => restoredBrowseState?.countryFilter ?? allHierarchyValues);
+  const [regionFilter, setRegionFilter] = useState(() => restoredBrowseState?.regionFilter ?? allHierarchyValues);
+  const [cityFilter, setCityFilter] = useState(() => restoredBrowseState?.cityFilter ?? allHierarchyValues);
   const [hierarchyCountries, setHierarchyCountries] = useState<BikeShopHierarchyItem[]>([]);
   const [hierarchyRegions, setHierarchyRegions] = useState<BikeShopHierarchyItem[]>([]);
   const [hierarchyCities, setHierarchyCities] = useState<BikeShopHierarchyItem[]>([]);
   const [hierarchyStatus, setHierarchyStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [hierarchyError, setHierarchyError] = useState('');
-  const [hierarchyTotal, setHierarchyTotal] = useState(0);
-  const [hierarchyOffset, setHierarchyOffset] = useState(0);
+  const [hierarchyTotal, setHierarchyTotal] = useState(() => restoredBrowseState?.hierarchyTotal ?? 0);
+  const [hierarchyOffset, setHierarchyOffset] = useState(() => restoredBrowseState?.hierarchyOffset ?? 0);
   const [hierarchyLoadingMore, setHierarchyLoadingMore] = useState(false);
-  const [nameSearchTerm, setNameSearchTerm] = useState('');
-  const [nameSearchTotal, setNameSearchTotal] = useState(0);
-  const [nameSearchOffset, setNameSearchOffset] = useState(0);
+  const [nameSearchTerm, setNameSearchTerm] = useState(() => restoredBrowseState?.nameSearchTerm ?? '');
+  const [nameSearchTotal, setNameSearchTotal] = useState(() => restoredBrowseState?.nameSearchTotal ?? 0);
+  const [nameSearchOffset, setNameSearchOffset] = useState(() => restoredBrowseState?.nameSearchOffset ?? 0);
   const [nameSearchLoadingMore, setNameSearchLoadingMore] = useState(false);
   const [claimShop, setClaimShop] = useState<BikeShopRecord | null>(null);
   const [claimRole, setClaimRole] = useState<BikeShopClaimRole>('owner');
@@ -241,6 +248,8 @@ export function PublicBikeShopDirectory({
   const claimDialogRef = useRef<HTMLElement | null>(null);
   const claimTriggerRef = useRef<HTMLButtonElement | null>(null);
   const resultListRef = useRef<HTMLOListElement | null>(null);
+  const resultListScrollTopRef = useRef(restoredBrowseState?.resultListScrollTop ?? 0);
+  const browseStateRef = useRef<PublicBikeShopDirectoryState | null>(restoredBrowseState);
   const mapFocusGenerationRef = useRef(0);
   const resultIntentGenerationRef = useRef(0);
   const accountIdRef = useRef(accountId);
@@ -1112,6 +1121,101 @@ export function PublicBikeShopDirectory({
     };
   }, [locationInput, locationPrediction, shopSearchMode]);
 
+  const busy = status === 'locating' || status === 'searching';
+  const captureResultListScroll = useCallback((scrollTop: number) => {
+    const capturedScrollTop = Math.max(0, scrollTop);
+    resultListScrollTopRef.current = capturedScrollTop;
+    if (browseStateRef.current) {
+      browseStateRef.current = {
+        ...browseStateRef.current,
+        resultListScrollTop: capturedScrollTop,
+      };
+    }
+  }, []);
+  browseStateRef.current = {
+    version: 1,
+    locationInput,
+    shopSearchMode,
+    radiusMiles,
+    shops,
+    selectedShopId,
+    hasSearched,
+    resultMode,
+    nearbyContext,
+    mapViewport,
+    viewportTruncated,
+    countryFilter,
+    regionFilter,
+    cityFilter,
+    hierarchyTotal,
+    hierarchyOffset,
+    nameSearchTerm,
+    nameSearchTotal,
+    nameSearchOffset,
+    pageScrollY: typeof window === 'undefined' ? 0 : Math.max(0, window.scrollY),
+    resultListScrollTop: resultListScrollTopRef.current,
+  };
+
+  const persistCurrentBrowseState = useCallback(() => {
+    const current = browseStateRef.current;
+    if (!current) return;
+    const snapshot = {
+      ...current,
+      pageScrollY: Math.max(0, window.scrollY),
+      resultListScrollTop: resultListScrollTopRef.current,
+    };
+    browseStateRef.current = snapshot;
+    writePublicBikeShopDirectoryState(snapshot);
+  }, []);
+
+  useEffect(() => {
+    persistCurrentBrowseState();
+  }, [
+    cityFilter,
+    countryFilter,
+    hasSearched,
+    hierarchyOffset,
+    hierarchyTotal,
+    locationInput,
+    mapViewport,
+    nameSearchOffset,
+    nameSearchTerm,
+    nameSearchTotal,
+    nearbyContext,
+    persistCurrentBrowseState,
+    radiusMiles,
+    regionFilter,
+    resultMode,
+    selectedShopId,
+    shopSearchMode,
+    shops,
+    viewportTruncated,
+  ]);
+
+  useEffect(() => {
+    window.addEventListener('pagehide', persistCurrentBrowseState);
+    return () => {
+      persistCurrentBrowseState();
+      window.removeEventListener('pagehide', persistCurrentBrowseState);
+    };
+  }, [persistCurrentBrowseState]);
+
+  useEffect(() => {
+    if (!restoredBrowseState) return undefined;
+    const { pageScrollY, resultListScrollTop } = restoredBrowseState;
+    if (pageScrollY <= 0 && resultListScrollTop <= 0) return undefined;
+    let firstFrame = window.requestAnimationFrame(() => {
+      firstFrame = window.requestAnimationFrame(() => {
+        if (resultListScrollTop > 0 && resultListRef.current) {
+          resultListRef.current.scrollTop = resultListScrollTop;
+          captureResultListScroll(resultListRef.current.scrollTop);
+        }
+        if (pageScrollY > 0) window.scrollTo({ top: pageScrollY, left: 0, behavior: 'auto' });
+      });
+    });
+    return () => window.cancelAnimationFrame(firstFrame);
+  }, [captureResultListScroll, restoredBrowseState]);
+
   useEffect(() => () => {
     resultIntentGenerationRef.current += 1;
     publicSearchRef.current.controller?.abort();
@@ -1139,8 +1243,6 @@ export function PublicBikeShopDirectory({
     };
     resetPlaceAutocompleteSession();
   }, []);
-
-  const busy = status === 'locating' || status === 'searching';
 
   return (
     <section className="public-bike-shop-directory" id="bike-shop-directory" aria-labelledby="bike-shop-directory-title">
@@ -1227,8 +1329,10 @@ export function PublicBikeShopDirectory({
               requestError={error}
               truncated={viewportTruncated}
               focusRequest={mapFocusRequest}
+              initialViewport={restoredBrowseState?.mapViewport ?? null}
               getResultIntentGeneration={() => resultIntentGenerationRef.current}
               onSelectShop={selectShopFromMap}
+              onViewportObserved={setMapViewport}
               onViewportChange={(viewport, observedResultIntentGeneration) => (
                 void loadMapViewport(viewport, observedResultIntentGeneration)
               )}
@@ -1331,7 +1435,12 @@ export function PublicBikeShopDirectory({
                 : 'This area contains more shops than can be shown at once. Zoom in for a complete local view.'}</p>
             )}
 
-            <ol ref={resultListRef} className="public-bike-shop-directory__result-list" aria-label="Loaded bike shop listings">
+            <ol
+              ref={resultListRef}
+              className="public-bike-shop-directory__result-list"
+              aria-label="Loaded bike shop listings"
+              onScroll={(event) => captureResultListScroll(event.currentTarget.scrollTop)}
+            >
               {visibleShops.map((shop) => {
                 const labels = serviceLabels(shop);
                 const selected = shop.id === selectedShop?.id;

@@ -1,32 +1,28 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Satellite } from 'lucide-react';
 import {
   hasGoogleMapsApiKey,
-  loadGoogleMaps,
+  loadGoogleBaseMap,
   type GoogleMap,
+  type GoogleMapsEventListener,
+  type GoogleMapsRuntime,
   type GoogleMarker,
-  type LatLngLiteral,
 } from '../lib/googleMaps';
+import {
+  publicTrackExplorerMarkers,
+  publicTrackExplorerMarkerTitle,
+  publicTrackExplorerPoint,
+} from '../lib/publicTrackExplorer';
 import type { TrackLocatorRecord } from '../types';
 
 type PublicTrackMapProps = {
+  exploreAll: boolean;
+  onTrackSelect: (track: TrackLocatorRecord) => void;
   track: TrackLocatorRecord;
+  tracks: TrackLocatorRecord[];
 };
 
-function locatorCenter(track: TrackLocatorRecord): LatLngLiteral | null {
-  const lat = Number(track.latitude);
-  const lng = Number(track.longitude);
-  return Number.isFinite(lat)
-    && lat >= -90
-    && lat <= 90
-    && Number.isFinite(lng)
-    && lng >= -180
-    && lng <= 180
-    ? { lat, lng }
-    : null;
-}
-
-function locatorBounds(center: LatLngLiteral) {
+function locatorBounds(center: { lat: number; lng: number }) {
   const offset = 0.0014;
   return [
     { lat: center.lat - offset, lng: center.lng - offset },
@@ -34,16 +30,43 @@ function locatorBounds(center: LatLngLiteral) {
   ];
 }
 
-export function PublicTrackMap({ track }: PublicTrackMapProps) {
+type TrackMarkerEntry = {
+  listener: GoogleMapsEventListener;
+  marker: GoogleMarker;
+  track: TrackLocatorRecord;
+};
+
+function markerIcon(google: GoogleMapsRuntime, selected: boolean) {
+  return {
+    fillColor: selected ? '#65d636' : '#d8ff3e',
+    fillOpacity: 1,
+    path: google.maps.SymbolPath.CIRCLE,
+    scale: selected ? 9 : 6,
+    strokeColor: selected ? '#0b1117' : '#17212b',
+    strokeOpacity: 1,
+    strokeWeight: selected ? 3 : 2,
+  };
+}
+
+export function PublicTrackMap({ exploreAll, onTrackSelect, track, tracks }: PublicTrackMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<GoogleMap | null>(null);
-  const markerRef = useRef<GoogleMarker | null>(null);
+  const googleRef = useRef<GoogleMapsRuntime | null>(null);
+  const markerEntriesRef = useRef<Map<string, TrackMarkerEntry>>(new Map());
+  const selectedTrackRef = useRef(track);
+  const onTrackSelectRef = useRef(onTrackSelect);
+  const previousExploreAllRef = useRef(false);
+  const previousFocusedTrackIdRef = useRef('');
+  const [mapVersion, setMapVersion] = useState(0);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>(
-    hasGoogleMapsApiKey() ? 'loading' : 'error',
+    hasGoogleMapsApiKey() || (typeof window !== 'undefined' && Boolean(window.google?.maps?.Map)) ? 'loading' : 'error',
   );
+  selectedTrackRef.current = track;
+  onTrackSelectRef.current = onTrackSelect;
+  const explorerMarkers = useMemo(() => publicTrackExplorerMarkers(tracks), [tracks]);
 
   useEffect(() => {
-    if (!hasGoogleMapsApiKey()) {
+    if (!hasGoogleMapsApiKey() && !window.google?.maps?.Map) {
       setStatus('error');
       return undefined;
     }
@@ -53,13 +76,13 @@ export function PublicTrackMap({ track }: PublicTrackMapProps) {
     let tilesLoadedListener: { remove: () => void } | undefined;
     setStatus('loading');
 
-    loadGoogleMaps()
+    loadGoogleBaseMap()
       .then((google) => {
         if (cancelled || !containerRef.current) {
           return;
         }
 
-        const center = locatorCenter(track);
+        const center = publicTrackExplorerPoint(selectedTrackRef.current);
         if (!center) {
           setStatus('error');
           return;
@@ -87,12 +110,7 @@ export function PublicTrackMap({ track }: PublicTrackMapProps) {
           zoomControl: true,
         });
         mapRef.current = map;
-
-        const marker = markerRef.current ?? new google.maps.Marker({ map, position: center });
-        marker.setMap(map);
-        marker.setPosition(center);
-        marker.setTitle?.(track.name);
-        markerRef.current = marker;
+        googleRef.current = google;
 
         tilesLoadedListener = map.addListener('tilesloaded', () => {
           if (cancelled) {
@@ -119,6 +137,8 @@ export function PublicTrackMap({ track }: PublicTrackMapProps) {
         map.fitBounds(bounds, 42);
         map.setHeading(0);
         map.setTilt(0);
+        previousFocusedTrackIdRef.current = selectedTrackRef.current.id;
+        setMapVersion((current) => current + 1);
       })
       .catch(() => {
         if (!cancelled) {
@@ -133,17 +153,134 @@ export function PublicTrackMap({ track }: PublicTrackMapProps) {
         window.clearTimeout(tileTimeout);
       }
     };
-  }, [track.id, track.latitude, track.longitude, track.name]);
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const google = googleRef.current;
+    if (!map || !google || mapVersion === 0) return;
+
+    const desiredMarkers = exploreAll
+      ? explorerMarkers
+      : explorerMarkers.filter(({ track: markerTrack }) => markerTrack.id === selectedTrackRef.current.id);
+    const desiredIds = new Set(desiredMarkers.map(({ track: markerTrack }) => markerTrack.id));
+    markerEntriesRef.current.forEach((entry, trackId) => {
+      if (desiredIds.has(trackId)) return;
+      entry.listener.remove();
+      entry.marker.setMap(null);
+      markerEntriesRef.current.delete(trackId);
+    });
+
+    desiredMarkers.forEach(({ position, track: markerTrack }) => {
+      let entry = markerEntriesRef.current.get(markerTrack.id);
+      if (!entry) {
+        const marker = new google.maps.Marker({ map, position });
+        const listener = marker.addListener('click', () => {
+          const currentTrack = markerEntriesRef.current.get(markerTrack.id)?.track;
+          if (currentTrack) onTrackSelectRef.current(currentTrack);
+        });
+        entry = { listener, marker, track: markerTrack };
+        markerEntriesRef.current.set(markerTrack.id, entry);
+      }
+      entry.track = markerTrack;
+      entry.marker.setMap(map);
+      entry.marker.setPosition(position);
+      entry.marker.setIcon(markerIcon(google, markerTrack.id === selectedTrackRef.current.id));
+      entry.marker.setTitle?.(publicTrackExplorerMarkerTitle(markerTrack));
+    });
+
+    const enteringExplorer = exploreAll && !previousExploreAllRef.current;
+    const leavingExplorer = !exploreAll && previousExploreAllRef.current;
+    if (enteringExplorer) {
+      const bounds = new google.maps.LatLngBounds();
+      desiredMarkers.forEach(({ position }) => bounds.extend(position));
+      map.fitBounds(bounds, 42);
+      map.setHeading(0);
+      map.setTilt(0);
+    } else if (!exploreAll && leavingExplorer) {
+      const selectedPoint = publicTrackExplorerPoint(selectedTrackRef.current);
+      if (!selectedPoint) return;
+      const bounds = new google.maps.LatLngBounds();
+      locatorBounds(selectedPoint).forEach((point) => bounds.extend(point));
+      map.fitBounds(bounds, 42);
+      map.setHeading(0);
+      map.setTilt(0);
+    }
+    previousExploreAllRef.current = exploreAll;
+  }, [exploreAll, explorerMarkers, mapVersion]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const google = googleRef.current;
+    if (!map || !google || mapVersion === 0) return;
+    const previousTrackId = previousFocusedTrackIdRef.current;
+    if (previousTrackId === track.id) return;
+
+    if (exploreAll) {
+      const previousMarker = markerEntriesRef.current.get(previousTrackId)?.marker;
+      const selectedMarker = markerEntriesRef.current.get(track.id)?.marker;
+      previousMarker?.setIcon(markerIcon(google, false));
+      selectedMarker?.setIcon(markerIcon(google, true));
+      previousFocusedTrackIdRef.current = track.id;
+      return;
+    }
+
+    markerEntriesRef.current.forEach((entry, trackId) => {
+      if (trackId === track.id) return;
+      entry.listener.remove();
+      entry.marker.setMap(null);
+      markerEntriesRef.current.delete(trackId);
+    });
+    const selectedPoint = publicTrackExplorerPoint(track);
+    if (!selectedPoint) {
+      setStatus('error');
+      return;
+    }
+    let entry = markerEntriesRef.current.get(track.id);
+    if (!entry) {
+      const marker = new google.maps.Marker({ map, position: selectedPoint });
+      const listener = marker.addListener('click', () => {
+        const currentTrack = markerEntriesRef.current.get(track.id)?.track;
+        if (currentTrack) onTrackSelectRef.current(currentTrack);
+      });
+      entry = { listener, marker, track };
+      markerEntriesRef.current.set(track.id, entry);
+    }
+    entry.track = track;
+    entry.marker.setMap(map);
+    entry.marker.setPosition(selectedPoint);
+    entry.marker.setIcon(markerIcon(google, true));
+    entry.marker.setTitle?.(publicTrackExplorerMarkerTitle(track));
+    const bounds = new google.maps.LatLngBounds();
+    locatorBounds(selectedPoint).forEach((point) => bounds.extend(point));
+    map.fitBounds(bounds, 42);
+    map.setHeading(0);
+    map.setTilt(0);
+    previousFocusedTrackIdRef.current = track.id;
+  }, [exploreAll, mapVersion, track]);
 
   useEffect(() => () => {
-    markerRef.current?.setMap(null);
-    markerRef.current = null;
+    markerEntriesRef.current.forEach(({ listener, marker }) => {
+      listener.remove();
+      marker.setMap(null);
+    });
+    markerEntriesRef.current.clear();
+    googleRef.current = null;
     mapRef.current = null;
   }, []);
 
   return (
-    <div className="public-track-map" aria-label={`Satellite view of ${track.name}`}>
+    <div
+      className={`public-track-map${exploreAll ? ' exploring-all-tracks' : ''}`}
+      aria-label={exploreAll ? 'Global TrackLab satellite explorer' : `Satellite view of ${track.name}`}
+    >
       <div className="public-track-map-canvas" ref={containerRef} />
+      {exploreAll && status === 'ready' && (
+        <div className="public-track-map-explorer-status" role="status" aria-live="polite">
+          <strong>{explorerMarkers.length.toLocaleString()} TrackLab track markers on the satellite map</strong>
+          <span>Zoom and select any marker to open that track in TrackLab.</span>
+        </div>
+      )}
       {status !== 'ready' && (
         <div className={`public-track-map-status ${status}`}>
           <Satellite size={22} />

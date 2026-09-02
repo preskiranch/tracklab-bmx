@@ -266,6 +266,33 @@
   inset: 0;
 }
 
+.public-track-map-explorer-status {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  left: 12px;
+  display: grid;
+  gap: 2px;
+  max-width: min(360px, calc(100% - 80px));
+  padding: 9px 11px;
+  border: 1px solid rgba(216, 255, 62, 0.72);
+  border-radius: 8px;
+  background: rgba(11, 17, 23, 0.9);
+  color: #ffffff;
+  pointer-events: none;
+}
+
+.public-track-map-explorer-status strong {
+  color: #d8ff3e;
+  font-size: 13px;
+}
+
+.public-track-map-explorer-status span {
+  color: #d8e0e7;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .public-track-map-status {
   position: absolute;
   inset: 0;
@@ -374,7 +401,7 @@
 
 .public-track-link-groups {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 0.5fr);
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.65fr) minmax(240px, 1fr);
   align-items: start;
   gap: 12px;
   width: 100%;
@@ -407,7 +434,7 @@
 }
 
 .public-track-earth-group .public-track-actions {
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .public-track-actions a,
@@ -736,7 +763,7 @@
   }
 
   .public-track-earth-group .public-track-actions {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .public-track-actions a {
@@ -766,6 +793,10 @@
   }
 
   .public-track-link-groups {
+    grid-template-columns: 1fr;
+  }
+
+  .public-track-earth-group .public-track-actions {
     grid-template-columns: 1fr;
   }
 
