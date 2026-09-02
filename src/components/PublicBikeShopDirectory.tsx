@@ -1087,7 +1087,7 @@ export function PublicBikeShopDirectory({
       shopSearchMode !== 'location'
       || input.length < 3
       || input === 'Current location'
-      || (locationPrediction && locationPrediction.label === input)
+      || Boolean(locationPrediction)
     ) {
       setLocationPredictions([]);
       setLocationPredictionStatus('');
