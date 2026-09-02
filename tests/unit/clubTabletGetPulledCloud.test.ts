@@ -334,6 +334,50 @@ describe('claimed Club Tablet Get Pulled result', () => {
     expect(saved.heartRate.segment.summary.averageBpm).toBeGreaterThan(148);
     expect(saved.heartRate.segment.summary.averageBpm).toBeLessThan(164);
 
+    const athleteUserDataResponse = await api('/api/user-data', {}, athlete.cookie);
+    expect(athleteUserDataResponse.status).toBe(200);
+    await expect(athleteUserDataResponse.json()).resolves.toMatchObject({
+      accountProfile: {
+        personalRecords: {
+          getPulledMaxWatts: 229,
+          getPulledMaxWattsSource: 'recorded',
+        },
+      },
+    });
+
+    const ownerUserDataResponse = await api('/api/user-data', {}, ownerMonitorCookie);
+    expect(ownerUserDataResponse.status).toBe(200);
+    await expect(ownerUserDataResponse.json()).resolves.toMatchObject({
+      studioRiders: [expect.objectContaining({
+        id: studioRiderId,
+        personalRecords: expect.objectContaining({
+          getPulledMaxWatts: 229,
+          getPulledMaxWattsSource: 'recorded',
+        }),
+      })],
+    });
+
+    // A stale browser or photo/roster update that does not know about the
+    // new field must not erase the durable max-watts record.
+    const staleRosterPatch = await api('/api/user-data', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        studioRiders: [{
+          id: studioRiderId,
+          name: 'Rasheen Test Athlete',
+          createdAt: rosterAt,
+          updatedAt: rosterAt + 1,
+        }],
+      }),
+    }, ownerMonitorCookie);
+    expect(staleRosterPatch.status).toBe(200);
+    await expect(staleRosterPatch.json()).resolves.toMatchObject({
+      studioRiders: [expect.objectContaining({
+        id: studioRiderId,
+        personalRecords: expect.objectContaining({ getPulledMaxWatts: 229 }),
+      })],
+    });
+
     const athleteHistoryResponse = await api('/api/training-sessions?from=0', {}, athlete.cookie);
     expect(athleteHistoryResponse.status).toBe(200);
     const athleteHistory = await athleteHistoryResponse.json() as any;

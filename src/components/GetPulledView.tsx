@@ -7,6 +7,7 @@ import {
   RotateCcw,
   TabletSmartphone,
   TimerReset,
+  Trophy,
   Zap,
 } from 'lucide-react';
 import {
@@ -32,12 +33,14 @@ import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import type {
   BikeSample,
   HeartRateMeasurement,
+  PersonalRecords,
   PlayerSlot,
   SpeedUnit,
   StudioRider,
   StudioRiderAssignments,
 } from '../types';
 import { applyStudioRiderAssignments } from '../lib/studioRiders';
+import { getPulledMaxWattsLimit } from '../lib/personalRecords';
 import { playStartGateTone, primeAudioCues } from '../lib/audioCues';
 import {
   primeBikeRaceAudio,
@@ -215,6 +218,13 @@ type GetPulledViewProps = {
   }>;
   onAssignRider: (deviceId: number, riderId: string | null) => void;
   onComplete: (result: GetPulledResult) => void;
+  personalRecords?: Readonly<Record<string, PersonalRecords>>;
+  canEditPersonalRecords?: boolean;
+  onPersonalRecordChange?: (
+    riderId: string,
+    value: number | null,
+    source?: 'manual' | 'recorded',
+  ) => void | Promise<void>;
   onFullscreenChange?: (enabled: boolean) => void;
   onLiveStateChange: (state: GetPulledLiveState | null) => void;
   heartRateByPlayer?: LiveHeartRateByPlayer;
@@ -251,6 +261,9 @@ export function GetPulledView({
   fullscreenSecondaryAction,
   onAssignRider,
   onComplete,
+  personalRecords = {},
+  canEditPersonalRecords = false,
+  onPersonalRecordChange,
   onFullscreenChange,
   onLiveStateChange,
   heartRateByPlayer = {},
@@ -295,6 +308,7 @@ export function GetPulledView({
   const [now, setNow] = useState(Date.now());
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [result, setResult] = useState<GetPulledResult | null>(null);
+  const [personalRecordDraft, setPersonalRecordDraft] = useState('');
   const accumulatorRef = useRef<GetPulledAccumulator>(createGetPulledAccumulator());
   const phaseRef = useRef<GetPulledPhase>('setup');
   const pedalArmedAtRef = useRef<number | null>(null);
@@ -311,18 +325,29 @@ export function GetPulledView({
   } | null>(null);
   const samplesByDeviceRef = useRef(samplesByDevice);
   const onCompleteRef = useRef(onComplete);
+  const onPersonalRecordChangeRef = useRef(onPersonalRecordChange);
   samplesByDeviceRef.current = samplesByDevice;
   onCompleteRef.current = onComplete;
+  onPersonalRecordChangeRef.current = onPersonalRecordChange;
   const sessionCallbacksRef = useRef({ onSessionCancel, onSessionCancelEvent });
   sessionCallbacksRef.current = { onSessionCancel, onSessionCancelEvent };
   const viewCleanupCallbacksRef = useRef({ onFullscreenChange, onLiveStateChange });
   viewCleanupCallbacksRef.current = { onFullscreenChange, onLiveStateChange };
   const selectedPlayer = connectedPlayers.find((player) => player.id === selectedPlayerId) ?? null;
+  const selectedPersonalRecord = selectedPlayer?.riderId
+    ? personalRecords[selectedPlayer.riderId]?.getPulledMaxWatts ?? null
+    : null;
   const sessionInputs = phase === 'setup' ? null : sessionInputsRef.current;
   const sessionPlayer = sessionInputs?.player ?? selectedPlayer;
+  const sessionPersonalRecord = sessionPlayer?.riderId
+    ? personalRecords[sessionPlayer.riderId]?.getPulledMaxWatts ?? null
+    : null;
   const sessionDurationSeconds = sessionInputs?.durationSeconds ?? durationSeconds;
   const sessionAirSetting = sessionInputs?.airSetting ?? airSetting;
   const sessionDemoMode = sessionInputs?.demoMode ?? demoMode;
+  const sessionPersonalRecordRef = useRef<number | null>(null);
+  const newPersonalRecordRef = useRef<number | null>(null);
+  const [newPersonalRecord, setNewPersonalRecord] = useState<number | null>(null);
   const sample = sessionPlayer?.deviceId == null ? undefined : samplesByDevice.get(sessionPlayer.deviceId);
   const metrics = useMemo(() => {
     if (sessionDemoMode && phase === 'active' && startedAt != null) {
@@ -379,6 +404,14 @@ export function GetPulledView({
     setSelectedPlayerId(connectedPlayers[0]?.id ?? null);
   }, [connectedPlayers, selectedPlayerId]);
 
+  useEffect(() => {
+    if (phase !== 'setup') return;
+    setPersonalRecordDraft(selectedPersonalRecord == null ? '' : String(selectedPersonalRecord));
+    newPersonalRecordRef.current = null;
+    setNewPersonalRecord(null);
+    sessionPersonalRecordRef.current = selectedPersonalRecord;
+  }, [phase, selectedPersonalRecord, selectedPlayer?.riderId]);
+
   const cancelSession = useCallback((reason: GetPulledSessionCancellation['reason']) => {
     const arm = sessionArmRef.current;
     const phaseAtCancel = phaseRef.current;
@@ -421,6 +454,9 @@ export function GetPulledView({
     setCountdown(getPulledCountdownSeconds);
     setStartedAt(null);
     setResult(null);
+    newPersonalRecordRef.current = null;
+    setNewPersonalRecord(null);
+    sessionPersonalRecordRef.current = null;
     setNow(Date.now());
     onLiveStateChange(null);
     onFullscreenChange?.(false);
@@ -493,6 +529,9 @@ export function GetPulledView({
     pedalArmedAtRef.current = null;
     sessionArmRef.current = arm;
     sessionStartRef.current = null;
+    sessionPersonalRecordRef.current = selectedPersonalRecord;
+    newPersonalRecordRef.current = null;
+    setNewPersonalRecord(null);
     sessionInputsRef.current = Object.freeze({
       player: Object.freeze({ ...selectedPlayer }),
       durationSeconds,
@@ -526,7 +565,7 @@ export function GetPulledView({
     playStartGateTone('tick');
     setPhase('countdown');
     setNow(Date.now());
-  }, [airSetting, cancelSession, customSecondsInvalid, demoMode, durationSeconds, onFullscreenChange, onSessionArm, primePullAudio, selectedPlayer]);
+  }, [airSetting, cancelSession, customSecondsInvalid, demoMode, durationSeconds, onFullscreenChange, onSessionArm, primePullAudio, selectedPersonalRecord, selectedPlayer]);
 
   useEffect(() => {
     if (phase !== 'countdown') return undefined;
@@ -623,6 +662,22 @@ export function GetPulledView({
         sampleAt,
         endedAt,
       );
+      const liveRiderId = activeInputs.player.riderId;
+      const livePreviousRecord = sessionPersonalRecordRef.current;
+      const livePeakWatts = accumulatorRef.current.peakWatts;
+      // Surface a new benchmark as soon as the live peak crosses the saved
+      // value. Persistence still happens once, from the authoritative result
+      // below, so a noisy sample cannot enqueue a stream of cloud writes.
+      if (
+        !activeInputs.demoMode
+        && liveRiderId
+        && livePeakWatts > 0
+        && (livePreviousRecord == null || livePeakWatts > livePreviousRecord)
+        && (newPersonalRecordRef.current == null || livePeakWatts > newPersonalRecordRef.current)
+      ) {
+        newPersonalRecordRef.current = livePeakWatts;
+        setNewPersonalRecord(livePeakWatts);
+      }
       setNow(Math.min(sampleAt, endedAt));
       if (sampleAt < endedAt) return;
       completedRef.current = true;
@@ -642,6 +697,20 @@ export function GetPulledView({
       setResult(nextResult);
       setPhase('results');
       setNow(endedAt);
+      const resultRiderId = activeInputs.player.riderId;
+      const previousRecord = sessionPersonalRecordRef.current;
+      const peakWatts = nextResult.peakWatts;
+      const isNewPersonalRecord = Boolean(
+        !activeInputs.demoMode
+        && resultRiderId
+        && peakWatts > 0
+        && (previousRecord == null || peakWatts > previousRecord),
+      );
+      if (isNewPersonalRecord && resultRiderId) {
+        newPersonalRecordRef.current = peakWatts;
+        setNewPersonalRecord(peakWatts);
+        void onPersonalRecordChangeRef.current?.(resultRiderId, peakWatts, 'recorded');
+      }
       onCompleteRef.current(nextResult);
     }, 100);
     return () => window.clearInterval(timer);
@@ -709,6 +778,8 @@ export function GetPulledView({
     peakCadence: accumulatorRef.current.peakCadence,
     speedKph: metrics.speedKph,
   };
+  const displayedPersonalRecord = newPersonalRecord ?? sessionPersonalRecord ?? selectedPersonalRecord;
+  const isShowingNewPersonalRecord = phase === 'results' && newPersonalRecord != null;
 
   return (
     <main className="get-pulled-view" aria-label="Get Pulled timed Wattbike test">
@@ -837,7 +908,7 @@ export function GetPulledView({
             <h3><Gauge size={18} /> Wattbike Air setting</h3>
             <p>{demoMode
               ? 'Choose a simulated Wattbike Air setting to compare values on this demo screen.'
-              : 'Select the physical Wattbike Air setting used for this pull. Records are compared only within the same time and Air setting.'}</p>
+              : 'Select the physical Wattbike Air setting used for this pull. Your max-watts personal record is tracked across every Get Pulled workout.'}</p>
             <div className="get-pulled-air-options" aria-label="Wattbike Air setting">
               {getPulledAirSettings.map((setting) => (
                 <button
@@ -904,6 +975,37 @@ export function GetPulledView({
                 );
               })}
             </div>
+            {!demoMode && canEditPersonalRecords && selectedPlayer?.riderId && (
+              <form
+                className="get-pulled-pr-editor"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const watts = Number(personalRecordDraft);
+                  if (!Number.isInteger(watts) || watts < 1 || watts > getPulledMaxWattsLimit) return;
+                  void onPersonalRecordChange?.(selectedPlayer.riderId!, watts, 'manual');
+                }}
+              >
+                <label htmlFor="get-pulled-personal-record">Personal max watts · Get Pulled</label>
+                <div className="get-pulled-pr-editor-controls">
+                  <input
+                    id="get-pulled-personal-record"
+                    aria-label="Personal max watts for Get Pulled"
+                    inputMode="numeric"
+                    min={1}
+                    max={getPulledMaxWattsLimit}
+                    step={1}
+                    type="number"
+                    placeholder="Enter watts"
+                    value={personalRecordDraft}
+                    onChange={(event) => setPersonalRecordDraft(event.target.value)}
+                  />
+                  <button type="submit">Save personal best</button>
+                </div>
+                <small>{selectedPersonalRecord == null
+                  ? 'No saved max-watts record yet.'
+                  : `Current personal best: ${selectedPersonalRecord} W`}</small>
+              </form>
+            )}
           </div>
           <p className="get-pulled-privacy">{demoMode
             ? 'DEMO MODE · Simulated pull results are for testing only and are not saved, published, or assigned to an athlete.'
@@ -926,7 +1028,15 @@ export function GetPulledView({
         <>
           <section className={`get-pulled-metrics${phase === 'results' ? ' get-pulled-results' : ''}`}>
             <div className="get-pulled-metric"><Zap size={20} /><strong>{displayed.watts}</strong><small>{result ? 'Average watts' : 'Live watts'}</small></div>
-            <div className="get-pulled-metric"><Zap size={20} /><strong>{displayed.peakWatts}</strong><small>Peak watts</small></div>
+            <div className={`get-pulled-metric get-pulled-peak-watts${isShowingNewPersonalRecord ? ' get-pulled-new-pr' : ''}`}>
+              <Zap size={20} />
+              <strong>{displayed.peakWatts}</strong>
+              <small>Peak watts</small>
+              <span className="get-pulled-pr-badge" role={isShowingNewPersonalRecord ? 'status' : undefined} aria-live="polite">
+                <Trophy aria-hidden="true" size={13} />
+                {isShowingNewPersonalRecord ? `New PR · ${displayedPersonalRecord} W` : `PR · ${displayedPersonalRecord == null ? '—' : `${displayedPersonalRecord} W`}`}
+              </span>
+            </div>
             <div className="get-pulled-metric"><Activity size={20} /><strong>{displayed.cadence}</strong><small>Cadence rpm</small></div>
             <div className="get-pulled-metric"><Activity size={20} /><strong>{displayed.peakCadence}</strong><small>Peak cadence</small></div>
             <div className="get-pulled-metric"><Gauge size={20} /><strong>{formatSpeedFromKph(displayed.speedKph, speedUnit)}</strong><small>{speedUnitLabel(speedUnit)}</small></div>

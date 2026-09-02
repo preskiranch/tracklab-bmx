@@ -176,6 +176,8 @@ import {
 import {
   personalRecordAchievements,
   previousPersonalBestTimes,
+  recordGetPulledPersonalBest,
+  setManualGetPulledPersonalRecord,
   type PreviousPersonalBestTimes,
 } from './lib/personalRecords';
 import { readPublicTrackCatalog } from './lib/publicTrackMappings';
@@ -380,6 +382,7 @@ import type {
   MetricKey,
   MultiplayerRaceState,
   MultiplayerTrackVoteCandidate,
+  PersonalRecords,
   PlayerId,
   PlayerSlot,
   PrivateHeartRateCapture,
@@ -4150,11 +4153,12 @@ export default function App() {
         id: `account:${authUser.id}`,
         name: authUser.name,
         ...(accountProfile.photoUrl ? { photoUrl: accountProfile.photoUrl } : {}),
+        ...(accountProfile.personalRecords ? { personalRecords: accountProfile.personalRecords } : {}),
         createdAt: 1,
         updatedAt: accountProfile.updatedAt,
       }
       : null
-  ), [accountProfile.photoUrl, accountProfile.updatedAt, authUser]);
+  ), [accountProfile.personalRecords, accountProfile.photoUrl, accountProfile.updatedAt, authUser]);
   const clubTabletRider = useMemo<StudioRider | null>(() => {
     if (!clubTabletSessionActive || !clubTabletSession) return null;
     const athlete = clubTabletRoster?.athletes.find(
@@ -4166,6 +4170,7 @@ export default function App() {
       ...(athlete?.photoUrl || clubTabletSession.session.photoUrl
         ? { photoUrl: athlete?.photoUrl ?? clubTabletSession.session.photoUrl }
         : {}),
+      ...(athlete?.personalRecords ? { personalRecords: athlete.personalRecords } : {}),
       createdAt: 1,
       updatedAt: 1,
     };
@@ -4181,6 +4186,19 @@ export default function App() {
       ],
     [accountRider, activeProfileStudioRiders, canManageActiveStudioRiders, clubTabletRider],
   );
+  const personalRecordsByRiderId = useMemo<Readonly<Record<string, PersonalRecords>>>(() => {
+    const records: Record<string, PersonalRecords> = {};
+    const add = (rider: Pick<StudioRider, 'id' | 'personalRecords'> | null | undefined) => {
+      if (rider?.personalRecords) records[rider.id] = rider.personalRecords;
+    };
+    add(accountRider);
+    activeProfileStudioRiders.forEach(add);
+    add(clubTabletRider);
+    clubTabletRoster?.athletes.forEach((athlete) => {
+      if (athlete.personalRecords) records[athlete.studioRiderId] = athlete.personalRecords;
+    });
+    return records;
+  }, [accountRider, activeProfileStudioRiders, clubTabletRoster?.athletes, clubTabletRider]);
   const explorePlayers = useMemo(
     () => (
       demoMode
@@ -8579,6 +8597,7 @@ export default function App() {
     const normalizedPhotoUrl = normalizeRiderPhotoDataUrl(photoUrl);
     const nextProfile: AccountProfile = {
       ...(normalizedPhotoUrl ? { photoUrl: normalizedPhotoUrl } : {}),
+      ...(accountProfile.personalRecords ? { personalRecords: accountProfile.personalRecords } : {}),
       updatedAt: Date.now(),
     };
     setLockedRacePlayers(null);
@@ -8594,7 +8613,69 @@ export default function App() {
           setCloudUserDataMessage(`Could not save your account photo. ${error.message}`);
         });
     }
-  }, [cloudProfileKey]);
+  }, [accountProfile.personalRecords, cloudProfileKey]);
+
+  const handlePersonalRecordChange = useCallback((
+    riderId: string,
+    watts: number | null,
+    source: 'manual' | 'recorded' = 'manual',
+  ) => {
+    const now = Date.now();
+    const accountRiderId = authUser ? `account:${authUser.id}` : null;
+    const currentRecords = riderId === accountRiderId
+      ? accountProfile.personalRecords
+      : activeProfileStudioRiders.find((rider) => rider.id === riderId)?.personalRecords
+        ?? clubTabletRoster?.athletes.find((athlete) => athlete.studioRiderId === riderId)?.personalRecords;
+    const nextRecords = watts == null
+      ? undefined
+      : source === 'recorded'
+        ? recordGetPulledPersonalBest(currentRecords, watts, now)
+        : setManualGetPulledPersonalRecord(watts, now);
+    if (watts != null && !nextRecords) return;
+    if (riderId === accountRiderId && authUser) {
+      const nextProfile: AccountProfile = {
+        ...accountProfile,
+        ...(nextRecords ? { personalRecords: nextRecords } : {}),
+        updatedAt: now,
+      };
+      if (!nextRecords) delete nextProfile.personalRecords;
+      setAccountProfile(nextProfile);
+      if (cloudProfileKey) {
+        void queueCloudUserDataPatch(cloudProfileKey, { accountProfile: nextProfile })
+          .then(() => {
+            setCloudUserDataStatus('online');
+            setCloudUserDataMessage('Your Get Pulled personal best is saved across devices.');
+          })
+          .catch((error: Error) => {
+            setCloudUserDataStatus('offline');
+            setCloudUserDataMessage(`Could not save your personal best. ${error.message}`);
+          });
+      }
+      return;
+    }
+
+    if (clubTabletSessionActive && clubTabletRoster) {
+      setClubTabletRoster((current) => current ? {
+        ...current,
+        athletes: current.athletes.map((athlete) => {
+          if (athlete.studioRiderId !== riderId) return athlete;
+          const next = { ...athlete };
+          if (nextRecords) next.personalRecords = nextRecords;
+          else delete next.personalRecords;
+          return next;
+        }),
+      } : current);
+      return;
+    }
+    if (!canManageActiveStudioRiders) return;
+    setStudioRiders((current) => mergeStudioRiders(current.map((rider) => {
+      if (rider.id !== riderId) return rider;
+      const next = { ...rider, updatedAt: now };
+      if (nextRecords) next.personalRecords = nextRecords;
+      else delete next.personalRecords;
+      return next;
+    })));
+  }, [accountProfile, activeProfileStudioRiders, authUser, canManageActiveStudioRiders, clubTabletRoster, clubTabletSessionActive, cloudProfileKey]);
 
   const handleClubProfileComplete = useCallback((user: AuthUser, profile: AccountProfile) => {
     setAuthUser(user);
@@ -13245,6 +13326,7 @@ export default function App() {
             email={authUser.email}
             membershipLabel={membershipLabel}
             profile={accountProfile}
+            profileId={authUser.id}
             studioRiders={canManageActiveStudioRiders
               ? activeStudioRiders(activeProfileStudioRiders)
               : []}
@@ -13252,6 +13334,8 @@ export default function App() {
             speedUnit={speedUnit}
             distanceUnit={distanceUnit}
             onPhotoChange={handleAccountPhotoChange}
+            onPersonalRecordChange={handlePersonalRecordChange}
+            canManagePersonalRecords={canManageActiveStudioRiders}
             onClubProfileComplete={handleClubProfileComplete}
           />
           </Suspense>
@@ -13330,6 +13414,11 @@ export default function App() {
                 speedUnit,
                 canAssignRiders: !clubTabletSessionActive,
                 onAssignRider: handleStudioRiderAssignment,
+                personalRecords: personalRecordsByRiderId,
+                canEditPersonalRecords: Boolean(authUser && !clubTabletSessionActive && (
+                  canManageActiveStudioRiders || accountRider
+                )),
+                onPersonalRecordChange: handlePersonalRecordChange,
                 onLiveStateChange: setGetPulledLiveState,
                 fullscreen: utilityFullscreen,
                 onFullscreenChange: handleUtilityFullscreenChange,

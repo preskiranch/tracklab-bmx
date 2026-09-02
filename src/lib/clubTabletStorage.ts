@@ -1,7 +1,8 @@
 import { safeSetLocalStorage } from './browserStorage';
 import { normalizeRaceViewPreferences } from './raceViewPreferences';
 import { normalizeRiderPhotoDataUrl } from './riderPhotos';
-import type { RaceViewPreferences } from '../types';
+import type { PersonalRecords, RaceViewPreferences } from '../types';
+import { normalizePersonalRecords } from './personalRecords';
 
 export const clubTabletDeviceStorageKey = 'tracklab.club-tablet-device.v1';
 export const clubTabletSessionStorageKey = 'tracklab.club-tablet-athlete-session.v1';
@@ -51,6 +52,7 @@ export type ClubTabletAthlete = {
   riderName: string;
   athleteName: string | null;
   photoUrl?: string;
+  personalRecords?: PersonalRecords;
   status: 'claimed' | 'unclaimed';
   watchConnect?: ClubTabletWatchConnectStatus;
 };
@@ -202,6 +204,7 @@ function normalizeAthlete(value: unknown): ClubTabletAthlete | null {
   if (!studioRiderId || !riderName) return null;
   const athleteName = clubTabletText(candidate.athleteName, 80) || null;
   const photoUrl = normalizeRiderPhotoDataUrl(candidate.photoUrl);
+  const personalRecords = normalizePersonalRecords(candidate.personalRecords);
   const status = candidate.status === 'claimed' || candidate.claimed === true ? 'claimed' : 'unclaimed';
   const watchConnect = status === 'claimed'
     ? normalizeClubTabletWatchConnectStatus(candidate.watchConnect)
@@ -211,6 +214,7 @@ function normalizeAthlete(value: unknown): ClubTabletAthlete | null {
     riderName,
     athleteName,
     ...(photoUrl ? { photoUrl } : {}),
+    ...(personalRecords ? { personalRecords } : {}),
     status,
     ...(watchConnect ? { watchConnect } : {}),
   };

@@ -18,10 +18,12 @@ import {
   Trash2,
   UserPlus,
   X,
+  Zap,
 } from 'lucide-react';
 import type {
   AccountProfile,
   DistanceUnit,
+  PersonalRecords,
   SpeedUnit,
   StudioRider,
   TrainingSession,
@@ -36,6 +38,7 @@ import {
   revokeClubMember,
   type ClubConnectState,
 } from '../lib/clubConnect';
+import { getPulledMaxWattsLimit } from '../lib/personalRecords';
 import {
   downloadTrainingSession,
   loadTrainingHistory,
@@ -79,11 +82,18 @@ type AccountProfileViewProps = {
   email: string;
   membershipLabel: string;
   profile: AccountProfile;
+  profileId: string;
   studioRiders: StudioRider[];
   historyRevision: number;
   speedUnit: SpeedUnit;
   distanceUnit: DistanceUnit;
   onPhotoChange: (photoUrl: string | undefined) => void;
+  onPersonalRecordChange?: (
+    riderId: string,
+    value: number | null,
+    source?: 'manual' | 'recorded',
+  ) => void | Promise<void>;
+  canManagePersonalRecords?: boolean;
   onClubProfileComplete: (user: AuthUser, profile: AccountProfile) => void;
 };
 
@@ -106,6 +116,65 @@ type PrivateHeartRateLoadEntry = Readonly<{
   target: PrivateTrainingHeartRateTarget;
   revisionKey: string;
 }>;
+
+function PersonalRecordEditor({
+  targetId,
+  records,
+  label = 'Personal max watts · Get Pulled',
+  onChange,
+}: {
+  targetId: string;
+  records?: PersonalRecords;
+  label?: string;
+  onChange: AccountProfileViewProps['onPersonalRecordChange'];
+}) {
+  const savedWatts = records?.getPulledMaxWatts ?? null;
+  const [draft, setDraft] = useState(savedWatts == null ? '' : String(savedWatts));
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    setDraft(savedWatts == null ? '' : String(savedWatts));
+  }, [savedWatts]);
+
+  if (!onChange) return null;
+  return (
+    <form
+      className="personal-record-editor"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const watts = Number(draft);
+        if (!Number.isInteger(watts) || watts < 1 || watts > getPulledMaxWattsLimit) {
+          setMessage(`Enter a whole-number max watts value from 1 to ${getPulledMaxWattsLimit.toLocaleString()}.`);
+          return;
+        }
+        void onChange(targetId, watts, 'manual');
+        setMessage('Personal best saved across devices.');
+      }}
+    >
+      <div className="personal-record-editor-heading">
+        <Zap size={16} aria-hidden="true" />
+        <span><strong>{label}</strong><small>{savedWatts == null ? 'No record yet' : `${savedWatts} W · ${records?.getPulledMaxWattsSource === 'recorded' ? 'recorded' : 'manually entered'}`}</small></span>
+      </div>
+      <div className="personal-record-editor-controls">
+        <label htmlFor={`personal-record-${targetId}`} className="sr-only">{label}</label>
+        <input
+          id={`personal-record-${targetId}`}
+          aria-label={label}
+          inputMode="numeric"
+          min={1}
+          max={getPulledMaxWattsLimit}
+          step={1}
+          type="number"
+          placeholder="Max watts"
+          value={draft}
+          onChange={(event) => { setDraft(event.target.value); setMessage(''); }}
+        />
+        <button type="submit">Save</button>
+      </div>
+      {message && <small className="personal-record-editor-message" role="status">{message}</small>}
+    </form>
+  );
+}
 
 function localDateKey(timestamp: number) {
   const date = new Date(timestamp);
@@ -710,11 +779,14 @@ export function AccountProfileView({
   email,
   membershipLabel,
   profile,
+  profileId,
   studioRiders,
   historyRevision,
   speedUnit,
   distanceUnit,
   onPhotoChange,
+  onPersonalRecordChange,
+  canManagePersonalRecords = false,
   onClubProfileComplete,
 }: AccountProfileViewProps) {
   const initialAccountName = useMemo(() => editableAccountName(name), [name]);
@@ -1183,6 +1255,11 @@ export function AccountProfileView({
         <p className="account-profile-photo-note">
           This is your account rider photo. It follows your profile across devices and is available in race entry, rider cards, results, and saved sessions.
         </p>
+        <PersonalRecordEditor
+          targetId={`account:${profileId}`}
+          records={profile.personalRecords}
+          onChange={onPersonalRecordChange}
+        />
       </section>
 
       <AccountDeletionPanel email={email} />
@@ -1281,6 +1358,14 @@ export function AccountProfileView({
                     <article key={rider.id}>
                       <RiderAvatar name={rider.name} photoUrl={rider.photoUrl} />
                       <div className="club-roster-name"><strong>{rider.name}</strong><small>{claimed ? `Connected${member.athleteName ? ` to ${member.athleteName}` : ''}` : inviteLink ? 'Invitation ready' : 'Not claimed'}</small></div>
+                      {canManagePersonalRecords && (
+                        <PersonalRecordEditor
+                          targetId={rider.id}
+                          records={rider.personalRecords}
+                          label="Get Pulled max watts"
+                          onChange={onPersonalRecordChange}
+                        />
+                      )}
                       <div className="club-roster-actions">
                         {inviteLink && !claimed && <button type="button" onClick={() => copyInvitation(inviteLink)}><Copy size={15} /> Copy link</button>}
                         {!claimed && <button className="primary" type="button" disabled={clubBusyId === rider.id} onClick={() => inviteRider(rider)}><UserPlus size={15} /> {inviteLink ? 'New link' : 'Invite'}</button>}

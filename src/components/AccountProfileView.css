@@ -56,6 +56,47 @@
   border-top: 1px solid #edf0f2;
 }
 
+.personal-record-editor {
+  display: grid;
+  gap: 8px;
+  grid-column: 1 / -1;
+  padding: 12px;
+  border: 1px solid #cfe7c2;
+  border-radius: 12px;
+  background: #f6fcef;
+}
+.personal-record-editor-heading,
+.personal-record-editor-controls { display: flex; align-items: center; gap: 8px; }
+.personal-record-editor-heading { color: #2f6e17; }
+.personal-record-editor-heading > svg { flex: 0 0 auto; }
+.personal-record-editor-heading span { display: grid; gap: 2px; }
+.personal-record-editor-heading small,
+.personal-record-editor-message { color: #667085; font-size: 11px; }
+.personal-record-editor-controls input {
+  min-width: 0;
+  width: 150px;
+  min-height: 38px;
+  padding: 7px 9px;
+  border: 1px solid #cdd6dc;
+  border-radius: 8px;
+  background: #fff;
+  color: #17202e;
+  font: inherit;
+}
+.personal-record-editor-controls button {
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid #a9c99b;
+  border-radius: 8px;
+  background: #fff;
+  color: #244c17;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 850;
+}
+.personal-record-editor-controls button[type='submit'] { background: #7ade36; border-color: #69bd39; color: #102108; }
+.personal-record-editor-message { margin: 0; }
+
 .account-deletion-panel {
   display: grid;
   gap: 14px;
@@ -189,6 +230,8 @@
 .club-owner-intro small { max-width: 310px; color: #667085; text-align: right; }
 .club-roster-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .club-roster-list article { gap: 10px; min-width: 0; padding: 10px; border: 1px solid #e0e6ea; border-radius: 11px; background: #fafcfd; }
+.club-roster-list article .personal-record-editor { flex: 1 1 100%; grid-column: auto; padding: 8px; }
+.club-roster-list article .personal-record-editor-controls input { width: 110px; }
 .club-roster-list .rider-avatar { width: 42px; height: 42px; flex: 0 0 42px; }
 .club-roster-name { display: grid; min-width: 0; flex: 1; }
 .club-roster-name strong { overflow-wrap: anywhere; }
@@ -419,4 +462,6 @@
   .club-owner-intro small { max-width: none; text-align: left; }
   .club-roster-list article { align-items: flex-start; flex-wrap: wrap; }
   .club-roster-actions { width: 100%; justify-content: flex-start; padding-left: 52px; }
+  .personal-record-editor-controls { align-items: stretch; flex-wrap: wrap; }
+  .personal-record-editor-controls input { flex: 1 1 120px; width: auto; }
 }

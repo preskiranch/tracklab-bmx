@@ -1,6 +1,7 @@
 import type { AccountProfile } from '../types';
 import type { AuthUser } from './auth';
 import { normalizeRiderPhotoDataUrl } from './riderPhotos';
+import { normalizePersonalRecords } from './personalRecords';
 import { trackLabPublicOrigin } from './serviceOrigins';
 
 export type ClubConnectMember = {
@@ -118,11 +119,13 @@ export async function claimClubInvite(token: string, profile: ClubClaimProfile) 
     throw new Error('TrackLab connected the invitation but could not finish the athlete profile. Refresh and try again.');
   }
   const photoUrl = normalizeRiderPhotoDataUrl(payload.accountProfile.photoUrl);
+  const personalRecords = normalizePersonalRecords(payload.accountProfile.personalRecords);
   return {
     ...state,
     user: payload.user,
     accountProfile: {
       ...(photoUrl ? { photoUrl } : {}),
+      ...(personalRecords ? { personalRecords } : {}),
       updatedAt: Math.max(0, Number(payload.accountProfile.updatedAt) || 0),
     },
   } as ClubClaimResult;

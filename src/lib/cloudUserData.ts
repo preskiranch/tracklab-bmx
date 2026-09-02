@@ -2,6 +2,7 @@ import type { AccountProfile, BikeProfile, RaceViewPreferences, StudioRider, Tra
 import { normalizeRaceViewPreferences } from './raceViewPreferences';
 import { normalizeRiderPhotoDataUrl } from './riderPhotos';
 import { normalizeUnitPreferences } from './unitPreferences';
+import { normalizePersonalRecords } from './personalRecords';
 import type { StoredTrackMappings } from './trackMapping';
 import { createPatchBatcher } from './patchBatcher';
 
@@ -48,6 +49,9 @@ function normalizeCloudUserData(value: Partial<CloudUserData> | null | undefined
       ? {
         ...(normalizeRiderPhotoDataUrl(value.accountProfile.photoUrl)
           ? { photoUrl: normalizeRiderPhotoDataUrl(value.accountProfile.photoUrl) }
+          : {}),
+        ...(normalizePersonalRecords(value.accountProfile.personalRecords)
+          ? { personalRecords: normalizePersonalRecords(value.accountProfile.personalRecords) }
           : {}),
         updatedAt: Math.max(0, Number(value.accountProfile.updatedAt) || 0),
       }

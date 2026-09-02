@@ -30,6 +30,13 @@
 .get-pulled-athlete-select select{width:100%;min-height:44px;border:1px solid #c9d4c8;border-radius:10px;background:#fff;color:#172018;padding:0 11px;font:inherit;font-weight:700;text-transform:none;letter-spacing:normal}
 .get-pulled-athlete-select select:focus{outline:3px solid rgba(120,223,59,.28);outline-offset:1px;border-color:#62c92d}
 .get-pulled-athlete-select select:disabled{color:#758076;background:#edf1ed;cursor:not-allowed}
+.get-pulled-pr-editor{display:grid;gap:7px;margin-top:12px;padding:10px;border:1px solid #cfe7c2;border-radius:10px;background:#f6fcef}
+.get-pulled-pr-editor>label{color:#2f6e17;font-size:12px;font-weight:900;letter-spacing:.03em}
+.get-pulled-pr-editor-controls{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.get-pulled-pr-editor-controls input{min-width:0;flex:1 1 130px;min-height:38px;padding:7px 9px;border:1px solid #cdd6dc;border-radius:8px;background:#fff;color:#17202e;font:inherit}
+.get-pulled-pr-editor-controls button{min-height:38px;padding:7px 10px;border:1px solid #a9c99b;border-radius:8px;background:#7ade36;color:#102108;font:inherit;font-size:12px;font-weight:850}
+.get-pulled-pr-editor-controls button.secondary{background:#fff;color:#244c17}
+.get-pulled-pr-editor>small{color:#667085;font-size:11px}
 .get-pulled-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
 .get-pulled-metric{border:1px solid #dce4dc;background:#fff;border-radius:14px;padding:14px;text-align:center}
 .get-pulled-metric strong{display:block;font-size:clamp(24px,3.2vw,42px);font-variant-numeric:tabular-nums}
@@ -38,6 +45,14 @@
 .get-pulled-results h3{margin:0 0 12px}
 .get-pulled-results .get-pulled-metric{background:#18251c;border-color:#304435}
 .get-pulled-results .get-pulled-metric small{color:#b7c4b9}
+.get-pulled-peak-watts{position:relative}
+.get-pulled-pr-badge{display:flex;align-items:center;justify-content:center;gap:4px;min-height:22px;margin-top:6px;color:#2f6e17;font-size:11px;font-weight:900;letter-spacing:.02em}
+.get-pulled-pr-badge svg{flex:0 0 auto}
+.get-pulled-results .get-pulled-pr-badge{color:#b6f18e}
+.get-pulled-new-pr{animation:get-pulled-new-pr-flash 1.8s ease-out both}
+.get-pulled-new-pr .get-pulled-pr-badge{color:#102108;background:#7ade36;border-radius:999px;padding:3px 7px;animation:get-pulled-new-pr-badge 1.8s ease-out both}
+@keyframes get-pulled-new-pr-flash{0%,100%{box-shadow:0 0 0 0 rgba(122,222,54,0)}18%{box-shadow:0 0 0 8px rgba(122,222,54,.42)}45%{box-shadow:0 0 0 3px rgba(122,222,54,.2)}}
+@keyframes get-pulled-new-pr-badge{0%,100%{transform:scale(1)}20%{transform:scale(1.1)}45%{transform:scale(1.03)}}
 .get-pulled-actions{display:flex;gap:10px;justify-content:flex-end}
 .get-pulled-actions button{padding:0 18px}
 .get-pulled-actions button:disabled{opacity:.58;cursor:not-allowed}
@@ -67,4 +82,5 @@
   .get-pulled-overlay{inset:10px 10px auto}
   .get-pulled-phase{display:none}
 }
+@media(prefers-reduced-motion:reduce){.get-pulled-new-pr,.get-pulled-new-pr .get-pulled-pr-badge{animation:none}}
 .get-pulled-exit-fullscreen{position:fixed;top:max(12px,env(safe-area-inset-top));right:max(12px,env(safe-area-inset-right));z-index:2147483002;display:inline-flex;align-items:center;gap:7px;min-height:44px;padding:0 14px;border:1px solid rgba(255,255,255,.3);border-radius:10px;background:rgba(7,14,10,.9);color:#fff;font:inherit;font-weight:800;box-shadow:0 8px 24px rgba(0,0,0,.3)}

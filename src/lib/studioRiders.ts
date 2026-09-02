@@ -1,5 +1,6 @@
 import type { PlayerSlot, StudioRider, StudioRiderAssignments } from '../types';
 import { normalizeRiderPhotoDataUrl } from './riderPhotos';
+import { normalizePersonalRecords } from './personalRecords';
 
 export const studioRiderNameMaxLength = 64;
 export const studioRiderRosterMaxSize = 250;
@@ -33,11 +34,13 @@ export function normalizeStudioRider(value: unknown, fallbackNow = Date.now()): 
     ? undefined
     : Math.max(updatedAt, normalizeTimestamp(candidate.deletedAt, updatedAt));
   const photoUrl = normalizeRiderPhotoDataUrl(candidate.photoUrl);
+  const personalRecords = normalizePersonalRecords(candidate.personalRecords);
 
   return {
     id,
     name,
     ...(photoUrl ? { photoUrl } : {}),
+    ...(personalRecords ? { personalRecords } : {}),
     createdAt,
     updatedAt: deletedAt ?? updatedAt,
     ...(deletedAt ? { deletedAt } : {}),

@@ -4652,10 +4652,14 @@ function sanitizeUserDataPatch(value) {
           ? null
           : Math.max(updatedAt, finiteNumber(candidate.deletedAt, updatedAt));
         const photoUrl = sanitizeRiderPhotoDataUrl(candidate.photoUrl);
+        const hasPersonalRecords = Object.prototype.hasOwnProperty.call(candidate, 'personalRecords');
+        const personalRecords = sanitizePersonalRecords(candidate.personalRecords);
         return [{
           id,
           name,
           ...(photoUrl ? { photoUrl } : {}),
+          ...(personalRecords ? { personalRecords } : {}),
+          ...(hasPersonalRecords && candidate.personalRecords === null ? { personalRecords: null } : {}),
           createdAt,
           updatedAt: deletedAt ?? updatedAt,
           ...(deletedAt == null ? {} : { deletedAt }),
@@ -4665,8 +4669,12 @@ function sanitizeUserDataPatch(value) {
   }
   if (value.accountProfile && typeof value.accountProfile === 'object') {
     const photoUrl = sanitizeRiderPhotoDataUrl(value.accountProfile.photoUrl);
+    const hasPersonalRecords = Object.prototype.hasOwnProperty.call(value.accountProfile, 'personalRecords');
+    const personalRecords = sanitizePersonalRecords(value.accountProfile.personalRecords);
     patch.accountProfile = {
       ...(photoUrl ? { photoUrl } : {}),
+      ...(personalRecords ? { personalRecords } : {}),
+      ...(hasPersonalRecords && value.accountProfile.personalRecords === null ? { personalRecords: null } : {}),
       updatedAt: Math.max(0, Math.round(finiteNumber(value.accountProfile.updatedAt, Date.now()))),
     };
   }
@@ -7483,6 +7491,14 @@ async function loadClubTabletRoster(device) {
       const photoUrl = sanitizeRiderPhotoDataUrl(
         claimedUserData?.accountProfile?.photoUrl || rider.photoUrl,
       );
+      const ownerRecords = sanitizePersonalRecords(rider.personalRecords);
+      const claimedRecords = sanitizePersonalRecords(claimedUserData?.accountProfile?.personalRecords);
+      const recordCandidates = [ownerRecords, claimedRecords]
+        .filter(Boolean)
+        .sort((left, right) => (
+          (right.getPulledMaxWatts ?? 0) - (left.getPulledMaxWatts ?? 0)
+        ));
+      const personalRecords = recordCandidates[0] ?? null;
       const watchConnect = claimedProfile ? watchByRiderId.get(rider.id) : null;
       return {
         studioRiderId: sanitizeText(rider.id, '', 160),
@@ -7500,6 +7516,7 @@ async function loadClubTabletRoster(device) {
           },
         } : {}),
         ...(photoUrl ? { photoUrl } : {}),
+        ...(personalRecords ? { personalRecords } : {}),
       };
     }));
   return {
@@ -9456,9 +9473,23 @@ function publicUserData(userData, user) {
   const { exploreRoutes: _exploreRoutes, ...profileData } = userData;
   return {
     ...profileData,
+    accountProfile: {
+      ...(sanitizeRiderPhotoDataUrl(profileData.accountProfile?.photoUrl)
+        ? { photoUrl: sanitizeRiderPhotoDataUrl(profileData.accountProfile.photoUrl) }
+        : {}),
+      ...(sanitizePersonalRecords(profileData.accountProfile?.personalRecords)
+        ? { personalRecords: sanitizePersonalRecords(profileData.accountProfile.personalRecords) }
+        : {}),
+      updatedAt: Math.max(0, Math.round(finiteNumber(profileData.accountProfile?.updatedAt, 0))),
+    },
     unitPreferences: sanitizeUnitPreferences(profileData.unitPreferences),
     studioRiders: canManageClubConnect(user) && Array.isArray(profileData.studioRiders)
-      ? profileData.studioRiders
+      ? profileData.studioRiders.map((rider) => ({
+        ...rider,
+        ...(sanitizePersonalRecords(rider?.personalRecords)
+          ? { personalRecords: sanitizePersonalRecords(rider.personalRecords) }
+          : {}),
+      }))
       : [],
   };
 }
@@ -9468,24 +9499,32 @@ function saveMergedUserData(profileKey, patch) {
   const operation = previousWrite
     .catch(() => undefined)
     .then(async () => {
-      let mergedPatch = patch;
-      if (patch.raceViewPreferences || patch.exploreRoutes || patch.unitPreferences) {
-        const current = await persistence.loadUserData(profileKey);
+      let current = typeof patch === 'function'
+        ? await persistence.loadUserData(profileKey)
+        : null;
+      let mergedPatch = typeof patch === 'function' ? await patch(current) : patch;
+      if (!mergedPatch) return current;
+      if (!current && (mergedPatch.accountProfile || mergedPatch.studioRiders)) {
+        current = await persistence.loadUserData(profileKey);
+      }
+      mergedPatch = mergePersonalRecordsIntoUserDataPatch(current, mergedPatch);
+      if (mergedPatch.raceViewPreferences || mergedPatch.exploreRoutes || mergedPatch.unitPreferences) {
+        const preferenceCurrent = current ?? await persistence.loadUserData(profileKey);
         mergedPatch = {
-          ...patch,
-          ...(patch.raceViewPreferences ? {
+          ...mergedPatch,
+          ...(mergedPatch.raceViewPreferences ? {
             raceViewPreferences: mergeSavedRaceViewPreferences(
-              current?.raceViewPreferences,
-              patch.raceViewPreferences,
+              preferenceCurrent?.raceViewPreferences,
+              mergedPatch.raceViewPreferences,
             ),
           } : {}),
-          ...(patch.exploreRoutes ? {
-            exploreRoutes: mergeExploreRouteHistory(patch.exploreRoutes, current?.exploreRoutes),
+          ...(mergedPatch.exploreRoutes ? {
+            exploreRoutes: mergeExploreRouteHistory(mergedPatch.exploreRoutes, preferenceCurrent?.exploreRoutes),
           } : {}),
-          ...(patch.unitPreferences ? {
+          ...(mergedPatch.unitPreferences ? {
             unitPreferences: mergeSavedUnitPreferences(
-              current?.unitPreferences,
-              patch.unitPreferences,
+              preferenceCurrent?.unitPreferences,
+              mergedPatch.unitPreferences,
             ),
           } : {}),
         };
@@ -9500,6 +9539,164 @@ function saveMergedUserData(profileKey, patch) {
     }
   });
   return operation;
+}
+
+const getPulledPersonalRecordMaxWatts = 5_000;
+
+function sanitizePersonalRecords(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const watts = Number(value.getPulledMaxWatts);
+  if (!Number.isFinite(watts)) return null;
+  const roundedWatts = Math.round(watts);
+  if (roundedWatts <= 0 || roundedWatts > getPulledPersonalRecordMaxWatts) return null;
+  const source = value.getPulledMaxWattsSource === 'recorded' || value.getPulledMaxWattsSource === 'manual'
+    ? value.getPulledMaxWattsSource
+    : null;
+  const updatedAtValue = Number(value.getPulledMaxWattsUpdatedAt);
+  const updatedAt = Number.isFinite(updatedAtValue) && updatedAtValue > 0
+    ? Math.round(updatedAtValue)
+    : null;
+  return {
+    getPulledMaxWatts: roundedWatts,
+    ...(source ? { getPulledMaxWattsSource: source } : {}),
+    ...(updatedAt ? { getPulledMaxWattsUpdatedAt: updatedAt } : {}),
+  };
+}
+
+function mergePersonalRecordValues(currentValue, incomingValue) {
+  const current = sanitizePersonalRecords(currentValue);
+  if (incomingValue === null) return null;
+  const incoming = sanitizePersonalRecords(incomingValue);
+  if (!incoming) return current;
+  if (!current || incoming.getPulledMaxWatts > current.getPulledMaxWatts) return incoming;
+  if (incoming.getPulledMaxWatts < current.getPulledMaxWatts) return current;
+  const currentUpdatedAt = Number(current.getPulledMaxWattsUpdatedAt) || 0;
+  const incomingUpdatedAt = Number(incoming.getPulledMaxWattsUpdatedAt) || 0;
+  return incomingUpdatedAt >= currentUpdatedAt ? incoming : current;
+}
+
+/** Preserve max-watts records when an older client sends a full roster/photo patch. */
+function mergePersonalRecordsIntoUserDataPatch(current, patch) {
+  if (!current || !patch || typeof patch !== 'object') return patch;
+  let next = patch;
+  if (patch.accountProfile && typeof patch.accountProfile === 'object') {
+    const currentProfile = current.accountProfile && typeof current.accountProfile === 'object'
+      ? current.accountProfile
+      : {};
+    const hasIncoming = Object.prototype.hasOwnProperty.call(patch.accountProfile, 'personalRecords');
+    const mergedRecords = hasIncoming
+      ? mergePersonalRecordValues(currentProfile.personalRecords, patch.accountProfile.personalRecords)
+      : mergePersonalRecordValues(currentProfile.personalRecords, undefined);
+    const nextProfile = { ...patch.accountProfile };
+    if (mergedRecords) nextProfile.personalRecords = mergedRecords;
+    else if (hasIncoming && patch.accountProfile.personalRecords === null) nextProfile.personalRecords = null;
+    else delete nextProfile.personalRecords;
+    next = { ...next, accountProfile: nextProfile };
+  }
+  if (Array.isArray(patch.studioRiders)) {
+    const currentRiders = Array.isArray(current.studioRiders) ? current.studioRiders : [];
+    const currentById = new Map(currentRiders.map((rider) => [rider?.id, rider]));
+    next = {
+      ...next,
+      studioRiders: patch.studioRiders.map((rider) => {
+        const previous = currentById.get(rider?.id);
+        if (!previous) return rider;
+        const hasIncoming = Object.prototype.hasOwnProperty.call(rider, 'personalRecords');
+        const mergedRecords = hasIncoming
+          ? mergePersonalRecordValues(previous.personalRecords, rider.personalRecords)
+          : mergePersonalRecordValues(previous.personalRecords, undefined);
+        if (mergedRecords) return { ...rider, personalRecords: mergedRecords };
+        if (hasIncoming && rider.personalRecords === null) return rider;
+        const { personalRecords: _personalRecords, ...withoutRecords } = rider;
+        return withoutRecords;
+      }),
+    };
+  }
+  return next;
+}
+
+function getRecordedGetPulledPeakWatts(session) {
+  if (session?.activityType !== 'get-pulled') return null;
+  const peaks = [];
+  const visit = (value, depth = 0) => {
+    if (depth > 12 || value == null) return;
+    if (Array.isArray(value)) {
+      value.forEach((entry) => visit(entry, depth + 1));
+      return;
+    }
+    if (typeof value !== 'object') return;
+    Object.entries(value).forEach(([key, nested]) => {
+      const normalizedKey = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+      if (['peakwatts', 'topwatts', 'maxwatts', 'maximumwatts'].includes(normalizedKey)) {
+        const watts = Number(nested);
+        if (Number.isFinite(watts) && watts > 0 && watts <= getPulledPersonalRecordMaxWatts) {
+          peaks.push(Math.round(watts));
+        }
+        return;
+      }
+      visit(nested, depth + 1);
+    });
+  };
+  visit(session.details);
+  return peaks.length > 0 ? Math.max(...peaks) : null;
+}
+
+/**
+ * Promote a recorded Get Pulled peak into the private athlete benchmark.
+ * A function patch is used so several group riders update the same owner's
+ * roster serially without one result overwriting another.
+ */
+function persistRecordedGetPulledPersonalBest({ profileKey, studioRiderId = null, sessions = [] }) {
+  if (!profileKey || !Array.isArray(sessions)) return Promise.resolve(false);
+  const peakWatts = sessions.reduce((maximum, session) => (
+    Math.max(maximum, getRecordedGetPulledPeakWatts(session) ?? 0)
+  ), 0);
+  if (peakWatts <= 0) return Promise.resolve(false);
+  const now = Date.now();
+  return saveMergedUserData(profileKey, async (current) => {
+    const data = current ?? {};
+    const currentRiders = Array.isArray(data.studioRiders) ? data.studioRiders : [];
+    if (studioRiderId) {
+      const index = currentRiders.findIndex((rider) => rider?.id === studioRiderId);
+      if (index < 0) return null;
+      const rider = currentRiders[index];
+      const currentRecords = sanitizePersonalRecords(rider.personalRecords);
+      if (currentRecords?.getPulledMaxWatts >= peakWatts) return null;
+      const nextRecords = {
+        ...(currentRecords ?? {}),
+        getPulledMaxWatts: peakWatts,
+        getPulledMaxWattsSource: 'recorded',
+        getPulledMaxWattsUpdatedAt: now,
+      };
+      const nextRiders = currentRiders.map((candidate, candidateIndex) => (
+        candidateIndex === index
+          ? { ...candidate, personalRecords: nextRecords, updatedAt: Math.max(
+            Number(candidate.updatedAt) || 0,
+            now,
+          ) }
+          : candidate
+      ));
+      return { studioRiders: nextRiders };
+    }
+    const currentProfile = data.accountProfile && typeof data.accountProfile === 'object'
+      ? data.accountProfile
+      : {};
+    const currentRecords = sanitizePersonalRecords(currentProfile.personalRecords);
+    if (currentRecords?.getPulledMaxWatts >= peakWatts) return null;
+    const photoUrl = sanitizeRiderPhotoDataUrl(currentProfile.photoUrl);
+    return {
+      accountProfile: {
+        ...(photoUrl ? { photoUrl } : {}),
+        personalRecords: {
+          ...(currentRecords ?? {}),
+          getPulledMaxWatts: peakWatts,
+          getPulledMaxWattsSource: 'recorded',
+          getPulledMaxWattsUpdatedAt: now,
+        },
+        updatedAt: Math.max(Number(currentProfile.updatedAt) || 0, now),
+      },
+    };
+  }).then(() => true).catch(() => false);
 }
 
 function sanitizeTrackPoint(value) {
@@ -17291,6 +17488,17 @@ async function handleClubGroupTrainingHistoryApi(request, response, requestUrl) 
           profileKey,
         ]), storedSession);
       });
+      await Promise.all(saved.sessions.flatMap((storedSession) => [
+        persistRecordedGetPulledPersonalBest({
+          profileKey: storedSession._profileKey,
+          sessions: [storedSession],
+        }),
+        persistRecordedGetPulledPersonalBest({
+          profileKey,
+          studioRiderId: storedSession._studioRiderId,
+          sessions: [storedSession],
+        }),
+      ]));
     }
     writeJson(response, saved.status === 'saved' ? 201 : 200, {
       authorization: publicClubGroupTrainingAuthorization(saved.authorization, now),
@@ -21789,6 +21997,17 @@ async function serveStatic(request, response) {
       identity.profileKey,
       tabletSession.ownerProfileKey,
     ]), saved);
+    await Promise.all([
+      ...(identity.member.status === 'claimed' ? [persistRecordedGetPulledPersonalBest({
+        profileKey: identity.profileKey,
+        sessions: [saved],
+      })] : []),
+      persistRecordedGetPulledPersonalBest({
+        profileKey: tabletSession.ownerProfileKey,
+        studioRiderId: tabletSession.studioRiderId,
+        sessions: [saved],
+      }),
+    ]);
     writeJson(response, existing ? 200 : 201, {
       session: publicTrainingSession(
         saved,
@@ -22763,11 +22982,17 @@ async function serveStatic(request, response) {
       ...(sanitizeRiderPhotoDataUrl(storedAccountProfile.photoUrl)
         ? { photoUrl: sanitizeRiderPhotoDataUrl(storedAccountProfile.photoUrl) }
         : {}),
+      ...(sanitizePersonalRecords(storedAccountProfile.personalRecords)
+        ? { personalRecords: sanitizePersonalRecords(storedAccountProfile.personalRecords) }
+        : {}),
       updatedAt: Math.max(0, Math.round(finiteNumber(storedAccountProfile.updatedAt, 0))),
     };
     if (photoWasSubmitted) {
       accountProfile = {
         ...(photoUrl ? { photoUrl } : {}),
+        ...(sanitizePersonalRecords(storedAccountProfile.personalRecords)
+          ? { personalRecords: sanitizePersonalRecords(storedAccountProfile.personalRecords) }
+          : {}),
         updatedAt: Date.now(),
       };
       const savedUserData = await persistence.saveUserData(profileKey, { accountProfile });
@@ -22988,6 +23213,17 @@ async function serveStatic(request, response) {
         await trainingHistoryRecipients(profileKey, saved, clubMembership),
         saved,
       );
+      await Promise.all([
+        persistRecordedGetPulledPersonalBest({
+          profileKey,
+          sessions: [saved],
+        }),
+        ...(clubMembership?.ownerProfileKey ? [persistRecordedGetPulledPersonalBest({
+          profileKey: clubMembership.ownerProfileKey,
+          studioRiderId: clubMembership.studioRiderId,
+          sessions: [saved],
+        })] : []),
+      ]);
       writeJson(response, 201, {
         session: publicTrainingSession(saved, requestedClubId ? 'athlete' : undefined),
         heartRate: {

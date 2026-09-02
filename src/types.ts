@@ -112,6 +112,7 @@ export type StudioRider = {
   id: string;
   name: string;
   photoUrl?: string;
+  personalRecords?: PersonalRecords;
   createdAt: number;
   updatedAt: number;
   deletedAt?: number;
@@ -493,7 +494,17 @@ export type AppMode = 'profile' | 'friends' | 'settings' | 'race' | 'results' | 
 
 export type AccountProfile = {
   photoUrl?: string;
+  personalRecords?: PersonalRecords;
   updatedAt: number;
+};
+
+export type PersonalRecordSource = 'recorded' | 'manual';
+
+/** Private athlete benchmarks. These values are never included in public race payloads. */
+export type PersonalRecords = {
+  getPulledMaxWatts?: number;
+  getPulledMaxWattsSource?: PersonalRecordSource;
+  getPulledMaxWattsUpdatedAt?: number;
 };
 
 export type UnitPreferences = {

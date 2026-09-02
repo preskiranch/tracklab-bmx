@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { personalRecordAchievements, previousPersonalBestTimes } from '../../src/lib/personalRecords';
+import {
+  getPulledMaxWatts,
+  normalizePersonalRecords,
+  personalRecordAchievements,
+  previousPersonalBestTimes,
+  recordGetPulledPersonalBest,
+  setManualGetPulledPersonalRecord,
+} from '../../src/lib/personalRecords';
 import type { GhostLap, PlayerSlot } from '../../src/types';
 
 const players: PlayerSlot[] = [
@@ -64,5 +71,50 @@ describe('personal race records', () => {
     expect(records[2]).toBeUndefined();
     expect(records[3]).toMatchObject({ finishTimeMs: 28_000, previousBestMs: 29_000, improvementMs: 1_000 });
     expect(records[4]).toBeUndefined();
+  });
+});
+
+describe('Get Pulled max-watts records', () => {
+  it('normalizes valid records and rejects unsafe values', () => {
+    expect(normalizePersonalRecords({
+      getPulledMaxWatts: '229.4',
+      getPulledMaxWattsSource: 'manual',
+      getPulledMaxWattsUpdatedAt: '123.6',
+      ignored: 'value',
+    })).toEqual({
+      getPulledMaxWatts: 229,
+      getPulledMaxWattsSource: 'manual',
+      getPulledMaxWattsUpdatedAt: 124,
+    });
+    expect(normalizePersonalRecords({ getPulledMaxWatts: 0 })).toBeUndefined();
+    expect(normalizePersonalRecords({ getPulledMaxWatts: 5_001 })).toBeUndefined();
+    expect(getPulledMaxWatts({ getPulledMaxWatts: 640 })).toBe(640);
+  });
+
+  it('supports an explicitly entered manual record', () => {
+    expect(setManualGetPulledPersonalRecord(1_125.4, 10_000)).toEqual({
+      getPulledMaxWatts: 1_125,
+      getPulledMaxWattsSource: 'manual',
+      getPulledMaxWattsUpdatedAt: 10_000,
+    });
+    expect(setManualGetPulledPersonalRecord(0, 10_000)).toBeUndefined();
+  });
+
+  it('only promotes a recorded peak when it beats the current record', () => {
+    const current = {
+      getPulledMaxWatts: 1_000,
+      getPulledMaxWattsSource: 'manual' as const,
+      getPulledMaxWattsUpdatedAt: 5,
+    };
+    expect(recordGetPulledPersonalBest(current, 999, 10)).toEqual(current);
+    expect(recordGetPulledPersonalBest(current, 1_250, 10)).toEqual({
+      getPulledMaxWatts: 1_250,
+      getPulledMaxWattsSource: 'recorded',
+      getPulledMaxWattsUpdatedAt: 10,
+    });
+    expect(recordGetPulledPersonalBest(undefined, 1_100, 10)).toMatchObject({
+      getPulledMaxWatts: 1_100,
+      getPulledMaxWattsSource: 'recorded',
+    });
   });
 });
