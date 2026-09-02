@@ -477,7 +477,7 @@ export function TrainingTrackZoneReview({
         <small style={{ color: '#64748b' }}>{review.track?.name ?? session.trackName ?? 'Historical track'}</small>
       </header>
       <div className="training-zone-review__layout" style={{ padding: 12 }}>
-        <figure style={{ margin: 0, minWidth: 0 }} aria-label={mapLabel(review, selected)}>
+        <figure className="training-zone-review__map-figure" style={{ margin: 0, minWidth: 0 }} aria-label={mapLabel(review, selected)}>
           <div className="training-zone-review__map" style={mapFrame}>
             <div aria-hidden={satelliteVisible}><Schematic review={review} selectedId={effectiveSelectedId ?? null} /></div>
             <div ref={mapHostRef} style={{ ...fill, opacity: satelliteVisible ? 1 : 0, zIndex: satelliteVisible ? 2 : 0, pointerEvents: satelliteVisible ? 'auto' : 'none' }} aria-hidden={!satelliteVisible} />
@@ -489,7 +489,7 @@ export function TrainingTrackZoneReview({
           </div>
           <figcaption style={{ paddingTop: 7, color: '#64748b', fontSize: 12 }}>{review.note}</figcaption>
         </figure>
-        <div role="region" tabIndex={0} aria-label="Recorded track zone spreadsheet" style={{ maxHeight: 360, overflow: 'auto', border: '1px solid #d8e0e8', borderRadius: 10 }}>
+        <div className="training-zone-review__data" role="region" tabIndex={0} aria-label="Recorded track zone spreadsheet">
           {review.zones.length > 0 ? (
             <table style={{ borderCollapse: 'separate', borderSpacing: 0, minWidth: 1240, width: '100%', fontVariantNumeric: 'tabular-nums' }}>
               <caption style={{ padding: 8, textAlign: 'left', fontWeight: 800, color: '#111827' }}>Recorded zone data · select a zone to review it on the map when current geometry supports placement</caption>

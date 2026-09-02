@@ -7510,7 +7510,12 @@ test('club athletes see only their own connection and never the studio roster', 
   const desktopGridBox = await zoneGrid.boundingBox();
   expect(desktopMapBox).not.toBeNull();
   expect(desktopGridBox).not.toBeNull();
-  expect(desktopGridBox!.x).toBeGreaterThan(desktopMapBox!.x + desktopMapBox!.width - 2);
+  // Historical review keeps the map at the top and puts the complete zone
+  // spreadsheet beneath it, so the data has the whole available width rather
+  // than a narrow side panel beside the map.
+  expect(desktopGridBox!.y).toBeGreaterThan(desktopMapBox!.y + desktopMapBox!.height);
+  expect(Math.abs(desktopGridBox!.x - desktopMapBox!.x)).toBeLessThanOrEqual(2);
+  expect(Math.abs(desktopGridBox!.width - desktopMapBox!.width)).toBeLessThanOrEqual(2);
 
   // Zone choice updates only the existing highlights. It cannot remount the
   // review or recreate the live map just to switch the selected zone.
