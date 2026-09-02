@@ -587,7 +587,10 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   await expect(createAccount).toBeDisabled();
   releaseRegistration?.();
 
-  await expect(page.getByRole('heading', { name: 'Your BMX home base.' })).toBeVisible();
+  // Signing in from a public directory retains that requested Community tab;
+  // the locator URL itself is consumed. A later ordinary reload returns to
+  // Community Home.
+  await expect(page.getByRole('heading', { name: 'Global BMX tracks' })).toBeVisible();
   await expect(page).not.toHaveURL(/locator=/);
   await page.getByRole('button', { name: 'Open App', exact: true }).click();
   await expect(page.getByLabel('Race controls')).toBeVisible();
