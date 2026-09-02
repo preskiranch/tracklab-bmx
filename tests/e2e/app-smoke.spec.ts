@@ -6264,9 +6264,15 @@ test('completed race finishes the active sentence and authoritative placements b
       }).__tracklabLiveDebug?.raceState === 'finished'
     ))
   ), { timeout: 60_000 }).toBe(true);
-  if (await finishCountdown.isVisible()) {
-    await expect(finishCountdown.locator('strong')).toHaveText(/10|[1-9]/);
-    await expect(finishCountdown).toContainText('remaining riders still racing');
+  // The finish overlay is intentionally transient. It can finish its final
+  // second between the visibility check above and a nested locator assertion,
+  // so capture the overlay atomically when it is still on screen instead of
+  // waiting for a child that may already have unmounted.
+  const finishCountdownText = await page.evaluate(() => (
+    document.querySelector<HTMLElement>('.race-finish-countdown')?.innerText ?? null
+  ));
+  if (finishCountdownText) {
+    expect(finishCountdownText).toMatch(/(?:10|[1-9]).*remaining riders still racing/is);
   }
   await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
   const raceStillActive = await page.evaluate(() => (
