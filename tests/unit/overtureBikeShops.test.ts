@@ -79,6 +79,13 @@ describe('preloaded Overture bike shop catalog', () => {
           truncated: false,
           shops: [{ name: 'Precision Bicycle' }, { name: "Ray's Cycle" }],
         });
+      expect(await catalog.searchByName({ query: 'rays cycle' })).toMatchObject({
+        query: 'rays cycle',
+        total: 1,
+        truncated: false,
+        shops: [{ name: "Ray's Cycle", address: { countryCode: 'US' } }],
+      });
+      await expect(catalog.searchByName({ query: 'r' })).rejects.toThrow('at least 2 characters');
       expect(await catalog.stats()).toMatchObject({ count: 4, release: '2026-08-19.0' });
     } finally {
       await rm(directory, { recursive: true, force: true });

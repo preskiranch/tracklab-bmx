@@ -257,6 +257,16 @@ function hierarchyText(value, maximumLength) {
   return candidate;
 }
 
+function nameSearchText(value, maximumLength = 180) {
+  return hierarchyText(value, maximumLength)
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[\u0027\u2019]/gu, '')
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
 function hierarchyKey(countryCode, region, locality) {
   return `${countryCode}\u0000${region}\u0000${locality}`;
 }
@@ -484,6 +494,60 @@ export function createOvertureBikeShopCatalog(options = {}) {
       const catalog = await load();
       const index = catalog.byId.get(String(elementId || '').toLowerCase());
       return index === undefined ? null : materializeCatalogRecord(catalog.shops[index]);
+    },
+    async searchByName(input = {}) {
+      const catalog = await load();
+      const request = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+      const query = hierarchyText(request.query, 180);
+      const normalizedQuery = nameSearchText(query);
+      const terms = normalizedQuery.split(/\s+/u).filter(Boolean);
+      if (normalizedQuery.length < 2 || terms.length === 0) {
+        throw new RangeError('Enter at least 2 characters of a bike shop name.');
+      }
+      const rawOffset = request.offset === undefined || request.offset === null || request.offset === ''
+        ? 0
+        : Number(request.offset);
+      if (!Number.isInteger(rawOffset) || rawOffset < 0 || rawOffset > maximumCatalogRecords) {
+        throw new RangeError('The bike shop name search page is invalid.');
+      }
+      const matches = [];
+      for (let index = 0; index < catalog.shops.length; index += 1) {
+        const tuple = catalog.shops[index];
+        const normalizedName = nameSearchText(tuple[1]);
+        if (!normalizedName || !terms.every((term) => normalizedName.includes(term))) continue;
+        const rank = normalizedName === normalizedQuery
+          ? 0
+          : normalizedName.startsWith(normalizedQuery)
+            ? 1
+            : normalizedName.includes(normalizedQuery)
+              ? 2
+              : 3;
+        matches.push({ index, normalizedName, rank });
+      }
+      matches.sort((left, right) => (
+        left.rank - right.rank
+        || left.normalizedName.localeCompare(right.normalizedName)
+        || catalog.shops[left.index][1].localeCompare(catalog.shops[right.index][1])
+        || catalog.shops[left.index][0].localeCompare(catalog.shops[right.index][0])
+      ));
+      const selectedIndexes = matches.slice(rawOffset, rawOffset + maximumBrowseRecords).map(({ index }) => index);
+      const selected = selectedIndexes.map((index) => materializeCatalogRecord(catalog.shops[index]));
+      const longitudeExtent = minimalLongitudeExtent(selected.map((shop) => shop.longitude));
+      const bounds = selected.length > 0 ? {
+        north: Math.max(...selected.map((shop) => shop.latitude)),
+        south: Math.min(...selected.map((shop) => shop.latitude)),
+        east: longitudeExtent.east,
+        west: longitudeExtent.west,
+      } : null;
+      return {
+        query,
+        shops: selected,
+        offset: rawOffset,
+        limit: selected.length,
+        truncated: rawOffset + selected.length < matches.length,
+        total: matches.length,
+        bounds,
+      };
     },
     async hierarchy(input = {}) {
       const catalog = await load();

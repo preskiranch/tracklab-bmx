@@ -624,6 +624,7 @@ test('country selection immediately lists Australian catalog shops before a city
   const country = directory.getByRole('combobox', { name: 'Country', exact: true });
   const region = directory.getByRole('combobox', { name: 'State / province', exact: true });
   const results = directory.getByRole('list', { name: 'Loaded bike shop listings' }).getByRole('button');
+  await expect(country.locator('option').nth(1)).toHaveText(/United States/);
   await country.selectOption('AU');
   await expect(directory.getByText('1 mapped bike shop', { exact: true })).toBeVisible();
   await expect(results).toHaveCount(1);

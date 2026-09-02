@@ -17923,6 +17923,52 @@ async function serveStatic(request, response) {
     }
     return;
   }
+  if (requestUrl.pathname === '/api/bike-shops/search') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (!enforceNoStoreRateLimit(
+      request,
+      response,
+      bikeShopDirectoryRateLimiter,
+      60,
+      'bike-shop-name-search',
+    )) return;
+    if (requestUrl.search) {
+      writeJson(response, 400, {
+        error: 'Bike shop name searches must be sent in the JSON request body.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    try {
+      const payload = await readJsonBody(request, 2_048);
+      const result = await overtureBikeShopCatalog.searchByName(payload);
+      const shops = await publicBikeShopsWithClaimBadges(result.shops, 'name-search');
+      writeJson(response, 200, {
+        ...result,
+        shops,
+        attributions: bikeShopDirectoryAttributions.slice(0, 1),
+      }, { 'Cache-Control': 'private, no-store' });
+    } catch (error) {
+      if (writeBikeShopClaimStorageUnavailable(error, response)) return;
+      if (error instanceof HttpRequestError) {
+        writeJson(response, error.statusCode, { error: error.message }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (error instanceof RangeError) {
+        writeJson(response, 400, { error: error.message }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      cloudTelemetry.warn('bike_shop_name_search.catalog_failed', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      writeJson(response, 503, {
+        error: 'Bike shops matching that name are temporarily unavailable.',
+      }, { 'Cache-Control': 'no-store' });
+    }
+    return;
+  }
   if (requestUrl.pathname === '/api/bike-shops/viewport') {
     if (request.method !== 'POST') {
       writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });

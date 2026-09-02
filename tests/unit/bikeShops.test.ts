@@ -12,6 +12,7 @@ import {
   listBikeShopHierarchy,
   listMyBikeShopClaimRequests,
   reviewBikeShopClaimRequest,
+  searchBikeShopsByName,
   searchNearbyBikeShops,
   submitBikeShopClaimRequest,
   withdrawBikeShopClaimRequest,
@@ -142,6 +143,30 @@ describe('public bike shop directory client', () => {
     expect(fetcher).toHaveBeenCalledWith('/api/bike-shops/nearby', expect.objectContaining({
       signal: controller.signal,
     }));
+  });
+
+  it('searches the published catalog by bike shop name with paging metadata', async () => {
+    const fetcher = vi.fn(async () => jsonResponse({
+      query: "Ray's Cycle",
+      shops: [
+        { id: 'ray', name: "Ray's Cycle", latitude: 38.3, longitude: -121.8, links: {} },
+      ],
+      offset: 0,
+      limit: 500,
+      total: 1,
+      truncated: false,
+      bounds: { north: 38.3, south: 38.3, east: -121.8, west: -121.8 },
+      attributions: [],
+    }));
+    const result = await searchBikeShopsByName("Ray's Cycle", { fetcher });
+    expect(fetcher).toHaveBeenCalledWith('/api/bike-shops/search', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ query: "Ray's Cycle", offset: 0 }),
+    }));
+    expect(result.query).toBe("Ray's Cycle");
+    expect(result.shops.map((shop) => shop.name)).toEqual(["Ray's Cycle"]);
+    expect(result.bounds).toEqual({ north: 38.3, south: 38.3, east: -121.8, west: -121.8 });
+    await expect(searchBikeShopsByName('R', { fetcher })).rejects.toMatchObject({ status: 400 });
   });
 
   it('finds tracks within 50 miles of the selected shop and sorts them nearest first', () => {

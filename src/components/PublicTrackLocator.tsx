@@ -89,6 +89,7 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
   const favoriteMutationRef = useRef<object | null>(null);
   const shareDialogRef = useRef<HTMLElement | null>(null);
   const shareTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const randomTrackIdRef = useRef<string | null>(initialLocator.id || initialLocator.invalid ? 'linked' : null);
   const directoryTracks: TrackLocatorRecord[] = publicTracks ?? tracks;
   const directoryReady = publicTracks !== null || (publicDirectoryFailed && catalogReady);
 
@@ -147,7 +148,12 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
     [directoryTracks],
   );
   const countries = useMemo(
-    () => [...new Set(sortedTracks.map((track) => track.country))],
+    () => [...new Set(sortedTracks.map((track) => track.country))].sort((left, right) => {
+      const leftIsUnitedStates = left.trim().toLocaleLowerCase() === 'united states';
+      const rightIsUnitedStates = right.trim().toLocaleLowerCase() === 'united states';
+      if (leftIsUnitedStates !== rightIsUnitedStates) return leftIsUnitedStates ? -1 : 1;
+      return left.localeCompare(right);
+    }),
     [sortedTracks],
   );
   const regions = useMemo(
@@ -217,6 +223,16 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
         if (generation === accountGenerationRef.current) setFavoritesLoading(false);
       });
   }, [accountId]);
+
+  useEffect(() => {
+    if (!directoryReady || linkedTrackRequested || randomTrackIdRef.current || sortedTracks.length === 0) {
+      return;
+    }
+    const randomIndex = Math.floor(Math.random() * sortedTracks.length);
+    const randomTrack = sortedTracks[randomIndex] ?? sortedTracks[0];
+    randomTrackIdRef.current = randomTrack.id;
+    setSelectedTrackId(randomTrack.id);
+  }, [directoryReady, linkedTrackRequested, sortedTracks]);
 
   useEffect(() => {
     if (!directoryReady || !selectedTrack || selectedTrack.id === selectedTrackId) {

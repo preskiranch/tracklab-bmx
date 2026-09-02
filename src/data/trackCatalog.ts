@@ -369,7 +369,12 @@ function routeDefaults(track: TrackRecord): TrackRecord {
 export const trackCatalog: TrackRecord[] = seedTrackCatalog.map(routeDefaults);
 
 export function countriesForCatalog(catalog: TrackRecord[] = trackCatalog) {
-  return [...new Set(catalog.map((track) => track.country))].sort();
+  return [...new Set(catalog.map((track) => track.country))].sort((left, right) => {
+    const leftIsUnitedStates = left.trim().toLocaleLowerCase() === 'united states';
+    const rightIsUnitedStates = right.trim().toLocaleLowerCase() === 'united states';
+    if (leftIsUnitedStates !== rightIsUnitedStates) return leftIsUnitedStates ? -1 : 1;
+    return left.localeCompare(right);
+  });
 }
 
 export function statesForCountry(country: string, catalog: TrackRecord[] = trackCatalog) {

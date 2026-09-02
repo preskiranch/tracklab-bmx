@@ -112,6 +112,17 @@ export type BikeShopDirectoryBrowseResponse = {
   attributions: BikeShopAttribution[];
 };
 
+export type BikeShopNameSearchResponse = {
+  query: string;
+  shops: BikeShopRecord[];
+  offset: number;
+  limit: number;
+  total: number;
+  truncated: boolean;
+  bounds: { north: number; south: number; east: number; west: number } | null;
+  attributions: BikeShopAttribution[];
+};
+
 // Kept as an alias so callers that specifically browse a city retain the
 // descriptive type while the directory can now page country- and region-wide
 // listings too.
@@ -763,6 +774,67 @@ export async function browseBikeShopsByCity(
   signal?: AbortSignal,
 ) {
   return browseBikeShopsByScope(location, fetcher, signal);
+}
+
+export async function searchBikeShopsByName(
+  query: string,
+  options: {
+    offset?: number;
+    fetcher?: typeof fetch;
+    signal?: AbortSignal;
+  } = {},
+) {
+  const cleanQuery = cleanText(query, 180);
+  if (cleanQuery.length < 2) {
+    throw new BikeShopDirectoryError('Enter at least 2 characters of a bike shop name.', 400);
+  }
+  const offset = options.offset === undefined
+    ? 0
+    : Math.round(Number(options.offset));
+  if (!Number.isInteger(offset) || offset < 0 || offset > 200_000) {
+    throw new BikeShopDirectoryError('The bike shop name search page is invalid.', 400);
+  }
+  const fetcher = options.fetcher ?? fetch;
+  const response = await fetcher('/api/bike-shops/search', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: cleanQuery, offset }),
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok) {
+    throw new BikeShopDirectoryError(
+      cleanText(payload.error, 240) || `The bike shop name search returned ${response.status}.`,
+      response.status,
+    );
+  }
+  const rawBounds = payload.bounds && typeof payload.bounds === 'object'
+    ? payload.bounds as Record<string, unknown>
+    : {};
+  const north = finiteNumber(rawBounds.north);
+  const south = finiteNumber(rawBounds.south);
+  const east = finiteNumber(rawBounds.east);
+  const west = finiteNumber(rawBounds.west);
+  const bounds = north !== null && south !== null && east !== null && west !== null
+    && north >= south && north <= 90 && south >= -90
+    && east >= -180 && east <= 180 && west >= -180 && west <= 180
+    ? { north, south, east, west }
+    : null;
+  const shops = normalizeShops(payload.shops, maximumViewportResponseShops);
+  const total = Math.max(shops.length, Math.min(200_000, Math.round(finiteNumber(payload.total) ?? shops.length)));
+  const responseOffset = Math.max(0, Math.min(200_000, Math.round(finiteNumber(payload.offset) ?? offset)));
+  const responseLimit = Math.max(0, Math.min(maximumViewportResponseShops, Math.round(finiteNumber(payload.limit) ?? shops.length)));
+  return {
+    query: cleanText(payload.query, 180) || cleanQuery,
+    shops,
+    offset: responseOffset,
+    limit: responseLimit,
+    total,
+    truncated: payload.truncated === true || responseOffset + shops.length < total,
+    bounds,
+    attributions: normalizeAttributions(payload.attributions),
+  } satisfies BikeShopNameSearchResponse;
 }
 
 export class BikeShopDirectoryError extends Error {

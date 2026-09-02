@@ -172,6 +172,25 @@ describe('public bike shop viewport API', () => {
     expect(browseBody.total).toBeGreaterThan(0);
     expect(browseBody.shops.length).toBeGreaterThan(0);
     expect(browseBody.shops.every((shop: any) => shop.address.countryCode === 'AU')).toBe(true);
+
+    expect((await request('/api/bike-shops/search')).status).toBe(405);
+    const nameSearch = await request('/api/bike-shops/search', {
+      method: 'POST',
+      body: { query: 'Bike' },
+    });
+    expect(nameSearch.status).toBe(200);
+    expect(nameSearch.headers.get('cache-control')).toContain('private');
+    expect(nameSearch.headers.get('ratelimit-limit')).toBe('60');
+    const nameSearchBody = await nameSearch.json() as any;
+    expect(nameSearchBody).toMatchObject({
+      query: 'Bike',
+      offset: 0,
+      limit: 500,
+      total: expect.any(Number),
+      truncated: true,
+    });
+    expect(nameSearchBody.total).toBeGreaterThan(nameSearchBody.shops.length);
+    expect(nameSearchBody.shops.every((shop: any) => /bike/iu.test(shop.name))).toBe(true);
   });
 
   it('uses a bounded body-only contract with exact post-filtering and private responses', async () => {

@@ -303,6 +303,48 @@ test('public bike shop search is useful and contained on phone, tablet, and desk
   })).toBeVisible();
 });
 
+test('searches the catalog by bike shop name', async ({ page }) => {
+  const nameShop = {
+    ...nearestShop,
+    id: 'overture:11111111-1111-4111-8111-111111111111',
+    name: "Ray's Cycle",
+    source: {
+      provider: 'Overture Maps',
+      elementType: 'place',
+      elementId: '11111111-1111-4111-8111-111111111111',
+      url: 'https://docs.overturemaps.org/guides/places/',
+    },
+  };
+  let searchBody: Record<string, unknown> | null = null;
+  await page.route('**/api/bike-shops/search', async (route) => {
+    searchBody = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        query: searchBody!.query,
+        shops: [nameShop],
+        offset: 0,
+        limit: 500,
+        total: 1,
+        truncated: false,
+        bounds: { north: nameShop.latitude, south: nameShop.latitude, east: nameShop.longitude, west: nameShop.longitude },
+        attributions: [],
+      }),
+    });
+  });
+
+  await page.goto('/#bike-shop-directory');
+  const directory = page.locator('#bike-shop-directory');
+  await directory.getByRole('button', { name: 'Bike shop name' }).click();
+  const input = directory.locator('input[type="search"]');
+  await expect(input).toHaveAttribute('placeholder', /Shop name/);
+  await input.fill("Ray's Cycle");
+  await directory.getByRole('button', { name: 'Search shop name' }).click();
+  await expect(directory.getByText('1 name match', { exact: true })).toBeVisible();
+  await expect(directory.getByRole('button', { name: /Ray's Cycle/ })).toBeVisible();
+  expect(searchBody).toEqual({ query: "Ray's Cycle", offset: 0 });
+});
+
 test('administrator claim review exposes canonical sources and paginates the full queue', async ({ page }) => {
   const authUser = {
     id: 'bike-shop-review-admin',
