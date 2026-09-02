@@ -30,6 +30,7 @@ import {
 } from '../lib/wattbikeCapacity';
 import { authenticatedWebSocketUrl, requestWebSocketTicket } from '../lib/webSocketTicket';
 import { trackLabPublicOrigin } from '../lib/serviceOrigins';
+import { canonicalPlayerAccent } from '../lib/playerPalette';
 
 type ConnectionState = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
 
@@ -57,6 +58,36 @@ export type ClubTabletDemoMultiplayerConfiguration = Readonly<{
   /** Versioned compatibility key for the exact demo race mechanics. */
   configurationId: string;
 }>;
+
+export function canonicalizeMultiplayerRaceState(
+  rawState: MultiplayerRaceState,
+  receivedAt = Date.now(),
+): MultiplayerRaceState {
+  return {
+    ...rawState,
+    riders: rawState.riders.map((rider) => ({
+      ...rider,
+      accent: canonicalPlayerAccent(rider.colorName, rider.accent),
+    })),
+    summary: rawState.summary.map((entry) => ({
+      ...entry,
+      accent: canonicalPlayerAccent(entry.colorName, entry.accent),
+    })),
+    receivedAt,
+  };
+}
+
+export function canonicalizeMultiplayerExploreState(
+  rawState: MultiplayerExploreState,
+): MultiplayerExploreState {
+  return {
+    ...rawState,
+    riders: rawState.riders.map((rider) => ({
+      ...rider,
+      accent: canonicalPlayerAccent(rider.colorName, rider.accent),
+    })),
+  };
+}
 
 type UseMultiplayerOptions = {
   enabled: boolean;
@@ -741,10 +772,7 @@ export function useMultiplayer({
 
         if (message.type === 'race-sync' && message.state) {
           if (!enabled) return;
-          const nextState = {
-            ...(message.state as MultiplayerRaceState),
-            receivedAt: Date.now(),
-          };
+          const nextState = canonicalizeMultiplayerRaceState(message.state as MultiplayerRaceState);
           setRoomRaceStates((current) => [
             ...current.filter((state) => state.clientId !== nextState.clientId),
             nextState,
@@ -753,7 +781,7 @@ export function useMultiplayer({
 
         if (message.type === 'explore-sync' && message.state) {
           if (!enabled) return;
-          const nextState = message.state as MultiplayerExploreState;
+          const nextState = canonicalizeMultiplayerExploreState(message.state as MultiplayerExploreState);
           setRoomExploreStates((current) => [
             ...current.filter((state) => state.clientId !== nextState.clientId),
             nextState,

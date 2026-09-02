@@ -32,6 +32,7 @@ import {
   normalizeWattbikeCapacityMessage,
   type WattbikeCapacityState,
 } from './wattbikeCapacity';
+import { flushClubTabletRecoveryOutbox } from './clubTabletRecoveryAlert';
 
 export * from './clubTabletStorage';
 
@@ -655,6 +656,7 @@ export async function startClubTabletSession(
   // interactive selection. Never make the next rider wait for that background
   // network request; the device-bound result token keeps the identities scoped.
   void flushClubTabletOutbox().catch(() => undefined);
+  void flushClubTabletRecoveryOutbox({ keepalive: true }).catch(() => undefined);
   const payload = await tabletFetch('/api/club-tablet/sessions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${credential.deviceToken}` },
@@ -707,6 +709,10 @@ export async function endClubTabletSession(credential = readStoredClubTabletSess
     // storage-quota failure while marking the optional cleanup flag must not
     // keep the athlete or event seat selected on the server.
   }
+  // Recovery finishes use the same original-athlete result capability as
+  // recorded artifacts. Start any retained write before revoking the short
+  // interactive bearer; it remains safe to finish after this DELETE.
+  void flushClubTabletRecoveryOutbox({ keepalive: true }).catch(() => undefined);
   try {
     await tabletFetch('/api/club-tablet/sessions', {
       method: 'DELETE',
@@ -714,6 +720,7 @@ export async function endClubTabletSession(credential = readStoredClubTabletSess
     });
   } finally {
     clearStoredClubTabletSessionIfCurrent(credential);
+    void flushClubTabletRecoveryOutbox({ keepalive: true }).catch(() => undefined);
   }
 }
 

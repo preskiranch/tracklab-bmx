@@ -12,6 +12,7 @@ import {
   type NativePushPreferences,
   type NativePushRoute,
 } from '../lib/nativePushNotifications';
+import { setNativeRecoveryPushDeliveryState } from '../lib/nativeRecoveryPushDelivery';
 import './NativeNotificationsCoordinator.css';
 
 export const nativeNotificationsSettingsSlotId = 'native-notifications-settings-slot';
@@ -22,6 +23,7 @@ export type NativeNotificationsCoordinatorProps = Readonly<{
   kioskMode: boolean;
   settingsOpen: boolean;
   onFriendsActivity: (opened: boolean) => void;
+  onRecoveryActivity: (opened: boolean) => void;
   client?: NativePushClient;
 }>;
 
@@ -37,6 +39,10 @@ const preferenceCopy: ReadonlyArray<{
 ];
 
 export function nativePushForegroundCopy(kind: NativePushRoute['kind']) {
+  if (kind === 'recovery_ready') return {
+    title: 'Recovery ready',
+    detail: 'Your recovery timer is complete.',
+  };
   if (kind === 'live_audio_invite') return null;
   if (kind === 'friend_request') return {
     title: 'New friend request',
@@ -59,6 +65,10 @@ let activeNativePushBoundary: Readonly<{
 }> | null = null;
 const nativePushBindFlights = new Map<string, Set<Promise<void>>>();
 export const nativePushLogoutCleanupTimeoutMs = 2_000;
+/** Registration callbacks normally arrive immediately. If APNs cannot finish
+ * that handshake, Recovery Alert may safely fall back to its local schedule
+ * rather than staying in a delivery limbo forever. */
+export const nativePushRecoveryRegistrationDeadlineMs = 15_000;
 
 export function resolveNativePushAccountBoundary(
   authStatus: NativeNotificationsCoordinatorProps['authStatus'],
@@ -101,13 +111,15 @@ export async function cleanupNativePushBoundary(
   return settleNativePushCleanup(cleanup, () => client.cancelRequests(), timeoutMs);
 }
 
-/** Removes only delivered TrackLab social remote notifications after the
- * server's logout transaction has finished. Native filtering deliberately
- * leaves Recovery alerts and notifications from other apps/features alone. */
+/** Removes only delivered TrackLab notifications that are bound to the
+ * current account (Friends and Recovery Alert) after the server logout
+ * transaction. Native filtering still leaves unrelated app notifications
+ * alone. The bridge method keeps its legacy name for backwards compatibility. */
 export async function clearNativePushDeliveredSocialBoundary(
   client: Pick<NativePushClient, 'isAvailable' | 'clearDeliveredSocialNotifications'> = createNativePushClient(),
   timeoutMs = nativePushDeliveryCleanupTimeoutMs,
 ) {
+  // This is an account boundary for both Friends and Recovery Alert delivery.
   if (!client.isAvailable()) return true;
   return settleNativePushStep(
     Promise.resolve().then(() => client.clearDeliveredSocialNotifications()),
@@ -129,6 +141,8 @@ export async function logoutThenClearNativePushDeliveredSocialNotifications(
 export async function clearNativePushAccountBoundary(accountId?: string | null) {
   const active = activeNativePushBoundary;
   if (active && accountId && active.accountId !== accountId) return;
+  const clearedAccountId = active?.accountId ?? accountId ?? null;
+  setNativeRecoveryPushDeliveryState(clearedAccountId, 'unavailable');
   if (!active) {
     const client = createNativePushClient();
     if (!client.isAvailable()) return;
@@ -208,6 +222,7 @@ export function NativeNotificationsCoordinator({
   kioskMode,
   settingsOpen,
   onFriendsActivity,
+  onRecoveryActivity,
   client: suppliedClient,
 }: NativeNotificationsCoordinatorProps) {
   const clientRef = useRef<NativePushClient | null>(null);
@@ -226,6 +241,7 @@ export function NativeNotificationsCoordinator({
   const [foregroundNotice, setForegroundNotice] = useState<Readonly<{
     accountId: string;
     notificationId: string;
+    route: NativePushRoute['route'];
     title: string;
     detail: string;
   }> | null>(null);
@@ -247,8 +263,13 @@ export function NativeNotificationsCoordinator({
     // listener subscribes. During cookie hydration, leave the native plugin
     // entirely untouched so the exact signed-in account can consume it later.
     if (requestedAccountId === undefined) return undefined;
+    if (!requestedAccountId) {
+      setNativeRecoveryPushDeliveryState(null, 'unavailable');
+      return undefined;
+    }
     const generation = ++generationRef.current;
     currentAccountIdRef.current = requestedAccountId;
+    setNativeRecoveryPushDeliveryState(requestedAccountId, 'checking');
     receivedIdsRef.current.clear();
     actionIdsRef.current.clear();
     setPermission(null);
@@ -263,9 +284,13 @@ export function NativeNotificationsCoordinator({
     const supported = client.isAvailable();
     setNativeIos(client.isNativeIos());
     setAvailable(supported);
-    if (!supported) return undefined;
+    if (!supported) {
+      setNativeRecoveryPushDeliveryState(requestedAccountId, 'unavailable');
+      return undefined;
+    }
 
     let disposed = false;
+    let recoveryRegistrationDeadline: number | null = null;
     const handles: Array<{ remove: () => Promise<void> }> = [];
     const isCurrent = () => !disposed && Boolean(requestedAccountId) && pushRequestIsCurrent(
       requestedAccountId ?? '',
@@ -273,6 +298,22 @@ export function NativeNotificationsCoordinator({
       generation,
       generationRef.current,
     );
+    const clearRecoveryRegistrationDeadline = () => {
+      if (recoveryRegistrationDeadline != null) {
+        window.clearTimeout(recoveryRegistrationDeadline);
+        recoveryRegistrationDeadline = null;
+      }
+    };
+    const beginRecoveryRegistration = () => {
+      clearRecoveryRegistrationDeadline();
+      setNativeRecoveryPushDeliveryState(requestedAccountId, 'checking');
+      recoveryRegistrationDeadline = window.setTimeout(() => {
+        if (!isCurrent()) return;
+        setRegistered(false);
+        setNativeRecoveryPushDeliveryState(requestedAccountId, 'unavailable');
+        setMessage('Apple Push Notification service did not finish connecting. Recovery Alert will use this device’s local notification fallback.');
+      }, nativePushRecoveryRegistrationDeadlineMs);
+    };
     const handleRoute = (route: NativePushRoute, opened: boolean) => {
       if (!isCurrent()) return;
       const seen = opened ? actionIdsRef.current : receivedIdsRef.current;
@@ -285,6 +326,7 @@ export function NativeNotificationsCoordinator({
           setForegroundNotice({
             accountId: requestedAccountId,
             notificationId: route.notificationId,
+            route: route.route,
             ...copy,
           });
         }
@@ -292,7 +334,8 @@ export function NativeNotificationsCoordinator({
       // Push data is only a wake-up hint. Both paths ask the authenticated
       // account to refetch authoritative Friends/invite state; neither accepts
       // an invite, opens a room, or enables the microphone.
-      onFriendsActivity(opened);
+      if (route.route === 'friends') onFriendsActivity(opened);
+      if (route.route === 'recovery') onRecoveryActivity(opened);
     };
     const addHandle = async (pending: Promise<{ remove: () => Promise<void> }>) => {
       const handle = await pending;
@@ -313,12 +356,16 @@ export function NativeNotificationsCoordinator({
             nativePushBindFlights.set(requestedAccountId, flights);
             void flight.then(() => {
               if (!isCurrent()) return;
+              clearRecoveryRegistrationDeadline();
               setRegistered(true);
+              setNativeRecoveryPushDeliveryState(requestedAccountId, 'ready');
               setHasError(false);
               setMessage('This device is ready for TrackLab notifications.');
             }).catch((error) => {
               if (!isCurrent()) return;
+              clearRecoveryRegistrationDeadline();
               setRegistered(false);
+              setNativeRecoveryPushDeliveryState(requestedAccountId, 'unavailable');
               setHasError(true);
               setMessage(error instanceof Error ? error.message : 'Notification registration failed.');
             }).finally(() => {
@@ -330,7 +377,9 @@ export function NativeNotificationsCoordinator({
           })),
           addHandle(client.addRegistrationErrorListener((error) => {
             if (!isCurrent()) return;
+            clearRecoveryRegistrationDeadline();
             setRegistered(false);
+            setNativeRecoveryPushDeliveryState(requestedAccountId, 'unavailable');
             setHasError(true);
             setMessage(error);
           })),
@@ -363,13 +412,18 @@ export function NativeNotificationsCoordinator({
         setPermission(checked);
         if (checked === 'granted') {
           setMessage('Connecting this account to Apple Push Notification service…');
+          beginRecoveryRegistration();
           await client.register();
         } else {
+          clearRecoveryRegistrationDeadline();
+          setNativeRecoveryPushDeliveryState(requestedAccountId, 'unavailable');
           await client.removeInstallation(setup.installation).catch(() => undefined);
         }
         await preferencesFlight;
       } catch (error) {
         if (isCurrent()) {
+          clearRecoveryRegistrationDeadline();
+          setNativeRecoveryPushDeliveryState(requestedAccountId, 'unavailable');
           setHasError(true);
           setMessage(error instanceof Error ? error.message : 'Notifications could not be loaded.');
         }
@@ -379,12 +433,13 @@ export function NativeNotificationsCoordinator({
 
     return () => {
       disposed = true;
+      clearRecoveryRegistrationDeadline();
       generationRef.current += 1;
       if (currentAccountIdRef.current === requestedAccountId) currentAccountIdRef.current = null;
       void Promise.allSettled(handles.map((handle) => handle.remove()));
       installationRef.current = null;
     };
-  }, [accountId, authStatus, client, kioskMode, onFriendsActivity, suppliedClient]);
+  }, [accountId, authStatus, client, kioskMode, onFriendsActivity, onRecoveryActivity, suppliedClient]);
 
   useEffect(() => {
     if (authStatus !== 'signed-in' || !accountId || kioskMode || !available || typeof document === 'undefined') {
@@ -400,14 +455,17 @@ export function NativeNotificationsCoordinator({
         if (!pushRequestIsCurrent(requestedAccountId, currentAccountIdRef.current, generation, generationRef.current)) return;
         setPermission(checked);
         if (checked === 'granted') {
+          setNativeRecoveryPushDeliveryState(requestedAccountId, 'checking');
           await client.register();
         } else {
           setRegistered(false);
+          setNativeRecoveryPushDeliveryState(requestedAccountId, 'unavailable');
           const installation = installationRef.current;
           if (installation) await client.removeInstallation(installation).catch(() => undefined);
         }
       }).catch((error) => {
         if (pushRequestIsCurrent(requestedAccountId, currentAccountIdRef.current, generation, generationRef.current)) {
+          setNativeRecoveryPushDeliveryState(requestedAccountId, 'unavailable');
           setHasError(true);
           setMessage(error instanceof Error ? error.message : 'Notification access could not be refreshed.');
         }
@@ -430,12 +488,15 @@ export function NativeNotificationsCoordinator({
       setPermission(result);
       if (result === 'granted') {
         setMessage('Connecting this account to Apple Push Notification service…');
+        setNativeRecoveryPushDeliveryState(requestedAccountId, 'checking');
         await client.register();
       } else {
+        setNativeRecoveryPushDeliveryState(requestedAccountId, 'unavailable');
         setMessage('Notifications remain off. You can change this later in iOS Settings.');
       }
     } catch (error) {
       if (pushRequestIsCurrent(requestedAccountId, currentAccountIdRef.current, generation, generationRef.current)) {
+        setNativeRecoveryPushDeliveryState(requestedAccountId, 'unavailable');
         setHasError(true);
         setMessage(error instanceof Error ? error.message : 'Notifications could not be enabled.');
       }
@@ -488,10 +549,16 @@ export function NativeNotificationsCoordinator({
       const checked = await client.checkPermission();
       if (!pushRequestIsCurrent(requestedAccountId, currentAccountIdRef.current, generation, generationRef.current)) return;
       setPermission(checked);
-      if (checked === 'granted') await client.register();
-      else setMessage('Notifications remain off. You can change this later in iOS Settings.');
+      if (checked === 'granted') {
+        setNativeRecoveryPushDeliveryState(requestedAccountId, 'checking');
+        await client.register();
+      } else {
+        setNativeRecoveryPushDeliveryState(requestedAccountId, 'unavailable');
+        setMessage('Notifications remain off. You can change this later in iOS Settings.');
+      }
     } catch (error) {
       if (pushRequestIsCurrent(requestedAccountId, currentAccountIdRef.current, generation, generationRef.current)) {
+        setNativeRecoveryPushDeliveryState(requestedAccountId, 'unavailable');
         setHasError(true);
         setMessage(error instanceof Error ? error.message : 'Notification registration could not be retried.');
       }
@@ -544,14 +611,18 @@ export function NativeNotificationsCoordinator({
     && typeof document !== 'undefined'
     ? createPortal(
       <aside className="native-push-foreground" role="alert" aria-labelledby="native-push-foreground-title">
-        <small>TRACKLAB FRIENDS</small>
+        <small>{foregroundNotice.route === 'recovery' ? 'RECOVERY ALERT' : 'TRACKLAB FRIENDS'}</small>
         <strong id="native-push-foreground-title">{foregroundNotice.title}</strong>
         <span>{foregroundNotice.detail}</span>
         <div className="native-push-foreground-actions">
-          <button type="button" onClick={() => {
+          {foregroundNotice.route === 'friends' && <button type="button" onClick={() => {
             setForegroundNotice(null);
             onFriendsActivity(true);
-          }}>View Friends</button>
+          }}>View Friends</button>}
+          {foregroundNotice.route === 'recovery' && <button type="button" onClick={() => {
+            setForegroundNotice(null);
+            onRecoveryActivity(true);
+          }}>View Recovery</button>}
           <button type="button" onClick={() => setForegroundNotice(null)}>Dismiss</button>
         </div>
       </aside>,
@@ -583,7 +654,7 @@ export function NativeNotificationsCoordinator({
         </div>
         <ShieldCheck aria-hidden="true" />
       </header>
-      <p>Choose which friend activity can alert this personal TrackLab account.</p>
+      <p>Choose which friend activity can alert this personal TrackLab account. Recovery Alert uses its own athlete setting.</p>
       <div
         className={`app-settings-sync ${stateClass === 'error' || stateClass === 'denied' ? 'offline' : stateClass}`}
         role={statusHasError ? 'alert' : 'status'}
@@ -622,7 +693,7 @@ export function NativeNotificationsCoordinator({
       </div>
       <p className="app-settings-sync loading native-notifications-privacy">
         TrackLab sends Apple an opaque device token and stores a random app-installation credential in this device’s Keychain.
-        Push alerts contain only a notification type and opaque ID. Opening one securely refetches your current Friends data;
+        Push alerts contain only a notification type and opaque ID. Opening a friend alert securely refetches current Friends data;
         it never joins live audio or turns on your microphone.
       </p>
     </section>,

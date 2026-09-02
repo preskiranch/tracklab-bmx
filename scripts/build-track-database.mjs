@@ -90,8 +90,17 @@ function normalizeTrack(track) {
   const lengthMeters = Number(track.lengthMeters ?? 350);
   const id = track.id || slug(`${track.country || 'unknown'}-${track.state || 'track'}-${track.name}`);
   const geometry = fallbackGeometry(track);
-  const outline = Array.isArray(track.outline) && track.outline.length > 0 ? track.outline : geometry.outline;
-  const centerline = Array.isArray(track.centerline) && track.centerline.length > 1 ? track.centerline : geometry.centerline;
+  const intentionallyUnmapped = track.routeStatus === 'locator-only'
+    && Array.isArray(track.outline)
+    && track.outline.length === 0
+    && Array.isArray(track.centerline)
+    && track.centerline.length === 0;
+  const outline = intentionallyUnmapped
+    ? []
+    : Array.isArray(track.outline) && track.outline.length > 0 ? track.outline : geometry.outline;
+  const centerline = intentionallyUnmapped
+    ? []
+    : Array.isArray(track.centerline) && track.centerline.length > 1 ? track.centerline : geometry.centerline;
   const locatorPoint = track.startGate ?? centerline[0] ?? outline[0];
   const latitude = Number.isFinite(Number(track.latitude)) ? Number(track.latitude) : Number(locatorPoint?.lat);
   const longitude = Number.isFinite(Number(track.longitude)) ? Number(track.longitude) : Number(locatorPoint?.lng);
@@ -201,6 +210,11 @@ function provenanceQuality(track) {
 function mergeTrack(existing, incoming) {
   const existingHasRoute = meaningfulGeometry(existing);
   const incomingHasRoute = meaningfulGeometry(incoming);
+  const incomingExplicitlyClearsRoute = incoming.routeStatus === 'locator-only'
+    && incoming.lengthMeters === 0
+    && incoming.outline.length === 0
+    && incoming.centerline.length === 0
+    && incoming.zones.length === 0;
   const merged = { ...existing };
   Object.entries(incoming).forEach(([key, value]) => {
     if (value !== undefined) {
@@ -221,6 +235,16 @@ function mergeTrack(existing, incoming) {
     merged.elevationMeters = existing.elevationMeters;
     merged.surface = existing.surface;
     merged.zones = existing.zones;
+  }
+
+  if (incomingExplicitlyClearsRoute) {
+    merged.lengthMeters = 0;
+    merged.outline = [];
+    merged.centerline = [];
+    delete merged.startGate;
+    delete merged.finishLine;
+    merged.routeStatus = 'locator-only';
+    merged.zones = [];
   }
 
   const authoritative = provenanceQuality(incoming) > provenanceQuality(existing) ? incoming : existing;

@@ -13,6 +13,7 @@ import { heartRateReadingState } from './HeartRateMetric';
 import { demoHeartRateReadingForBikeSample } from '../lib/demoHeartRate';
 import { normalizeRiderPresentationScale } from '../lib/riderPresentation';
 import { normalizeRacePresentationViewport } from '../lib/racePresentation';
+import { EVERGREEN_RIDER_ACCENT } from '../lib/playerPalette';
 
 export type LiveHeartRateByPlayer = Partial<Record<PlayerSlot['id'], {
   bpm: number | null;
@@ -467,7 +468,7 @@ export function RaceRiderOverlay({
         badge: `P${rank}`,
         name: player?.name ?? `Player ${rank}`,
         photoUrl: player?.photoUrl,
-        accent: player?.accent ?? ['#7cff28', '#2da8ff', '#ff5364', '#ffe05a'][index],
+        accent: player?.accent ?? [EVERGREEN_RIDER_ACCENT, '#2da8ff', '#ff5364', '#ffe05a'][index],
         rank,
         progressPct: 72 - (index * 9),
         speedKph: 38 - (index * 2),

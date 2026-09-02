@@ -14221,6 +14221,7 @@ const pushEventKinds = new Set([
   'friend_request',
   'friend_connection',
   'track_share',
+  'recovery_ready',
 ]);
 const defaultPushPreferences = Object.freeze({
   liveAudio: true,
@@ -14750,6 +14751,9 @@ export async function enqueuePushEvent(candidate, now = Date.now()) {
 }
 
 function pushPreferenceAllows(preferences, kind) {
+  // Recovery Alert itself is the athlete's opt-in. It must not be disabled by
+  // a Friends-only notification preference.
+  if (kind === 'recovery_ready') return true;
   if (kind === 'live_audio_invite') return preferences.liveAudio === true;
   if (kind === 'friend_request') return preferences.friendRequests === true;
   if (kind === 'friend_connection') return preferences.friendConnections === true;
@@ -14765,6 +14769,18 @@ function memoryPushEventEligible(event, originInstanceId, now, requiredState = '
     || (event.originInstanceId && event.originInstanceId !== originInstanceId)
     || !pushPreferenceAllows(pushPreferencesRecord(memoryPushPreferences.get(event.recipientUserId)), event.kind)
   ) return false;
+  if (event.kind === 'recovery_ready') {
+    const episode = memoryRecoveryAlertEpisodes.get(event.objectId);
+    const dueAt = Number(episode?.readyAt ?? episode?.plannedReadyAt ?? episode?.fallbackAt);
+    return Boolean(
+      episode
+      && recoveryOwnerUserId(episode.ownerProfileKey) === event.recipientUserId
+      && episode.cancelledAt == null
+      && episode.alertTrigger !== 'manual'
+      && Number.isFinite(dueAt)
+      && dueAt <= now,
+    );
+  }
   if (event.kind === 'live_audio_invite') {
     const invite = memoryLiveAudioFriendInvites.get(event.objectId);
     return Boolean(
@@ -14844,7 +14860,17 @@ export async function pushEventIsEligible(eventId, originInstanceId, now = Date.
     trackShares: row.preference_track_shares,
   }, event.kind)) return false;
   let eligibility;
-  if (event.kind === 'live_audio_invite') {
+  if (event.kind === 'recovery_ready') {
+    eligibility = await query(
+      `SELECT 1 FROM ${schema}.recovery_alert_episodes
+       WHERE id = $1 AND owner_user_id = $2
+         AND cancelled_at IS NULL
+         AND alert_trigger IS DISTINCT FROM 'manual'
+         AND COALESCE(ready_at, planned_ready_at, fallback_at) <= to_timestamp($3 / 1000.0)
+       LIMIT 1`,
+      [event.objectId, event.recipientUserId, now],
+    );
+  } else if (event.kind === 'live_audio_invite') {
     eligibility = await query(
       `SELECT 1
        FROM ${schema}.live_audio_friend_invites AS invite
@@ -19797,56 +19823,89 @@ export async function createRecoveryAlertEpisode(
   candidate,
   now = Date.now(),
   revisionAt = Math.max(now, candidate.startedAt),
+  pushEventForEpisode = null,
 ) {
   if (!pool) {
-    const replay = [...memoryRecoveryAlertEpisodes.values()].find((episode) => (
-      episode.ownerProfileKey === ownerProfileKey
-      && (episode.requestId === candidate.requestId || (
-        episode.activityType === candidate.activityType
-        && episode.sessionId === candidate.sessionId
-        && episode.repetitionId === candidate.repetitionId
-      ))
-    ));
-    if (replay) {
-      return {
-        episode: cloneRecoveryEpisode(replay),
-        replayed: sameRecoveryRequest(replay, candidate),
-        conflict: !sameRecoveryRequest(replay, candidate),
+    return withMemoryPersistenceLock(`recovery-alert:${ownerProfileKey}`, async () => {
+      const enqueueForEpisode = async (episode) => {
+        if (typeof pushEventForEpisode !== 'function') return true;
+        let pushCandidate = null;
+        try {
+          pushCandidate = await pushEventForEpisode(cloneRecoveryEpisode(episode));
+        } catch (error) {
+          cloudTelemetry.warn('recovery_alert.push_event_factory_failed', { error });
+          return false;
+        }
+        // A null candidate means the delivery channel is intentionally not
+        // configured (for example APNs is unavailable), not that the recovery
+        // episode itself should be rejected.
+        if (!pushCandidate) return true;
+        return Boolean(enqueueMemoryPushEvent(pushCandidate, now));
       };
-    }
-    const latest = latestMemoryRecoveryAlertEpisode(ownerProfileKey);
-    const staleArrival = latest != null && candidate.startedAt < latest.startedAt;
-    if (!staleArrival) {
-      for (const episode of memoryRecoveryAlertEpisodes.values()) {
-        const stillRecovering = episode.readyAt == null
-          && (episode.plannedReadyAt == null || episode.plannedReadyAt > now)
-          && episode.fallbackAt > now;
-        if (episode.ownerProfileKey === ownerProfileKey && episode.cancelledAt == null && stillRecovering) {
-          episode.cancelledAt = Math.max(episode.startedAt, now);
-          episode.updatedAt = Math.max(now, episode.startedAt, episode.updatedAt + 1);
+      const replay = [...memoryRecoveryAlertEpisodes.values()].find((episode) => (
+        episode.ownerProfileKey === ownerProfileKey
+        && (episode.requestId === candidate.requestId || (
+          episode.activityType === candidate.activityType
+          && episode.sessionId === candidate.sessionId
+          && episode.repetitionId === candidate.repetitionId
+        ))
+      ));
+      if (replay) {
+        const matches = sameRecoveryRequest(replay, candidate);
+        if (!matches) {
+          return { episode: cloneRecoveryEpisode(replay), replayed: false, conflict: true };
+        }
+        // Replays repair a previously interrupted caller without creating a
+        // second APNs event: the idempotency key belongs to the episode + due
+        // time and enqueueMemoryPushEvent returns the original event.
+        if (!await enqueueForEpisode(replay)) return null;
+        return { episode: cloneRecoveryEpisode(replay), replayed: true, conflict: false };
+      }
+      const latest = latestMemoryRecoveryAlertEpisode(ownerProfileKey);
+      const staleArrival = latest != null && candidate.startedAt < latest.startedAt;
+      const stored = {
+        ...cloneJson(candidate, candidate),
+        ownerProfileKey,
+        readyAt: null,
+        readyReason: null,
+        recoverySummary: {},
+        freshSampleCount: 0,
+        belowTargetStartedAt: null,
+        lastHeartRateRecordedAt: null,
+        lastHeartRateStreamId: null,
+        alertedAt: null,
+        alertTrigger: null,
+        cancelledAt: staleArrival ? Math.max(candidate.startedAt, now) : null,
+        createdAt: now,
+        updatedAt: revisionAt,
+      };
+      // Treat the personal-device outbox record as part of the same durable
+      // operation as a studio-tablet finish. If the event cannot be persisted,
+      // do not cancel an earlier athlete timer or create an orphaned one.
+      if (!await enqueueForEpisode(stored)) return null;
+      if (!staleArrival) {
+        for (const episode of memoryRecoveryAlertEpisodes.values()) {
+          const stillRecovering = episode.readyAt == null
+            && (episode.plannedReadyAt == null || episode.plannedReadyAt > now)
+            && episode.fallbackAt > now;
+          if (episode.ownerProfileKey === ownerProfileKey && episode.cancelledAt == null && stillRecovering) {
+            episode.cancelledAt = Math.max(episode.startedAt, now);
+            episode.updatedAt = Math.max(now, episode.startedAt, episode.updatedAt + 1);
+          }
         }
       }
-    }
-    const stored = {
-      ...cloneJson(candidate, candidate),
-      ownerProfileKey,
-      readyAt: null,
-      readyReason: null,
-      recoverySummary: {},
-      freshSampleCount: 0,
-      belowTargetStartedAt: null,
-      lastHeartRateRecordedAt: null,
-      lastHeartRateStreamId: null,
-      alertedAt: null,
-      alertTrigger: null,
-      cancelledAt: staleArrival ? Math.max(candidate.startedAt, now) : null,
-      createdAt: now,
-      updatedAt: revisionAt,
-    };
-    memoryRecoveryAlertEpisodes.set(stored.id, stored);
-    return { episode: cloneRecoveryEpisode(stored), replayed: false, conflict: false };
+      memoryRecoveryAlertEpisodes.set(stored.id, stored);
+      return { episode: cloneRecoveryEpisode(stored), replayed: false, conflict: false };
+    });
   }
   return withPersistenceLock(`recovery-alert:${ownerProfileKey}`, async (client) => {
+    const enqueueForEpisode = async (episode) => {
+      if (typeof pushEventForEpisode !== 'function') return;
+      const pushCandidate = await pushEventForEpisode(episode);
+      if (!pushCandidate) return;
+      const queued = await enqueuePushEventWithClient(client, pushCandidate, now);
+      if (!queued) throw new Error('Recovery Alert push outbox could not be persisted.');
+    };
     const existing = await client.query(
       `SELECT * FROM ${schema}.recovery_alert_episodes
        WHERE owner_profile_key = $1
@@ -19862,6 +19921,7 @@ export async function createRecoveryAlertEpisode(
     const replay = recoveryAlertEpisodeFromRow(existing.rows[0]);
     if (replay) {
       const matches = sameRecoveryRequest(replay, candidate);
+      if (matches) await enqueueForEpisode(replay);
       return { episode: replay, replayed: matches, conflict: !matches };
     }
     const latestResult = await client.query(
@@ -19932,8 +19992,10 @@ export async function createRecoveryAlertEpisode(
         revisionAt,
       ],
     );
+    const episode = recoveryAlertEpisodeFromRow(inserted.rows[0]);
+    await enqueueForEpisode(episode);
     return {
-      episode: recoveryAlertEpisodeFromRow(inserted.rows[0]),
+      episode,
       replayed: false,
       conflict: false,
     };
@@ -20030,12 +20092,85 @@ function updateMemoryRecoveryEpisode(episode, action, options, now, revisionAt) 
   return episode;
 }
 
-export async function updateRecoveryAlertEpisode(ownerProfileKey, episodeId, action, options = {}, now = Date.now()) {
+async function syncMemoryRecoveryReadyPush(episode, pushEventForEpisode, now, reason) {
+  if (typeof pushEventForEpisode !== 'function') return true;
+  const changed = [];
+  for (const event of memoryPushEvents.values()) {
+    if (
+      event.kind !== 'recovery_ready'
+      || event.objectId !== episode.id
+      || !['pending', 'leased'].includes(event.state)
+    ) continue;
+    changed.push({
+      event,
+      state: event.state,
+      leaseOwner: event.leaseOwner,
+      leasedUntil: event.leasedUntil,
+      lastErrorCode: event.lastErrorCode,
+      updatedAt: event.updatedAt,
+    });
+    event.state = 'cancelled';
+    event.leaseOwner = null;
+    event.leasedUntil = null;
+    event.lastErrorCode = String(reason).slice(0, 120);
+    event.updatedAt = new Date(now).toISOString();
+  }
+  try {
+    const candidate = await pushEventForEpisode(cloneRecoveryEpisode(episode));
+    if (!candidate) return true;
+    if (enqueueMemoryPushEvent(candidate, now)) return true;
+  } catch (error) {
+    cloudTelemetry.warn('recovery_alert.push_reschedule_factory_failed', { error });
+  }
+  // Keep the episode and old outbox state untouched if the new personal
+  // device deadline cannot be safely persisted.
+  changed.forEach((snapshot) => {
+    snapshot.event.state = snapshot.state;
+    snapshot.event.leaseOwner = snapshot.leaseOwner;
+    snapshot.event.leasedUntil = snapshot.leasedUntil;
+    snapshot.event.lastErrorCode = snapshot.lastErrorCode;
+    snapshot.event.updatedAt = snapshot.updatedAt;
+  });
+  return false;
+}
+
+async function syncRecoveryReadyPushWithClient(client, episode, pushEventForEpisode, now, reason) {
+  if (typeof pushEventForEpisode !== 'function') return;
+  await client.query(
+    `UPDATE ${schema}.push_events SET state = 'cancelled', lease_owner = NULL,
+       leased_until = NULL, last_error_code = $3, updated_at = now()
+     WHERE kind = $2 AND object_id = $1 AND state IN ('pending', 'leased')`,
+    [episode.id, 'recovery_ready', String(reason).slice(0, 120)],
+  );
+  const candidate = await pushEventForEpisode(episode);
+  if (!candidate) return;
+  const queued = await enqueuePushEventWithClient(client, candidate, now);
+  if (!queued) throw new Error('Recovery Alert push outbox could not be rescheduled.');
+}
+
+export async function updateRecoveryAlertEpisode(
+  ownerProfileKey,
+  episodeId,
+  action,
+  options = {},
+  now = Date.now(),
+  pushEventForEpisode = null,
+) {
   if (!pool) {
-    const episode = memoryRecoveryAlertEpisodes.get(episodeId);
-    if (!episode || episode.ownerProfileKey !== ownerProfileKey) return null;
-    const revisionAt = Math.max(now, episode.startedAt, episode.updatedAt + 1);
-    return cloneRecoveryEpisode(updateMemoryRecoveryEpisode(episode, action, options, now, revisionAt));
+    return withMemoryPersistenceLock(`recovery-alert:${ownerProfileKey}`, async () => {
+      const episode = memoryRecoveryAlertEpisodes.get(episodeId);
+      if (!episode || episode.ownerProfileKey !== ownerProfileKey) return null;
+      const before = cloneJson(episode, episode);
+      const revisionAt = Math.max(now, episode.startedAt, episode.updatedAt + 1);
+      const updated = updateMemoryRecoveryEpisode(episode, action, options, now, revisionAt);
+      if (!updated) return null;
+      const reason = action === 'add-time' ? 'recovery-deadline-changed' : 'recovery-stopped';
+      if (!await syncMemoryRecoveryReadyPush(updated, pushEventForEpisode, now, reason)) {
+        Object.assign(episode, before);
+        return null;
+      }
+      return cloneRecoveryEpisode(updated);
+    });
   }
   return withPersistenceLock(`recovery-alert:${ownerProfileKey}`, async (client) => {
     const loaded = await client.query(
@@ -20046,19 +20181,18 @@ export async function updateRecoveryAlertEpisode(ownerProfileKey, episodeId, act
     const episode = recoveryAlertEpisodeFromRow(loaded.rows[0]);
     if (!episode || episode.cancelledAt != null) return null;
     const revisionAt = Math.max(now, episode.startedAt, episode.updatedAt + 1);
+    let result;
     if (action === 'stop') {
-      const result = await client.query(
+      result = await client.query(
         `UPDATE ${schema}.recovery_alert_episodes
          SET cancelled_at = GREATEST(started_at, to_timestamp($3 / 1000.0)),
            updated_at = to_timestamp($4 / 1000.0)
          WHERE id = $1 AND owner_profile_key = $2 RETURNING *`,
         [episodeId, ownerProfileKey, now, revisionAt],
       );
-      return recoveryAlertEpisodeFromRow(result.rows[0]);
-    }
-    if (action === 'start-anyway') {
+    } else if (action === 'start-anyway') {
       const readyAt = Math.max(episode.startedAt, Math.min(episode.fallbackAt, now));
-      const result = await client.query(
+      result = await client.query(
         `UPDATE ${schema}.recovery_alert_episodes
          SET ready_at = to_timestamp($3 / 1000.0), ready_reason = 'manual-start',
            alerted_at = to_timestamp($3 / 1000.0), alert_trigger = 'manual',
@@ -20067,29 +20201,38 @@ export async function updateRecoveryAlertEpisode(ownerProfileKey, episodeId, act
          WHERE id = $1 AND owner_profile_key = $2 RETURNING *`,
         [episodeId, ownerProfileKey, readyAt, revisionAt],
       );
-      return recoveryAlertEpisodeFromRow(result.rows[0]);
+    } else {
+      if (action !== 'add-time') return null;
+      const extensionMs = options.seconds * 1_000;
+      const absoluteLimit = episode.startedAt + 1_800_000;
+      const nextFallback = Math.min(absoluteLimit, Math.max(now, episode.fallbackAt) + extensionMs);
+      if (nextFallback <= episode.fallbackAt) return null;
+      const nextPlanned = episode.plannedReadyAt == null
+        ? null
+        : Math.min(nextFallback, Math.max(now, episode.plannedReadyAt) + extensionMs);
+      result = await client.query(
+        `UPDATE ${schema}.recovery_alert_episodes
+         SET fallback_at = to_timestamp($3 / 1000.0),
+           planned_ready_at = CASE WHEN $4::double precision IS NULL
+             THEN NULL ELSE to_timestamp($4 / 1000.0) END,
+           ready_at = NULL, ready_reason = NULL, alerted_at = NULL, alert_trigger = NULL,
+           below_target_started_at = NULL,
+           explanation = 'Recovery extended. Start when the next alert appears and you feel ready.',
+           updated_at = to_timestamp($5 / 1000.0)
+         WHERE id = $1 AND owner_profile_key = $2 RETURNING *`,
+        [episodeId, ownerProfileKey, nextFallback, nextPlanned, revisionAt],
+      );
     }
-    if (action !== 'add-time') return null;
-    const extensionMs = options.seconds * 1_000;
-    const absoluteLimit = episode.startedAt + 1_800_000;
-    const nextFallback = Math.min(absoluteLimit, Math.max(now, episode.fallbackAt) + extensionMs);
-    if (nextFallback <= episode.fallbackAt) return null;
-    const nextPlanned = episode.plannedReadyAt == null
-      ? null
-      : Math.min(nextFallback, Math.max(now, episode.plannedReadyAt) + extensionMs);
-    const result = await client.query(
-      `UPDATE ${schema}.recovery_alert_episodes
-       SET fallback_at = to_timestamp($3 / 1000.0),
-         planned_ready_at = CASE WHEN $4::double precision IS NULL
-           THEN NULL ELSE to_timestamp($4 / 1000.0) END,
-         ready_at = NULL, ready_reason = NULL, alerted_at = NULL, alert_trigger = NULL,
-         below_target_started_at = NULL,
-         explanation = 'Recovery extended. Start when the next alert appears and you feel ready.',
-         updated_at = to_timestamp($5 / 1000.0)
-       WHERE id = $1 AND owner_profile_key = $2 RETURNING *`,
-      [episodeId, ownerProfileKey, nextFallback, nextPlanned, revisionAt],
+    const updated = recoveryAlertEpisodeFromRow(result?.rows?.[0]);
+    if (!updated) return null;
+    await syncRecoveryReadyPushWithClient(
+      client,
+      updated,
+      pushEventForEpisode,
+      now,
+      action === 'add-time' ? 'recovery-deadline-changed' : 'recovery-stopped',
     );
-    return recoveryAlertEpisodeFromRow(result.rows[0]);
+    return updated;
   });
 }
 
@@ -20254,6 +20397,7 @@ export async function applyRecoveryHeartRateSamples(
   streamId,
   samples,
   receivedAt = Date.now(),
+  pushEventForEpisode = null,
 ) {
   const evaluationSamples = [...samples]
     .map((sample) => ({
@@ -20265,29 +20409,46 @@ export async function applyRecoveryHeartRateSamples(
     .sort((left, right) => (
       left.recordedAt - right.recordedAt
       || Number(left.sequence ?? 0) - Number(right.sequence ?? 0)
-    ));
+  ));
   if (!pool) {
-    const episode = latestMemoryRecoveryAlertEpisode(ownerProfileKey);
-    if (!episode || episode.cancelledAt != null) return episode ? cloneRecoveryEpisode(episode) : null;
-    const evaluations = await buildRecoveryHeartRateEvaluations(
-      episode,
-      streamId,
-      evaluationSamples,
-      receivedAt,
-    );
-    const priorUpdatedAt = episode.updatedAt;
-    let changed = false;
-    evaluations.forEach((evaluation) => {
-      changed = applyRecoverySampleToEpisode(
+    return withMemoryPersistenceLock(`recovery-alert:${ownerProfileKey}`, async () => {
+      const episode = latestMemoryRecoveryAlertEpisode(ownerProfileKey);
+      if (!episode || episode.cancelledAt != null) return episode ? cloneRecoveryEpisode(episode) : null;
+      const before = cloneJson(episode, episode);
+      const evaluations = await buildRecoveryHeartRateEvaluations(
         episode,
         streamId,
-        evaluation.sample,
-        evaluation.decisionWindow,
-        evaluation.receivedAt,
-      ) || changed;
+        evaluationSamples,
+        receivedAt,
+      );
+      const priorUpdatedAt = episode.updatedAt;
+      let changed = false;
+      evaluations.forEach((evaluation) => {
+        changed = applyRecoverySampleToEpisode(
+          episode,
+          streamId,
+          evaluation.sample,
+          evaluation.decisionWindow,
+          evaluation.receivedAt,
+        ) || changed;
+      });
+      if (changed) episode.updatedAt = Math.max(receivedAt, episode.startedAt, priorUpdatedAt + 1);
+      if (
+        changed
+        && episode.readyAt != null
+        && episode.alertTrigger !== 'manual'
+        && !await syncMemoryRecoveryReadyPush(
+          episode,
+          pushEventForEpisode,
+          receivedAt,
+          'recovery-target-reached',
+        )
+      ) {
+        Object.assign(episode, before);
+        return null;
+      }
+      return cloneRecoveryEpisode(episode);
     });
-    if (changed) episode.updatedAt = Math.max(receivedAt, episode.startedAt, priorUpdatedAt + 1);
-    return cloneRecoveryEpisode(episode);
   }
   return withPersistenceLock(`recovery-alert:${ownerProfileKey}`, async (client) => {
     const loaded = await client.query(
@@ -20347,7 +20508,17 @@ export async function applyRecoveryHeartRateSamples(
         revisionAt,
       ],
     );
-    return recoveryAlertEpisodeFromRow(updated.rows[0]);
+    const persisted = recoveryAlertEpisodeFromRow(updated.rows[0]);
+    if (persisted?.readyAt != null && persisted.alertTrigger !== 'manual') {
+      await syncRecoveryReadyPushWithClient(
+        client,
+        persisted,
+        pushEventForEpisode,
+        receivedAt,
+        'recovery-target-reached',
+      );
+    }
+    return persisted;
   });
 }
 

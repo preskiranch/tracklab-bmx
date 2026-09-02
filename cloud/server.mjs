@@ -601,6 +601,34 @@ function socialPushEvent(kind, {
   };
 }
 
+/**
+ * Recovery completion is an account-owned alert, not a social interaction.
+ * Keep the APNs event completely opaque: the recipient account is resolved on
+ * the server and the client receives only a generic recovery-ready route.
+ */
+function recoveryReadyPushEvent({ recipientUserId, episode, now = Date.now() }) {
+  if (!pushOutboxEnabled() || !recipientUserId || !episode?.id) return null;
+  const dueAt = Number(episode.readyAt ?? episode.plannedReadyAt ?? episode.fallbackAt);
+  if (!Number.isFinite(dueAt) || dueAt <= 0) return null;
+  const notBefore = Math.max(now, dueAt);
+  const expiresAt = Math.max(notBefore + 60_000, dueAt + recoveryAlertDirectiveVisibilityMs);
+  return {
+    id: randomUUID(),
+    notificationId: randomUUID(),
+    recipientUserId,
+    actorUserId: null,
+    kind: 'recovery_ready',
+    objectId: episode.id,
+    // A changed recovery deadline has a different idempotency identity, while
+    // the stable collapse id makes iOS replace an older pending alert.
+    idempotencyKey: `recovery-ready:${recipientUserId}:${episode.id}:${dueAt}`,
+    collapseId: `tl-recovery-${episode.id}`.slice(0, 64),
+    originInstanceId: null,
+    notBefore,
+    expiresAt,
+  };
+}
+
 function runtimePushEventIsEligible(event) {
   if (event?.kind !== 'live_audio_invite') return true;
   const invite = liveAudioFriendInvites.get(event.objectId);
@@ -940,6 +968,17 @@ function pruneTransientState(now = Date.now()) {
 function sanitizeText(value, fallback, maxLength = 80) {
   const text = typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
   return (text || fallback).slice(0, maxLength);
+}
+
+function sanitizePlayerAccent(colorName, value, maxLength = 32) {
+  const defaults = {
+    lime: '#178f4d',
+    blue: '#39a8ff',
+    red: '#ff4d42',
+    yellow: '#ffd83d',
+  };
+  if (colorName === 'lime') return defaults.lime;
+  return sanitizeText(value, defaults[colorName] ?? defaults.lime, maxLength);
 }
 
 function nullableAcceptedWattbikeCadence(value) {
@@ -4829,19 +4868,23 @@ function publicTrainingSession(session, clubRole, options = {}) {
       healthSafePublicSession.details ?? {},
     )),
   };
-  const claimedPowerStudioRiderIds = new Set(
-    Array.isArray(options.claimedPowerStudioRiderIds)
-      ? options.claimedPowerStudioRiderIds.map((value) => sanitizeText(value, '', 160)).filter(Boolean)
+  // A club owner can review power recorded by every athlete enrolled in that
+  // owner's studio roster. The identity must still be an explicit roster ID:
+  // legacy/name-only data never gains power access just because it appears in
+  // an owner-visible session.
+  const authorizedPowerStudioRiderIds = new Set(
+    Array.isArray(options.authorizedPowerStudioRiderIds)
+      ? options.authorizedPowerStudioRiderIds.map((value) => sanitizeText(value, '', 160)).filter(Boolean)
       : [],
   );
   const visiblePublicSession = clubRole !== 'owner' || options.includePrivatePower === true
     ? privateHealthRedactedSession
     : {
       ...privateHealthRedactedSession,
-      details: claimedPowerStudioRiderIds.size > 0
-        ? redactPrivatePowerExceptClaimedRiders(
+      details: authorizedPowerStudioRiderIds.size > 0
+        ? redactPrivatePowerExceptAuthorizedRiders(
           privateHealthRedactedSession.details,
-          claimedPowerStudioRiderIds,
+          authorizedPowerStudioRiderIds,
           sanitizeText(options.attributedStudioRiderId, '', 160),
         )
         : redactPrivatePower(privateHealthRedactedSession.details),
@@ -4891,11 +4934,11 @@ function privatePowerStudioRiderId(value) {
   return sanitizeText(value.studioRiderId ?? value.riderId, '', 160);
 }
 
-function collectPrivatePowerPlayerAccess(value, claimedStudioRiderIds, accessByPlayer) {
+function collectPrivatePowerPlayerAccess(value, authorizedStudioRiderIds, accessByPlayer) {
   if (Array.isArray(value)) {
     value.forEach((entry) => collectPrivatePowerPlayerAccess(
       entry,
-      claimedStudioRiderIds,
+      authorizedStudioRiderIds,
       accessByPlayer,
     ));
     return;
@@ -4904,7 +4947,7 @@ function collectPrivatePowerPlayerAccess(value, claimedStudioRiderIds, accessByP
   const studioRiderId = privatePowerStudioRiderId(value);
   const playerKey = privatePowerPlayerKey(value.playerId);
   if (studioRiderId && playerKey) {
-    const exactAccess = claimedStudioRiderIds.has(studioRiderId);
+    const exactAccess = authorizedStudioRiderIds.has(studioRiderId);
     accessByPlayer.set(
       playerKey,
       accessByPlayer.has(playerKey)
@@ -4914,27 +4957,27 @@ function collectPrivatePowerPlayerAccess(value, claimedStudioRiderIds, accessByP
   }
   Object.values(value).forEach((entry) => collectPrivatePowerPlayerAccess(
     entry,
-    claimedStudioRiderIds,
+    authorizedStudioRiderIds,
     accessByPlayer,
   ));
 }
 
-function privatePowerRiderAccess(value, claimedStudioRiderIds, accessByPlayer) {
+function privatePowerRiderAccess(value, authorizedStudioRiderIds, accessByPlayer) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const studioRiderId = privatePowerStudioRiderId(value);
-  if (studioRiderId) return claimedStudioRiderIds.has(studioRiderId);
+  if (studioRiderId) return authorizedStudioRiderIds.has(studioRiderId);
   const playerKey = privatePowerPlayerKey(value.playerId);
   if (playerKey) return accessByPlayer.get(playerKey) === true;
   return typeof value.riderName === 'string' ? false : null;
 }
 
-function redactPrivatePowerExceptClaimedRiders(
+function redactPrivatePowerExceptAuthorizedRiders(
   value,
-  claimedStudioRiderIds,
+  authorizedStudioRiderIds,
   attributedStudioRiderId = '',
 ) {
   const accessByPlayer = new Map();
-  collectPrivatePowerPlayerAccess(value, claimedStudioRiderIds, accessByPlayer);
+  collectPrivatePowerPlayerAccess(value, authorizedStudioRiderIds, accessByPlayer);
   const riderAccess = [];
   const collectRiderAccess = (candidate) => {
     if (Array.isArray(candidate)) {
@@ -4942,13 +4985,13 @@ function redactPrivatePowerExceptClaimedRiders(
       return;
     }
     if (!candidate || typeof candidate !== 'object') return;
-    const access = privatePowerRiderAccess(candidate, claimedStudioRiderIds, accessByPlayer);
+    const access = privatePowerRiderAccess(candidate, authorizedStudioRiderIds, accessByPlayer);
     if (access != null) riderAccess.push(access);
     Object.values(candidate).forEach(collectRiderAccess);
   };
   collectRiderAccess(value);
   const attributedAccess = attributedStudioRiderId
-    ? claimedStudioRiderIds.has(attributedStudioRiderId)
+    ? authorizedStudioRiderIds.has(attributedStudioRiderId)
     : false;
   const rootAccess = riderAccess.length > 0
     ? riderAccess.every(Boolean)
@@ -4960,7 +5003,7 @@ function redactPrivatePowerExceptClaimedRiders(
     if (!candidate || typeof candidate !== 'object') return candidate;
     const exactAccess = privatePowerRiderAccess(
       candidate,
-      claimedStudioRiderIds,
+      authorizedStudioRiderIds,
       accessByPlayer,
     );
     const effectiveAccess = exactAccess == null ? inheritedAccess : exactAccess;
@@ -5290,15 +5333,20 @@ function projectOwnedClubTrainingSession(session, member) {
     claimedAt: null,
   });
   if (!projected) return null;
-  const claimedPowerAccess = member?.status === 'claimed'
-    && member.studioRiderId === studioRiderId;
+  const ownerControlsStudioRider = member?.studioRiderId === studioRiderId;
   const club = { id: clubId, name: clubName, studioRiderId, riderName, role: 'owner' };
   return {
     ...projected,
     id: `club-owner:${clubId}:${studioRiderId}:${session.id}`,
     club,
     details: {
-      ...(claimedPowerAccess ? projected.details ?? {} : redactPrivatePower(projected.details ?? {})),
+      ...(ownerControlsStudioRider
+        ? redactPrivatePowerExceptAuthorizedRiders(
+          projected.details ?? {},
+          new Set([studioRiderId]),
+          studioRiderId,
+        )
+        : redactPrivatePower(projected.details ?? {})),
       club: { id: clubId, name: clubName, role: 'owner' },
     },
   };
@@ -5308,12 +5356,6 @@ async function loadTrainingSessionsForAccount(profileKey, options) {
   const clubState = await persistence.loadClubConnectState(profileKey);
   const ownedStudioRiderIds = new Set(
     (clubState.ownedClub?.members ?? []).map((member) => member.studioRiderId).filter(Boolean),
-  );
-  const claimedOwnedStudioRiderIds = new Set(
-    (clubState.ownedClub?.members ?? [])
-      .filter((member) => member.status === 'claimed')
-      .map((member) => member.studioRiderId)
-      .filter(Boolean),
   );
   const claimedAtByRiderName = new Map(
     (clubState.ownedClub?.members ?? [])
@@ -5353,7 +5395,7 @@ async function loadTrainingSessionsForAccount(profileKey, options) {
         session,
         ownedClubSession ? 'owner' : 'athlete',
         ownedClubSession ? {
-          claimedPowerStudioRiderIds: [...claimedOwnedStudioRiderIds],
+          authorizedPowerStudioRiderIds: [...ownedStudioRiderIds],
           attributedStudioRiderId,
         } : {},
       );
@@ -5445,6 +5487,9 @@ const heartRateLiveAuthorizationTtlMs = 30_000;
 const maxHeartRateSamplesPerStream = 1_000_000;
 const recoveryAlertModes = new Set(['off', 'timer', 'heart-rate', 'smart']);
 const recoveryAlertActivityTypes = new Set(['bmx-race', 'straight-sprint', 'get-pulled']);
+// A recovery alert is useful only while its completed workout is still
+// current. Keep the shared-tablet durable retry window aligned with this.
+const recoveryAlertFinishDeliveryWindowMs = 10 * 60 * 1_000;
 const recoveryAlertDefaultPreference = Object.freeze({
   mode: 'off',
   timerSeconds: 300,
@@ -5713,6 +5758,148 @@ function recoveryAlertDirective(ownerProfileKey, episode, now = Date.now()) {
   return visible
     ? { version: 1, accountId: recoveryAccountId(ownerProfileKey), issuedAt: visible.updatedAt, ...visible }
     : null;
+}
+
+/**
+ * Build one recovery episode for an already-authorized owner.  Both the
+ * personal endpoint and the Club Tablet endpoint call this helper so the
+ * latter cannot quietly diverge into an owner/tablet-scoped recovery record.
+ *
+ * `beforeCreate` may be asynchronous: the Club Tablet caller re-checks the
+ * exact durable athlete session immediately before the persistent write. A
+ * tablet that has switched riders or expired during a slow request therefore
+ * cannot start a recovery period for the old rider.
+ */
+async function createRecoveryAlertEpisodeForOwner({
+  ownerProfileKey,
+  ownerUserId,
+  preference,
+  payload,
+  now = Date.now(),
+  beforeCreate = () => true,
+  pushEventForEpisode = null,
+}) {
+  const requestId = recoveryRequestId(payload?.requestId);
+  const activityType = recoveryAlertActivityTypes.has(payload?.activityType) ? payload.activityType : '';
+  const sessionId = recoveryIdentifier(payload?.sessionId);
+  const repetitionId = recoveryIdentifier(payload?.repetitionId);
+  const finishedAt = heartRateTimestamp(payload?.finishedAt);
+  const effortSummary = sanitizeRecoveryEffortSummary(payload?.effortSummary);
+  const identityBoundary = { user: { id: ownerUserId } };
+  const exposesOwnerIdentity = [requestId, sessionId, repetitionId]
+    .some((value) => recoveryIdentifierExposesOwner(value, identityBoundary, ownerProfileKey));
+  if (
+    !ownerProfileKey || !ownerUserId
+    || !requestId || !activityType || !sessionId || !repetitionId || finishedAt == null
+    || finishedAt < now - recoveryAlertFinishDeliveryWindowMs || finishedAt > now + heartRateLiveFutureSkewMs
+    || effortSummary == null || exposesOwnerIdentity
+  ) {
+    return { status: 400, error: 'Recovery Alert needs one valid, recently finished repetition.' };
+  }
+
+  const resolvedPreference = recoveryPreferenceValue(preference);
+  const accountId = recoveryAccountId(ownerProfileKey);
+  if (!await beforeCreate()) {
+    return { status: 401, error: 'This club tablet athlete session expired or ended.' };
+  }
+  if (resolvedPreference.mode === 'off') {
+    const activeEpisode = await persistence.loadActiveRecoveryAlertEpisode(ownerProfileKey, now);
+    return {
+      status: 200,
+      accountId,
+      episode: null,
+      activeEpisode: recoveryEpisodePublic(activeEpisode, now),
+      replayed: false,
+      createdEpisode: null,
+    };
+  }
+
+  let plannedSeconds = null;
+  let confidence = 'fixed';
+  let learningEpisodeCount = 0;
+  let explanation = resolvedPreference.mode === 'timer'
+    ? 'Recovery timer running. Start when the alert appears and you feel ready.'
+    : 'Waiting for your recovery heart-rate target. Start when you feel ready.';
+  if (resolvedPreference.mode === 'timer') {
+    plannedSeconds = resolvedPreference.timerSeconds;
+  } else if (resolvedPreference.mode === 'smart') {
+    const history = await persistence.loadRecoveryLearningSummaries(
+      ownerProfileKey,
+      activityType,
+      resolvedPreference.targetBpm,
+      12,
+    );
+    const plan = smartRecoveryPlan(resolvedPreference, history, effortSummary);
+    plannedSeconds = plan.plannedSeconds;
+    confidence = plan.confidence;
+    learningEpisodeCount = plan.learningEpisodeCount;
+    explanation = plan.explanation;
+  }
+
+  // A fixed Timer always honors the visible timer choice. minimumSeconds is
+  // only the earliest sensor/model recommendation for Heart Rate and Smart.
+  const notBeforeAt = resolvedPreference.mode === 'timer'
+    ? finishedAt
+    : finishedAt + resolvedPreference.minimumSeconds * 1_000;
+  const fallbackAt = resolvedPreference.mode === 'timer'
+    ? finishedAt + plannedSeconds * 1_000
+    : finishedAt + resolvedPreference.maximumSeconds * 1_000;
+  const plannedReadyAt = plannedSeconds == null
+    ? null
+    : Math.min(fallbackAt, Math.max(notBeforeAt, finishedAt + plannedSeconds * 1_000));
+  const requestFingerprint = createHash('sha256').update(JSON.stringify({
+    activityType,
+    sessionId,
+    repetitionId,
+    finishedAt,
+    effortSummary,
+  })).digest('hex');
+
+  // Check once more after preference/history work and immediately before the
+  // transactional write. This is the boundary that stops an old tablet bearer
+  // from attaching a late finish to the athlete who has already stepped off.
+  if (!await beforeCreate()) {
+    return { status: 401, error: 'This club tablet athlete session expired or ended.' };
+  }
+  const created = await persistence.createRecoveryAlertEpisode(ownerProfileKey, {
+    id: `recovery_${randomUUID()}`,
+    requestId,
+    requestFingerprint,
+    activityType,
+    sessionId,
+    repetitionId,
+    mode: resolvedPreference.mode,
+    timerSeconds: resolvedPreference.timerSeconds,
+    targetBpm: resolvedPreference.mode === 'timer' ? null : resolvedPreference.targetBpm,
+    minimumSeconds: resolvedPreference.minimumSeconds,
+    maximumSeconds: resolvedPreference.maximumSeconds,
+    startedAt: finishedAt,
+    notBeforeAt,
+    plannedReadyAt,
+    fallbackAt,
+    explanation,
+    confidence,
+    learningEpisodeCount,
+    effortSummary,
+  }, now, Math.max(now, finishedAt), pushEventForEpisode);
+  if (!created?.episode) {
+    return { status: 503, error: 'Recovery Alert could not be started.' };
+  }
+  if (created.conflict) {
+    return { status: 409, error: 'That recovery request was already used for another repetition.' };
+  }
+  // Keep the submitted request's exact idempotent result in `episode`, but
+  // separately project the latest authoritative account state. A delayed
+  // retry for repetition 1 must never replace repetition 2 after it commits.
+  const activeEpisode = await persistence.loadActiveRecoveryAlertEpisode(ownerProfileKey, now);
+  return {
+    status: created.replayed ? 200 : 201,
+    accountId,
+    episode: recoveryEpisodePublic(created.episode, now),
+    activeEpisode: recoveryEpisodePublic(activeEpisode, now),
+    replayed: created.replayed,
+    createdEpisode: created.episode,
+  };
 }
 
 function createHeartRateCode() {
@@ -7625,10 +7812,7 @@ async function loadClubTabletSessionFromRequest(request, options) {
   return loadClubTabletSessionToken(requestClubTabletSessionToken(request), options);
 }
 
-async function loadClubTabletArtifactSessionFromRequest(request) {
-  const activeSession = await loadClubTabletSessionFromRequest(request);
-  if (activeSession) return activeSession;
-
+async function loadClubTabletResultArtifactSessionFromRequest(request) {
   const resultToken = requestClubTabletResultToken(request);
   if (!/^[a-zA-Z0-9_-]{40,180}$/.test(resultToken)) return null;
   const device = await loadClubTabletDeviceFromRequest(request, { requireAvailable: true });
@@ -7642,6 +7826,12 @@ async function loadClubTabletArtifactSessionFromRequest(request) {
   }
   const authorization = loaded.status === 'authorized' ? loaded.authorization : null;
   if (!authorization) return null;
+  // A durable result credential can finish only the athlete session that
+  // originally created it. Rejecting a mismatched active-session header keeps
+  // a delayed Athlete A completion from being combined with Athlete B's
+  // current interactive bearer on the same iPad.
+  const sessionToken = requestClubTabletSessionToken(request);
+  if (sessionToken && tokenHash(sessionToken) !== authorization.sessionTokenHash) return null;
   return {
     tokenHash: authorization.sessionTokenHash,
     deviceTokenHash: device.tokenHash,
@@ -7661,6 +7851,21 @@ async function loadClubTabletArtifactSessionFromRequest(request) {
     _artifactOutbox: true,
     _artifactMember: authorization.member,
   };
+}
+
+async function loadClubTabletArtifactSessionFromRequest(request) {
+  const activeSession = await loadClubTabletSessionFromRequest(request);
+  if (activeSession) return activeSession;
+  return loadClubTabletResultArtifactSessionFromRequest(request);
+}
+
+async function loadClubTabletRecoverySessionFromRequest(request) {
+  // Recovery completion uses an explicit durable result credential whenever
+  // one is supplied. Do not fall back to the current athlete session: that
+  // would let an in-flight finish switch identities during a handoff.
+  return requestClubTabletResultToken(request)
+    ? loadClubTabletResultArtifactSessionFromRequest(request)
+    : loadClubTabletSessionFromRequest(request);
 }
 
 function clubTabletTrainingProfileKey(session, member) {
@@ -7729,6 +7934,7 @@ function sanitizeClubTabletRaceSummary(entry, tabletSession, playerId) {
   if (!entry || typeof entry !== 'object' || clubTabletPlayerId(entry.playerId) !== playerId) return null;
   const base = sanitizeLocalRaceResult(entry, playerId - 1);
   if (!base) return null;
+  const colorName = ['lime', 'red', 'blue', 'yellow'].includes(entry.colorName) ? entry.colorName : 'lime';
   return {
     ...base,
     playerId,
@@ -7736,8 +7942,8 @@ function sanitizeClubTabletRaceSummary(entry, tabletSession, playerId) {
     studioRiderId: tabletSession.studioRiderId,
     riderName: tabletSession.riderName,
     ...(tabletSession.photoUrl ? { photoUrl: tabletSession.photoUrl } : {}),
-    colorName: ['lime', 'red', 'blue', 'yellow'].includes(entry.colorName) ? entry.colorName : 'lime',
-    accent: sanitizeText(entry.accent, '#7ade36', 32),
+    colorName,
+    accent: sanitizePlayerAccent(colorName, entry.accent, 32),
     deviceLabel: sanitizeText(entry.deviceLabel, tabletSession.bikeDeviceId, 120),
     sampleCount: Math.round(boundedNumber(entry.sampleCount, 0, 10_000_000)),
     thirtyFootTimeMs: clubTabletNullableMetric(entry.thirtyFootTimeMs, 3_600_000),
@@ -9751,6 +9957,7 @@ function sanitizeGhostLapPayload(value, profileKey) {
     return null;
   }
 
+  const colorName = ['lime', 'red', 'blue', 'yellow'].includes(value.colorName) ? value.colorName : 'lime';
   return {
     version: 1,
     id: sanitizeText(value.id, `ghost-${randomUUID()}`, 180).replace(/[^a-zA-Z0-9:._-]/g, '-'),
@@ -9762,8 +9969,8 @@ function sanitizeGhostLapPayload(value, profileKey) {
     ...(photoUrl ? { photoUrl } : {}),
     ownerKey,
     ownerName: sanitizeText(value.ownerName, 'TrackLab rider', 80),
-    colorName: ['lime', 'red', 'blue', 'yellow'].includes(value.colorName) ? value.colorName : 'lime',
-    accent: sanitizeText(value.accent, '#7ade36', 32),
+    colorName,
+    accent: sanitizePlayerAccent(colorName, value.accent, 32),
     source: 'personal',
     raceSource,
     lapCount,
@@ -10041,7 +10248,7 @@ function sanitizeExploreState(value, client, room) {
         name: sanitizeText(rider?.name, `${client.name} ${index + 1}`, 64),
         ...(photoUrl ? { photoUrl } : {}),
         colorName,
-        accent: sanitizeText(rider?.accent, '#7ade36', 24),
+        accent: sanitizePlayerAccent(colorName, rider?.accent, 24),
         distanceMeters: Math.max(0, Math.min(routeDistanceMeters, finiteNumber(rider?.distanceMeters, 0))),
         velocityMps: acceptedTrainingVelocityMps(rider?.velocityMps ?? 0),
         cadence,
@@ -10103,11 +10310,12 @@ function sanitizeRaceSummaryEntry(value, index) {
     return number == null ? null : Math.max(0, Math.min(max, number));
   };
 
+  const colorName = ['lime', 'red', 'blue', 'yellow'].includes(value.colorName) ? value.colorName : 'lime';
   return {
     playerId,
     riderName: sanitizeText(value.riderName, `Rider ${playerId}`, 64),
-    colorName: ['lime', 'red', 'blue', 'yellow'].includes(value.colorName) ? value.colorName : 'lime',
-    accent: sanitizeText(value.accent, '#7ade36', 24),
+    colorName,
+    accent: sanitizePlayerAccent(colorName, value.accent, 24),
     deviceLabel: sanitizeText(value.deviceLabel, 'Wattbike', 120),
     rank: Math.max(1, Math.min(maxRaceBikeCount, Math.round(finiteNumber(value.rank, playerId)))),
     finishTimeMs: nullableMetric(value.finishTimeMs, 24 * 60 * 60 * 1000),
@@ -10180,7 +10388,7 @@ function sanitizeRaceState(value, client, room) {
         name: sanitizeText(rider?.name, `${client.name} ${index + 1}`, 64),
         ...(photoUrl ? { photoUrl } : {}),
         colorName,
-        accent: sanitizeText(rider?.accent, '#7ade36', 24),
+        accent: sanitizePlayerAccent(colorName, rider?.accent, 24),
         distance: Math.max(0, finiteNumber(rider?.distance, 0)),
         velocity: acceptedTrainingVelocityMps(rider?.velocity ?? 0),
         boost: Math.max(0, Math.min(1, finiteNumber(rider?.boost, 0))),
@@ -14098,6 +14306,10 @@ async function handleRecoveryAlertApi(request, response, requestUrl) {
       writeJson(response, 200, {
         accountId,
         preference: recoveryPreferenceValue(stored),
+        // The personal app uses this capability signal to choose either the
+        // server/APNs delivery path or its per-device local fallback. It
+        // contains no installation, account, or athlete detail.
+        pushDeliveryAvailable: pushProviderDispatchReady(),
       }, { 'Cache-Control': 'no-store' });
       return;
     }
@@ -14120,7 +14332,11 @@ async function handleRecoveryAlertApi(request, response, requestUrl) {
       writeJson(response, 503, { error: 'Recovery Alert settings could not be saved.' });
       return;
     }
-    writeJson(response, 200, { accountId, preference: recoveryPreferenceValue(saved) }, { 'Cache-Control': 'no-store' });
+    writeJson(response, 200, {
+      accountId,
+      preference: recoveryPreferenceValue(saved),
+      pushDeliveryAvailable: pushProviderDispatchReady(),
+    }, { 'Cache-Control': 'no-store' });
     return;
   }
 
@@ -14134,111 +14350,32 @@ async function handleRecoveryAlertApi(request, response, requestUrl) {
     const ownerProfileKey = authProfileKey(session.user);
     if (!enforceRateLimit(request, response, heartRateMutationRateLimiter, 480, `recovery-create:${ownerProfileKey}`)) return;
     const payload = await readJsonBody(request, 16_000);
-    const requestId = recoveryRequestId(payload?.requestId);
-    const activityType = recoveryAlertActivityTypes.has(payload?.activityType) ? payload.activityType : '';
-    const sessionId = recoveryIdentifier(payload?.sessionId);
-    const repetitionId = recoveryIdentifier(payload?.repetitionId);
-    const finishedAt = heartRateTimestamp(payload?.finishedAt);
-    const effortSummary = sanitizeRecoveryEffortSummary(payload?.effortSummary);
-    const exposesOwnerIdentity = [requestId, sessionId, repetitionId]
-      .some((value) => recoveryIdentifierExposesOwner(value, session, ownerProfileKey));
-    if (
-      !requestId || !activityType || !sessionId || !repetitionId || finishedAt == null
-      || finishedAt < now - 10 * 60 * 1_000 || finishedAt > now + heartRateLiveFutureSkewMs
-      || effortSummary == null || exposesOwnerIdentity
-    ) {
-      writeJson(response, 400, { error: 'Recovery Alert needs one valid, recently finished repetition.' });
+    const preference = await persistence.loadRecoveryAlertPreference(ownerProfileKey);
+    const created = await createRecoveryAlertEpisodeForOwner({
+      ownerProfileKey,
+      ownerUserId: session.user.id,
+      preference,
+      payload,
+      now,
+      // A personal athlete’s newly-created recovery timer must fan out to
+      // every personal device they have enrolled. The shared-tablet endpoint
+      // already follows this path; keeping the direct endpoint identical
+      // prevents a tablet/phone discrepancy.
+      pushEventForEpisode: (episode) => recoveryReadyPushEvent({
+        recipientUserId: session.user.id,
+        episode,
+        now,
+      }),
+    });
+    if (created.error) {
+      writeJson(response, created.status, { error: created.error });
       return;
     }
-    const preference = recoveryPreferenceValue(await persistence.loadRecoveryAlertPreference(ownerProfileKey));
-    const accountId = recoveryAccountId(ownerProfileKey);
-    if (preference.mode === 'off') {
-      const activeEpisode = await persistence.loadActiveRecoveryAlertEpisode(ownerProfileKey, now);
-      writeJson(response, 200, {
-        accountId,
-        episode: null,
-        activeEpisode: recoveryEpisodePublic(activeEpisode, now),
-        replayed: false,
-      }, { 'Cache-Control': 'no-store' });
-      return;
-    }
-    let plannedSeconds = null;
-    let confidence = 'fixed';
-    let learningEpisodeCount = 0;
-    let explanation = preference.mode === 'timer'
-      ? 'Recovery timer running. Start when the alert appears and you feel ready.'
-      : 'Waiting for your recovery heart-rate target. Start when you feel ready.';
-    if (preference.mode === 'timer') {
-      plannedSeconds = preference.timerSeconds;
-    } else if (preference.mode === 'smart') {
-      const history = await persistence.loadRecoveryLearningSummaries(
-        ownerProfileKey,
-        activityType,
-        preference.targetBpm,
-        12,
-      );
-      const plan = smartRecoveryPlan(preference, history, effortSummary);
-      plannedSeconds = plan.plannedSeconds;
-      confidence = plan.confidence;
-      learningEpisodeCount = plan.learningEpisodeCount;
-      explanation = plan.explanation;
-    }
-    // A fixed Timer always honors the visible timer choice. minimumSeconds is
-    // only the earliest sensor/model recommendation for Heart Rate and Smart.
-    const notBeforeAt = preference.mode === 'timer'
-      ? finishedAt
-      : finishedAt + preference.minimumSeconds * 1_000;
-    const fallbackAt = preference.mode === 'timer'
-      ? finishedAt + plannedSeconds * 1_000
-      : finishedAt + preference.maximumSeconds * 1_000;
-    const plannedReadyAt = plannedSeconds == null
-      ? null
-      : Math.min(fallbackAt, Math.max(notBeforeAt, finishedAt + plannedSeconds * 1_000));
-    const requestFingerprint = createHash('sha256').update(JSON.stringify({
-      activityType,
-      sessionId,
-      repetitionId,
-      finishedAt,
-      effortSummary,
-    })).digest('hex');
-    const created = await persistence.createRecoveryAlertEpisode(ownerProfileKey, {
-      id: `recovery_${randomUUID()}`,
-      requestId,
-      requestFingerprint,
-      activityType,
-      sessionId,
-      repetitionId,
-      mode: preference.mode,
-      timerSeconds: preference.timerSeconds,
-      targetBpm: preference.mode === 'timer' ? null : preference.targetBpm,
-      minimumSeconds: preference.minimumSeconds,
-      maximumSeconds: preference.maximumSeconds,
-      startedAt: finishedAt,
-      notBeforeAt,
-      plannedReadyAt,
-      fallbackAt,
-      explanation,
-      confidence,
-      learningEpisodeCount,
-      effortSummary,
-    }, now, Math.max(now, finishedAt));
-    if (!created?.episode) {
-      writeJson(response, 503, { error: 'Recovery Alert could not be started.' });
-      return;
-    }
-    if (created.conflict) {
-      writeJson(response, 409, { error: 'That recovery request was already used for another repetition.' });
-      return;
-    }
-    // Keep the submitted request's exact idempotent result in `episode`, but
-    // separately project the latest authoritative account state. A delayed
-    // retry for repetition 1 must never replace repetition 2 in another
-    // device after repetition 2 has already committed.
-    const activeEpisode = await persistence.loadActiveRecoveryAlertEpisode(ownerProfileKey, now);
-    writeJson(response, created.replayed ? 200 : 201, {
-      accountId,
-      episode: recoveryEpisodePublic(created.episode, now),
-      activeEpisode: recoveryEpisodePublic(activeEpisode, now),
+    if (created.createdEpisode) kickPushWorker();
+    writeJson(response, created.status, {
+      accountId: created.accountId,
+      episode: created.episode,
+      activeEpisode: created.activeEpisode,
       replayed: created.replayed,
     }, { 'Cache-Control': 'no-store' });
     return;
@@ -14282,17 +14419,27 @@ async function handleRecoveryAlertApi(request, response, requestUrl) {
       writeJson(response, 400, { error: 'Choose Add time, Start anyway, or Stop.' });
       return;
     }
+    const recoveryUserId = authUserIdFromProfileKey(ownerProfileKey);
     const updated = await persistence.updateRecoveryAlertEpisode(
       ownerProfileKey,
       episodeId,
       action,
       { seconds },
       Math.max(now, existing.startedAt),
+      recoveryUserId
+        ? (episode) => (action === 'add-time'
+          ? recoveryReadyPushEvent({ recipientUserId: recoveryUserId, episode, now })
+          : null)
+        : null,
     );
     if (!updated) {
       writeJson(response, 409, { error: 'That recovery period cannot be changed.' });
       return;
     }
+    // The episode update and any cancellation/replacement of its personal
+    // device outbox event commit together. A new deadline can never leave the
+    // athlete with an old alert or an orphaned timer.
+    if (recoveryUserId) kickPushWorker();
     writeJson(response, 200, {
       accountId: recoveryAccountId(ownerProfileKey),
       episode: recoveryEpisodePublic(updated, now),
@@ -14330,15 +14477,29 @@ async function handleRecoveryAlertApi(request, response, requestUrl) {
       writeJson(response, 409, { error: 'A fresh accepted Apple Watch reading for this account is required.' });
       return;
     }
+    const recoveryUserId = authUserIdFromProfileKey(ownerProfileKey);
     const updated = await persistence.applyRecoveryHeartRateSamples(
       ownerProfileKey,
       stream.id,
       [{ bpm, recordedAt }],
       now,
+      recoveryUserId
+        ? (nextEpisode) => recoveryReadyPushEvent({
+          recipientUserId: recoveryUserId,
+          episode: nextEpisode,
+          now,
+        })
+        : null,
     );
     if (!updated || updated.id !== episode.id) {
       writeJson(response, 409, { error: 'That Apple Watch reading does not match the active recovery period.' });
       return;
+    }
+    // Heart-rate recovery can complete before its conservative fallback. Its
+    // earlier deadline is cancelled and the immediate personal-device event is
+    // persisted in the same transaction as the target-reaching state.
+    if (updated.readyAt != null && updated.alertTrigger !== 'manual' && recoveryUserId) {
+      kickPushWorker();
     }
     writeJson(response, 200, {
       accountId: recoveryAccountId(ownerProfileKey),
@@ -14436,12 +14597,17 @@ async function handleRecoveryAlertApi(request, response, requestUrl) {
       writeJson(response, 404, { error: 'That recovery period was not found.' });
       return;
     }
+    const recoveryUserId = authUserIdFromProfileKey(ownerProfileKey);
     const stopped = await persistence.updateRecoveryAlertEpisode(
       ownerProfileKey,
       episodeId,
       'stop',
       {},
       Math.max(now, existing.startedAt),
+      // A stop cancels the athlete's scheduled personal-device alert in the
+      // same transaction as the episode, rather than relying on a later
+      // best-effort cleanup request.
+      recoveryUserId ? () => null : null,
     );
     if (!stopped) {
       writeJson(response, 409, { error: 'That recovery period is already stopped.' });
@@ -14455,6 +14621,164 @@ async function handleRecoveryAlertApi(request, response, requestUrl) {
   }
 
   writeJson(response, 404, { error: 'Recovery Alert endpoint not found.' });
+}
+
+/**
+ * Shared tablets may report a finish, but they never choose the recovery
+ * account.  The current tablet bearer is resolved to one claimed athlete on
+ * the server and only that athlete's private profile receives the episode.
+ */
+async function handleClubTabletRecoveryAlertApi(request, response, requestUrl) {
+  if (requestUrl.pathname !== '/api/club-tablet/recovery-alert/episodes') {
+    writeJson(response, 404, { error: 'Club Tablet recovery endpoint not found.' });
+    return;
+  }
+  if (request.method !== 'POST') {
+    writeJson(response, 405, { error: 'Method not allowed' });
+    return;
+  }
+
+  // A finish can be queued just before the rider leaves a shared tablet.  Its
+  // durable, device-bound result credential is deliberately allowed to finish
+  // that one athlete's recovery write after the interactive bearer has been
+  // revoked. This prevents the next athlete from inheriting or losing it.
+  const tabletSession = await loadClubTabletRecoverySessionFromRequest(request);
+  if (!tabletSession) {
+    writeJson(response, 401, {
+      error: 'This club tablet athlete session expired or ended.',
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+  if (!enforceRateLimit(
+    request,
+    response,
+    heartRateMutationRateLimiter,
+    480,
+    `club-tablet-recovery-create:${tabletSession.tokenHash}`,
+  )) return;
+
+  const identity = await clubTabletMemberAndProfile(tabletSession);
+  const athleteProfileKey = String(identity?.member?.athleteProfileKey || '');
+  const athleteUserId = authUserIdFromProfileKey(athleteProfileKey);
+  if (
+    !identity
+    || identity.member.status !== 'claimed'
+    || !athleteUserId
+    || identity.profileKey !== athleteProfileKey
+  ) {
+    writeJson(response, 403, {
+      error: 'Recovery Alerts require this selected athlete to have a claimed TrackLab account.',
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const payload = await readJsonBody(request, 16_000);
+  // This endpoint obtains the target from the tablet bearer only. Rejecting
+  // accidental/forged target fields makes it impossible to turn it into a
+  // generic cross-account recovery writer.
+  if (
+    !payload || typeof payload !== 'object' || Array.isArray(payload)
+    || ['accountId', 'athleteProfileKey', 'ownerProfileKey', 'studioRiderId', 'userId']
+      .some((key) => Object.hasOwn(payload, key))
+  ) {
+    writeJson(response, 400, {
+      error: 'Club Tablet Recovery Alert does not accept an account or athlete override.',
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  // Athlete-specific preferences always win.  A club owner's saved recovery
+  // settings are a useful default for a claimed athlete who has not selected
+  // personal preferences yet; either path still writes the episode to the
+  // athlete's account, never the owner or the shared iPad.
+  const athletePreference = await persistence.loadRecoveryAlertPreference(athleteProfileKey);
+  const preference = athletePreference
+    ?? await persistence.loadRecoveryAlertPreference(tabletSession.ownerProfileKey);
+  const now = Date.now();
+  const clubTabletClaimStillMatches = async () => {
+    if (tabletSession._artifactOutbox) {
+      // Re-read the durable credential at the persistence boundary. It binds
+      // this exact original session to an enrolled device/member even if a
+      // different athlete has begun an interactive session on that iPad.
+      const artifactSession = await loadClubTabletResultArtifactSessionFromRequest(request);
+      if (
+        !artifactSession
+        || !artifactSession._artifactOutbox
+        || artifactSession.tokenHash !== tabletSession.tokenHash
+        || artifactSession.deviceId !== tabletSession.deviceId
+        || artifactSession.clubId !== tabletSession.clubId
+        || artifactSession.studioRiderId !== tabletSession.studioRiderId
+      ) return false;
+      const artifactIdentity = await clubTabletMemberAndProfile(artifactSession);
+      const artifactProfileKey = String(artifactIdentity?.member?.athleteProfileKey || '');
+      return Boolean(
+        artifactIdentity
+        && artifactIdentity.member.status === 'claimed'
+        && artifactIdentity.profileKey === athleteProfileKey
+        && artifactProfileKey === athleteProfileKey
+        && authUserIdFromProfileKey(artifactProfileKey) === athleteUserId
+      );
+    }
+    // The original bearer may be valid when the request enters this handler
+    // but no longer represent this athlete after preference/history reads.
+    // Re-read the exact session and membership rather than accepting an
+    // equivalent new session on the same physical iPad.
+    if (!clubTabletSessionIsCurrent(tabletSession, Date.now())) return false;
+    try {
+      const currentSession = await loadClubTabletSessionByHash(tabletSession.tokenHash);
+      if (
+        !currentSession
+        || currentSession !== tabletSession
+        || !clubTabletSessionIsCurrent(currentSession, Date.now())
+      ) return false;
+      const currentIdentity = await clubTabletMemberAndProfile(currentSession);
+      const currentProfileKey = String(currentIdentity?.member?.athleteProfileKey || '');
+      return Boolean(
+        currentIdentity
+        && currentIdentity.member.status === 'claimed'
+        && currentIdentity.profileKey === athleteProfileKey
+        && currentProfileKey === athleteProfileKey
+        && authUserIdFromProfileKey(currentProfileKey) === athleteUserId
+        && clubTabletSessionIsCurrent(currentSession, Date.now())
+      );
+    } catch (error) {
+      cloudTelemetry.warn('club_tablet.recovery_claim_recheck_failed', {
+        clubId: tabletSession.clubId,
+        deviceId: tabletSession.deviceId,
+        error,
+      });
+      return false;
+    }
+  };
+  const created = await createRecoveryAlertEpisodeForOwner({
+    ownerProfileKey: athleteProfileKey,
+    ownerUserId: athleteUserId,
+    preference,
+    payload,
+    now,
+    beforeCreate: clubTabletClaimStillMatches,
+    // Persist the athlete's personal-device alert in the same recovery
+    // transaction. The shared tablet only reports a finish; it never owns a
+    // notification and can never redirect one to the club owner.
+    pushEventForEpisode: (episode) => recoveryReadyPushEvent({
+      recipientUserId: athleteUserId,
+      episode,
+      now,
+    }),
+  });
+  if (created.error) {
+    writeJson(response, created.status, { error: created.error }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  // The outbox entry has committed with the recovery episode (or a replay
+  // repaired it idempotently). Start a worker pass only after that boundary.
+  if (created.createdEpisode) kickPushWorker();
+
+  writeJson(response, created.status, {
+    accountId: created.accountId,
+    replayed: created.replayed,
+  }, { 'Cache-Control': 'no-store' });
 }
 
 async function handleHeartRateStreamApi(request, response, requestUrl) {
@@ -14609,12 +14933,20 @@ async function handleHeartRateStreamApi(request, response, requestUrl) {
       );
       const acceptedSet = new Set(acceptedSequences);
       const acceptedSamples = sanitized.samples.filter((sample) => acceptedSet.has(sample.sequence));
+      const recoveryUserId = authUserIdFromProfileKey(currentStream.ownerProfileKey);
       if (acceptedSamples.length > 0) {
         await persistence.applyRecoveryHeartRateSamples(
           currentStream.ownerProfileKey,
           currentStream.id,
           acceptedSamples,
           sampleReceivedAt,
+          recoveryUserId
+            ? (episode) => recoveryReadyPushEvent({
+              recipientUserId: recoveryUserId,
+              episode,
+              now: sampleReceivedAt,
+            })
+            : null,
         );
       }
       if (['studio-block', 'account-block'].includes(currentStream.relayScope)) {
@@ -14626,7 +14958,12 @@ async function handleHeartRateStreamApi(request, response, requestUrl) {
         }
       }
       const recoveryEpisode = await persistence.loadLatestRecoveryAlertEpisode(currentStream.ownerProfileKey);
-      return { acceptedSequences, recoveryEpisode, recoveryOwnerProfileKey: currentStream.ownerProfileKey };
+      return {
+        acceptedSequences,
+        recoveryEpisode,
+        recoveryOwnerProfileKey: currentStream.ownerProfileKey,
+        recoveryPushRecipientUserId: recoveryUserId,
+      };
     });
     if (writeResult.authorizationFailed) {
       writeJson(response, 401, { error: 'This heart-rate stream authorization is invalid, expired, or revoked.' });
@@ -14641,6 +14978,16 @@ async function handleHeartRateStreamApi(request, response, requestUrl) {
       return;
     }
     const { acceptedSequences } = writeResult;
+    if (
+      writeResult.recoveryEpisode?.readyAt != null
+      && writeResult.recoveryEpisode.alertTrigger !== 'manual'
+      && writeResult.recoveryPushRecipientUserId
+    ) {
+      // The target may be reached by the athlete's Watch relay rather than
+      // through the personal app. Wake the same personal-device outbox path
+      // used by a Club Tablet completion; the shared tablet remains passive.
+      kickPushWorker();
+    }
     const acceptedSet = new Set(acceptedSequences);
     const latestAccepted = [...sanitized.samples].reverse().find((sample) => acceptedSet.has(sample.sequence));
     if (latestAccepted) {
@@ -17461,6 +17808,10 @@ async function serveStatic(request, response) {
     });
     if (request.method === 'GET') response.end(body);
     else response.end();
+    return;
+  }
+  if (requestUrl.pathname === '/api/club-tablet/recovery-alert/episodes') {
+    await handleClubTabletRecoveryAlertApi(request, response, requestUrl);
     return;
   }
   if (requestUrl.pathname.startsWith('/api/recovery-alert')) {
@@ -21393,7 +21744,14 @@ async function serveStatic(request, response) {
       tabletSession.ownerProfileKey,
     ]), saved);
     writeJson(response, existing ? 200 : 201, {
-      session: publicTrainingSession(saved, identity.member.status === 'claimed' ? 'athlete' : 'owner'),
+      session: publicTrainingSession(
+        saved,
+        identity.member.status === 'claimed' ? 'athlete' : 'owner',
+        {
+          authorizedPowerStudioRiderIds: [tabletSession.studioRiderId],
+          attributedStudioRiderId: tabletSession.studioRiderId,
+        },
+      ),
       replayed: Boolean(existing),
       heartRate: {
         status: heartRateSegment.status,

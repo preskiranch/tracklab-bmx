@@ -95,6 +95,19 @@ const mockPedalZoneMapping = {
   splitSections: [],
 };
 
+async function mockPublishedPedalZoneTrack(page: Page) {
+  await page.route('**/api/public-track-mappings*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackMappings: { [mockPedalZoneMapping.trackId]: mockPedalZoneMapping },
+        customRoutes: [],
+        count: 1,
+      }),
+    });
+  });
+}
+
 const mockNoPedalZoneMapping = {
   ...mockPedalZoneMapping,
   savedAt: '2026-07-09T00:05:00.000Z',
@@ -397,6 +410,86 @@ test('public landing page exposes the global track locator without an account', 
   );
   await expect(locator.locator('.public-track-map')).toHaveAttribute('aria-label', 'Satellite view of Air Time BMX');
   await expect(locator.getByRole('link', { name: 'Official Website' })).toHaveCount(0);
+});
+
+test('public app hub keeps tabs, deep links, scroll, and responsive pricing in sync', async ({ page }) => {
+  await page.route('**/api/auth/me', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ user: null }),
+  }));
+  await page.route('https://maps.googleapis.com/**', (route) => route.abort());
+  await page.goto('/?locator=north-bay-bmx-napa-valley');
+
+  const hub = page.locator('.membership-hub-page');
+  const nav = page.getByRole('navigation', { name: 'TrackLab home navigation' });
+  await expect(page.locator('#track-locator')).toBeVisible();
+
+  await nav.getByRole('button', { name: 'Home', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Your BMX home base.' })).toBeVisible();
+  await expect(page).not.toHaveURL(/locator=|#track-locator/);
+
+  await page.evaluate(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('locator', 'north-bay-bmx-napa-valley');
+    url.hash = 'track-locator';
+    window.history.pushState(window.history.state, '', url);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await expect(page.locator('#track-locator')).toBeVisible();
+
+  await nav.getByRole('button', { name: 'Bike Shops', exact: true }).click();
+  await expect(page.locator('#bike-shop-directory')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Global bike shops' })).toBeVisible();
+  await expect(page).toHaveURL(/#bike-shop-directory$/);
+
+  await page.goBack();
+  await expect(page.locator('#track-locator')).toBeVisible();
+  await expect(nav.getByRole('button', { name: 'BMX Tracks', exact: true })).toHaveClass(/active/);
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await nav.getByRole('button', { name: 'Home', exact: true }).click();
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await nav.getByRole('button', { name: 'BMX Tracks', exact: true }).click();
+  await expect.poll(async () => page.locator('#track-locator').evaluate((element) => (
+    Math.round(element.getBoundingClientRect().top)
+  ))).toBeGreaterThanOrEqual(0);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await nav.getByRole('button', { name: 'Home', exact: true }).click();
+  const mobileOrder = await hub.evaluate((element) => {
+    const brand = element.querySelector<HTMLElement>('.membership-hub-sidebar .brand-lockup');
+    const navigation = element.querySelector<HTMLElement>('.membership-hub-nav');
+    if (!brand || !navigation) throw new Error('Hub mobile navigation is incomplete');
+    return {
+      brandTop: brand.getBoundingClientRect().top,
+      navigationTop: navigation.getBoundingClientRect().top,
+      documentFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    };
+  });
+  expect(mobileOrder.brandTop).toBeLessThan(mobileOrder.navigationTop);
+  expect(mobileOrder.documentFits).toBe(true);
+
+  await nav.getByRole('button', { name: 'Bike Shops', exact: true }).click();
+  await page.locator('.membership-hub-signin').click();
+  await expect(page.locator('#free-account-gate')).toBeVisible();
+  await expect.poll(async () => page.locator('#free-account-gate').evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.top >= 0 && rect.top < window.innerHeight;
+  })).toBe(true);
+
+  await page.setViewportSize({ width: 1041, height: 900 });
+  const pricingGeometry = await page.locator('.membership-grid').evaluate((element) => {
+    const columns = getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean);
+    const tierButton = element.querySelector<HTMLElement>('.apple-tier-selector button');
+    return {
+      columnCount: columns.length,
+      tierButtonWidth: tierButton?.getBoundingClientRect().width ?? 0,
+      documentFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    };
+  });
+  expect(pricingGeometry.columnCount).toBe(1);
+  expect(pricingGeometry.tierButtonWidth).toBeGreaterThan(100);
+  expect(pricingGeometry.documentFits).toBe(true);
 });
 
 test('first-run profile flow opens the TrackLab dashboard', async ({ page }, testInfo) => {
@@ -4924,7 +5017,8 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     }, { once: true });
   });
 
-  await page.goto('/?track=air-time-bmx');
+  await mockPublishedPedalZoneTrack(page);
+  await page.goto('/?track=black-mountain-bmx');
 
   await page.getByRole('button', { name: 'Open App' }).click();
   await page.getByRole('button', { name: /Demo/i }).first().click();
@@ -5593,7 +5687,8 @@ test.describe('mobile commentary playback', () => {
       }
     });
 
-    await page.goto('/?track=air-time-bmx');
+    await mockPublishedPedalZoneTrack(page);
+    await page.goto('/?track=black-mountain-bmx');
     await page.getByRole('button', { name: 'Open App' }).click();
     await page.getByRole('button', { name: /Demo/i }).first().click();
     await page.waitForTimeout(1_500);
@@ -5772,7 +5867,8 @@ test.describe('mobile commentary playback', () => {
       });
     });
 
-    await page.goto('/?track=air-time-bmx');
+    await mockPublishedPedalZoneTrack(page);
+    await page.goto('/?track=black-mountain-bmx');
     await page.getByRole('button', { name: 'Open App' }).click();
     await page.getByRole('button', { name: /Demo/i }).first().click();
     const startAction = page.locator('.workflow-step.primary-action');
@@ -5914,8 +6010,17 @@ test('loop races expose lap controls and ranked ghost selection without a cadenc
   await expect(page.getByText('Top 3')).toBeVisible();
   await expect(page.getByText('Demo Ghosts')).toHaveCount(0);
   await expect(page.getByText('Demo Rider 1')).toHaveCount(0);
-  await expect(page.getByText('Studio Bike One')).toBeVisible();
-  await expect(page.getByText('World Leader')).toBeVisible();
+  await expect(page.getByText('Studio Bike One', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('World Leader', { exact: true }).first()).toBeVisible();
+  const preRaceGhostSetup = page.locator('#ghost-race-setup');
+  await expect(preRaceGhostSetup).toBeVisible();
+  await expect(preRaceGhostSetup).toContainText('Race a ghost');
+  await expect(preRaceGhostSetup).toContainText('Black Mountain BMX');
+  const preRacePersonalGhost = preRaceGhostSetup.locator('.ghost-setup-options > button')
+    .filter({ hasText: 'Studio Bike One' });
+  await expect(preRacePersonalGhost).toBeVisible();
+  await preRacePersonalGhost.click();
+  await expect(preRacePersonalGhost).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('.ghost-section .leaderboard-rank')).toHaveText(['#1', '#2']);
   await expect(page.getByRole('img', { name: 'First place gold cup' })).toBeVisible();
   await expect(page.getByRole('img', { name: 'Second place silver cup' })).toBeVisible();
@@ -5926,7 +6031,6 @@ test('loop races expose lap controls and ranked ghost selection without a cadenc
   await expect(page.getByText('Gate start', { exact: false })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Countdown', exact: true })).toHaveCount(0);
   const personalGhost = page.locator('.ghost-leaderboard-entry').filter({ hasText: 'Studio Bike One' });
-  await personalGhost.click();
   await expect(personalGhost.getByText('Selected to race')).toBeVisible();
   await expect(page.locator('.ghost-summary-row')).toContainText('1 selected');
   const ghostWorkflowStep = page.locator('.workflow-step').filter({ hasText: 'Ghost' });
@@ -7278,6 +7382,17 @@ test('club athletes see only their own connection and never the studio roster', 
 
   const spreadsheet = page.getByRole('region', { name: 'Training results spreadsheet' });
   await expect(spreadsheet).toBeVisible();
+  const [profileContentWidth, spreadsheetBox] = await Promise.all([
+    page.locator('.account-profile-view').evaluate((element) => {
+      const style = getComputedStyle(element);
+      return element.clientWidth
+        - Number.parseFloat(style.paddingLeft)
+        - Number.parseFloat(style.paddingRight);
+    }),
+    spreadsheet.boundingBox(),
+  ]);
+  expect(spreadsheetBox).not.toBeNull();
+  expect(Math.abs(spreadsheetBox!.width - profileContentWidth)).toBeLessThanOrEqual(2);
   await expect(spreadsheet.getByRole('tab', { name: /Power by rep/ })).toBeVisible();
   await spreadsheet.getByRole('tab', { name: /Race & sprint/ }).click();
 
@@ -7330,6 +7445,29 @@ test('club athletes see only their own connection and never the studio roster', 
   expect(desktopMapBox).not.toBeNull();
   expect(desktopGridBox).not.toBeNull();
   expect(desktopGridBox!.x).toBeGreaterThan(desktopMapBox!.x + desktopMapBox!.width - 2);
+
+  // Long studio-tablet result histories must scroll inside the results sheet,
+  // so the metric labels remain visible while the owner reads later rows.
+  const resultsGrid = spreadsheet.getByRole('region', { name: /Race & sprint spreadsheet/ });
+  const scrollMetrics = await resultsGrid.evaluate((grid) => {
+    const body = grid.querySelector('tbody');
+    const firstRow = body?.querySelector('tr');
+    if (!body || !firstRow) throw new Error('Expected a race-results row to test sticky headers.');
+    for (let index = 0; index < 24; index += 1) {
+      body.append(firstRow.cloneNode(true));
+    }
+    return { clientHeight: grid.clientHeight, scrollHeight: grid.scrollHeight };
+  });
+  expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight);
+  await resultsGrid.evaluate((grid) => { grid.scrollTop = grid.scrollHeight; });
+  await expect.poll(async () => {
+    const [gridBox, headerBox] = await Promise.all([
+      resultsGrid.boundingBox(),
+      resultTable.getByRole('columnheader', { name: 'Finish' }).boundingBox(),
+    ]);
+    return gridBox && headerBox ? Math.abs(headerBox.y - gridBox.y) : Number.POSITIVE_INFINITY;
+  }).toBeLessThanOrEqual(2);
+  await resultsGrid.evaluate((grid) => { grid.scrollTop = 0; });
 
   await page.setViewportSize({ width: 390, height: 844 });
   await zoneReview.scrollIntoViewIfNeeded();
@@ -7839,6 +7977,7 @@ test('native club owner sign-in restores the uniquely assigned Wattbike tablet i
   let sessionRequest: unknown = null;
   let sessionPosts = 0;
   let sessionDeletes = 0;
+  let clubTabletGhostRequests = 0;
   let tabletLiveRequests = 0;
   let tabletLiveSessionHeader = '';
   let tabletLiveReadingAvailable = true;
@@ -7940,6 +8079,40 @@ test('native club owner sign-in restores the uniquely assigned Wattbike tablet i
       body: JSON.stringify({
         ticket: 't'.repeat(43),
         expiresAt: Date.now() + 60_000,
+      }),
+    });
+  });
+  await page.route('**/api/club-tablet/ghosts*', async (route) => {
+    clubTabletGhostRequests += 1;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ghosts: [{
+          version: 1,
+          id: 'club-tablet-personal-ghost',
+          trackId: 'black-mountain-bmx',
+          trackName: 'Black Mountain BMX',
+          routeVariantId: 'amateur',
+          riderName: 'Rasheen Practice Ghost',
+          ownerKey: 'user:rasheen-athlete',
+          ownerName: 'Rasheen Hicks',
+          colorName: 'lime',
+          accent: '#178f4d',
+          source: 'personal',
+          raceSource: 'live',
+          lapCount: 1,
+          finishTimeMs: 18_500,
+          thirtyFootTimeMs: 1_800,
+          savedAt: Date.now(),
+          analyticsPublic: false,
+          medalRank: null,
+          summary: null,
+          zoneResults: [],
+          points: [
+            { elapsedMs: 0, distanceMeters: 0, velocityMps: 0, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+            { elapsedMs: 18_500, distanceMeters: 220, velocityMps: 0, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+          ],
+        }],
       }),
     });
   });
@@ -8538,6 +8711,27 @@ test('native club owner sign-in restores the uniquely assigned Wattbike tablet i
   await primaryNav.getByRole('button', { name: 'End activity & choose athlete', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Independent Training' })).toBeVisible();
   await expect.poll(() => sessionDeletes).toBe(2);
+  finishSessionDelete?.();
+
+  // The same athlete can select a personal ghost before a shared-tablet
+  // race. Ghost data remains scoped to that athlete's secure tablet session.
+  await page.getByRole('button', { name: /Rasheen Hicks/ }).click();
+  await page.locator('.club-tablet-home-programs')
+    .getByRole('button', { name: /BMX Race Intervals/ })
+    .click();
+  await expect.poll(() => sessionPosts).toBe(3);
+  const clubTabletGhostSetup = page.locator('#ghost-race-setup');
+  await expect(clubTabletGhostSetup).toBeVisible();
+  await expect.poll(() => clubTabletGhostRequests).toBeGreaterThanOrEqual(1);
+  const clubTabletPersonalGhost = clubTabletGhostSetup.locator('.ghost-setup-options > button')
+    .filter({ hasText: 'Rasheen Practice Ghost' });
+  await expect(clubTabletPersonalGhost).toBeVisible();
+  await clubTabletPersonalGhost.click();
+  await expect(clubTabletPersonalGhost).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.workflow-step').filter({ hasText: 'Ghost' })).toContainText('1 selected');
+  await primaryNav.getByRole('button', { name: 'End activity & choose athlete', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Independent Training' })).toBeVisible();
+  await expect.poll(() => sessionDeletes).toBe(3);
   finishSessionDelete?.();
 
   expect(await page.evaluate(() => ({

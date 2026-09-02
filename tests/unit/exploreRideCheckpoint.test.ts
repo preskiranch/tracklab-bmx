@@ -8,6 +8,7 @@ import {
   saveExploreRideCheckpoint,
 } from '../../src/lib/exploreRideCheckpoint';
 import type { ExploreRider, ExploreRoute, PlayerSlot } from '../../src/types';
+import { EVERGREEN_RIDER_ACCENT } from '../../src/lib/playerPalette';
 
 function route(): ExploreRoute {
   return {
@@ -231,6 +232,7 @@ describe('Explore ride checkpoints', () => {
 
     expect(saved).toMatchObject({
       sessionId: 'explore:studio-group-arm',
+      riders: [{ colorName: 'lime', accent: EVERGREEN_RIDER_ACCENT }],
       activeClockSegments: [{
         startedAt: 1_700_000_001_000,
         endedAt: 1_700_000_001_100,

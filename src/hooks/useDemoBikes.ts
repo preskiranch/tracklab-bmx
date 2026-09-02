@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { defaultPlayerSlots, maxPlayers } from '../data';
+import { EVERGREEN_RIDER_ACCENT } from '../lib/playerPalette';
 import { bmxSpeedKphFromCadence, realisticDemoCadenceRpm } from '../game/bmxRollout';
 import { wattbikeProAirHighWattsFromCadence } from '../game/wattbikePowerTable';
 import type { BikeSample, DemoRiderNames, DemoRiderPhotos, PlayerSlot } from '../types';
@@ -134,7 +135,7 @@ function createProfiles(bikeCount: number, raceSeed: number): DemoProfile[] {
     return {
       deviceId,
       label: `Demo Bike ${String.fromCharCode(65 + index)}`,
-      accent: defaultPlayerSlots[index]?.accent ?? '#7ade36',
+      accent: defaultPlayerSlots[index]?.accent ?? EVERGREEN_RIDER_ACCENT,
       index,
       phaseOffset: random() * Math.PI * 2,
       variables,

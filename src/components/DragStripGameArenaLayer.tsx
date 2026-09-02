@@ -19,6 +19,7 @@ import type {
   RiderState,
   SpeedUnit,
 } from '../types';
+import { EVERGREEN_RIDER_FILTER } from '../lib/playerPalette';
 import type { PersonalRecordAchievements } from '../lib/personalRecords';
 
 type ArenaRider = {
@@ -877,6 +878,8 @@ function ArenaPanel({
                   inset: '4%',
                   filter: rider.ghost
                     ? 'hue-rotate(-28deg) saturate(2.6) brightness(1.18) drop-shadow(0 0 5px rgba(255,106,0,.92))'
+                    : rider.colorName === 'lime'
+                      ? `${EVERGREEN_RIDER_FILTER} drop-shadow(0 3px 2px rgba(0,0,0,.48))`
                     : 'brightness(1.04) contrast(1.08) drop-shadow(0 3px 2px rgba(0,0,0,.48))',
                   transform: 'scaleX(var(--arena-camera-inverse-scale, 1))',
                 }}

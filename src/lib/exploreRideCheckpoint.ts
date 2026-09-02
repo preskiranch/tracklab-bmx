@@ -14,6 +14,7 @@ import {
   acceptedBikeCadenceRpm,
   acceptedTrainingSpeedKph,
 } from './bikeSampleSanity';
+import { canonicalPlayerAccent } from './playerPalette';
 
 const exploreRideCheckpointStoragePrefix = 'tracklab-explore-ride-checkpoint-v1';
 const validPlayerIds = new Set<PlayerSlot['id']>([1, 2, 3, 4]);
@@ -140,7 +141,7 @@ function sanitizeRider(value: unknown, route: ExploreRoute): ExploreRider | null
       ? { photoUrl: rider.photoUrl.slice(0, 2_000) }
       : {}),
     colorName: rider.colorName as PlayerColorName,
-    accent: rider.accent.slice(0, 80),
+    accent: canonicalPlayerAccent(rider.colorName as PlayerColorName, rider.accent.slice(0, 80)),
     distanceMeters: Math.max(0, Math.min(route.distanceMeters, finiteNumber(rider.distanceMeters))),
     velocityMps,
     cadence,

@@ -17,11 +17,13 @@ const budgets = {
   // startup add a small amount to that controller. The media state machine
   // and full tablet/map runtimes stay lazy-loaded, while the network-relevant
   // compressed budgets remain tightly capped. The iPhone portrait containment
-  // and nested Watch tile rules add about 1 KB raw / 100 bytes Brotli.
+  // and nested Watch tile rules add about 1 KB raw / 100 bytes Brotli. The
+  // public app-hub shell and pre-race ghost picker add another tightly scoped
+  // 1.75 KB raw / 150 bytes Brotli while keeping both directories public.
   javascriptRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_RAW_BYTES', 621_000),
   javascriptBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_BR_BYTES', 175_000),
-  cssRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_RAW_BYTES', 135_250),
-  cssBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_BR_BYTES', 20_250),
+  cssRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_RAW_BYTES', 137_000),
+  cssBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_BR_BYTES', 20_400),
   initialBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_INITIAL_BR_BYTES', 195_000),
 };
 

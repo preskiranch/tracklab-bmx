@@ -37,6 +37,10 @@ for (const sheet of sheets) {
 
 const sourceFrameWidth = width / columns;
 const sourceFrameHeight = height / rows;
+function sourcePixelIsLabel(x, y) {
+  return x < cellLeftInset && y < sourceFrameHeight * 0.18;
+}
+
 function visibleFrameBounds(png, frameIndex) {
   const column = frameIndex % columns;
   const row = Math.floor(frameIndex / columns);
@@ -48,7 +52,10 @@ function visibleFrameBounds(png, frameIndex) {
   };
 
   for (let y = 0; y < sourceFrameHeight; y += 1) {
-    for (let x = cellLeftInset; x < sourceFrameWidth; x += 1) {
+    for (let x = 0; x < sourceFrameWidth; x += 1) {
+      // The source generator can place a small label in the upper-left corner.
+      // Mask that top strip only; a full-height x inset cuts through rear tires.
+      if (sourcePixelIsLabel(x, y)) continue;
       const sourceIndex = (((row * sourceFrameHeight + y) * width) + (column * sourceFrameWidth + x)) * 4;
       if (png.data[sourceIndex + 3] < alphaThreshold) {
         continue;
@@ -100,9 +107,12 @@ for (const { color, png, frameBounds } of preparedSheets) {
       const sourceY = Math.min(bounds.height - 1, Math.floor(y / scale));
       for (let x = 0; x < destinationWidth; x += 1) {
         const sourceX = Math.min(bounds.width - 1, Math.floor(x / scale));
+        const sourceFrameX = bounds.minX + sourceX;
+        const sourceFrameY = bounds.minY + sourceY;
+        if (sourcePixelIsLabel(sourceFrameX, sourceFrameY)) continue;
         const sourceIndex = (
-          ((row * sourceFrameHeight + bounds.minY + sourceY) * width)
-          + (column * sourceFrameWidth + bounds.minX + sourceX)
+          ((row * sourceFrameHeight + sourceFrameY) * width)
+          + (column * sourceFrameWidth + sourceFrameX)
         ) * 4;
         const destinationIndex = (((destinationY + y) * atlas.width) + destinationX + x) * 4;
         png.data.copy(atlas.data, destinationIndex, sourceIndex, sourceIndex + 4);

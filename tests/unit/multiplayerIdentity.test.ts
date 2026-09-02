@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canonicalizeMultiplayerExploreState,
+  canonicalizeMultiplayerRaceState,
   resolveMultiplayerProfile,
   type MultiplayerIdentityOverride,
   type MultiplayerProfile,
 } from '../../src/hooks/useMultiplayer';
+import { EVERGREEN_RIDER_ACCENT } from '../../src/lib/playerPalette';
+import type { MultiplayerExploreState, MultiplayerRaceState } from '../../src/types';
 
 const ownerProfile: MultiplayerProfile = {
   guestKey: 'owner-profile',
@@ -60,5 +64,32 @@ describe('multiplayer identity scoping', () => {
       membershipTier: 'racer',
     });
     expect(ownerProfile.name).toBe('Studio Owner');
+  });
+
+  it('canonicalizes legacy lime cards and pins at multiplayer receive boundaries', () => {
+    const raceState = canonicalizeMultiplayerRaceState({
+      sessionId: 'race-1',
+      clientId: 'remote-1',
+      riderName: 'Remote rider',
+      roomId: 'room-1',
+      trackId: 'track-1',
+      raceState: 'racing',
+      at: 100,
+      riders: [{ colorName: 'lime', accent: '#7ade36' }],
+      summary: [{ colorName: 'lime', accent: '#b7ff33' }],
+    } as MultiplayerRaceState, 200);
+    const exploreState = canonicalizeMultiplayerExploreState({
+      sessionId: 'explore-1',
+      clientId: 'remote-1',
+      roomId: 'room-1',
+      routeId: 'route-1',
+      at: 100,
+      riders: [{ colorName: 'lime', accent: '#7ade36' }],
+    } as MultiplayerExploreState);
+
+    expect(raceState.riders[0].accent).toBe(EVERGREEN_RIDER_ACCENT);
+    expect(raceState.summary[0].accent).toBe(EVERGREEN_RIDER_ACCENT);
+    expect(raceState.receivedAt).toBe(200);
+    expect(exploreState.riders[0].accent).toBe(EVERGREEN_RIDER_ACCENT);
   });
 });

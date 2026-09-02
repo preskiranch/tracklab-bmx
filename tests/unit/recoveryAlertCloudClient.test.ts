@@ -47,6 +47,7 @@ describe('Recovery Alert cloud client', () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
         accountId,
+        pushDeliveryAvailable: true,
         preference: {
           mode: 'smart', timerSeconds: 120, targetBpm: 118,
           minimumSeconds: 30, maximumSeconds: 600, updatedAt: now,
@@ -54,6 +55,7 @@ describe('Recovery Alert cloud client', () => {
       }))
       .mockResolvedValueOnce(jsonResponse({
         accountId,
+        pushDeliveryAvailable: false,
         preference: {
           mode: 'timer', timerSeconds: 180, targetBpm: 118,
           minimumSeconds: 30, maximumSeconds: 600, updatedAt: now + 1,
@@ -63,14 +65,34 @@ describe('Recovery Alert cloud client', () => {
 
     await expect(loadRecoveryAlertPreference()).resolves.toMatchObject({
       accountId,
-      preference: { mode: 'smart', targetBpm: 118 },
+      preference: { mode: 'smart', targetBpm: 118 }, pushDeliveryAvailable: true,
     });
     await expect(saveRecoveryAlertPreference({ mode: 'timer', timerSeconds: 180 }))
-      .resolves.toMatchObject({ accountId, preference: { mode: 'timer', timerSeconds: 180 } });
+      .resolves.toMatchObject({
+        accountId,
+        preference: { mode: 'timer', timerSeconds: 180 },
+        pushDeliveryAvailable: false,
+      });
     expect(fetchMock.mock.calls[1]).toMatchObject([
       '/api/recovery-alert/preferences',
       expect.objectContaining({ method: 'PATCH' }),
     ]);
+  });
+
+  it('fails closed to the personal-device local fallback when delivery capability is missing or malformed', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      accountId,
+      pushDeliveryAvailable: 'yes',
+      preference: {
+        mode: 'timer', timerSeconds: 120, targetBpm: 118,
+        minimumSeconds: 30, maximumSeconds: 600, updatedAt: now,
+      },
+    })));
+
+    await expect(loadRecoveryAlertPreference()).resolves.toMatchObject({
+      accountId,
+      pushDeliveryAvailable: false,
+    });
   });
 
   it('creates, polls, and performs durable recovery actions without constructing routes in UI', async () => {

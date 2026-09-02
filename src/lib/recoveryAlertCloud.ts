@@ -40,6 +40,12 @@ export function normalizeRecoveryAccountId(value: unknown) {
   return typeof value === 'string' && /^recacct_[a-f0-9]{32}$/u.test(value.trim()) ? value.trim() : '';
 }
 
+/** This is a public capability bit only. A missing/malformed response must
+ * fail closed to the native local-notification fallback. */
+export function normalizeRecoveryPushDeliveryAvailable(value: unknown) {
+  return value === true;
+}
+
 async function recoveryResponse<T>(response: Response, label: string) {
   const payload = await response.json().catch(() => ({})) as T & { error?: unknown };
   if (!response.ok) {
@@ -61,33 +67,51 @@ function requiredEpisode(value: unknown, label: string) {
 export async function loadRecoveryAlertPreference(): Promise<{
   accountId: string;
   preference: RecoveryAlertPreference;
+  pushDeliveryAvailable: boolean;
 }> {
   const response = await fetch('/api/recovery-alert/preferences', {
     cache: 'no-store',
     headers: { Accept: 'application/json' },
   });
-  const payload = await recoveryResponse<{ accountId?: unknown; preference?: unknown }>(response, 'Recovery Alert settings');
+  const payload = await recoveryResponse<{
+    accountId?: unknown;
+    preference?: unknown;
+    pushDeliveryAvailable?: unknown;
+  }>(response, 'Recovery Alert settings');
   const accountId = normalizeRecoveryAccountId(payload.accountId);
   if (!accountId) throw new Error('Recovery Alert settings returned an invalid account binding.');
   return {
     accountId,
     preference: normalizeRecoveryAlertPreference(payload.preference, defaultRecoveryAlertPreference),
+    pushDeliveryAvailable: normalizeRecoveryPushDeliveryAvailable(payload.pushDeliveryAvailable),
   };
 }
 
 export async function saveRecoveryAlertPreference(
   patch: RecoveryPreferencePatch,
-): Promise<{ accountId: string; preference: RecoveryAlertPreference }> {
+): Promise<{
+  accountId: string;
+  preference: RecoveryAlertPreference;
+  pushDeliveryAvailable: boolean;
+}> {
   const response = await fetch('/api/recovery-alert/preferences', {
     method: 'PATCH',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
   });
-  const payload = await recoveryResponse<{ accountId?: unknown; preference?: unknown }>(response, 'Recovery Alert settings');
+  const payload = await recoveryResponse<{
+    accountId?: unknown;
+    preference?: unknown;
+    pushDeliveryAvailable?: unknown;
+  }>(response, 'Recovery Alert settings');
   const accountId = normalizeRecoveryAccountId(payload.accountId);
   const preference = normalizeRecoveryAlertPreference(payload.preference, defaultRecoveryAlertPreference);
   if (!accountId || !preference.updatedAt) throw new Error('Recovery Alert settings returned an invalid response.');
-  return { accountId, preference };
+  return {
+    accountId,
+    preference,
+    pushDeliveryAvailable: normalizeRecoveryPushDeliveryAvailable(payload.pushDeliveryAvailable),
+  };
 }
 
 export async function createRecoveryEpisode(

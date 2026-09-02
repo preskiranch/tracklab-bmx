@@ -66,6 +66,7 @@ import {
   ghostPlaybackGlow,
 } from '../lib/ghosts';
 import { riderRigBaseAssetByColor } from '../lib/riderAssets';
+import { EVERGREEN_RIDER_FILTER } from '../lib/playerPalette';
 
 type GoogleMaps3DTrackLayerProps = {
   track: TrackRecord;
@@ -490,6 +491,8 @@ function createRiderContent(
     content.dataset.ghostColor = 'fluorescent-orange';
     image.style.filter = `hue-rotate(-28deg) saturate(2.6) brightness(1.18) drop-shadow(0 0 5px ${ghostPlaybackGlow})`;
     image.style.opacity = '0.72';
+  } else if (player.colorName === 'lime') {
+    image.style.filter = `${EVERGREEN_RIDER_FILTER} drop-shadow(0 3px 2px rgba(0,0,0,.42))`;
   }
   content.append(image);
   return content;

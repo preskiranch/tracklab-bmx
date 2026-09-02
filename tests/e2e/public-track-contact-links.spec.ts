@@ -112,6 +112,8 @@ test('track contacts and map actions stay clear, callable, and responsive', asyn
       layoutHeight: layout.getBoundingClientRect().height,
       layoutFits: layout.scrollWidth <= layout.clientWidth + 1 && layout.scrollHeight <= layout.clientHeight + 1,
       mapHeight: map.getBoundingClientRect().height,
+      officialLinkHeights: [...element.querySelectorAll<HTMLElement>('.public-track-official-links a')]
+        .map((link) => Math.round(link.getBoundingClientRect().height)),
       officialLinkRows: new Set([...element.querySelectorAll<HTMLElement>('.public-track-official-links a')]
         .map((link) => Math.round(link.getBoundingClientRect().top))).size,
       previewBottom: preview.getBoundingClientRect().bottom,
@@ -122,7 +124,8 @@ test('track contacts and map actions stay clear, callable, and responsive', asyn
   expect(desktopGeometry.layoutHeight).toBeLessThanOrEqual(820);
   expect(desktopGeometry.layoutFits).toBe(true);
   expect(desktopGeometry.previewFits).toBe(true);
-  expect(desktopGeometry.officialLinkRows).toBe(1);
+  expect(desktopGeometry.officialLinkRows).toBe(2);
+  expect(desktopGeometry.officialLinkHeights.every((height) => height === 44)).toBe(true);
   expect(desktopGeometry.actionControlRows.every((rows) => rows === 1)).toBe(true);
   expect(desktopGeometry.detailsBottom).toBeLessThanOrEqual(desktopGeometry.previewBottom + 1);
 

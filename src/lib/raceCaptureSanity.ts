@@ -1,5 +1,6 @@
 import type { RaceCapture } from '../types';
 import { recordedBikeMetricsAreAccepted } from './bikeSampleSanity';
+import { canonicalPlayerAccent } from './playerPalette';
 
 export function acceptedRaceCapture(value: unknown): RaceCapture | null {
   if (!value || typeof value !== 'object') return null;
@@ -11,5 +12,11 @@ export function acceptedRaceCapture(value: unknown): RaceCapture | null {
     || !recordedBikeMetricsAreAccepted(capture)
   ) return null;
 
-  return capture as RaceCapture;
+  return {
+    ...(capture as RaceCapture),
+    summary: capture.summary.map((entry) => ({
+      ...entry,
+      accent: canonicalPlayerAccent(entry.colorName, entry.accent),
+    })),
+  };
 }

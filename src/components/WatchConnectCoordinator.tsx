@@ -86,6 +86,7 @@ export type WatchConnectCoordinatorProps = Readonly<{
   onOpenSettings?: () => void;
   friendNetworkRefreshRevision?: string | number;
   onNativeNotification?: (opened: boolean) => void;
+  onRecoveryNotification?: (opened: boolean) => void;
 }>;
 
 const emptySnapshot: WatchConnectCloudSnapshot = Object.freeze({
@@ -524,6 +525,7 @@ export function WatchConnectCoordinator({
   onOpenSettings = () => undefined,
   friendNetworkRefreshRevision = 0,
   onNativeNotification = () => undefined,
+  onRecoveryNotification = () => undefined,
 }: WatchConnectCoordinatorProps) {
   const [snapshot, setSnapshot] = useState<WatchConnectCloudSnapshot>(emptySnapshot);
   const [nativeState, setNativeState] = useState<NativeWatchConnectState | null>(heartRate.watchConnect);
@@ -1499,6 +1501,7 @@ export function WatchConnectCoordinator({
       kioskMode={false}
       settingsOpen={settingsOpen}
       onFriendsActivity={onNativeNotification}
+      onRecoveryActivity={onRecoveryNotification}
     />
   </Suspense>;
   if (authStatus !== 'signed-in' || !accountId) return nativeNotifications;

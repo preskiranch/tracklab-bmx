@@ -23,6 +23,7 @@ const pushKinds = new Set([
   'friend_request',
   'friend_connection',
   'track_share',
+  'recovery_ready',
 ]);
 const permanentDeviceReasons = new Set([
   'BadDeviceToken',
@@ -303,23 +304,26 @@ export function createApnsProviderToken({ teamId, keyId, privateKey, issuedAt })
 export function genericSocialPushPayload(kind, notificationId) {
   const id = boundedText(notificationId, 64);
   if (!pushKinds.has(kind) || !/^[a-f0-9-]{32,64}$/iu.test(id)) return null;
-  const body = kind === 'live_audio_invite'
-    ? 'A friend wants to talk live.'
-    : kind === 'friend_request'
-      ? 'You have a new friend request.'
-      : kind === 'friend_connection'
-        ? 'A friend connection was updated.'
-        : 'A friend shared a BMX track.';
+  const recovery = kind === 'recovery_ready';
+  const body = recovery
+    ? 'Your recovery timer is complete.'
+    : kind === 'live_audio_invite'
+      ? 'A friend wants to talk live.'
+      : kind === 'friend_request'
+        ? 'You have a new friend request.'
+        : kind === 'friend_connection'
+          ? 'A friend connection was updated.'
+          : 'A friend shared a BMX track.';
   const payload = {
     aps: {
-      alert: { title: 'TrackLab BMX', body },
+      alert: { title: recovery ? 'Recovery ready' : 'TrackLab BMX', body },
       sound: 'default',
-      'thread-id': 'tracklab-friends',
+      'thread-id': recovery ? 'tracklab-recovery' : 'tracklab-friends',
     },
     v: 1,
     kind,
     notificationId: id,
-    route: 'friends',
+    route: recovery ? 'recovery' : 'friends',
   };
   const encoded = JSON.stringify(payload);
   return Buffer.byteLength(encoded, 'utf8') <= maximumApnsPayloadBytes ? { payload, encoded } : null;
@@ -464,7 +468,7 @@ export class ApnsProvider {
     const apnsId = boundedText(message?.apnsId, 64);
     const collapseId = boundedText(message?.collapseId, 64);
     const expiration = Math.max(0, Math.floor(Number(message?.expiration) || 0));
-    const priority = message?.kind === 'live_audio_invite' ? '10' : '5';
+    const priority = ['live_audio_invite', 'recovery_ready'].includes(message?.kind) ? '10' : '5';
     if (!token || !apnsHosts[environment] || !payloadValue || !/^[a-f0-9-]{32,64}$/iu.test(apnsId) || !collapseId) {
       return { status: 400, reason: 'BadMessageId', timestamp: null };
     }

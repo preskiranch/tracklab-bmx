@@ -87,7 +87,8 @@ import {
   ghostPlaybackGlow,
   ghostPlaybackHighlight,
 } from '../lib/ghosts';
-import { riderRigBaseAssetByColor } from '../lib/riderAssets';
+import { riderFallbackRigBaseAssetByColor, riderRigBaseAssetByColor } from '../lib/riderAssets';
+import { EVERGREEN_RIDER_FILTER } from '../lib/playerPalette';
 
 type GoogleMapsTrackLayerProps = {
   track: TrackRecord;
@@ -768,7 +769,7 @@ function baseRiderIcon(google: GoogleMapsRuntime, player: PlayerSlot, presentati
     anchor: new google.maps.Point(38 * presentationScale, 40 * presentationScale),
     labelOrigin: new google.maps.Point(74 * presentationScale, 13 * presentationScale),
     scaledSize: new google.maps.Size(38 * presentationScale, 43 * presentationScale),
-    url: riderRigBaseAssetByColor[player.colorName],
+    url: riderFallbackRigBaseAssetByColor[player.colorName],
   };
 }
 
@@ -984,6 +985,9 @@ function drawUprightRiderCanvas(
     ? riderMarkerMaximumShadowBlurPixels
     : riderMarkerShadowBlurPixels;
   context.shadowOffsetY = riderMarkerShadowOffsetYPixels;
+  context.filter = appearance !== 'ghost' && player.colorName === 'lime'
+    ? EVERGREEN_RIDER_FILTER
+    : 'none';
   context.drawImage(
     image,
     -riderMarkerDrawSize / 2,
@@ -991,6 +995,7 @@ function drawUprightRiderCanvas(
     riderMarkerDrawSize,
     riderMarkerDrawSize,
   );
+  context.filter = 'none';
   context.shadowColor = 'transparent';
   context.shadowBlur = 0;
   context.shadowOffsetY = 0;
@@ -1110,7 +1115,7 @@ function createPersistentRiderOverlay(
     const drawSize = riderMarkerDrawSize * presentationScale;
     element.style.background = riderImage
       ? 'none'
-      : `center / ${drawSize}px ${drawSize}px no-repeat url("${riderRigBaseAssetByColor[player.colorName]}")`;
+      : `center / ${drawSize}px ${drawSize}px no-repeat url("${riderFallbackRigBaseAssetByColor[player.colorName]}")`;
     element.style.height = `${canvasSize}px`;
     element.style.width = `${canvasSize}px`;
     canvas.style.height = `${canvasSize}px`;

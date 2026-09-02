@@ -7,9 +7,11 @@ const bridgeUrl = process.env.PLAYWRIGHT_BRIDGE_URL ?? 'ws://127.0.0.1:19787';
 export default defineConfig({
   testDir: './tests/e2e',
   timeout: 60_000,
-  // Connector-backed tests share the single bridge URL injected into the app.
-  // Keep CI on one worker so separate spec files cannot bind that port at once.
-  workers: process.env.CI ? 1 : undefined,
+  // Connector-backed tests share one bridge URL injected into the app. Running
+  // them in parallel lets separate specs contend for that port, which can make
+  // otherwise passing release checks fail intermittently. Keep the suite
+  // serial everywhere so the release gate exercises a deterministic bridge.
+  workers: 1,
   expect: {
     timeout: 15_000,
   },

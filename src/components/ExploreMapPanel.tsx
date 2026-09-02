@@ -30,6 +30,7 @@ import type {
   TrackPoint,
 } from '../types';
 import { formatExploreDistanceMeters } from '../units';
+import { canonicalPlayerAccent, EVERGREEN_RIDER_ACCENT } from '../lib/playerPalette';
 
 export type ExploreMapPanelProps = {
   group: ExploreViewportGroup;
@@ -179,18 +180,19 @@ function exploreRiderInitials(name: string) {
     .join('') || '?';
 }
 
-function safeRiderAccent(accent: string) {
-  return /^#[0-9a-f]{3,8}$/i.test(accent.trim()) ? accent.trim() : '#7ade36';
+function safeRiderAccent(accent: string, colorName?: ExploreRider['colorName']) {
+  if (colorName) return canonicalPlayerAccent(colorName, accent);
+  return /^#[0-9a-f]{3,8}$/i.test(accent.trim()) ? accent.trim() : EVERGREEN_RIDER_ACCENT;
 }
 
-function exploreRiderPinSvg(accent: string, playerId: number) {
-  const color = safeRiderAccent(accent);
+function exploreRiderPinSvg(accent: string, playerId: number, colorName?: ExploreRider['colorName']) {
+  const color = safeRiderAccent(accent, colorName);
   const label = `P${Math.max(1, Math.min(4, Math.round(playerId)))}`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${exploreRiderPinWidthPx}" height="${exploreRiderPinHeightPx}" viewBox="0 0 32 40" style="display:block;width:100%;height:100%"><path d="M16 1C7.7 1 1 7.7 1 16c0 11.4 15 23 15 23s15-11.6 15-23C31 7.7 24.3 1 16 1Z" fill="${color}" stroke="#fff" stroke-width="2"/><circle cx="16" cy="15.5" r="8" fill="#fff" fill-opacity=".94"/><text x="16" y="18.7" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" font-weight="900" fill="#101823">${label}</text></svg>`;
 }
 
-function exploreRiderPinDataUrl(accent: string, playerId: number) {
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(exploreRiderPinSvg(accent, playerId))}`;
+function exploreRiderPinDataUrl(accent: string, playerId: number, colorName?: ExploreRider['colorName']) {
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(exploreRiderPinSvg(accent, playerId, colorName))}`;
 }
 
 export function createExploreRiderPinElement(rider: ExploreRider): ExploreRiderPinPresentation {
@@ -212,14 +214,14 @@ export function createExploreRiderPinElement(rider: ExploreRider): ExploreRiderP
     signature = nextSignature;
     element.title = nextRider.name;
     element.setAttribute('aria-label', `${nextRider.name} map position`);
-    element.style.setProperty('--player-color', safeRiderAccent(nextRider.accent));
+    element.style.setProperty('--player-color', safeRiderAccent(nextRider.accent, nextRider.colorName));
 
     const avatar = nextRider.photoUrl
       ? document.createElement('img')
       : document.createElement('span');
     const avatarSizePx = window.matchMedia('(max-width: 720px)').matches ? 40 : 44;
     avatar.className = 'explore-map-rider-avatar';
-    avatar.style.cssText = `position:relative;z-index:2;display:grid;place-items:center;width:${avatarSizePx}px;height:${avatarSizePx}px;overflow:hidden;border:2px solid ${safeRiderAccent(nextRider.accent)};border-radius:50%;background:#101823;color:#fff;box-shadow:0 0 0 2px rgba(255,255,255,.92);font-size:12px;font-weight:900;line-height:1;object-fit:cover`;
+    avatar.style.cssText = `position:relative;z-index:2;display:grid;place-items:center;width:${avatarSizePx}px;height:${avatarSizePx}px;overflow:hidden;border:2px solid ${safeRiderAccent(nextRider.accent, nextRider.colorName)};border-radius:50%;background:#101823;color:#fff;box-shadow:0 0 0 2px rgba(255,255,255,.92);font-size:12px;font-weight:900;line-height:1;object-fit:cover`;
     if (avatar instanceof HTMLImageElement) {
       avatar.alt = '';
       avatar.draggable = false;
@@ -232,7 +234,7 @@ export function createExploreRiderPinElement(rider: ExploreRider): ExploreRiderP
     pin.className = 'explore-map-rider-pin';
     pin.style.cssText = 'position:relative;z-index:1;display:block;width:32px;height:40px;margin-top:-3px';
     pin.setAttribute('aria-hidden', 'true');
-    pin.innerHTML = exploreRiderPinSvg(nextRider.accent, nextRider.playerId);
+    pin.innerHTML = exploreRiderPinSvg(nextRider.accent, nextRider.playerId, nextRider.colorName);
     element.replaceChildren(avatar, pin);
   };
 
@@ -264,7 +266,7 @@ function createExploreRiderMarker(
       icon: {
         anchor: new google.maps.Point(exploreRiderPinWidthPx / 2, exploreRiderPinHeightPx),
         scaledSize: new google.maps.Size(exploreRiderPinWidthPx, exploreRiderPinHeightPx),
-        url: exploreRiderPinDataUrl(rider.accent, rider.playerId),
+        url: exploreRiderPinDataUrl(rider.accent, rider.playerId, rider.colorName),
       },
       map,
       position,
@@ -284,7 +286,7 @@ function createExploreRiderMarker(
         marker.setIcon({
           anchor: new google.maps.Point(exploreRiderPinWidthPx / 2, exploreRiderPinHeightPx),
           scaledSize: new google.maps.Size(exploreRiderPinWidthPx, exploreRiderPinHeightPx),
-          url: exploreRiderPinDataUrl(nextRider.accent, nextRider.playerId),
+          url: exploreRiderPinDataUrl(nextRider.accent, nextRider.playerId, nextRider.colorName),
         });
       },
     };

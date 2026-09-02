@@ -36,7 +36,7 @@ function tokenProtectionEnvironment() {
   };
 }
 
-describe('APNs private social notification primitives', () => {
+describe('APNs private notification primitives', () => {
   it('normalizes only bounded even-length hexadecimal APNs device tokens', () => {
     expect(normalizeApnsDeviceToken(` ${'AB'.repeat(32)} `)).toBe('ab'.repeat(32));
     expect(normalizeApnsDeviceToken('abc')).toBe('');
@@ -201,6 +201,23 @@ describe('APNs private social notification primitives', () => {
       });
       expect(encoded).not.toMatch(/room|trackId|userId|heart|bpm|name|handle/iu);
     }
+
+    const recovery = genericSocialPushPayload('recovery_ready', notificationId);
+    expect(recovery?.payload).toEqual({
+      aps: {
+        alert: {
+          title: 'Recovery ready',
+          body: 'Your recovery timer is complete.',
+        },
+        sound: 'default',
+        'thread-id': 'tracklab-recovery',
+      },
+      v: 1,
+      kind: 'recovery_ready',
+      notificationId,
+      route: 'recovery',
+    });
+    expect(recovery?.encoded).not.toMatch(/account|profile|athlete|rider|episode|session|userId|heart|bpm|email|name|handle|trackId|room/iu);
   });
 
   it('classifies APNs invalidation and bounded retry behavior', () => {
@@ -339,7 +356,7 @@ describe('APNs private social notification primitives', () => {
     });
   }
 
-  it('sends only fixed-topic alert requests and refreshes ExpiredProviderToken once', async () => {
+  it('sends fixed-topic alerts, refreshes ExpiredProviderToken once, and gives recovery readiness immediate priority', async () => {
     const requests: Array<{ headers: Record<string, string>; body: string }> = [];
     let responseCount = 0;
     const session = Object.assign(new EventEmitter(), {
@@ -370,7 +387,7 @@ describe('APNs private social notification primitives', () => {
       connect: vi.fn(() => session),
       now: () => 1_800_000_000_000,
     });
-    const result = await provider.send({
+    const friendResult = await provider.send({
       deviceToken: 'ab'.repeat(32),
       environment: 'production',
       kind: 'friend_request',
@@ -379,9 +396,19 @@ describe('APNs private social notification primitives', () => {
       collapseId: 'tl-friend-request',
       expiration: 1_800_000_600,
     });
+    const recoveryResult = await provider.send({
+      deviceToken: 'ab'.repeat(32),
+      environment: 'production',
+      kind: 'recovery_ready',
+      notificationId: '123e4567-e89b-12d3-a456-426614174002',
+      apnsId: '123e4567-e89b-12d3-a456-426614174003',
+      collapseId: 'tl-recovery-ready',
+      expiration: 1_800_000_600,
+    });
 
-    expect(result).toMatchObject({ status: 200 });
-    expect(requests).toHaveLength(2);
+    expect(friendResult).toMatchObject({ status: 200 });
+    expect(recoveryResult).toMatchObject({ status: 200 });
+    expect(requests).toHaveLength(3);
     expect(requests[0].headers).toMatchObject({
       ':method': 'POST',
       'apns-topic': trackLabApnsTopic,
@@ -390,5 +417,25 @@ describe('APNs private social notification primitives', () => {
     });
     expect(requests[0].headers.authorization).toMatch(/^bearer /u);
     expect(JSON.parse(requests[0].body)).toMatchObject({ route: 'friends' });
+    expect(requests[2].headers).toMatchObject({
+      ':method': 'POST',
+      'apns-topic': trackLabApnsTopic,
+      'apns-push-type': 'alert',
+      'apns-priority': '10',
+    });
+    expect(JSON.parse(requests[2].body)).toEqual({
+      aps: {
+        alert: {
+          title: 'Recovery ready',
+          body: 'Your recovery timer is complete.',
+        },
+        sound: 'default',
+        'thread-id': 'tracklab-recovery',
+      },
+      v: 1,
+      kind: 'recovery_ready',
+      notificationId: '123e4567-e89b-12d3-a456-426614174002',
+      route: 'recovery',
+    });
   });
 });

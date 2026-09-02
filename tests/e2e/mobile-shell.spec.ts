@@ -1,6 +1,31 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const iphonePortrait = { width: 390, height: 844 };
+const mobileRaceTrackMapping = {
+  version: 1,
+  trackId: 'black-mountain-bmx',
+  trackName: 'Black Mountain BMX',
+  country: 'United States',
+  state: 'Arizona',
+  savedAt: '2026-09-01T00:00:00.000Z',
+  routeStatus: 'user-mapped',
+  restAfterSeconds: 1,
+  lengthMeters: 120,
+  centerline: [
+    { lat: 33.7125, lng: -112.0667 },
+    { lat: 33.7125, lng: -112.0659 },
+    { lat: 33.7120, lng: -112.0659 },
+    { lat: 33.7120, lng: -112.0667 },
+  ],
+  startGate: { lat: 33.7125, lng: -112.0667 },
+  finishLine: { lat: 33.7120, lng: -112.0667 },
+  zoneBoundaryMeters: [0, 30, 60, 90],
+  zones: [
+    { id: 'pedal-zone-1', name: 'Pedal Zone 1', startMeter: 0, endMeter: 30, type: 'pedal' },
+    { id: 'pedal-zone-2', name: 'Pedal Zone 2', startMeter: 60, endMeter: 90, type: 'pedal' },
+  ],
+  splitSections: [],
+};
 const portraitViewports = [
   { label: 'iPhone SE', width: 320, height: 568 },
   { label: 'iPhone SE 3', width: 375, height: 667 },
@@ -20,6 +45,7 @@ async function mockSignedInRacer(
   page: Page,
   activeRecoveryEpisode: Record<string, unknown> | null = null,
   admin = false,
+  trackMappings: Record<string, unknown> = {},
 ) {
   const now = Date.now();
   const user = {
@@ -38,7 +64,7 @@ async function mockSignedInRacer(
   await page.route('**/api/user-data*', (route) => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({
-      trackMappings: {},
+      trackMappings,
       customRoutes: [],
       bikeProfiles: [],
       studioRiders: [],
@@ -344,8 +370,10 @@ test('iPhone activities stay active and usable through portrait and landscape ro
     });
   });
   await page.setViewportSize({ width: 844, height: 390 });
-  await mockSignedInRacer(page, null, true);
-  await page.goto('/?track=air-time-bmx');
+  await mockSignedInRacer(page, null, true, {
+    [mobileRaceTrackMapping.trackId]: mobileRaceTrackMapping,
+  });
+  await page.goto('/?track=black-mountain-bmx');
   await openSignedInApp(page);
 
   await page.setViewportSize(iphonePortrait);

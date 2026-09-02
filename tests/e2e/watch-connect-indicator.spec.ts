@@ -1,6 +1,54 @@
 import { expect, test, type Page } from '@playwright/test';
 import { WebSocket, WebSocketServer } from 'ws';
 
+// The Reedley (Air Time BMX) catalog record intentionally has no shipped
+// course geometry. This saved owner mapping keeps the Watch flow test focused
+// on native connection ordering rather than depending on removed seed data.
+const watchRaceMapping = {
+  version: 1,
+  trackId: 'air-time-bmx',
+  trackName: 'Air Time BMX',
+  country: 'United States',
+  state: 'California',
+  savedAt: '2026-09-01T00:00:00.000Z',
+  routeStatus: 'user-mapped',
+  restAfterSeconds: 1,
+  lengthMeters: 120,
+  centerline: [
+    { lat: 36.6626, lng: -119.4517 },
+    { lat: 36.6626, lng: -119.4509 },
+    { lat: 36.6621, lng: -119.4509 },
+    { lat: 36.6621, lng: -119.4517 },
+  ],
+  startGate: { lat: 36.6626, lng: -119.4517 },
+  finishLine: { lat: 36.6621, lng: -119.4517 },
+  zoneBoundaryMeters: [0, 30, 60, 90],
+  zoneBoundarySets: [{
+    id: 'default-pedal-zones',
+    name: 'Default pedal zones',
+    boundaryMeters: [0, 30, 60, 90],
+  }],
+  zones: [
+    {
+      id: 'pedal-zone-1',
+      name: 'Pedal Zone 1',
+      startMeter: 0,
+      endMeter: 30,
+      type: 'pedal',
+      restAfterSeconds: 1,
+    },
+    {
+      id: 'pedal-zone-2',
+      name: 'Pedal Zone 2',
+      startMeter: 60,
+      endMeter: 90,
+      type: 'pedal',
+      restAfterSeconds: 1,
+    },
+  ],
+  splitSections: [],
+};
+
 async function createWatchBikeBridge(deviceId = 58701) {
   const url = new URL(process.env.PLAYWRIGHT_BRIDGE_URL ?? 'ws://127.0.0.1:19787');
   const clients = new Set<WebSocket>();
@@ -60,7 +108,11 @@ function signedInUser(id: string, name: string) {
   };
 }
 
-async function routeSignedInShell(page: Page, user: ReturnType<typeof signedInUser>) {
+async function routeSignedInShell(
+  page: Page,
+  user: ReturnType<typeof signedInUser>,
+  trackMappings: Record<string, unknown> = {},
+) {
   await page.route('**/api/health', (route) => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ ok: true }),
@@ -102,7 +154,7 @@ async function routeSignedInShell(page: Page, user: ReturnType<typeof signedInUs
   await page.route('**/api/user-data*', (route) => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({
-      trackMappings: {},
+      trackMappings,
       customRoutes: [],
       bikeProfiles: [],
       studioRiders: [],
@@ -420,7 +472,7 @@ test('iPhone native connecting event cannot cancel its newly created Watch conne
       },
     };
   }, { deadline: connectedUntil, id: connectionId, pairing: 'pairing-iphone-new' });
-  await routeSignedInShell(page, user);
+  await routeSignedInShell(page, user, { [watchRaceMapping.trackId]: watchRaceMapping });
   await page.route('**/api/heart-rate/watch-connect/enrollments', (route) => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({

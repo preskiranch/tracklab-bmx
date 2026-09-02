@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defaultPlayerSlots } from '../../src/data';
+import { EVERGREEN_RIDER_ACCENT, canonicalPlayerAccent } from '../../src/lib/playerPalette';
 import {
   compactRiderName,
   ghostRiderMarkerLabel,
@@ -16,6 +17,9 @@ describe('player identity', () => {
       'yellow',
     ]);
     expect(new Set(defaultPlayerSlots.map((player) => player.accent)).size).toBe(4);
+    expect(defaultPlayerSlots[0].accent).toBe(EVERGREEN_RIDER_ACCENT);
+    expect(canonicalPlayerAccent('lime', '#7ade36')).toBe(EVERGREEN_RIDER_ACCENT);
+    expect(defaultPlayerSlots[0].accent).not.toBe(defaultPlayerSlots[3].accent);
     expect(playerVisualForSlot(2).colorName).toBe('blue');
   });
 

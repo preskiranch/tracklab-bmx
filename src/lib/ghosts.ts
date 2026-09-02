@@ -11,6 +11,7 @@ import type {
 } from '../types';
 import { safeSetLocalStorage } from './browserStorage';
 import { normalizeRiderPhotoDataUrl } from './riderPhotos';
+import { canonicalPlayerAccent } from './playerPalette';
 import { acceptedTrainingSpeedKph, recordedBikeMetricsAreAccepted } from './bikeSampleSanity';
 import {
   normalizeStraightSprintAirSetting,
@@ -177,6 +178,9 @@ export function sanitizeGhostLap(value: unknown): GhostLap | null {
   const riderName = safeText(raw.riderName, 'Rider', 80);
   const photoUrl = normalizeRiderPhotoDataUrl(raw.photoUrl);
   const hasSprintConfiguration = raw.sprintDistanceFeet != null && raw.sprintAirSetting != null;
+  const colorName = raw.colorName === 'red' || raw.colorName === 'blue' || raw.colorName === 'yellow'
+    ? raw.colorName
+    : 'lime';
 
   return {
     version: 1,
@@ -192,8 +196,8 @@ export function sanitizeGhostLap(value: unknown): GhostLap | null {
     ...(photoUrl ? { photoUrl } : {}),
     ownerKey: safeText(raw.ownerKey, 'local', 180),
     ownerName: safeText(raw.ownerName, 'TrackLab rider', 80),
-    colorName: raw.colorName === 'red' || raw.colorName === 'blue' || raw.colorName === 'yellow' ? raw.colorName : 'lime',
-    accent: safeText(raw.accent, defaultGhostAccent, 32),
+    colorName,
+    accent: canonicalPlayerAccent(colorName, safeText(raw.accent, defaultGhostAccent, 32)),
     source: safeSource(raw.source),
     raceSource: safeRaceSource(raw.raceSource, riderName),
     lapCount: safeLapCount(raw.lapCount),

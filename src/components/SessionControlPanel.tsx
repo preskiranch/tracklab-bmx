@@ -20,6 +20,7 @@ import {
   Save,
   SlidersHorizontal,
   Timer,
+  Trophy,
   Trash2,
   Undo2,
   Upload,
@@ -48,6 +49,7 @@ import {
 import type {
   DistanceUnit,
   DraftTrackSplit,
+  GhostLap,
   MappingEditMode,
   MetricKey,
   RaceCommentaryPreferences,
@@ -131,6 +133,9 @@ type SessionControlPanelProps = {
   customRoutes: TrackRecord[];
   selectedTrackId: string;
   players: PlayerSlot[];
+  ghostLaps: GhostLap[];
+  selectedGhostIds: string[];
+  ghostLoadStatus: 'loading' | 'ready' | 'error';
   demoPlayerOptions: PlayerSlot[];
   selectedDemoPlayerIds: PlayerSlot['id'][];
   branchChoicesByPlayer: Partial<Record<PlayerSlot['id'], TrackSplitBranch['id']>>;
@@ -190,6 +195,9 @@ type SessionControlPanelProps = {
   onCustomRouteSelect: (trackId: string) => void;
   onCustomRouteDelete: (trackId: string) => void;
   onBranchChoiceChange: (playerId: PlayerSlot['id'], branch: TrackSplitBranch['id']) => void;
+  onGhostToggle: (ghostId: string) => void;
+  onGhostClear: () => void;
+  onGhostRetry: () => void;
   onMappingRouteVariantChange: (variantId: TrackRouteVariantId) => void;
   onMappingZoneBranchChange: (branch: TrackSplitBranch['id']) => void;
   onRaceRouteVariantChange: (variantId: TrackRouteVariantId) => void;
@@ -239,6 +247,10 @@ function riderInitials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
 }
 
+function formatGhostFinishTime(milliseconds: number) {
+  return `${(Math.max(0, milliseconds) / 1000).toFixed(3)}s`;
+}
+
 export function SessionControlPanel({
   track,
   selectedMetrics,
@@ -254,6 +266,9 @@ export function SessionControlPanel({
   customRoutes,
   selectedTrackId,
   players,
+  ghostLaps,
+  selectedGhostIds,
+  ghostLoadStatus,
   demoPlayerOptions,
   selectedDemoPlayerIds,
   branchChoicesByPlayer,
@@ -312,6 +327,9 @@ export function SessionControlPanel({
   onCustomRouteSelect,
   onCustomRouteDelete,
   onBranchChoiceChange,
+  onGhostToggle,
+  onGhostClear,
+  onGhostRetry,
   onMappingRouteVariantChange,
   onMappingZoneBranchChange,
   onRaceRouteVariantChange,
@@ -423,6 +441,7 @@ export function SessionControlPanel({
   const canChooseSplitLine = !configurationLocked && raceState !== 'racing' && !startGateActive;
   const hasRaceSplitChoices = players.length > 0 && (track.splitSections?.length ?? 0) > 0;
   const canChooseRaceLayout = !configurationLocked && raceState !== 'racing' && !startGateActive;
+  const canChooseGhost = !configurationLocked && raceState !== 'racing' && !startGateActive;
   const undoLabel = mappingEditMode === 'zones' ? 'Undo pedal pin' : mappingEditMode === 'split' ? 'Undo split' : 'Undo path';
   const redoLabel = mappingEditMode === 'zones' ? 'Redo pedal pin' : mappingEditMode === 'split' ? 'Redo split' : 'Redo path';
   const visibleTrackDistance = draftPointCount > 1 ? draftLengthMeters : hasMappedRoute ? track.lengthMeters : null;
@@ -1286,6 +1305,61 @@ export function SessionControlPanel({
 
         </section>
       )}
+
+      <section className="panel-section ghost-race-setup" id="ghost-race-setup" aria-label="Race a ghost">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">Personal best</span>
+            <h3>Race a ghost</h3>
+          </div>
+          <Trophy size={18} />
+        </div>
+        <p className="panel-helper">
+          Choose up to four of this athlete’s prior live runs for this exact {showCustomRoutes
+            ? `${formatStraightSprintFeet(straightSprintDistanceFeet, distanceUnit)} sprint at Wattbike Air ${straightSprintAirSetting}`
+            : `${track.name}${lapCount > 1 ? ` · ${lapCount} laps` : ''}`} configuration.
+        </p>
+        <div className="ghost-setup-summary">
+          <span>{selectedGhostIds.length} selected</span>
+          <button type="button" onClick={onGhostClear} disabled={!canChooseGhost || selectedGhostIds.length === 0}>Clear</button>
+        </div>
+        {ghostLoadStatus === 'loading' ? (
+          <div className="ghost-setup-state" role="status">Loading personal ghosts…</div>
+        ) : ghostLoadStatus === 'error' ? (
+          <div className="ghost-setup-state error" role="alert">
+            <span>Could not load this athlete’s ghosts.</span>
+            <button type="button" onClick={onGhostRetry}>Retry</button>
+          </div>
+        ) : ghostLaps.length === 0 ? (
+          <div className="ghost-setup-state">
+            Finish one live run with these exact settings to create the first personal ghost.
+          </div>
+        ) : (
+          <div className="ghost-setup-options">
+            {ghostLaps.slice(0, 8).map((ghost, index) => {
+              const selected = selectedGhostIds.includes(ghost.id);
+              return (
+                <button
+                  aria-pressed={selected}
+                  className={selected ? 'selected' : ''}
+                  disabled={!canChooseGhost}
+                  key={ghost.id}
+                  onClick={() => onGhostToggle(ghost.id)}
+                  type="button"
+                >
+                  <span className="ghost-setup-rank">#{index + 1}</span>
+                  <span className="ghost-setup-avatar">{riderInitials(ghost.riderName)}</span>
+                  <span className="ghost-setup-copy">
+                    <strong>{ghost.riderName}</strong>
+                    <small>{new Date(ghost.savedAt).toLocaleDateString()} · personal run</small>
+                  </span>
+                  <b>{formatGhostFinishTime(ghost.finishTimeMs)}</b>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       <section className="panel-section race-announcer-section">
         <div className="section-heading">

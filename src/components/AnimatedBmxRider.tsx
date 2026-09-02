@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { EVERGREEN_RIDER_FILTER } from '../lib/playerPalette';
 
 type AnimatedBmxRiderProps = {
   active: boolean;
@@ -242,7 +243,9 @@ function renderRider(canvas: HTMLCanvasElement, image: HTMLImageElement, crankAn
   context.clearRect(0, 0, canvasWidth, canvasHeight);
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = 'high';
+  context.filter = EVERGREEN_RIDER_FILTER;
   context.drawImage(image, safetyPadding, safetyPadding, sourceWidth, sourceHeight);
+  context.filter = 'none';
   eraseStaticLegs(context);
   drawArticulatedRig(context, crankAngle);
 }

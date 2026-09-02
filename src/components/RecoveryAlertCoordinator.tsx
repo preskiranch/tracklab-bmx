@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import type {
   RecoveryActivityType,
   RecoveryAlertPreference,
@@ -20,6 +27,11 @@ import {
   openNativeRecoveryAccountBoundary,
   type NativeRecoveryPermission,
 } from '../lib/nativeRecoveryAlerts';
+import {
+  getNativeRecoveryPushDeliveryState,
+  resolveRecoveryNotificationDelivery,
+  subscribeNativeRecoveryPushDelivery,
+} from '../lib/nativeRecoveryPushDelivery';
 import {
   RecoveryAlertCard,
   recoveryDraftFromPreferences,
@@ -264,6 +276,7 @@ export function RecoveryAlertCoordinator({
   const [now, setNow] = useState(Date.now());
   const [nativeAlertsAvailable, setNativeAlertsAvailable] = useState<boolean | null>(null);
   const [recoveryAccountId, setRecoveryAccountId] = useState<string | null>(null);
+  const [serverPushDeliveryAvailable, setServerPushDeliveryAvailable] = useState<boolean | null>(null);
   const [retryRevision, setRetryRevision] = useState(0);
   const submittedRequestIdsRef = useRef(new Set<string>());
   const pendingFinishSignalsRef = useRef(new Map<string, RecoveryFinishSignal>());
@@ -274,6 +287,18 @@ export function RecoveryAlertCoordinator({
   const activeUserAccountIdRef = useRef(accountId);
   const hydrationGenerationRef = useRef(0);
   activeUserAccountIdRef.current = accountId;
+  const nativePushDelivery = useSyncExternalStore(
+    subscribeNativeRecoveryPushDelivery,
+    getNativeRecoveryPushDeliveryState,
+    getNativeRecoveryPushDeliveryState,
+  );
+  const notificationDelivery = resolveRecoveryNotificationDelivery({
+    accountId,
+    serverPushDeliveryAvailable,
+    nativePush: nativePushDelivery,
+  });
+  const notificationDeliveryRef = useRef(notificationDelivery);
+  notificationDeliveryRef.current = notificationDelivery;
 
   const finishSignals = useMemo(() => {
     const raceSnapshot: RecoveryRaceSnapshot | null = activityType !== 'get-pulled' && raceCapture ? {
@@ -335,6 +360,7 @@ export function RecoveryAlertCoordinator({
     setDraft(recoveryDraftFromPreferences(null));
     setEpisode(null);
     setRecoveryAccountId(null);
+    setServerPushDeliveryAvailable(null);
     setNativeAlertsAvailable(null);
     setLoading(true);
     setSaving(false);
@@ -366,6 +392,7 @@ export function RecoveryAlertCoordinator({
         // and native has atomically removed every foreign account plan.
         expectedBoundary = openNativeRecoveryAccountBoundary(preferenceResult.accountId);
         setRecoveryAccountId(preferenceResult.accountId);
+        setServerPushDeliveryAvailable(preferenceResult.pushDeliveryAvailable);
         setPreference(preferenceResult.preference);
         setDraft(recoveryDraftFromPreferences(preferenceResult.preference));
         setEpisode(actionableEpisode(activeResult.episode));
@@ -415,6 +442,24 @@ export function RecoveryAlertCoordinator({
         }).catch(() => undefined);
         return;
       }
+      // Remote APNs delivery is the single owner whenever this personal
+      // installation is bound and the server can dispatch. During a pending
+      // registration we also clear a local plan so it cannot race a successful
+      // bind and show the athlete two notifications for one recovery episode.
+      if (notificationDelivery !== 'local') {
+        if (
+          nativeState.accountId === reconciliationAccountId
+          && nativeState.recoveryId
+          && nativeState.repetitionId
+        ) {
+          await nativeRecoveryAlerts.cancelEpisode({
+            accountId: reconciliationAccountId,
+            recoveryId: nativeState.recoveryId,
+            repetitionId: nativeState.repetitionId,
+          }).catch(() => undefined);
+        }
+        return;
+      }
       if (reconciliationEpisode
         && !nativeRecoveryMustRemainCleared(reconciliationEpisode)
         && nativeRecoveryScheduleRequired(
@@ -432,7 +477,7 @@ export function RecoveryAlertCoordinator({
       if (isCurrentReconciliation()) setNativeAlertsAvailable(false);
     });
     return () => { disposed = true; };
-  }, [episode?.id, episode?.updatedAt, recoveryAccountId]);
+  }, [episode?.id, episode?.updatedAt, notificationDelivery, recoveryAccountId]);
 
   useEffect(() => {
     if (!episode || episode.state === 'ready') return undefined;
@@ -515,6 +560,7 @@ export function RecoveryAlertCoordinator({
           if (!isCurrentSubmission()) return;
           if (authoritativeActive
             && !nativeRecoveryMustRemainCleared(authoritativeActive)
+            && notificationDeliveryRef.current === 'local'
             && nativeRecoveryAlerts.isPluginAvailable()) {
             await nativeRecoveryAlerts.scheduleEpisode(
               opaqueAccountId,
@@ -601,6 +647,7 @@ export function RecoveryAlertCoordinator({
       const saved = await saveRecoveryAlertPreference(draft);
       if (!mountedRef.current || activeUserAccountIdRef.current !== savingForAccount) return;
       setRecoveryAccountId(saved.accountId);
+      setServerPushDeliveryAvailable(saved.pushDeliveryAvailable);
       setPreference(saved.preference);
       setDraft(recoveryDraftFromPreferences(saved.preference));
       setMessage(saved.preference.mode === 'off'
@@ -647,7 +694,7 @@ export function RecoveryAlertCoordinator({
       setEpisode(actionableEpisode(updated.episode));
       const { nativeRecoveryAlerts } = await import('../lib/nativeRecoveryAlerts');
       if (!isCurrentAction()) return;
-      if (nativeRecoveryAlerts.isPluginAvailable()) {
+      if (notificationDeliveryRef.current === 'local' && nativeRecoveryAlerts.isPluginAvailable()) {
         if (kind === 'add') {
           await nativeRecoveryAlerts.scheduleEpisode(updated.accountId, updated.episode).catch(() => undefined);
         } else if (kind === 'stop') {

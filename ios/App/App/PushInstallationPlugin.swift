@@ -118,7 +118,7 @@ public final class PushInstallationPlugin: CAPPlugin, CAPBridgedPlugin {
             let identifiers = notifications.compactMap { notification -> String? in
                 let request = notification.request
                 guard request.trigger is UNPushNotificationTrigger,
-                      Self.isTrackLabSocialPush(request.content.userInfo) else {
+                      Self.isTrackLabAccountBoundPush(request.content.userInfo) else {
                     return nil
                 }
                 return request.identifier
@@ -214,8 +214,8 @@ public final class PushInstallationPlugin: CAPPlugin, CAPBridgedPlugin {
         return Data(base64Encoded: base64)?.count == 32
     }
 
-    private static func isTrackLabSocialPush(_ info: [AnyHashable: Any]) -> Bool {
-        let allowedKinds: Set<String> = [
+    private static func isTrackLabAccountBoundPush(_ info: [AnyHashable: Any]) -> Bool {
+        let friendKinds: Set<String> = [
             "live_audio_invite",
             "friend_request",
             "friend_connection",
@@ -225,12 +225,12 @@ public final class PushInstallationPlugin: CAPPlugin, CAPBridgedPlugin {
               CFGetTypeID(version) != CFBooleanGetTypeID(),
               version.intValue == 1,
               version.doubleValue == 1,
-              info["route"] as? String == "friends",
-              let kind = info["kind"] as? String,
-              allowedKinds.contains(kind) else {
+              let route = info["route"] as? String,
+              let kind = info["kind"] as? String else {
             return false
         }
-        return true
+        return (route == "friends" && friendKinds.contains(kind))
+            || (route == "recovery" && kind == "recovery_ready")
     }
 
     private static func pushEnvironment() throws -> String {

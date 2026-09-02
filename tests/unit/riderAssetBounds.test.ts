@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { PNG } from 'pngjs';
 import { describe, expect, it } from 'vitest';
-import { riderRigBaseAssetByColor } from '../../src/lib/riderAssets';
+import { riderFallbackRigBaseAssetByColor, riderRigBaseAssetByColor } from '../../src/lib/riderAssets';
 import {
   riderMarkerCanvasSize,
   riderMarkerDrawSize,
@@ -21,6 +21,28 @@ async function readRiderAsset(color: (typeof colors)[number]) {
 }
 
 describe('rider rig source assets', () => {
+  it('ships a darker Evergreen fallback with the complete lime silhouette', async () => {
+    const lime = await readRiderAsset('lime');
+    const evergreen = PNG.sync.read(await readFile(path.resolve(
+      process.cwd(),
+      `public${riderFallbackRigBaseAssetByColor.lime}`,
+    )));
+    let limeBrightness = 0;
+    let evergreenBrightness = 0;
+    let occupiedPixels = 0;
+    expect(evergreen.width).toBe(lime.width);
+    expect(evergreen.height).toBe(lime.height);
+    for (let offset = 0; offset < lime.data.length; offset += 4) {
+      expect(evergreen.data[offset + 3]).toBe(lime.data[offset + 3]);
+      if (lime.data[offset + 3] <= 8) continue;
+      limeBrightness += lime.data[offset] + lime.data[offset + 1] + lime.data[offset + 2];
+      evergreenBrightness += evergreen.data[offset] + evergreen.data[offset + 1] + evergreen.data[offset + 2];
+      occupiedPixels += 1;
+    }
+    expect(occupiedPixels).toBeGreaterThan(1_000);
+    expect(evergreenBrightness).toBeLessThan(limeBrightness * 0.82);
+  });
+
   it.each(colors)('keeps the complete %s rider silhouette inside its source frame', async (color) => {
     const image = await readRiderAsset(color);
     let minimumX = image.width;
@@ -43,6 +65,17 @@ describe('rider rig source assets', () => {
     expect(minimumY).toBeGreaterThanOrEqual(8);
     expect(maximumX).toBeLessThanOrEqual(image.width - 9);
     expect(maximumY).toBeLessThanOrEqual(image.height - 9);
+
+    let longestOccupiedRunAtLeftEdge = 0;
+    let currentRun = 0;
+    for (let y = 0; y < image.height; y += 1) {
+      const alpha = image.data[((y * image.width) + minimumX) * 4 + 3];
+      currentRun = alpha > 8 ? currentRun + 1 : 0;
+      longestOccupiedRunAtLeftEdge = Math.max(longestOccupiedRunAtLeftEdge, currentRun);
+    }
+    // A long flat occupied edge means the rear tire was sliced before the
+    // transparent padding was added. A complete curved wheel touches briefly.
+    expect(longestOccupiedRunAtLeftEdge).toBeLessThanOrEqual(16);
   });
 
   it.each(colors)('keeps the complete %s rider inside the 3D marker envelope while leaning', async (color) => {

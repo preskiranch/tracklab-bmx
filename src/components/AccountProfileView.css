@@ -1,6 +1,9 @@
 .account-profile-view {
   display: grid;
   gap: 16px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 18px;
 }
 
@@ -229,8 +232,17 @@
 
 .account-training-layout {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
+  width: 100%;
   min-width: 0;
+}
+
+.account-training-layout > .training-results-sheet {
+  inline-size: 100%;
+  max-inline-size: none;
+  box-sizing: border-box;
+  justify-self: stretch;
 }
 
 .training-calendar { width: min(100%, 720px); padding: 18px; box-sizing: border-box; }

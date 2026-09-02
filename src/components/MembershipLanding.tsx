@@ -1,18 +1,22 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Activity,
+  BarChart3,
   Bike,
+  Compass,
   ExternalLink,
+  Gauge,
   Globe2,
+  LayoutGrid,
   Lock,
   LogIn,
   MapPinned,
   Play,
   Radio,
   RefreshCcw,
+  Route,
   Smartphone,
   Store,
-  Users,
 } from 'lucide-react';
 import type { AuthMode } from '../lib/auth';
 import {
@@ -64,6 +68,11 @@ type MembershipLandingProps = {
   onSignOut: () => void;
   onJoinFree: () => void;
   onEnterApp: () => void;
+  onOpenRaceIntervals: () => void;
+  onOpenStraightSprint: () => void;
+  onOpenGetPulled: () => void;
+  onOpenExplore: () => void;
+  onOpenResults: () => void;
   onStartDemo: () => void;
   onBikeSeatsChange: (count: number) => void;
   onPurchase: () => void;
@@ -100,12 +109,24 @@ export function MembershipLanding({
   onSignOut,
   onJoinFree,
   onEnterApp,
+  onOpenRaceIntervals,
+  onOpenStraightSprint,
+  onOpenGetPulled,
+  onOpenExplore,
+  onOpenResults,
   onStartDemo,
   onBikeSeatsChange,
   onPurchase,
   onRestorePurchases,
   onManageSubscription,
 }: MembershipLandingProps) {
+  type LandingTab = 'home' | 'tracks' | 'shops' | 'training' | 'results';
+  const initialLandingTab = (): LandingTab => {
+    const url = new URL(window.location.href);
+    if (url.hash === '#bike-shop-directory') return 'shops';
+    if (url.hash === '#track-locator' || url.searchParams.has('locator')) return 'tracks';
+    return 'home';
+  };
   const isMember = membership.tier !== 'visitor';
   const creatingAccount = authMode === 'register';
   const selectedOffer = appleProducts.find((product) => product.bikeSeats === bikeSeats);
@@ -118,12 +139,73 @@ export function MembershipLanding({
     && membership.bikeSeats !== bikeSeats;
   const billingBusy = billingStatus === 'loading';
   const profileSubmitPendingRef = useRef(false);
+  const requestedScrollTargetRef = useRef<string | null>(null);
   const [shopClaimPrompt, setShopClaimPrompt] = useState('');
+  const [activeTab, setActiveTab] = useState<LandingTab>(initialLandingTab);
+  useEffect(() => {
+    if (!profileComplete && (activeTab === 'training' || activeTab === 'results')) {
+      setActiveTab('home');
+    }
+  }, [activeTab, profileComplete]);
+  useEffect(() => {
+    const syncTabFromUrl = () => setActiveTab(initialLandingTab());
+    window.addEventListener('popstate', syncTabFromUrl);
+    window.addEventListener('hashchange', syncTabFromUrl);
+    return () => {
+      window.removeEventListener('popstate', syncTabFromUrl);
+      window.removeEventListener('hashchange', syncTabFromUrl);
+    };
+  }, []);
+  useEffect(() => {
+    const requestedTargetId = requestedScrollTargetRef.current;
+    requestedScrollTargetRef.current = null;
+    const targetId = requestedTargetId ?? (activeTab === 'tracks'
+      ? 'track-locator'
+      : activeTab === 'shops'
+        ? 'bike-shop-directory'
+        : activeTab === 'training'
+          ? 'membership-training'
+          : activeTab === 'results'
+            ? 'membership-results'
+            : 'membership-hub-content-top');
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTab]);
+  const selectTab = (tab: LandingTab) => {
+    if (!profileComplete && (tab === 'training' || tab === 'results')) return;
+    setActiveTab(tab);
+    const url = new URL(window.location.href);
+    if (tab === 'tracks') {
+      url.hash = 'track-locator';
+    } else if (tab === 'shops') {
+      url.hash = 'bike-shop-directory';
+      url.searchParams.delete('locator');
+    } else {
+      url.searchParams.delete('locator');
+      if (url.hash === '#track-locator' || url.hash === '#bike-shop-directory') url.hash = '';
+    }
+    if (url.href !== window.location.href) {
+      window.history.pushState(window.history.state, '', url);
+    }
+  };
+  const revealSignIn = () => {
+    requestedScrollTargetRef.current = 'free-account-gate';
+    if (activeTab === 'home') {
+      requestedScrollTargetRef.current = null;
+      window.requestAnimationFrame(() => {
+        document.getElementById('free-account-gate')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+      return;
+    }
+    selectTab('home');
+  };
   const consumeLocator = () => {
     const url = new URL(window.location.href);
-    if (url.searchParams.has('locator')) {
+    if (url.searchParams.has('locator') || url.hash === '#track-locator' || url.hash === '#bike-shop-directory') {
       url.searchParams.delete('locator');
-      if (url.hash === '#track-locator') url.hash = '';
+      if (url.hash === '#track-locator' || url.hash === '#bike-shop-directory') url.hash = '';
       window.history.replaceState(window.history.state, '', url);
     }
   };
@@ -149,9 +231,16 @@ export function MembershipLanding({
     });
   };
 
+  const trainingActions = [
+    { label: 'Race Intervals', detail: 'Mapped BMX racing', icon: Activity, action: onOpenRaceIntervals },
+    { label: 'Straight Sprint', detail: 'Custom sprint locations', icon: Route, action: onOpenStraightSprint },
+    { label: 'Get Pulled', detail: 'Power and cadence pulls', icon: Gauge, action: onOpenGetPulled },
+    { label: 'Explore the World', detail: 'Ride routes worldwide', icon: Compass, action: onOpenExplore },
+  ];
+
   return (
-    <main className="membership-page">
-      <header className="membership-nav">
+    <main className="membership-page membership-hub-page">
+      <aside className="membership-hub-sidebar">
         <div className="brand-lockup">
           <div className="brand-mark">
             <Radio size={20} strokeWidth={2.6} />
@@ -161,19 +250,59 @@ export function MembershipLanding({
             <p>Wattbike racing and training network</p>
           </div>
         </div>
+        <nav className="membership-hub-nav" aria-label="TrackLab home navigation">
+          <button className={activeTab === 'home' ? 'active' : ''} type="button" onClick={() => selectTab('home')}>
+            <LayoutGrid size={18} /> Home
+          </button>
+          <button className={activeTab === 'tracks' ? 'active' : ''} type="button" onClick={() => selectTab('tracks')}>
+            <MapPinned size={18} /> BMX Tracks
+          </button>
+          <button
+            className={activeTab === 'shops' ? 'active' : ''}
+            title="Global Bike Shop Directory"
+            type="button"
+            onClick={() => selectTab('shops')}
+          >
+            <Store size={18} /> Bike Shops
+          </button>
+          {profileComplete && (
+            <>
+              <button className={activeTab === 'training' ? 'active' : ''} type="button" onClick={() => selectTab('training')}>
+                <Bike size={18} /> Training
+              </button>
+              <button className={activeTab === 'results' ? 'active' : ''} type="button" onClick={() => selectTab('results')}>
+                <BarChart3 size={18} /> Results
+              </button>
+            </>
+          )}
+        </nav>
+        {profileComplete ? (
+          <div className="membership-hub-account">
+            <span>{profileName.trim().slice(0, 1).toUpperCase() || 'R'}</span>
+            <div><strong>{profileName}</strong><small>{profileEmail}</small></div>
+          </div>
+        ) : (
+          <button className="membership-hub-signin" type="button" onClick={revealSignIn}>
+            <LogIn size={17} /> Sign in
+          </button>
+        )}
+      </aside>
+
+      <header className="membership-nav membership-hub-topbar" id="membership-hub-content-top">
+        <div>
+          <span className="eyebrow">{profileComplete ? `Welcome back, ${profileName}` : 'Explore without an account'}</span>
+          <h1>{activeTab === 'home' ? 'Your BMX home base.' : activeTab === 'tracks' ? 'Global BMX tracks' : activeTab === 'shops' ? 'Global bike shops' : activeTab === 'training' ? 'Wattbike training' : 'Your results'}</h1>
+        </div>
         <div className="membership-nav-actions">
           <div className="watch-connect-indicator-slot" id="watch-connect-indicator-slot" />
-          <a className="secondary-button" href="#track-locator">
-            <MapPinned size={16} />
-            Find a Track
-          </a>
-          <a className="secondary-button" href="#bike-shop-directory">
-            <Store size={16} />
-            Global Bike Shop Directory
-          </a>
           {profileComplete && (
             <button className="secondary-button" type="button" onClick={onSignOut}>
               Sign Out
+            </button>
+          )}
+          {isAdminProfile && (
+            <button className="secondary-button" type="button" onClick={() => enterFromLocator(onStartDemo)}>
+              <Play size={16} /> Demo Race
             </button>
           )}
           <button className="secondary-button" type="button" onClick={() => enterFromLocator(onEnterApp)} disabled={!profileComplete}>
@@ -182,55 +311,82 @@ export function MembershipLanding({
         </div>
       </header>
 
-      <section className="membership-hero">
-        <div className="membership-hero-copy">
-          <span className="membership-pill">
-            <Globe2 size={15} />
-            Social racing platform
-          </span>
-          <h2>BMX racers can watch, train, and race on real mapped tracks.</h2>
-          <p>
-            Free members can view live sessions and explore the track directory. Racer members connect
-            Wattbikes, create private rooms, join challenges, and save performance data.
-          </p>
-          <div className="membership-cta-row">
-            <button className="primary-button" type="button" onClick={profileComplete ? () => enterFromLocator(onJoinFree) : () => { void submitProfile(); }} disabled={!profileComplete && authLoading}>
-              <Users size={17} />
-              {profileComplete ? 'Join Free' : creatingAccount ? 'Create Free Account' : 'Sign In'}
-            </button>
-            {isAdminProfile && (
-              <button className="secondary-button" type="button" onClick={() => enterFromLocator(onStartDemo)} disabled={!profileComplete}>
-                <Play size={17} />
-                Demo Race
-              </button>
-            )}
-          </div>
-        </div>
+      {activeTab === 'home' && (
+        <>
+          <section className="membership-hub-intro">
+            <span className="membership-pill"><Globe2 size={15} /> Global BMX community</span>
+            <h2>Discover globally. Train when you are ready.</h2>
+            <p>Track and bike-shop directories are free to explore. Signed-in riders also get direct access to every Wattbike activity and their saved results.</p>
+            <div className="membership-hub-status" aria-label="TrackLab live status">
+              <span><strong>{onlineRiderCount}</strong> riders online</span>
+              <span><strong>{liveRoomCount}</strong> active rooms</span>
+              <span><strong>{membership.tier === 'racer' ? membership.bikeSeats : 'Free'}</strong> {membership.tier === 'racer' ? 'bike seats' : 'directory access'}</span>
+            </div>
+          </section>
+          <section className="membership-hub-cards" aria-label="TrackLab directories">
+            <article className="membership-hub-feature">
+              <div>
+                <span className="eyebrow">Global directory</span>
+                <h2>Find BMX tracks anywhere</h2>
+                <p>Browse by country, state, and city, or move across the world map.</p>
+                <button className="primary-button" type="button" onClick={() => selectTab('tracks')}><MapPinned size={17} /> Open track finder</button>
+              </div>
+              <Globe2 className="membership-hub-globe" aria-hidden="true" />
+            </article>
+            <article className="membership-hub-secondary">
+              <span className="eyebrow">Nearby support</span>
+              <h2>Global bike shops</h2>
+              <p>Search near your location or browse any country, state, and city worldwide.</p>
+              <button className="secondary-button" type="button" onClick={() => selectTab('shops')}><Store size={17} /> Open shop finder</button>
+            </article>
+          </section>
+          {profileComplete && (
+            <section className="membership-training-launch" aria-label="Wattbike training shortcuts">
+              <div className="section-heading"><div><span className="eyebrow">Signed-in tools</span><h2>Start Wattbike training</h2></div><Bike size={20} /></div>
+              <div className="membership-training-grid">
+                {trainingActions.map(({ label, detail, icon: Icon, action }) => (
+                  <button key={label} type="button" onClick={() => enterFromLocator(action)}><Icon size={19} /><span><strong>{label}</strong><small>{detail}</small></span></button>
+                ))}
+              </div>
+            </section>
+          )}
+        </>
+      )}
 
-        <aside className="membership-status-card">
-          <div className="status-metric">
-            <span>{onlineRiderCount}</span>
-            <p>online riders</p>
-          </div>
-          <div className="status-metric">
-            <span>{liveRoomCount}</span>
-            <p>active rooms</p>
-          </div>
-          <div className="status-metric">
-            <span>{membership.tier === 'racer' ? `${membership.bikeSeats}` : 'Free'}</span>
-            <p>{membership.tier === 'racer' ? 'bike seats' : 'membership'}</p>
-          </div>
-        </aside>
-      </section>
+      {activeTab === 'tracks' && (
+        <PublicTrackLocator accountId={profileComplete ? profileEmail : null} catalogReady={catalogReady} tracks={tracks} />
+      )}
 
-      <PublicTrackLocator accountId={profileComplete ? profileEmail : null} catalogReady={catalogReady} tracks={tracks} />
+      {activeTab === 'shops' && (
+        <PublicBikeShopDirectory
+          accountId={profileComplete ? profileEmail : null}
+          isAdmin={isAdminProfile}
+          tracks={tracks}
+          onRequireFreeAccount={(shop) => requireFreeAccountForShopClaim(shop.name)}
+        />
+      )}
 
-      <PublicBikeShopDirectory
-        accountId={profileComplete ? profileEmail : null}
-        isAdmin={isAdminProfile}
-        tracks={tracks}
-        onRequireFreeAccount={(shop) => requireFreeAccountForShopClaim(shop.name)}
-      />
+      {activeTab === 'training' && profileComplete && (
+        <section className="membership-training-launch membership-tab-panel" id="membership-training" aria-label="Choose a Wattbike activity">
+          <div className="section-heading"><div><span className="eyebrow">Wattbike training</span><h2>Choose an activity</h2></div><Bike size={20} /></div>
+          <p className="panel-helper">Your account, connected bike, club access, and saved activity settings carry into the training workspace.</p>
+          <div className="membership-training-grid">
+            {trainingActions.map(({ label, detail, icon: Icon, action }) => (
+              <button key={label} type="button" onClick={() => enterFromLocator(action)}><Icon size={20} /><span><strong>{label}</strong><small>{detail}</small></span></button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {activeTab === 'results' && profileComplete && (
+        <section className="membership-results-launch membership-tab-panel" id="membership-results">
+          <BarChart3 size={34} />
+          <span className="eyebrow">Training history</span>
+          <h2>Review every saved result</h2>
+          <p>Open your race, sprint, pull, and Explore the World history with exports and detailed metrics.</p>
+          <button className="primary-button" type="button" onClick={() => enterFromLocator(onOpenResults)}><BarChart3 size={17} /> Open results</button>
+        </section>
+      )}
 
       <section id="free-account-gate" className={`profile-gate ${profileComplete ? 'complete' : ''}`} aria-label="Required profile">
         <div>
@@ -322,6 +478,7 @@ export function MembershipLanding({
         </form>
       </section>
 
+      {activeTab === 'home' && (
       <section className="membership-grid" aria-label="Membership options">
         <article className="membership-card">
           <div className="card-icon">
@@ -481,6 +638,7 @@ export function MembershipLanding({
           </button>
         </article>
       </section>
+      )}
       <footer
         aria-label="TrackLab policies and support"
         style={{ display: 'flex', justifyContent: 'center', gap: 18, padding: '10px 20px 42px' }}

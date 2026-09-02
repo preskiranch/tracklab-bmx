@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createInitialRiders, stepRiders, type BranchChoicesByPlayer } from '../game/physics';
 import { nextRaceFinishDeadline } from '../lib/raceLifecycle';
+import { EVERGREEN_RIDER_ACCENT } from '../lib/playerPalette';
 import { reportedBmxTopSpeedKph } from '../game/bmxRollout';
 import {
   acceptedTrainingSpeedKph,
@@ -151,7 +152,7 @@ function buildRaceSummary(
         ...(player?.riderId ? { riderId: player.riderId } : {}),
         riderName: player?.name ?? `Rider ${rider.playerId}`,
         colorName: player?.colorName ?? 'lime',
-        accent: player?.accent ?? '#84e047',
+        accent: player?.accent ?? EVERGREEN_RIDER_ACCENT,
         deviceLabel: stats?.deviceLabel ?? 'No device',
         rank: rider.rank,
         finishTimeMs: rider.finishedAt,

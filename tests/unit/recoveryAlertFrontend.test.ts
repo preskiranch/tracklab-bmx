@@ -23,6 +23,7 @@ import {
   recoverySubmissionCanRetry,
   recoverySubmissionRetryDelayMs,
 } from '../../src/components/RecoveryAlertCoordinator';
+import { clubTabletRecoveryFinishSignals } from '../../src/components/ClubTabletRecoveryCoordinator';
 import type { RecoveryAlertPreference, RecoveryEpisode } from '../../src/lib/recoveryAlert';
 
 const preference: RecoveryAlertPreference = {
@@ -128,6 +129,48 @@ describe('Recovery Alert individual finish lifecycle', () => {
     };
     expect(raceRecoveryFinishSignals({ ...base, startedAt: 1_000, source: 'demo' })).toEqual([]);
     expect(raceRecoveryFinishSignals({ ...base, startedAt: null, source: 'live' })).toEqual([]);
+  });
+
+  it('keeps each Club Tablet recovery finish scoped to its current studio athlete', () => {
+    const props = {
+      credential: { session: { studioRiderId: 'studio-athlete-a' } },
+      mode: 'race',
+      raceCapture: {
+        sessionId: 'club-race-one',
+        startedAt: 20_000,
+        source: 'live',
+        players: [
+          { id: 1, riderId: 'studio-athlete-a' },
+          { id: 2, riderId: 'studio-athlete-b' },
+        ],
+      },
+      raceRiders: [
+        { playerId: 1, finishedAt: 8_500 },
+        { playerId: 2, finishedAt: 9_500 },
+      ],
+      getPulledResult: null,
+    } as Parameters<typeof clubTabletRecoveryFinishSignals>[0];
+
+    expect(clubTabletRecoveryFinishSignals(props).map((signal) => [
+      signal.athleteId,
+      signal.finishedAt,
+    ])).toEqual([['studio-athlete-a', 28_500]]);
+    expect(clubTabletRecoveryFinishSignals({
+      ...props,
+      credential: { session: { studioRiderId: 'studio-athlete-b' } } as typeof props.credential,
+    }).map((signal) => [signal.athleteId, signal.finishedAt]))
+      .toEqual([['studio-athlete-b', 29_500]]);
+
+    const tabletSource = readFileSync(
+      new URL('../../src/components/ClubTabletRecoveryCoordinator.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(tabletSource).toContain('submitClubTabletRecoveryEpisode');
+    expect(tabletSource).toContain('flushClubTabletRecoveryOutbox');
+    expect(tabletSource).not.toContain('nativeRecoveryAlerts');
+    const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
+    expect(appSource).toContain('clubTabletKioskMode\n          && clubTabletSessionActive');
+    expect(appSource).toContain('&& !demoMode');
   });
 
   it('uses bounded backoff instead of retrying on high-frequency race renders', () => {

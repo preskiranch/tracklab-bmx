@@ -205,6 +205,14 @@ describe('owner-operated Monitor View athlete history', () => {
     expect(rosterResponse.status).toBe(200);
     await claimStudioRider(owner.cookie, athlete.cookie, riderOne, 'Monitor Athlete');
     await claimStudioRider(owner.cookie, secondAthlete.cookie, riderTwo, 'Second Athlete');
+    // An unclaimed athlete can use a studio tablet before creating a personal
+    // TrackLab account. Adding their invitation makes them an enrolled club
+    // roster identity without claiming the account.
+    const unclaimedInvite = await api('/api/club-connect/invites', {
+      method: 'POST',
+      body: JSON.stringify({ studioRiderId: unclaimedRider }),
+    }, owner.cookie);
+    expect(unclaimedInvite.status).toBe(201);
 
     const clubStateResponse = await api('/api/club-connect', {}, owner.cookie);
     expect(clubStateResponse.status).toBe(200);
@@ -268,14 +276,22 @@ describe('owner-operated Monitor View athlete history', () => {
       topWatts: 1_250,
       averageWatts: 640,
     });
-    expect(JSON.stringify(mixedOwnerSession.details.summaries[1])).not.toMatch(/watts?|power/i);
+    expect(mixedOwnerSession.details.summaries[1]).toMatchObject({
+      riderId: unclaimedRider,
+      topWatts: 1_100,
+      averageWatts: 610,
+    });
     expect(JSON.stringify(mixedOwnerSession.details.summaries[2])).not.toMatch(/watts?|power/i);
     expect(mixedOwnerSession.details.zoneResults[0].riders[0]).toMatchObject({
       playerId: 1,
       topWatts: 1_200,
       averageWatts: 630,
     });
-    expect(JSON.stringify(mixedOwnerSession.details.zoneResults[0].riders[1])).not.toMatch(/watts?|power/i);
+    expect(mixedOwnerSession.details.zoneResults[0].riders[1]).toMatchObject({
+      playerId: 3,
+      topWatts: 1_080,
+      averageWatts: 600,
+    });
     expect(JSON.stringify(mixedOwnerSession.details.zoneResults[0].riders[2])).not.toMatch(/watts?|power/i);
     const armedAt = Date.now() - 6_000;
     const startedAt = armedAt + 1_000;

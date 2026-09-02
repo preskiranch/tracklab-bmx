@@ -29,7 +29,8 @@
 
 .apple-tier-selector span,
 .apple-tier-selector small {
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
   font-size: 10px;
   font-weight: 800;
   line-height: 1.15;
@@ -103,4 +104,409 @@
   background: rgba(45, 143, 232, 0.08);
   color: #174f7c !important;
   font-weight: 800;
+}
+
+.membership-hub-page {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.membership-hub-page > :not(.membership-hub-sidebar) {
+  grid-column: 2;
+  min-width: 0;
+}
+
+.membership-hub-page > .public-locator-band {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+/* The landing-page rail narrows the embedded track preview below the width
+ * needed for six readable contact controls. Keep a balanced 3 × 2 grid until
+ * the full six-control desktop layout has room again. */
+@media (min-width: 1240px) and (max-width: 1359px) {
+  .membership-hub-page .public-track-official-links {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.membership-hub-page > .public-bike-shop-directory {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.membership-hub-sidebar {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  grid-column: 1;
+  grid-row: 1 / span 20;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+  min-height: calc(100dvh - 32px);
+  padding: 18px 14px;
+  border: 1px solid rgba(114, 232, 154, 0.15);
+  border-radius: 16px;
+  color: #e7fff0;
+  background: #071b13;
+  box-shadow: 0 18px 45px rgba(6, 24, 17, 0.18);
+}
+
+.membership-hub-sidebar .brand-lockup {
+  order: 0;
+  align-items: center;
+  padding: 2px 5px 16px;
+  border-bottom: 1px solid rgba(231, 255, 240, 0.12);
+}
+
+.membership-hub-sidebar .brand-lockup h1,
+.membership-hub-sidebar .brand-lockup p {
+  color: inherit;
+}
+
+.membership-hub-sidebar .brand-lockup p {
+  color: #aac5b5;
+}
+
+.membership-hub-nav {
+  display: grid;
+  gap: 6px;
+}
+
+.membership-hub-nav button,
+.membership-hub-signin {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 46px;
+  padding: 9px 11px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #c5d6cc;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: left;
+}
+
+.membership-hub-nav button:hover,
+.membership-hub-nav button.active {
+  border-color: rgba(71, 187, 115, 0.26);
+  color: #f0fff5;
+  background: rgba(23, 143, 77, 0.24);
+}
+
+.membership-hub-signin {
+  justify-content: center;
+  margin-top: auto;
+  border-color: rgba(231, 255, 240, 0.24);
+  color: #e7fff0;
+}
+
+.membership-hub-account {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+  margin-top: auto;
+  padding: 10px;
+  border: 1px solid rgba(231, 255, 240, 0.14);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.membership-hub-account > span {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 50%;
+  color: #071b13;
+  background: #8af0ad;
+  font-weight: 950;
+}
+
+.membership-hub-account div,
+.membership-hub-account strong,
+.membership-hub-account small {
+  display: block;
+  min-width: 0;
+}
+
+.membership-hub-account strong,
+.membership-hub-account small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.membership-hub-account small {
+  margin-top: 2px;
+  color: #aac5b5;
+  font-size: 10px;
+}
+
+.membership-hub-topbar {
+  min-height: 76px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.membership-hub-topbar h1 {
+  margin: 3px 0 0;
+  color: #0b1711;
+  font-size: clamp(24px, 3vw, 36px);
+  letter-spacing: -0.035em;
+}
+
+.membership-hub-intro {
+  display: grid;
+  gap: 12px;
+  padding: 8px 2px 0;
+}
+
+.membership-hub-intro h2 {
+  max-width: 760px;
+  font-size: clamp(30px, 4vw, 48px);
+  line-height: 1;
+}
+
+.membership-hub-intro > p {
+  max-width: 720px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.membership-hub-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.membership-hub-status span {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: #52615a;
+  background: #fff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.membership-hub-status strong {
+  color: #147342;
+}
+
+.membership-hub-cards {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(260px, .75fr);
+  gap: 14px;
+}
+
+.membership-hub-feature,
+.membership-hub-secondary,
+.membership-training-launch,
+.membership-results-launch {
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+  padding: 24px;
+  border-radius: 17px;
+}
+
+.membership-hub-feature {
+  min-height: 310px;
+  color: #effff5;
+  background: linear-gradient(145deg, #0f6f42, #0b4e32);
+}
+
+.membership-hub-feature > div {
+  position: relative;
+  z-index: 2;
+  max-width: 420px;
+}
+
+.membership-hub-feature .eyebrow,
+.membership-hub-feature h2,
+.membership-hub-feature p {
+  color: inherit;
+}
+
+.membership-hub-feature h2,
+.membership-hub-secondary h2 {
+  margin: 7px 0;
+  font-size: clamp(25px, 3.3vw, 38px);
+  line-height: 1.02;
+}
+
+.membership-hub-feature p,
+.membership-hub-secondary p {
+  margin-bottom: 18px;
+  line-height: 1.5;
+}
+
+.membership-hub-feature .primary-button {
+  border-color: #c9ffdb;
+  color: #092719;
+  background: #c9ffdb;
+}
+
+.membership-hub-globe {
+  position: absolute;
+  right: -56px;
+  bottom: -62px;
+  width: 250px;
+  height: 250px;
+  opacity: 0.18;
+  stroke-width: 0.7;
+}
+
+.membership-hub-secondary,
+.membership-training-launch,
+.membership-results-launch {
+  border: 1px solid var(--line);
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(25, 39, 52, 0.06);
+}
+
+.membership-training-launch {
+  display: grid;
+  gap: 14px;
+}
+
+.membership-training-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.membership-training-grid > button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 70px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  color: #163227;
+  background: #f3f8f5;
+  text-align: left;
+}
+
+.membership-training-grid > button:hover {
+  border-color: rgba(23, 143, 77, 0.48);
+  background: #eaf7ef;
+}
+
+.membership-training-grid span,
+.membership-training-grid strong,
+.membership-training-grid small {
+  display: block;
+  min-width: 0;
+}
+
+.membership-training-grid small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.membership-tab-panel {
+  min-height: 360px;
+  align-content: start;
+}
+
+.membership-results-launch {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  min-height: 320px;
+  align-content: center;
+}
+
+.membership-results-launch p {
+  max-width: 560px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+@media (max-width: 1320px) {
+  .membership-hub-page .membership-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 980px) {
+  .membership-hub-page {
+    grid-template-columns: 1fr;
+  }
+
+  .membership-hub-page > :not(.membership-hub-sidebar),
+  .membership-hub-sidebar {
+    grid-column: 1;
+  }
+
+  .membership-hub-sidebar {
+    position: static;
+    grid-row: auto;
+    min-height: 0;
+  }
+
+  .membership-hub-nav {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .membership-hub-nav button {
+    justify-content: center;
+  }
+
+  .membership-hub-account,
+  .membership-hub-signin {
+    margin-top: 0;
+  }
+}
+
+@media (max-width: 700px) {
+  .membership-hub-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .membership-hub-cards,
+  .membership-training-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .membership-hub-feature {
+    min-height: 280px;
+  }
+
+  .membership-hub-topbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .membership-hub-topbar .membership-nav-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 440px) {
+  .membership-hub-topbar .membership-nav-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .membership-hub-topbar .membership-nav-actions > button {
+    width: 100%;
+  }
 }

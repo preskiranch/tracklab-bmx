@@ -93,6 +93,22 @@ describe('native push adapter', () => {
     expect(normalizeNativePushRoute(route)).toEqual(route);
     expect(normalizeNativePushRoute({ ...route, route: 'room', roomId: 'private' })).toBeNull();
     expect(normalizeNativePushRoute({ ...route, kind: 'message', body: 'private' })).toBeNull();
+
+    const recoveryRoute = {
+      v: 1,
+      kind: 'recovery_ready',
+      notificationId: '0b8a3c8b-39de-41a9-b65d-200100000002',
+      route: 'recovery',
+    } as const;
+    expect(normalizeNativePushRoute(recoveryRoute)).toEqual(recoveryRoute);
+    expect(normalizeNativePushRoute({ ...recoveryRoute, route: 'friends' })).toBeNull();
+    expect(normalizeNativePushRoute({
+      ...recoveryRoute,
+      accountId: 'private-account',
+      athleteProfileKey: 'private-athlete',
+      episodeId: 'private-episode',
+      heartRate: 180,
+    })).toEqual(recoveryRoute);
   });
 
   it('uses the frozen credential contract without echoing secrets into URLs', async () => {
@@ -299,7 +315,7 @@ describe('native push account and duplicate fences', () => {
     expect(cleanup).not.toHaveBeenCalled();
   });
 
-  it('bounds post-logout selective cleanup without invoking Recovery cleanup', async () => {
+  it('bounds post-logout cleanup for every TrackLab notification bound to the old account', async () => {
     vi.useFakeTimers();
     try {
       const client = {
@@ -317,7 +333,7 @@ describe('native push account and duplicate fences', () => {
       );
       const start = source.indexOf('export async function clearNativePushDeliveredSocialBoundary');
       const end = source.indexOf('export async function logoutThenClearNativePushDeliveredSocialNotifications');
-      expect(source.slice(start, end)).not.toContain('Recovery');
+      expect(source.slice(start, end)).toContain('Friends and Recovery Alert');
     } finally {
       vi.useRealTimers();
     }
@@ -342,13 +358,17 @@ describe('native push account and duplicate fences', () => {
     expect(resolveNativePushAccountBoundary('signed-in', 'account-a', true)).toBeNull();
   });
 
-  it('shows generic foreground friend activity without duplicating the live-audio card', () => {
+  it('shows generic foreground friend activity and an opaque recovery-ready alert without duplicating the live-audio card', () => {
     expect(nativePushForegroundCopy('friend_request')).toEqual({
       title: 'New friend request',
       detail: 'Open Friends to review the request.',
     });
     expect(nativePushForegroundCopy('friend_connection')?.title).toBe('New friend connection');
     expect(nativePushForegroundCopy('track_share')?.title).toBe('A friend shared a track');
+    expect(nativePushForegroundCopy('recovery_ready')).toEqual({
+      title: 'Recovery ready',
+      detail: 'Your recovery timer is complete.',
+    });
     expect(nativePushForegroundCopy('live_audio_invite')).toBeNull();
   });
 
@@ -418,8 +438,10 @@ describe('native push account and duplicate fences', () => {
     expect(hydration).not.toContain('joinRoom');
     expect(hydration).not.toContain('voice.start');
     expect(source).toContain('onFriendsActivity(opened);');
+    expect(source).toContain('onRecoveryActivity(opened);');
     expect(source).toContain('foregroundNotice.accountId === accountId');
     expect(source).toContain('>View Friends</button>');
+    expect(source).toContain('>View Recovery</button>');
     expect(source).toContain('>Dismiss</button>');
     expect(source).toContain('role="alert"');
     expect(source).toContain('Choose which friend activity can alert this personal TrackLab account.');

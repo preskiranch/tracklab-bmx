@@ -134,9 +134,6 @@ export default function ClubTabletAutoRestoreCoordinator({
       .then((credential) => {
         if (claimed.started) {
           updateClubTabletSharedRecoveryAttempt(attemptKey, 'succeeded');
-          void import('./NativeNotificationsCoordinator')
-            .then(({ clearNativePushAccountBoundary }) => clearNativePushAccountBoundary())
-            .catch(() => undefined);
         }
         if (!active) return;
         // Commit the rotated credential before continuing into kiosk mode.
@@ -144,6 +141,13 @@ export default function ClubTabletAutoRestoreCoordinator({
         // remounted coordinator receives the same result so React StrictMode
         // or a landing-to-app transition cannot lose the kiosk state update.
         onRecovered(credential);
+        // Recovery turns this physical device into a shared kiosk. Clear the
+        // former owner's registered delivery endpoint in the background so a
+        // personal Recovery Alert cannot later appear on a studio tablet. It
+        // must not delay or jeopardize the durable auto-restore handoff.
+        void import('./NativeNotificationsCoordinator')
+          .then(({ clearNativePushAccountBoundary }) => clearNativePushAccountBoundary())
+          .catch(() => undefined);
       })
       .catch((error) => {
         // A generic transport failure is ambiguous: the server may already

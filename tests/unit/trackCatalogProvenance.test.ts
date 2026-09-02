@@ -9,6 +9,13 @@ type CatalogTrack = {
   address?: string;
   latitude?: number;
   longitude?: number;
+  lengthMeters?: number;
+  outline?: unknown[];
+  centerline?: unknown[];
+  startGate?: unknown;
+  finishLine?: unknown;
+  routeStatus?: string;
+  zones?: unknown[];
 };
 
 type TrackDatabase = {
@@ -52,6 +59,21 @@ describe('global track catalog provenance', () => {
     expect(database.tracks.filter((track) => track.providerId === 'auscycling').length).toBeGreaterThanOrEqual(100);
     expect(database.tracks.some((track) => track.country === 'Aruba')).toBe(true);
     expect(database.tracks.some((track) => track.country === 'China')).toBe(true);
+  });
+
+  it('keeps Air Time BMX in Reedley locator-only with no hard-coded race mapping', () => {
+    const reedley = database.tracks.find((track) => track.id === 'air-time-bmx');
+
+    expect(reedley).toMatchObject({
+      country: 'United States',
+      routeStatus: 'locator-only',
+      lengthMeters: 0,
+      outline: [],
+      centerline: [],
+      zones: [],
+    });
+    expect(reedley?.startGate).toBeUndefined();
+    expect(reedley?.finishLine).toBeUndefined();
   });
 
   it('never represents supplemental community data as federation verified', () => {

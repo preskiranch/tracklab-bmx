@@ -6,6 +6,9 @@ import type { RaceViewPreferences } from '../types';
 export const clubTabletDeviceStorageKey = 'tracklab.club-tablet-device.v1';
 export const clubTabletSessionStorageKey = 'tracklab.club-tablet-athlete-session.v1';
 export const clubTabletOutboxStorageKey = 'tracklab.club-tablet-save-outbox.v1';
+/** Opaque recovery finishes retained until their original athlete result
+ * credential reaches the server. Never stores an account/profile identity. */
+export const clubTabletRecoveryOutboxStorageKey = 'tracklab.club-tablet-recovery-outbox.v1';
 export const clubTabletSessionHeader = 'X-TrackLab-Club-Tablet-Session';
 export const clubTabletResultUploadHeader = 'X-TrackLab-Club-Tablet-Result-Token';
 
@@ -349,6 +352,7 @@ export function clearStoredClubTabletDevice() {
   try {
     window.localStorage.removeItem(clubTabletDeviceStorageKey);
     window.localStorage.removeItem(clubTabletOutboxStorageKey);
+    window.localStorage.removeItem(clubTabletRecoveryOutboxStorageKey);
     window.sessionStorage.removeItem(clubTabletOutboxStorageKey);
   } catch {
     // A blocked storage backend must not prevent the server-side authorization from ending.

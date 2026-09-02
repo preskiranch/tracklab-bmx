@@ -210,7 +210,7 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           finish_time_ms INTEGER NOT NULL,
           thirty_foot_time_ms INTEGER,
           color_name TEXT NOT NULL DEFAULT 'lime',
-          accent TEXT NOT NULL DEFAULT '#7ade36',
+          accent TEXT NOT NULL DEFAULT '#178f4d',
           race_source TEXT NOT NULL DEFAULT 'live',
           lap_count INTEGER NOT NULL DEFAULT 1,
           analytics_public BOOLEAN NOT NULL DEFAULT false,
@@ -2231,6 +2231,22 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           ) NOT VALID`,
         `ALTER TABLE ${schema}.heart_rate_training_segment_bindings
           VALIDATE CONSTRAINT heart_rate_training_segment_bindings_relay_scope_check`,
+      ],
+    },
+    {
+      version: 42,
+      name: 'deliver claimed athlete recovery alerts to personal devices',
+      statements: [
+        `ALTER TABLE ${schema}.push_events
+          DROP CONSTRAINT IF EXISTS push_events_kind_check`,
+        `ALTER TABLE ${schema}.push_events
+          ADD CONSTRAINT push_events_kind_check
+          CHECK (kind IN (
+            'live_audio_invite', 'friend_request', 'friend_connection',
+            'track_share', 'recovery_ready'
+          )) NOT VALID`,
+        `ALTER TABLE ${schema}.push_events
+          VALIDATE CONSTRAINT push_events_kind_check`,
       ],
     },
   ];

@@ -136,6 +136,7 @@ import {
   zoneBoundariesFromRouteVariant,
 } from './lib/trackMapping';
 import { playerVisualForSlot } from './lib/playerIdentity';
+import { canonicalPlayerAccent } from './lib/playerPalette';
 import {
   fetchLocationPredictions,
   hasGoogleMapsApiKey,
@@ -287,6 +288,7 @@ import {
   type ClubTabletRoster,
   type ClubTabletSessionCredential,
 } from './lib/clubTabletStorage';
+import { flushClubTabletRecoveryFinishSignals } from './lib/clubTabletRecoveryAlert';
 import type {
   ClubLiveActivityState,
   ClubLiveExploreState,
@@ -435,6 +437,7 @@ const HeartRateAccountBlockCoordinator = lazy(() => import('./components/HeartRa
 const WatchConnectCoordinator = lazy(() => import('./components/WatchConnectCoordinator')
   .then((module) => ({ default: module.WatchConnectCoordinator })));
 const RecoveryAlertCoordinator = lazy(() => import('./components/RecoveryAlertCoordinator'));
+const ClubTabletRecoveryCoordinator = lazy(() => import('./components/ClubTabletRecoveryCoordinator'));
 const clearNativeRecoveryBoundary = () => import('./lib/nativeRecoveryAlerts')
   .then(({ nativeRecoveryAlerts }) => nativeRecoveryAlerts.clearAllEpisodes())
   .catch(() => undefined);
@@ -1313,11 +1316,12 @@ function normalizeBikeProfile(value: unknown, index: number): BikeProfile | null
     ? defaultBikeName(deviceId)
     : storedName;
 
+  const colorName = isPlayerColorName(profile.colorName) ? profile.colorName : visual.colorName;
   return {
     deviceId,
     name,
-    colorName: isPlayerColorName(profile.colorName) ? profile.colorName : visual.colorName,
-    accent: typeof profile.accent === 'string' && profile.accent.trim() ? profile.accent : visual.accent,
+    colorName,
+    accent: canonicalPlayerAccent(colorName, profile.accent ?? visual.accent),
     updatedAt: Number.isFinite(profile.updatedAt) ? Number(profile.updatedAt) : Date.now(),
   };
 }
@@ -2096,6 +2100,8 @@ export default function App() {
     () => !initialClubTabletDeviceRef.current && (
       initialMembershipRef.current?.tier === 'visitor'
       || currentSearchParam('locator') != null
+      || window.location.hash === '#track-locator'
+      || window.location.hash === '#bike-shop-directory'
     ),
   );
   const [appleConnectionCount, setAppleConnectionCount] = useState(() => (
@@ -2167,6 +2173,7 @@ export default function App() {
   const [onlineFriendCount, setOnlineFriendCount] = useState(0);
   const [friendGraphRevision, setFriendGraphRevision] = useState(0);
   const [friendNetworkRefreshRevision, setFriendNetworkRefreshRevision] = useState(0);
+  const [recoveryAlertRefreshRevision, setRecoveryAlertRefreshRevision] = useState(0);
   const friendCountRef = useRef<number | null>(null);
   const [unitPreferences, setUnitPreferences] = useState<UnitPreferences>(() => regionalUnitPreferences());
   const unitPreferencesRef = useRef(unitPreferences);
@@ -2230,6 +2237,8 @@ export default function App() {
   }, []);
   const [ghostLaps, setGhostLaps] = useState(readStoredGhostLaps);
   const [selectedGhostIds, setSelectedGhostIds] = useState<string[]>([]);
+  const [ghostLoadStatus, setGhostLoadStatus] = useState<'loading' | 'ready' | 'error'>('ready');
+  const [ghostLoadRevision, setGhostLoadRevision] = useState(0);
   const [friendGhostRaceTarget, setFriendGhostRaceTarget] = useState<(FriendGhostPreview & { profileId: string }) | null>(null);
   const friendGhostAutoSelectPendingRef = useRef(false);
   const [ghostPlaybackMs, setGhostPlaybackMs] = useState(0);
@@ -2531,6 +2540,18 @@ export default function App() {
     setShowMembershipLanding(false);
     setAppMode('friends');
   }, [handleFriendNetworkChange]);
+
+  const handleNativeRecoveryAlertActivity = useCallback((opened: boolean) => {
+    // APNs carries only an opaque wake-up. Remounting the personal coordinator
+    // makes it refetch the exact athlete-owned recovery episode instead of
+    // trusting notification contents or a prior account's local state.
+    setRecoveryAlertRefreshRevision((current) => current + 1);
+    if (!opened || clubTabletKioskMode || !authUser?.id) return;
+    setMappingMode(false);
+    setSidebarMoreOpen(false);
+    setShowMembershipLanding(false);
+    setAppMode('race');
+  }, [authUser?.id, clubTabletKioskMode]);
 
   useEffect(() => {
     if (authStatus !== 'signed-in' || !authUser?.id || clubTabletKioskMode) return undefined;
@@ -6329,13 +6350,16 @@ export default function App() {
 
   useEffect(() => {
     if (isCustomRoutePreviewId(selectedTrack.id)) {
+      setGhostLoadStatus('ready');
       return undefined;
     }
 
     let cancelled = false;
+    setGhostLoadStatus('loading');
     if (clubTabletKioskMode && !clubTabletSessionActive) {
       setSelectedGhostIds([]);
       setGhostLaps([]);
+      setGhostLoadStatus('ready');
       return undefined;
     }
     if (clubTabletSessionActive && clubTabletSession) {
@@ -6354,13 +6378,20 @@ export default function App() {
           return ghost ? [{ ...ghost, ownerKey: clubTabletProfileKey }] : [];
         });
         setGhostLaps(scopedGhosts);
+        setGhostLoadStatus('ready');
       }).catch((error: Error) => {
-        if (!cancelled) console.warn(`Could not load this athlete's Club Tablet ghosts: ${error.message}`);
+        if (!cancelled) {
+          setGhostLoadStatus('error');
+          console.warn(`Could not load this athlete's Club Tablet ghosts: ${error.message}`);
+        }
       });
       return () => { cancelled = true; };
     }
 
-    if (!cloudProfileKey) return undefined;
+    if (!cloudProfileKey) {
+      setGhostLoadStatus('ready');
+      return undefined;
+    }
     const friendKeys = friendGhostKeySignature
       ? friendGhostKeySignature.split(',').filter(Boolean)
       : [];
@@ -6387,9 +6418,13 @@ export default function App() {
           current.filter((ghost) => ghost.source === 'personal' && ghost.ownerKey === cloudProfileKey),
           cloudGhosts,
         ));
+        setGhostLoadStatus('ready');
       })
       .catch((error: Error) => {
-        console.warn(`Could not load TrackLab ghosts: ${error.message}`);
+        if (!cancelled) {
+          setGhostLoadStatus('error');
+          console.warn(`Could not load TrackLab ghosts: ${error.message}`);
+        }
       });
 
     return () => {
@@ -6406,6 +6441,7 @@ export default function App() {
     friendGhostRaceTarget?.profileId,
     friendGhostRaceTarget?.trackId,
     friendGraphRevision,
+    ghostLoadRevision,
     raceWorkspaceMode,
     selectedTrack.id,
     straightSprintAirSetting,
@@ -9908,6 +9944,9 @@ export default function App() {
       return;
     }
 
+    const url = new URL(window.location.href);
+    url.hash = 'track-locator';
+    window.history.replaceState(window.history.state, '', url);
     setShowMembershipLanding(true);
     window.setTimeout(() => {
       document.getElementById('track-locator')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -9915,6 +9954,10 @@ export default function App() {
   }, [requireAccountProfile]);
 
   const openBikeShopDirectory = useCallback(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('locator');
+    url.hash = 'bike-shop-directory';
+    window.history.replaceState(window.history.state, '', url);
     setShowMembershipLanding(true);
     window.setTimeout(() => {
       document.getElementById('bike-shop-directory')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -10287,6 +10330,10 @@ export default function App() {
   clubTabletEmergencyExitRef.current = returnToClubTablet;
 
   const prepareClubTabletAuthorization = useCallback(async () => {
+    // A device becoming shared must never retain an administrator's or a
+    // previous athlete's local recovery alarm. The new club session will only
+    // submit opaque finishes to the selected athlete's personal account.
+    await clearNativeRecoveryBoundary();
     const pendingRaceViewSave = queueCloudUserDataPatch(cloudProfileKey, {
       raceViewPreferences: raceViewPreferencesRef.current,
     });
@@ -10321,6 +10368,9 @@ export default function App() {
   }, []);
 
   const handleClubTabletDeviceChange = useCallback((next: ClubTabletDeviceCredential | null) => {
+    // Auto-restore can enter Club Tablet mode without reopening the owner
+    // authorization UI, so clear this physical device here as well.
+    void clearNativeRecoveryBoundary();
     setLiveHeartRateByRider({});
     clearRaceCaptureForClubTablet();
     friendGhostAutoSelectPendingRef.current = false;
@@ -10357,6 +10407,31 @@ export default function App() {
 
   const handleClubTabletSessionChange = useCallback((next: ClubTabletSessionCredential | null) => {
     const previousSession = clubTabletSessionRef.current;
+    const recoveryMode = appMode === 'race'
+      ? 'race'
+      : appMode === 'straight-sprint'
+        ? 'straight-sprint'
+        : appMode === 'get-pulled'
+          ? 'get-pulled'
+          : null;
+    // Start an idempotent, keepalive-backed finish write before this handler
+    // clears the race state or ends the bearer. This closes the handoff race
+    // where a coach immediately selects the next athlete after a finish.
+    if (previousSession && previousSession.sessionToken !== next?.sessionToken && recoveryMode && !demoMode) {
+      void flushClubTabletRecoveryFinishSignals({
+        credential: previousSession,
+        mode: recoveryMode,
+        raceCapture,
+        raceRiders: riders,
+        getPulledResult: getPulledLiveState?.result ?? null,
+      }, { keepalive: true }).catch(() => undefined);
+    }
+    // A shared tablet is never an athlete's personal notification endpoint.
+    // Clear any locally scheduled / delivered recovery item as soon as its
+    // selected rider changes or leaves the device.
+    if (previousSession || next || clubTabletDeviceActive) {
+      void clearNativeRecoveryBoundary();
+    }
     if (
       previousSession
       && previousSession.sessionToken !== next?.sessionToken
@@ -10395,7 +10470,15 @@ export default function App() {
     setBikeConnectionSource('bluetooth');
     setDemoMode(false);
     setAppMode('club-tablet');
-  }, [clearRaceCaptureForClubTablet]);
+  }, [
+    appMode,
+    clearRaceCaptureForClubTablet,
+    clubTabletDeviceActive,
+    demoMode,
+    getPulledLiveState?.result,
+    raceCapture,
+    riders,
+  ]);
 
   const handleClubTabletDeviceReady = useCallback((
     nextRoster: ClubTabletRoster,
@@ -11728,7 +11811,7 @@ export default function App() {
       onClick: () => {
         setAppMode(raceWorkspaceMode);
         window.setTimeout(() => {
-          document.querySelector('.ghost-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          document.getElementById('ghost-race-setup')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }, 0);
       },
     } as RaceWorkflowStep] : []),
@@ -11938,6 +12021,7 @@ export default function App() {
         onLiveHeartRateReadingsChange={setLiveHeartRateByRider}
         onMessage={setHeartRateMessage}
         onNativeNotification={handleNativeNotificationFriendsActivity}
+        onRecoveryNotification={handleNativeRecoveryAlertActivity}
         onOpenSettings={() => handleHeartRateAccountBlockOpenSettings(true)}
         friendNetworkRefreshRevision={friendNetworkRefreshRevision}
         ownedStudio={ownedClub ? { clubId: ownedClub.id, clubName: ownedClub.name } : null}
@@ -12013,6 +12097,28 @@ export default function App() {
           onSignOut={handleSignOut}
           onJoinFree={openFreeSpectatorAccess}
           onEnterApp={openRaceDashboard}
+          onOpenRaceIntervals={() => {
+            setShowMembershipLanding(false);
+            openBmxRaceIntervals();
+          }}
+          onOpenStraightSprint={() => {
+            setShowMembershipLanding(false);
+            openStraightSprint();
+          }}
+          onOpenGetPulled={() => {
+            setShowMembershipLanding(false);
+            openGetPulled();
+          }}
+          onOpenExplore={() => {
+            setShowMembershipLanding(false);
+            setMappingMode(false);
+            setAppMode('explore');
+          }}
+          onOpenResults={() => {
+            setShowMembershipLanding(false);
+            setMappingMode(false);
+            setAppMode('results');
+          }}
           onStartDemo={startBenchmarkDemo}
           onBikeSeatsChange={handleAppleConnectionCountChange}
           onPurchase={() => { void purchaseAppleSubscription(); }}
@@ -12978,12 +13084,30 @@ export default function App() {
           && (raceWorkspaceActive || appMode === 'get-pulled') && (
           <Suspense fallback={null}>
             <RecoveryAlertCoordinator
+              key={`${authUser.id}:${recoveryAlertRefreshRevision}`}
               accountId={authUser.id}
               mode={appMode}
               raceCapture={raceCapture}
               raceRiders={riders}
               getPulledResult={getPulledLiveState?.result ?? null}
               latestHeartRate={accountLiveHeartRate}
+            />
+          </Suspense>
+        )}
+
+        {clubTabletKioskMode
+          && clubTabletSessionActive
+          && clubTabletSession
+          && !demoMode
+          && (raceWorkspaceActive || appMode === 'get-pulled') && (
+          <Suspense fallback={null}>
+            <ClubTabletRecoveryCoordinator
+              key={clubTabletSession.sessionToken}
+              credential={clubTabletSession}
+              mode={appMode}
+              raceCapture={raceCapture}
+              raceRiders={riders}
+              getPulledResult={getPulledLiveState?.result ?? null}
             />
           </Suspense>
         )}
@@ -13491,6 +13615,9 @@ export default function App() {
                   customRoutes={straightSprintVenueCourses.map(({ course }) => course)}
                   selectedTrackId={selectedTrack.id}
                   players={racePlayers}
+                  ghostLaps={availableGhostLaps}
+                  selectedGhostIds={selectedGhostIds}
+                  ghostLoadStatus={ghostLoadStatus}
                   demoPlayerOptions={exploreDemoCandidates}
                   selectedDemoPlayerIds={selectedDemoPlayerIds}
                   branchChoicesByPlayer={activeBranchChoicesByPlayer}
@@ -13550,6 +13677,9 @@ export default function App() {
                   onCustomRouteSelect={handleTrackChange}
                   onCustomRouteDelete={handleCustomRouteDelete}
                   onBranchChoiceChange={handleBranchChoiceChange}
+                  onGhostToggle={toggleGhostLap}
+                  onGhostClear={clearSelectedGhosts}
+                  onGhostRetry={() => setGhostLoadRevision((revision) => revision + 1)}
                   onMappingRouteVariantChange={handleMappingRouteVariantChange}
                   onMappingZoneBranchChange={setMappingZoneBranchChoice}
                   onRaceRouteVariantChange={handleRaceRouteVariantChange}

@@ -37,26 +37,30 @@ describe('native iOS push integration', () => {
     expect(bridge).toContain('registerPluginInstance(PushInstallationPlugin())');
   });
 
-  it('selectively clears only delivered TrackLab social remote pushes', () => {
+  it('selectively clears only delivered TrackLab remote pushes bound to the old account', () => {
     expect(installation).toContain('CAPPluginMethod(name: "clearDeliveredSocialNotifications"');
     expect(installation).toContain('getDeliveredNotifications');
     expect(installation).toContain('request.trigger is UNPushNotificationTrigger');
     expect(installation).toContain('CFGetTypeID(version) != CFBooleanGetTypeID()');
     expect(installation).toContain('version.intValue == 1');
     expect(installation).toContain('version.doubleValue == 1');
-    expect(installation).toContain('info["route"] as? String == "friends"');
+    expect(installation).toContain('let route = info["route"] as? String');
+    expect(installation).toContain('route == "friends" && friendKinds.contains(kind)');
+    expect(installation).toContain('route == "recovery" && kind == "recovery_ready"');
     for (const kind of ['live_audio_invite', 'friend_request', 'friend_connection', 'track_share']) {
       expect(installation).toContain(`"${kind}"`);
     }
+    expect(installation).toContain('"recovery_ready"');
     expect(installation).toContain('removeDeliveredNotifications(withIdentifiers: identifiers)');
     expect(installation).not.toContain('removeAllDeliveredNotifications');
     expect(installation).toContain('deadline: .now() + 1.0');
   });
 
-  it('enables app push, preserves Watch capability scope, and ships build 40', () => {
+  it('enables app push, preserves Watch capability scope, and ships build 42', () => {
     expect(entitlements).toContain('<key>aps-environment</key>');
     expect(project).toContain('com.apple.Push');
-    expect(project.match(/CURRENT_PROJECT_VERSION = 40;/gu)).toHaveLength(4);
+    expect(project.match(/CURRENT_PROJECT_VERSION = 42;/gu)).toHaveLength(4);
+    expect(project).not.toContain('CURRENT_PROJECT_VERSION = 40;');
     expect(project).not.toContain('CURRENT_PROJECT_VERSION = 39;');
     expect(project).not.toContain('CURRENT_PROJECT_VERSION = 38;');
     expect(project).not.toContain('CURRENT_PROJECT_VERSION = 37;');

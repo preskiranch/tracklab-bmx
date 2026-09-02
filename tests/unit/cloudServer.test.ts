@@ -5591,8 +5591,10 @@ describe('cloud API trust boundaries', () => {
       }),
     ]);
     expect(trainingPayload.session.details.events).toEqual([]);
-    expect(trainingPayload.session.details.summaries[0]).not.toHaveProperty('topWatts');
-    expect(trainingPayload.session.details.summaries[0]).not.toHaveProperty('averageWatts');
+    expect(trainingPayload.session.details.summaries[0]).toMatchObject({
+      topWatts: 800,
+      averageWatts: 600,
+    });
     expect(JSON.stringify(trainingPayload)).not.toContain('Sibling data');
     expect(JSON.stringify(trainingPayload)).not.toContain('Private sibling');
     expect(JSON.stringify(trainingPayload)).not.toContain('medical note');
@@ -5611,7 +5613,14 @@ describe('cloud API trust boundaries', () => {
       (session: { id: string }) => session.id.includes(trainingId),
     );
     expect(unclaimedOwnerTraining).toBeDefined();
-    expect(JSON.stringify(unclaimedOwnerTraining)).not.toMatch(/watts?|power/i);
+    expect(unclaimedOwnerTraining.details.summaries).toEqual([
+      expect.objectContaining({
+        riderId: 'shared-tablet-rider-one',
+        topWatts: 800,
+        averageWatts: 600,
+      }),
+    ]);
+    expect(JSON.stringify(unclaimedOwnerTraining)).not.toContain('Sibling');
 
     const raceRequestPayload = {
       sessionId: raceSessionId,

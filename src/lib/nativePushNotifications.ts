@@ -24,7 +24,8 @@ export type NativePushKind =
   | 'live_audio_invite'
   | 'friend_request'
   | 'friend_connection'
-  | 'track_share';
+  | 'track_share'
+  | 'recovery_ready';
 
 export type NativePushInstallation = Readonly<{
   version: 1;
@@ -39,7 +40,7 @@ export type NativePushRoute = Readonly<{
   v: 1;
   kind: NativePushKind;
   notificationId: string;
-  route: 'friends';
+  route: 'friends' | 'recovery';
 }>;
 
 export type NativePushPreferences = Readonly<{
@@ -85,6 +86,7 @@ const pushKinds = new Set<NativePushKind>([
   'friend_request',
   'friend_connection',
   'track_share',
+  'recovery_ready',
 ]);
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -137,14 +139,15 @@ export function normalizeNativePushRoute(value: unknown): NativePushRoute | null
   const item = record(value);
   const kind = item?.kind;
   const notificationId = text(item?.notificationId, 160);
+  const route = kind === 'recovery_ready' ? 'recovery' : 'friends';
   if (
     item?.v !== nativePushProtocolVersion
     || typeof kind !== 'string'
     || !pushKinds.has(kind as NativePushKind)
     || !/^[a-f0-9-]{32,64}$/iu.test(notificationId)
-    || item.route !== 'friends'
+    || item.route !== route
   ) return null;
-  return { v: 1, kind: kind as NativePushKind, notificationId, route: 'friends' };
+  return { v: 1, kind: kind as NativePushKind, notificationId, route };
 }
 
 export function normalizeNativePushPreferences(value: unknown): NativePushPreferences | null {

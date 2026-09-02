@@ -5,6 +5,7 @@ import {
   applyRecoveryHeartRateSamples,
   createHeartRateStream,
   createHeartRateWatchConnection,
+  createAuthUser,
   createRecoveryAlertEpisode,
   createOrRefreshHeartRateWatchEnrollment,
   deleteRecoveryAlertData,
@@ -13,6 +14,7 @@ import {
   loadRecoveryAlertPreference,
   loadRecoveryLearningSummaries,
   insertHeartRateSamples,
+  pushEventIsEligible,
   saveRecoveryAlertPreference,
   updateRecoveryAlertEpisode,
 } from '../../cloud/persistence.mjs';
@@ -38,6 +40,23 @@ function candidate(id: string, requestId: string, startedAt: number, repetitionI
     confidence: 'fixed',
     learningEpisodeCount: 0,
     effortSummary: { finishTimeMs: 20_000, peakPowerWatts: 1_400 },
+  };
+}
+
+function recoveryPushEvent(userId: string, episode: { id: string; plannedReadyAt: number | null; fallbackAt: number }) {
+  const dueAt = episode.plannedReadyAt ?? episode.fallbackAt;
+  return {
+    id: `recovery-push-${episode.id}-${dueAt}`,
+    notificationId: `recovery-notification-${episode.id}-${dueAt}`,
+    recipientUserId: userId,
+    actorUserId: null,
+    kind: 'recovery_ready',
+    objectId: episode.id,
+    idempotencyKey: `recovery-ready:${userId}:${episode.id}:${dueAt}`,
+    collapseId: `recovery-${episode.id}`.slice(0, 64),
+    originInstanceId: null,
+    notBefore: dueAt,
+    expiresAt: dueAt + 60_000,
   };
 }
 
@@ -147,6 +166,81 @@ describe('Recovery Alert memory persistence parity', () => {
     expect(await loadActiveRecoveryAlertEpisode(owner, newerStartedAt + 200)).toMatchObject({
       id: newer.id,
     });
+  });
+
+  it('keeps a claimed athlete\'s personal recovery notification in lockstep with extensions and stops', async () => {
+    const suffix = `push-boundary-${Date.now()}`;
+    const userId = `recovery-push-user-${suffix}`;
+    const ownerProfileKey = `user:${userId}`;
+    const now = 12_000_000;
+    await createAuthUser({
+      id: userId,
+      email: `${userId}@tracklab.test`,
+      displayName: 'Recovery Push Athlete',
+      username: `recovery-push-${suffix}`,
+      friendDiscoverable: false,
+      passwordHash: 'test-only',
+      membershipTier: 'spectator',
+      bikeSeats: 1,
+      admin: false,
+    });
+    const episode = {
+      ...candidate(
+        `recovery_push_${suffix}`,
+        `push_${'x'.repeat(32)}`,
+        now,
+        `push-repetition-${suffix}`,
+      ),
+      mode: 'timer',
+      timerSeconds: 120,
+      targetBpm: null,
+      minimumSeconds: 0,
+      maximumSeconds: 1_800,
+      plannedReadyAt: now + 120_000,
+      fallbackAt: now + 120_000,
+    };
+    let firstEventId = '';
+    const created = await createRecoveryAlertEpisode(
+      ownerProfileKey,
+      episode,
+      now,
+      now,
+      (saved) => {
+        const event = recoveryPushEvent(userId, saved);
+        firstEventId = event.id;
+        return event;
+      },
+    );
+    expect(created).toMatchObject({ episode: { id: episode.id }, replayed: false });
+    await expect(pushEventIsEligible(firstEventId, 'any-worker', now + 120_000)).resolves.toBe(true);
+
+    let extendedEventId = '';
+    const extended = await updateRecoveryAlertEpisode(
+      ownerProfileKey,
+      episode.id,
+      'add-time',
+      { seconds: 30 },
+      now + 1,
+      (saved) => {
+        const event = recoveryPushEvent(userId, saved);
+        extendedEventId = event.id;
+        return event;
+      },
+    );
+    expect(extended).toMatchObject({ plannedReadyAt: now + 150_000 });
+    await expect(pushEventIsEligible(firstEventId, 'any-worker', now + 120_000)).resolves.toBe(false);
+    await expect(pushEventIsEligible(extendedEventId, 'any-worker', now + 149_999)).resolves.toBe(false);
+    await expect(pushEventIsEligible(extendedEventId, 'any-worker', now + 150_000)).resolves.toBe(true);
+
+    await expect(updateRecoveryAlertEpisode(
+      ownerProfileKey,
+      episode.id,
+      'stop',
+      {},
+      now + 2,
+      () => null,
+    )).resolves.toMatchObject({ cancelledAt: now + 2 });
+    await expect(pushEventIsEligible(extendedEventId, 'any-worker', now + 150_000)).resolves.toBe(false);
   });
 
   it('evaluates every newly inserted point in a 13-sample batch in Watch order', async () => {

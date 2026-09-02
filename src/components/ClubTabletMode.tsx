@@ -51,6 +51,7 @@ import {
   type ClubEventLaunchPayload,
   type ClubEventSnapshot,
 } from '../lib/clubEvent';
+import { flushClubTabletRecoveryOutbox } from '../lib/clubTabletRecoveryAlert';
 import './ClubTabletMode.css';
 
 type ClubTabletBike = {
@@ -376,13 +377,16 @@ export default function ClubTabletMode({
     try {
       await onBeforeAuthorize?.();
       const credential = await recoverClubTabletDevice(device.id);
-      // The server has now consumed the owner session and the replacement
-      // credential is already durable. Commit kiosk identity immediately so
-      // roster verification uses that exact bearer; native notification
-      // cleanup is best-effort and must never hold this transition open.
+      // The replacement credential is already durable on the server. Commit
+      // it immediately so an update/reinstall cannot lose the kiosk handoff;
+      // notification cleanup is still performed in the background and must
+      // never hold this restored tablet in an authorization limbo.
       consumedRestoreDeviceIdsRef.current.add(device.id);
       setManagedDevices((current) => [...current]);
       onDeviceChange(credential);
+      // This physical iPad is now shared. Remove the former owner's APNs
+      // installation and delivered personal alerts so a personal Recovery
+      // Alert cannot later appear for students.
       void import('./NativeNotificationsCoordinator')
         .then(({ clearNativePushAccountBoundary }) => clearNativePushAccountBoundary())
         .catch(() => undefined);
@@ -397,6 +401,18 @@ export default function ClubTabletMode({
   useEffect(() => {
     if (deviceStatus === 'active') setMessage(null);
   }, [deviceStatus]);
+
+  useEffect(() => {
+    if (!deviceCredential) return;
+    // A retained opaque finish belongs to its original durable credential,
+    // never to the athlete currently displayed on this tablet.
+    const flush = () => {
+      void flushClubTabletRecoveryOutbox({ keepalive: true }).catch(() => undefined);
+    };
+    flush();
+    window.addEventListener('online', flush);
+    return () => window.removeEventListener('online', flush);
+  }, [deviceCredential?.device.id]);
 
   const refreshRoster = async (credential = deviceCredential) => {
     if (!credential) return;

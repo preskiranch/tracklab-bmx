@@ -3875,6 +3875,135 @@ input:focus {
   background: linear-gradient(180deg, #ffffff 0%, #f8fafb 100%);
 }
 
+.ghost-race-setup {
+  align-content: start;
+  background: linear-gradient(180deg, #ffffff 0%, #f4f8f6 100%);
+}
+
+.ghost-setup-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.ghost-setup-summary button,
+.ghost-setup-state button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: #293a31;
+  background: #fff;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.ghost-setup-summary button:disabled {
+  color: #9ba7a0;
+  background: #f2f4f3;
+}
+
+.ghost-setup-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 48px;
+  padding: 11px;
+  border: 1px dashed #b8c8be;
+  border-radius: 9px;
+  color: #53645a;
+  background: #fbfdfc;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.ghost-setup-state.error {
+  border-style: solid;
+  border-color: rgba(186, 57, 57, 0.35);
+  color: #8c2424;
+  background: #fff7f7;
+}
+
+.ghost-setup-options {
+  display: grid;
+  gap: 7px;
+}
+
+.ghost-setup-options > button {
+  display: grid;
+  grid-template-columns: auto 34px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  min-height: 54px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: #1b2b22;
+  background: #fff;
+  text-align: left;
+}
+
+.ghost-setup-options > button.selected {
+  border-color: #ff6a00;
+  box-shadow: inset 3px 0 0 #ff6a00;
+  background: #fff8f2;
+}
+
+.ghost-setup-options > button:disabled {
+  opacity: 0.62;
+}
+
+.ghost-setup-rank {
+  color: #66746c;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.ghost-setup-avatar {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 2px solid #ff6a00;
+  border-radius: 50%;
+  color: #fff;
+  background: #15221a;
+  font-size: 10px;
+  font-weight: 950;
+}
+
+.ghost-setup-copy,
+.ghost-setup-copy strong,
+.ghost-setup-copy small {
+  display: block;
+  min-width: 0;
+}
+
+.ghost-setup-copy strong,
+.ghost-setup-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ghost-setup-copy small {
+  margin-top: 2px;
+  color: #718077;
+  font-size: 9px;
+}
+
+.ghost-setup-options b {
+  color: #bd4f00;
+  font-size: 12px;
+}
+
 .loop-race-section {
   align-content: start;
   background: #f8faf8;
