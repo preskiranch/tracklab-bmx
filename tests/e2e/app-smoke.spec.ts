@@ -7275,11 +7275,13 @@ test('club athletes see only their own connection and never the studio roster', 
       }),
     });
   });
+  let trainingHistoryRequests = 0;
   await page.route('**/api/training-sessions*', async (route) => {
     if (new URL(route.request().url()).pathname.endsWith('/stream')) {
       await route.abort();
       return;
     }
+    trainingHistoryRequests += 1;
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -7339,6 +7341,25 @@ test('club athletes see only their own connection and never the studio roster', 
                 averageCadence: 169.5,
                 topWatts: 1_100,
                 averageWatts: 890.5,
+              }],
+            }, {
+              zoneId: 'mapped-recovery-zone',
+              zoneName: 'Rhythm reset',
+              zoneType: 'recovery',
+              startMeter: 22.2,
+              endMeter: 35.4,
+              riders: [{
+                playerId: 1,
+                sampleCount: 9,
+                entryElapsedMs: 500,
+                exitElapsedMs: 770,
+                durationMs: 270,
+                topSpeedKph: 42.2,
+                averageSpeedKph: 36.4,
+                topCadence: 174,
+                averageCadence: 158.5,
+                topWatts: 760,
+                averageWatts: 590.5,
               }],
             }],
           },
@@ -7467,6 +7488,24 @@ test('club athletes see only their own connection and never the studio roster', 
   expect(desktopMapBox).not.toBeNull();
   expect(desktopGridBox).not.toBeNull();
   expect(desktopGridBox!.x).toBeGreaterThan(desktopMapBox!.x + desktopMapBox!.width - 2);
+
+  // Zone choice updates only the existing highlights. It cannot remount the
+  // review or recreate the live map just to switch the selected zone.
+  await zoneReview.evaluate((element) => element.setAttribute('data-review-instance', 'stable'));
+  const secondZoneButton = zoneTable.getByRole('button', { name: 'Zone 2: Rhythm reset' });
+  await secondZoneButton.click();
+  await expect(zoneButton).toHaveAttribute('aria-pressed', 'false');
+  await expect(secondZoneButton).toHaveAttribute('aria-pressed', 'true');
+  await expect(zoneReview).toHaveAttribute('data-review-instance', 'stable');
+
+  // A profile refresh recreates the session objects even when the recorded
+  // route has not changed. The expanded review must retain its live DOM and
+  // map/table scroll position instead of dropping back to its loading state.
+  const historyRequestsBeforeFocus = trainingHistoryRequests;
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect.poll(() => trainingHistoryRequests).toBeGreaterThan(historyRequestsBeforeFocus);
+  await page.waitForTimeout(250);
+  await expect(zoneReview).toHaveAttribute('data-review-instance', 'stable');
 
   // Long studio-tablet result histories must scroll inside the results sheet,
   // so the metric labels remain visible while the owner reads later rows.

@@ -71,6 +71,22 @@ function coverageLabel(sampleCount: number, coveragePercent: number) {
   return `${sampleCount.toLocaleString()} ${sampleCount === 1 ? 'sample' : 'samples'} · ${percentage}%`;
 }
 
+/**
+ * A history refresh gives the profile new session object identities even when
+ * the saved route and zones have not changed.  Keep the review loader keyed to
+ * only the data that determines its geometry, rather than that object identity
+ * (or unrelated session updates such as a heart-rate attachment).
+ */
+function recordedZoneLayoutKey(zones: ReturnType<typeof trainingSessionZoneResults>) {
+  return JSON.stringify(zones.map((zone) => [
+    zone.zoneId,
+    zone.zoneName ?? '',
+    zone.zoneType ?? '',
+    zone.startMeter,
+    zone.endMeter,
+  ]));
+}
+
 export function privateZoneHeartRateLabels(
   projections: readonly PrivateTrainingHeartRateProjection[],
   playerId: number,
@@ -162,6 +178,55 @@ function mapLabel(review: TrainingTrackReviewResult, selected: TrainingTrackRevi
     : `${trackName} current route with ${review.zones.filter((zone) => zone.placeable).length} placed recorded zones`;
 }
 
+type TrainingReviewZoneMapOverlay = Readonly<{
+  id: string;
+  number: number;
+  type: keyof typeof colors;
+  line: GooglePolyline;
+  marker: GoogleMarker;
+}>;
+
+type GooglePolylineWithOptions = GooglePolyline & {
+  setOptions?: (options: Record<string, unknown>) => void;
+};
+
+type GoogleMarkerWithZIndex = GoogleMarker & {
+  setZIndex?: (zIndex: number) => void;
+};
+
+function reviewZoneMarkerIcon(
+  google: GoogleMapsRuntime,
+  type: keyof typeof colors,
+  selected: boolean,
+) {
+  return {
+    path: google.maps.SymbolPath.CIRCLE,
+    fillColor: selected ? '#d8ff3e' : '#fff',
+    fillOpacity: 1,
+    scale: selected ? 16 : 13,
+    strokeColor: '#111827',
+    strokeWeight: 3,
+  };
+}
+
+function updateTrainingReviewZoneMapSelection(
+  google: GoogleMapsRuntime,
+  overlays: readonly TrainingReviewZoneMapOverlay[],
+  selectedZoneId: string | null,
+) {
+  overlays.forEach((overlay) => {
+    const selected = overlay.id === selectedZoneId;
+    (overlay.line as GooglePolylineWithOptions).setOptions?.({
+      strokeColor: selected ? '#d8ff3e' : colors[overlay.type],
+      strokeOpacity: selected ? 1 : .78,
+      strokeWeight: selected ? 12 : 7,
+      zIndex: selected ? 500 : 300,
+    });
+    overlay.marker.setIcon(reviewZoneMarkerIcon(google, overlay.type, selected));
+    (overlay.marker as GoogleMarkerWithZIndex).setZIndex?.(selected ? 2_000 : 600 + overlay.number);
+  });
+}
+
 function Schematic({
   review,
   selectedId,
@@ -215,9 +280,39 @@ export function TrainingTrackZoneReview({
   const details = session.details as { routeVariantId?: unknown; lapCount?: unknown };
   const routeVariantId = typeof details.routeVariantId === 'string' ? details.routeVariantId : null;
   const lapCount = Number(details.lapCount) || 1;
-  const reviewKey = `${session.id}:${session.updatedAt}:${session.trackId ?? ''}:${routeVariantId ?? ''}:${lapCount}`;
-  const [reviewState, setReviewState] = useState<{ key: string; value: TrainingTrackReviewResult } | null>(null);
-  const review = reviewState?.key === reviewKey ? reviewState.value : null;
+  const reviewKey = useMemo(() => JSON.stringify([
+    session.id,
+    session.trackId ?? '',
+    routeVariantId ?? '',
+    lapCount,
+    recordedZoneLayoutKey(recordedZones),
+  ]), [lapCount, recordedZones, routeVariantId, session.id, session.trackId]);
+  const reviewRequestRef = useRef<Readonly<{
+    key: string;
+    value: Readonly<{
+      trackId: string | undefined;
+      routeVariantId: string | null;
+      lapCount: number;
+      zones: ReturnType<typeof trainingSessionZoneResults>;
+    }>;
+  }> | null>(null);
+  if (reviewRequestRef.current?.key !== reviewKey) {
+    reviewRequestRef.current = {
+      key: reviewKey,
+      value: {
+        trackId: session.trackId,
+        routeVariantId,
+        lapCount,
+        zones: recordedZones,
+      },
+    };
+  }
+  const reviewRequest = reviewRequestRef.current.value;
+  const [reviewState, setReviewState] = useState<{ sessionId: string; value: TrainingTrackReviewResult } | null>(null);
+  // Keep the current view in place while changed data for the same session is
+  // resolved. A different selected session still correctly starts with a
+  // loading state instead of briefly showing another session's results.
+  const review = reviewState?.sessionId === session.id ? reviewState.value : null;
   const [loadError, setLoadError] = useState('');
   const [internalSelectedId, setInternalSelectedId] = useState<string | null>(null);
   const [satelliteState, setSatelliteState] = useState<'schematic' | 'loading' | 'ready'>('schematic');
@@ -227,27 +322,17 @@ export function TrainingTrackZoneReview({
   const mapBoundsPointsRef = useRef<TrackPoint[]>([]);
   const fitKeyRef = useRef('');
   const overlaysRef = useRef<Array<GoogleMarker | GooglePolyline>>([]);
+  const zoneOverlaysRef = useRef<TrainingReviewZoneMapOverlay[]>([]);
   const uncontrolledSelection = selectedZoneId === undefined;
   const effectiveSelectedId = selectedZoneId === undefined ? internalSelectedId : selectedZoneId;
+  const effectiveSelectedIdRef = useRef<string | null>(effectiveSelectedId ?? null);
 
   useEffect(() => {
     let disposed = false;
-    overlaysRef.current.splice(0).forEach((overlay) => overlay.setMap(null));
-    mapRef.current = null;
-    mapsRuntimeRef.current = null;
-    mapBoundsPointsRef.current = [];
-    fitKeyRef.current = '';
-    setSatelliteState('schematic');
-    setReviewState(null);
     setLoadError('');
-    void loadTrainingTrackReview({
-      trackId: session.trackId,
-      routeVariantId,
-      lapCount,
-      zones: recordedZones,
-    }).then((next) => {
+    void loadTrainingTrackReview(reviewRequest).then((next) => {
       if (disposed) return;
-      setReviewState({ key: reviewKey, value: next });
+      setReviewState({ sessionId: session.id, value: next });
       if (uncontrolledSelection) {
         setInternalSelectedId((current) => next.zones.some((zone) => zone.id === current) ? current : next.zones[0]?.id ?? null);
       }
@@ -255,12 +340,17 @@ export function TrainingTrackZoneReview({
       if (!disposed) setLoadError('Track review is temporarily unavailable. Your saved result data is unchanged.');
     });
     return () => { disposed = true; };
-  }, [lapCount, recordedZones, reviewKey, routeVariantId, session.trackId, uncontrolledSelection]);
+  }, [reviewKey, reviewRequest, session.id, uncontrolledSelection]);
 
   useEffect(() => {
     const overlays = overlaysRef.current;
     overlays.splice(0).forEach((overlay) => overlay.setMap(null));
+    zoneOverlaysRef.current = [];
     if (!review?.track || review.status !== 'ready' || !mapHostRef.current || !hasGoogleMapsApiKey()) {
+      mapRef.current = null;
+      mapsRuntimeRef.current = null;
+      mapBoundsPointsRef.current = [];
+      fitKeyRef.current = '';
       setSatelliteState('schematic');
       return undefined;
     }
@@ -284,24 +374,29 @@ export function TrainingTrackZoneReview({
       routePaths.filter((path) => path.length > 1).forEach((path) => {
         overlays.push(new google.maps.Polyline({ map, path, clickable: false, strokeColor: '#f8fafc', strokeOpacity: .72, strokeWeight: 6, zIndex: 100 }));
       });
+      const zoneOverlays: TrainingReviewZoneMapOverlay[] = [];
       review.zones.forEach((zone) => {
-        const selected = zone.id === effectiveSelectedId;
         const path = trainingTrackReviewZonePolyline(review.track!, zone);
         if (path.length < 2) return;
-        overlays.push(new google.maps.Polyline({
-          map, path, clickable: false, strokeColor: selected ? '#d8ff3e' : colors[zone.type],
-          strokeOpacity: selected ? 1 : .78, strokeWeight: selected ? 12 : 7, zIndex: selected ? 500 : 300,
-        }));
+        const line = new google.maps.Polyline({
+          map, path, clickable: false, strokeColor: colors[zone.type],
+          strokeOpacity: .78, strokeWeight: 7, zIndex: 300,
+        });
         const position = path[Math.floor(path.length / 2)];
-        overlays.push(new google.maps.Marker({
-          map, position, title: `Zone ${zone.number}: ${zone.name}`, zIndex: selected ? 2_000 : 600 + zone.number,
-          icon: { path: google.maps.SymbolPath.CIRCLE, fillColor: selected ? '#d8ff3e' : '#fff', fillOpacity: 1, scale: selected ? 16 : 13, strokeColor: '#111827', strokeWeight: 3 },
+        const marker = new google.maps.Marker({
+          map, position, title: `Zone ${zone.number}: ${zone.name}`, zIndex: 600 + zone.number,
+          icon: reviewZoneMarkerIcon(google, zone.type, false),
           label: { text: String(zone.number), color: '#111827', fontSize: '12px', fontWeight: '900' },
-        }));
+        });
+        overlays.push(line, marker);
+        zoneOverlays.push({ id: zone.id, number: zone.number, type: zone.type, line, marker });
       });
-      if (fitKeyRef.current !== `${session.id}:${review.track.id}`) {
+      zoneOverlaysRef.current = zoneOverlays;
+      updateTrainingReviewZoneMapSelection(google, zoneOverlays, effectiveSelectedIdRef.current);
+      const fitKey = `${reviewKey}:${review.track.id}`;
+      if (fitKeyRef.current !== fitKey) {
         refitTrainingTrackReviewMap(google, map, mapBoundsPointsRef.current);
-        fitKeyRef.current = `${session.id}:${review.track.id}`;
+        fitKeyRef.current = fitKey;
       } else {
         google.maps.event?.trigger(map, 'resize');
       }
@@ -311,8 +406,17 @@ export function TrainingTrackZoneReview({
       disposed = true;
       window.removeEventListener('tracklab-google-maps-auth-failure', onAuthFailure);
       overlays.splice(0).forEach((overlay) => overlay.setMap(null));
+      zoneOverlaysRef.current = [];
     };
-  }, [effectiveSelectedId, review, session.id]);
+  }, [review, session.id]);
+
+  useEffect(() => {
+    effectiveSelectedIdRef.current = effectiveSelectedId ?? null;
+    const google = mapsRuntimeRef.current;
+    if (google && zoneOverlaysRef.current.length > 0) {
+      updateTrainingReviewZoneMapSelection(google, zoneOverlaysRef.current, effectiveSelectedIdRef.current);
+    }
+  }, [effectiveSelectedId]);
 
   useEffect(() => {
     if (satelliteState !== 'ready' || !mapHostRef.current) return undefined;
@@ -341,10 +445,11 @@ export function TrainingTrackZoneReview({
       if (frame != null) window.cancelAnimationFrame(frame);
       timers.forEach((timer) => window.clearTimeout(timer));
     };
-  }, [reviewKey, satelliteState]);
+  }, [review, satelliteState]);
 
   useEffect(() => () => {
     overlaysRef.current.splice(0).forEach((overlay) => overlay.setMap(null));
+    zoneOverlaysRef.current = [];
     mapRef.current = null;
     mapsRuntimeRef.current = null;
     mapBoundsPointsRef.current = [];
@@ -375,7 +480,7 @@ export function TrainingTrackZoneReview({
         <figure style={{ margin: 0, minWidth: 0 }} aria-label={mapLabel(review, selected)}>
           <div className="training-zone-review__map" style={mapFrame}>
             <div aria-hidden={satelliteVisible}><Schematic review={review} selectedId={effectiveSelectedId ?? null} /></div>
-            <div key={reviewKey} ref={mapHostRef} style={{ ...fill, opacity: satelliteVisible ? 1 : 0, zIndex: satelliteVisible ? 2 : 0, pointerEvents: satelliteVisible ? 'auto' : 'none' }} aria-hidden={!satelliteVisible} />
+            <div ref={mapHostRef} style={{ ...fill, opacity: satelliteVisible ? 1 : 0, zIndex: satelliteVisible ? 2 : 0, pointerEvents: satelliteVisible ? 'auto' : 'none' }} aria-hidden={!satelliteVisible} />
             <p style={badge}>{satelliteVisible
               ? 'Satellite map · current route'
               : satelliteState === 'loading'
