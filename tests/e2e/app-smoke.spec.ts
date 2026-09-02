@@ -7505,6 +7505,152 @@ test('club athletes see only their own connection and never the studio roster', 
   await expect(page.getByText('Owner-only view', { exact: true })).toHaveCount(0);
 });
 
+test('training results follow the latest capture after a history refresh', async ({ page }) => {
+  const selectedDay = new Date();
+  selectedDay.setHours(12, 0, 0, 0);
+  const noon = selectedDay.getTime();
+  const authUser = {
+    id: 'results-follow-rider',
+    profileKey: 'user:results-follow-rider',
+    email: 'results-follow@tracklab.test',
+    name: 'Results Follow Rider',
+    admin: false,
+    membership: {
+      tier: 'racer',
+      bikeSeats: 1,
+      updatedAt: noon,
+    },
+  };
+  const buildSession = (ordinal: number, title = `Earlier capture ${ordinal}`) => {
+    const startedAt = noon + ordinal * 60_000;
+    return {
+      id: `follow-result-${ordinal}`,
+      activityType: 'get-pulled',
+      title,
+      startedAt,
+      endedAt: startedAt + 6_000,
+      durationMs: 6_000,
+      distanceMeters: 45 + ordinal,
+      trackId: 'black-mountain-bmx',
+      trackName: 'Black Mountain BMX',
+      source: 'live',
+      createdAt: startedAt,
+      updatedAt: startedAt + 6_000,
+      details: {
+        durationSeconds: 6,
+        airSetting: 3,
+        riders: [{
+          playerId: 1,
+          riderId: 'results-follow-rider',
+          riderName: 'Results Follow Rider',
+          resultStatus: 'finished',
+          distanceMeters: 45 + ordinal,
+          averageSpeedKph: 36 + ordinal,
+          peakSpeedKph: 42 + ordinal,
+          averageCadence: 100 + ordinal,
+          peakCadence: 115 + ordinal,
+          averageWatts: 400 + ordinal,
+          peakWatts: 600 + ordinal,
+        }],
+      },
+    };
+  };
+  const initialSessions = Array.from({ length: 8 }, (_, index) => buildSession(index + 1));
+  let latestSession = buildSession(9, 'Latest capture');
+  let includeLatestCapture = false;
+
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
+  });
+  await page.route('**/api/user-data*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackMappings: {},
+        customRoutes: [],
+        bikeProfiles: [],
+        studioRiders: [],
+        accountProfile: { updatedAt: noon },
+      }),
+    });
+  });
+  await page.route('**/api/club-connect*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ canManageClub: false, ownedClub: null, memberships: [] }),
+    });
+  });
+  await page.route('**/api/public-track-mappings*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ trackMappings: {}, customRoutes: [] }) });
+  });
+  await page.route('**/api/heart-rate/streams?*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ streams: [], segments: [], attachment: { status: 'not-recorded' } }),
+    });
+  });
+  await page.route('**/api/training-sessions*', async (route) => {
+    if (new URL(route.request().url()).pathname.endsWith('/stream')) {
+      await route.abort();
+      return;
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        sessions: includeLatestCapture ? [...initialSessions, latestSession] : initialSessions,
+        totals: {},
+      }),
+    });
+  });
+  await page.route('https://maps.googleapis.com/**', (route) => route.abort());
+
+  await page.goto('/?track=black-mountain-bmx');
+  await openSignedInAppIfNeeded(page);
+  await page.getByRole('button', { name: 'My Profile', exact: true }).click();
+
+  const spreadsheet = page.getByRole('region', { name: 'Training results spreadsheet' });
+  await expect(spreadsheet).toBeVisible();
+  const resultsGrid = spreadsheet.getByRole('region', { name: /All results spreadsheet/ });
+  await page.addStyleTag({ content: '.training-results-grid { max-height: 140px !important; }' });
+  await expect.poll(() => resultsGrid.evaluate((grid) => grid.scrollHeight > grid.clientHeight)).toBe(true);
+  await resultsGrid.evaluate((grid) => { grid.scrollTop = 0; });
+  await expect.poll(() => resultsGrid.evaluate((grid) => grid.scrollTop)).toBe(0);
+
+  includeLatestCapture = true;
+  await page.getByRole('button', { name: 'Refresh training history' }).click();
+  const latestRow = resultsGrid.getByRole('row').filter({ hasText: 'Latest capture' });
+  await expect(latestRow).toHaveCount(1);
+  await expect.poll(() => resultsGrid.evaluate((grid) => {
+    const remaining = grid.scrollHeight - grid.clientHeight;
+    return grid.scrollTop >= remaining - 2;
+  })).toBe(true);
+  await expect(latestRow).toBeVisible();
+  const scrollPosition = await resultsGrid.evaluate((grid) => ({
+    scrollTop: grid.scrollTop,
+    remaining: grid.scrollHeight - grid.clientHeight,
+  }));
+  expect(scrollPosition.scrollTop).toBeGreaterThanOrEqual(scrollPosition.remaining - 2);
+
+  // A late metric correction must follow the same active row, not just a
+  // newly inserted session. This is the shape used by a cloud result update.
+  await resultsGrid.evaluate((grid) => { grid.scrollTop = 0; });
+  await expect.poll(() => resultsGrid.evaluate((grid) => grid.scrollTop)).toBe(0);
+  latestSession = {
+    ...latestSession,
+    updatedAt: latestSession.updatedAt + 1_000,
+    details: {
+      ...latestSession.details,
+      riders: latestSession.details.riders.map((rider) => ({ ...rider, peakWatts: 1_100 })),
+    },
+  };
+  await page.getByRole('button', { name: 'Refresh training history' }).click();
+  await expect(latestRow).toContainText('1,100 W');
+  await expect.poll(() => resultsGrid.evaluate((grid) => {
+    const remaining = grid.scrollHeight - grid.clientHeight;
+    return grid.scrollTop >= remaining - 2;
+  })).toBe(true);
+});
+
 test('club owners can open the read-only Club Live Monitor while athletes cannot control sessions', async ({ page }) => {
   const now = Date.now();
   let currentClubEvent: Record<string, unknown> | null = null;

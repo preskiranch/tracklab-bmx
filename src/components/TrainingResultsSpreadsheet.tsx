@@ -1,4 +1,14 @@
-import { useEffect, useId, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import { Download, TableProperties, X } from 'lucide-react';
 import type { DistanceUnit, SpeedUnit, TrainingSession } from '../types';
 import {
@@ -320,15 +330,17 @@ function ResultTable({
   caption,
   regionLabel,
   selectedSessionId,
+  gridRef,
 }: {
   rows: readonly TrainingResultRow[];
   columns: readonly GridColumn[];
   caption: string;
   regionLabel: string;
   selectedSessionId: string | null;
+  gridRef: RefObject<HTMLDivElement | null>;
 }) {
   return (
-    <div className="training-results-grid" role="region" aria-label={regionLabel} tabIndex={0}>
+    <div className="training-results-grid" ref={gridRef} role="region" aria-label={regionLabel} tabIndex={0}>
       <table>
         <caption>{caption}</caption>
         <thead><tr>{columns.map((column) => <th scope="col" className={column.numeric ? 'number' : undefined} key={column.id}>{column.label}</th>)}</tr></thead>
@@ -477,6 +489,11 @@ export function TrainingResultsSpreadsheet({
   const activeRows = activeSheet.id === 'power-by-rep'
     ? []
     : rowsForTrainingResultSheet(rows, activeSheet.id);
+  const resultsGridRef = useRef<HTMLDivElement>(null);
+  const lastVisibleResultRowsRef = useRef<Readonly<{ sheetId: TrainingResultSheetId; version: string }> | null>(null);
+  const visibleResultRowsVersion = useMemo(() => activeRows.map((row) => (
+    `${row.id}:${sessionById.get(row.sessionId)?.updatedAt ?? 0}:${JSON.stringify(row)}`
+  )).join('\u001e'), [activeRows, sessionById]);
   const columns = activeSheet.id === 'race-sprint'
     ? raceColumns(speedUnit, distanceUnit, resolveHeartRate, canReview, review)
     : activeSheet.id === 'get-pulled'
@@ -486,6 +503,20 @@ export function TrainingResultsSpreadsheet({
         : activeSheet.id === 'explore'
           ? exploreColumns(speedUnit, distanceUnit, resolveHeartRate, canReview, review)
           : commonColumns(speedUnit, distanceUnit, resolveHeartRate, canReview, review);
+
+  useLayoutEffect(() => {
+    if (activeSheet.id === 'power-by-rep') {
+      lastVisibleResultRowsRef.current = null;
+      return;
+    }
+
+    const previous = lastVisibleResultRowsRef.current;
+    if (previous && previous.sheetId === activeSheet.id && previous.version !== visibleResultRowsVersion) {
+      const grid = resultsGridRef.current;
+      if (grid) grid.scrollTop = grid.scrollHeight;
+    }
+    lastVisibleResultRowsRef.current = { sheetId: activeSheet.id, version: visibleResultRowsVersion };
+  }, [activeSheet.id, visibleResultRowsVersion]);
 
   return (
     <section
@@ -531,6 +562,7 @@ export function TrainingResultsSpreadsheet({
               caption={`${activeSheet.label} for ${dateLabel}`}
               regionLabel={`${activeSheet.label} spreadsheet for ${dateLabel}`}
               selectedSessionId={effectiveSelectedId}
+              gridRef={resultsGridRef}
             />}
         </div>
         {selectedSession && renderSessionDetail && <div className="training-result-detail" id={`${regionId}-detail`}>

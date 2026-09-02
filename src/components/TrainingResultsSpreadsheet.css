@@ -1,4 +1,4 @@
-.training-results-sheet{min-width:0;border:1px solid var(--line);border-radius:16px;background:#fff;overflow:hidden}
+.training-results-sheet{inline-size:100%;max-inline-size:none;min-width:0;box-sizing:border-box;border:1px solid var(--line);border-radius:16px;background:#fff;overflow:hidden}
 .training-results-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px}
 .training-results-heading p{color:var(--muted)}
 .training-results-heading button,.training-result-detail>div button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:7px 11px;border:1px solid var(--line-strong);border-radius:8px;background:#fff;font-weight:800}
