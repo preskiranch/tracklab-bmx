@@ -267,6 +267,8 @@ test('favorites, friend sharing, and canonical track links stay exact and respon
   await expect(page.getByRole('button', { name: 'BMX Race Intervals', exact: true })).toBeVisible();
   await expect(page).not.toHaveURL(/locator=/);
   await page.reload();
+  await expect(page.getByRole('heading', { name: 'Your BMX home base.' })).toBeVisible();
+  await page.getByRole('button', { name: 'Open App', exact: true }).click();
   await expect(page.getByRole('button', { name: 'BMX Race Intervals', exact: true })).toBeVisible();
   await expect(locator).toHaveCount(0);
 

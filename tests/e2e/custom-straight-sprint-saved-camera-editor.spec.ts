@@ -580,8 +580,8 @@ test('resizes and publishes independent player cards that fit iPad and iPhone or
   await page.setViewportSize({ width: 1366, height: 1024 });
   await leaveSavedCameraEditor(page);
   await page.reload();
-  const openApp = page.getByRole('button', { name: 'Open App' });
-  if (await openApp.isVisible()) await openApp.click();
+  await expect(page.getByRole('heading', { name: 'Your BMX home base.' })).toBeVisible();
+  await page.getByRole('button', { name: 'Open App', exact: true }).click();
   await page.getByRole('button', { name: 'Straight Sprint', exact: true }).click();
   await expect(page.getByLabel('Sprint distance')).toHaveValue('100');
 
