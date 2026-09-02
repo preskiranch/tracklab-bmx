@@ -125,7 +125,9 @@ test('track contacts and map actions stay clear, callable, and responsive', asyn
     };
   });
   expect(desktopGeometry.mapHeight).toBeGreaterThanOrEqual(460);
-  expect(desktopGeometry.layoutHeight).toBeLessThanOrEqual(820);
+  // The 1,240–1,519px membership rail gives Save & Share its own row so the
+  // labels remain intact; keep the complete two-row contact fixture compact.
+  expect(desktopGeometry.layoutHeight).toBeLessThanOrEqual(825);
   expect(desktopGeometry.layoutFits).toBe(true);
   expect(desktopGeometry.previewFits).toBe(true);
   expect(desktopGeometry.officialLinkRows).toBe(2);

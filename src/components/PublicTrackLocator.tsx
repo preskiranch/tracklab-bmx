@@ -610,7 +610,7 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
                         <button type="button" aria-label="Copy link" onClick={() => void copySelectedTrackLink()}><Copy size={16} /> Copy</button>
                       </div>
                     </div>
-                    <div className="public-track-link-group" role="group" aria-label={`Directions to ${selectedTrack.name}`}>
+                    <div className="public-track-link-group public-track-directions-group" role="group" aria-label={`Directions to ${selectedTrack.name}`}>
                       <span>Directions</span>
                       <div className="public-track-actions">
                         <a aria-label="Google Maps" href={trackGoogleMapsDirectionsUrl(selectedTrack)} target="_blank" rel="noopener noreferrer">

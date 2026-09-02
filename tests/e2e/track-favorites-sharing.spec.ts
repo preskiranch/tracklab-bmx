@@ -180,10 +180,18 @@ test('favorites, friend sharing, and canonical track links stay exact and respon
 
   await locator.getByLabel('Search tracks').fill(favoriteTrack.name);
   await expect(locator.getByText('1 found', { exact: true })).toBeVisible();
+  await locator.getByRole('button', { name: 'Saved', exact: true }).click();
+  await expect(locator.getByRole('button', { name: 'Favorite', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  expect(favoriteMutations).toEqual([`save:${favoriteTrack.id}`, `remove:${favoriteTrack.id}`]);
   for (const viewport of [
-    { width: 1280, height: 960, minimumMapHeight: 460, desktop: true },
-    { width: 1024, height: 768, minimumMapHeight: 360, desktop: false },
-    { width: 390, height: 844, minimumMapHeight: 360, desktop: false },
+    { width: 1240, height: 960, minimumMapHeight: 460, actionRows: 2, maximumLayoutHeight: 790 },
+    { width: 1280, height: 960, minimumMapHeight: 460, actionRows: 2, maximumLayoutHeight: 790 },
+    { width: 1366, height: 960, minimumMapHeight: 460, actionRows: 2, maximumLayoutHeight: 790 },
+    { width: 1439, height: 960, minimumMapHeight: 460, actionRows: 2, maximumLayoutHeight: 790 },
+    { width: 1519, height: 960, minimumMapHeight: 460, actionRows: 2, maximumLayoutHeight: 790 },
+    { width: 1520, height: 960, minimumMapHeight: 460, actionRows: 1, maximumLayoutHeight: 730 },
+    { width: 1024, height: 768, minimumMapHeight: 360, actionRows: null, maximumLayoutHeight: null },
+    { width: 390, height: 844, minimumMapHeight: 360, actionRows: null, maximumLayoutHeight: null },
   ]) {
     await page.setViewportSize(viewport);
     const geometry = await locator.evaluate((element) => {
@@ -207,9 +215,19 @@ test('favorites, friend sharing, and canonical track links stay exact and respon
         '.public-track-official-links a, .public-track-actions a, .public-track-actions button',
       )].map((control) => {
         const box = control.getBoundingClientRect();
+        const textNode = [...control.childNodes].find((node) => (
+          node.nodeType === Node.TEXT_NODE && node.textContent?.trim()
+        ));
+        const textRange = document.createRange();
+        if (textNode) textRange.selectNodeContents(textNode);
+        const textLineTops = textNode
+          ? [...textRange.getClientRects()].map((rect) => Math.round(rect.top))
+          : [];
         return {
+          contentFits: control.scrollWidth <= control.clientWidth + 1,
           height: box.height,
           insidePreview: box.left >= previewBounds.left - 1 && box.right <= previewBounds.right + 1,
+          textLineCount: new Set(textLineTops).size,
         };
       });
       return {
@@ -231,9 +249,13 @@ test('favorites, friend sharing, and canonical track links stay exact and respon
     expect(geometry.previewFits).toBe(true);
     expect(geometry.details.bottom).toBeLessThanOrEqual(geometry.preview.bottom + 1);
     expect(geometry.controls.every((control) => control.height >= 44 && control.insidePreview)).toBe(true);
-    if (viewport.desktop) {
-      expect(geometry.layoutHeight).toBeLessThanOrEqual(730);
-      expect(new Set(geometry.actionGroupTops).size).toBe(1);
+    expect(geometry.controls.every((control) => control.contentFits)).toBe(true);
+    expect(geometry.controls.every((control) => control.textLineCount === 1)).toBe(true);
+    if (viewport.maximumLayoutHeight != null) {
+      expect(geometry.layoutHeight).toBeLessThanOrEqual(viewport.maximumLayoutHeight);
+    }
+    if (viewport.actionRows != null) {
+      expect(new Set(geometry.actionGroupTops).size).toBe(viewport.actionRows);
     }
   }
 

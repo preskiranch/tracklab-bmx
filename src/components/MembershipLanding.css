@@ -133,6 +133,18 @@
   }
 }
 
+/* The same rail also squeezes the three save/share controls until their labels
+ * break apart. Give that group a full row until all three groups fit cleanly. */
+@media (min-width: 1240px) and (max-width: 1519px) {
+  .membership-hub-page .public-track-link-groups {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .membership-hub-page .public-track-save-group {
+    grid-column: 1 / -1;
+  }
+}
+
 .membership-hub-page > .public-bike-shop-directory {
   border: 1px solid var(--line);
   border-radius: 14px;
