@@ -7436,16 +7436,28 @@ test('club athletes see only their own connection and never the studio roster', 
 
   const spreadsheet = page.getByRole('region', { name: 'Training results spreadsheet' });
   await expect(spreadsheet).toBeVisible();
-  const [profileContentWidth, spreadsheetBox] = await Promise.all([
+  const [platformContentWidth, profileContentWidth, profileBox, trainingLayoutBox, spreadsheetBox] = await Promise.all([
+    page.locator('.platform-main').evaluate((element) => {
+      const style = getComputedStyle(element);
+      return element.clientWidth
+        - Number.parseFloat(style.paddingLeft)
+        - Number.parseFloat(style.paddingRight);
+    }),
     page.locator('.account-profile-view').evaluate((element) => {
       const style = getComputedStyle(element);
       return element.clientWidth
         - Number.parseFloat(style.paddingLeft)
         - Number.parseFloat(style.paddingRight);
     }),
+    page.locator('.account-profile-view').boundingBox(),
+    page.locator('.account-training-layout').boundingBox(),
     spreadsheet.boundingBox(),
   ]);
+  expect(profileBox).not.toBeNull();
+  expect(trainingLayoutBox).not.toBeNull();
   expect(spreadsheetBox).not.toBeNull();
+  expect(Math.abs(profileBox!.width - platformContentWidth)).toBeLessThanOrEqual(2);
+  expect(Math.abs(trainingLayoutBox!.width - profileContentWidth)).toBeLessThanOrEqual(2);
   expect(Math.abs(spreadsheetBox!.width - profileContentWidth)).toBeLessThanOrEqual(2);
   await expect(spreadsheet.getByRole('tab', { name: /Power by rep/ })).toBeVisible();
   await spreadsheet.getByRole('tab', { name: /Race & sprint/ }).click();

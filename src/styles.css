@@ -2265,7 +2265,10 @@ input:focus {
 }
 
 .platform-main {
+  inline-size: 100%;
+  max-inline-size: 100%;
   min-width: 0;
+  box-sizing: border-box;
   padding: 16px;
 }
 
