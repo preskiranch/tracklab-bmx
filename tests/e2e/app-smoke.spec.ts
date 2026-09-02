@@ -6925,6 +6925,8 @@ test('connected bike names remain bound to their monitor IDs after reload', asyn
       .toBe('Rhythm Trainer');
 
     await page.reload();
+    await expect(page.getByRole('heading', { name: 'Your BMX home base.' })).toBeVisible();
+    await page.getByRole('button', { name: 'Open App', exact: true }).click();
     await expect(page.getByText(/2 connected bikes/i)).toBeVisible({ timeout: 15_000 });
     await expect(page.getByLabel('Name for player 1')).toHaveValue('Gate Trainer');
     await expect(page.getByLabel('Name for player 2')).toHaveValue('Rhythm Trainer');
@@ -7147,6 +7149,8 @@ test('demo rider names and the last track view restore from the signed-in accoun
       .forEach((key) => window.localStorage.removeItem(key));
   });
   await page.reload();
+  await expect(page.getByRole('heading', { name: 'Your BMX home base.' })).toBeVisible();
+  await page.getByRole('button', { name: 'Open App', exact: true }).click();
   await expect(page.getByRole('button', { name: /Demo/i }).first()).toBeVisible();
   await page.getByRole('button', { name: /Demo/i }).first().click();
   await expect(page.getByLabel('Name for player 1')).toHaveValue('Gate Master');
@@ -9066,6 +9070,8 @@ test('studio rider roster syncs to the account and can be assigned to a connecte
     expect(raceEntryAvatarBounds?.height).toBe(34);
 
     await page.reload();
+    await expect(page.getByRole('heading', { name: 'Your BMX home base.' })).toBeVisible();
+    await page.getByRole('button', { name: 'Open App', exact: true }).click();
     await expect(page.getByText(/1 connected bike/i)).toBeVisible({ timeout: 15_000 });
     await expect(page.getByRole('option', { name: 'Jordan H' })).toBeAttached();
     const studioManager = page.locator('.studio-rider-manager');
