@@ -17918,7 +17918,7 @@ async function serveStatic(request, response) {
         errorName: error instanceof Error ? error.name : 'UnknownError',
       });
       writeJson(response, 503, {
-        error: 'Bike shops for this city are temporarily unavailable.',
+        error: 'Bike shops for this directory area are temporarily unavailable.',
       }, { 'Cache-Control': 'no-store' });
     }
     return;

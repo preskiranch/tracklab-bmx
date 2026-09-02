@@ -269,13 +269,15 @@ async function mockPublicDirectoryShell(page: Page) {
     const country = url.searchParams.get('countryCode') || '';
     const region = url.searchParams.get('region') || '';
     const response = !country
-      ? { level: 'country', items: [{ value: 'CA', count: 1 }, { value: 'US', count: 3 }] }
+      ? { level: 'country', items: [{ value: 'AU', count: 3 }, { value: 'CA', count: 1 }, { value: 'US', count: 3 }] }
       : !region
         ? {
             level: 'region',
             items: country === 'US'
               ? [{ value: 'CA', count: 2 }, { value: 'OR', count: 1 }]
-              : [{ value: 'BC', count: 1 }],
+              : country === 'AU'
+                ? [{ value: 'NSW', count: 2 }, { value: 'VIC', count: 1 }]
+                : [{ value: 'BC', count: 1 }],
           }
         : {
             level: 'city',
@@ -283,6 +285,10 @@ async function mockPublicDirectoryShell(page: Page) {
               ? [{ value: 'Oakland', count: 1 }, { value: 'Sacramento', count: 1 }]
               : region === 'OR'
                 ? [{ value: 'Portland', count: 1 }]
+                : region === 'NSW'
+                  ? [{ value: 'Sydney', count: 2 }]
+                  : region === 'VIC'
+                    ? [{ value: 'Melbourne', count: 1 }]
                 : [{ value: 'Vancouver', count: 1 }],
           };
     await route.fulfill({
@@ -300,21 +306,29 @@ async function mockPublicDirectoryShell(page: Page) {
   await page.route('**/api/bike-shops/browse', async (route) => {
     const body = route.request().postDataJSON() as {
       countryCode: string;
-      region: string;
-      locality: string;
+      region?: string;
+      locality?: string;
+      offset?: number;
     };
+    const areaName = body.locality || body.region || body.countryCode;
     const cityShop = shop(
       'overture:11111111-1111-4111-8111-111111111111',
-      `${body.locality} Cycle Center`,
+      `${areaName} Cycle Center`,
       38.58,
       -121.49,
-      { locality: body.locality, region: body.region, countryCode: body.countryCode },
+      {
+        locality: body.locality || 'Directory',
+        region: body.region || 'All regions',
+        countryCode: body.countryCode,
+      },
     );
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
         location: body,
         shops: [cityShop],
+        offset: body.offset || 0,
+        limit: 1,
         total: 1,
         truncated: false,
         bounds: {
@@ -526,10 +540,11 @@ test('global hierarchy browses country to state or province to city, then return
   await expect(city).toBeDisabled();
   await expect(region.getByRole('option', { name: 'CA (2)', exact: true })).toHaveAttribute('value', 'CA');
   await expect(region.getByRole('option', { name: 'OR (1)', exact: true })).toHaveAttribute('value', 'OR');
-  await expect(results).toHaveCount(0);
+  await expect(results).toHaveCount(1);
+  await expect(results.first()).toContainText('US Cycle Center');
   await expect.poll(() => page.evaluate(() => (
     (window as any).__tracklabBikeShopMapTest.activeMarkers().map((marker: any) => marker.title).sort()
-  ))).toEqual([]);
+  ))).toEqual(['US Cycle Center']);
 
   await region.selectOption('CA');
   await expect(city).toBeEnabled();
@@ -568,6 +583,53 @@ test('global hierarchy browses country to state or province to city, then return
     'Sacramento Cycle Center',
     'Vancouver Bike Studio',
   ]);
+});
+
+test('country selection immediately lists Australian catalog shops before a city is chosen', async ({ page }) => {
+  await installGoogleMapMock(page);
+  await mockPublicDirectoryShell(page);
+  const browseBodies: Array<Record<string, unknown>> = [];
+  await page.route('**/api/bike-shops/browse', async (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    browseBodies.push(body);
+    const areaName = body.locality || body.region || body.countryCode;
+    const listing = shop(
+      'overture:99999999-9999-4999-8999-999999999999',
+      `${areaName} Bicycle Works`,
+      -33.87,
+      151.21,
+      {
+        locality: String(body.locality || 'Sydney'),
+        region: String(body.region || 'NSW'),
+        countryCode: String(body.countryCode || 'AU'),
+      },
+    );
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        location: body,
+        shops: [listing],
+        offset: body.offset || 0,
+        limit: 1,
+        total: 1,
+        truncated: false,
+        bounds: { north: listing.latitude, south: listing.latitude, east: listing.longitude, west: listing.longitude },
+        attributions: [],
+      }),
+    });
+  });
+
+  await page.goto('/#bike-shop-directory');
+  const directory = page.locator('#bike-shop-directory');
+  const country = directory.getByRole('combobox', { name: 'Country', exact: true });
+  const region = directory.getByRole('combobox', { name: 'State / province', exact: true });
+  const results = directory.getByRole('list', { name: 'Loaded bike shop listings' }).getByRole('button');
+  await country.selectOption('AU');
+  await expect(directory.getByText('1 mapped bike shop', { exact: true })).toBeVisible();
+  await expect(results).toHaveCount(1);
+  await expect(results.first()).toContainText('AU Bicycle Works');
+  await expect(region.getByRole('option', { name: 'NSW (2)', exact: true })).toHaveAttribute('value', 'NSW');
+  expect(browseBodies[0]).toEqual({ countryCode: 'AU' });
 });
 
 test('current-location nearby search still returns an accessible shop list when Google Maps fails to load', async ({ page, context }) => {

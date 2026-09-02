@@ -359,7 +359,14 @@ export function createOvertureBikeShopCatalog(options = {}) {
           if (hierarchyIndex) return hierarchyIndex;
           const countryCounts = new Map();
           const regionCounts = new Map();
+          const byCountry = new Map();
+          const byRegion = new Map();
           const byCity = new Map();
+          const appendIndex = (indexMap, key, index) => {
+            const entries = indexMap.get(key);
+            if (entries) entries.push(index);
+            else indexMap.set(key, [index]);
+          };
           shops.forEach((tuple, index) => {
             const countryCode = hierarchyText(tuple[8], 8).toUpperCase();
             const region = hierarchyText(tuple[6], 160) || missingHierarchyRegion;
@@ -368,12 +375,12 @@ export function createOvertureBikeShopCatalog(options = {}) {
             countryCounts.set(countryCode, (countryCounts.get(countryCode) ?? 0) + 1);
             const regionKey = hierarchyKey(countryCode, region, '');
             regionCounts.set(regionKey, (regionCounts.get(regionKey) ?? 0) + 1);
+            appendIndex(byCountry, countryCode, index);
+            appendIndex(byRegion, regionKey, index);
             const cityKey = hierarchyKey(countryCode, region, locality);
-            const cityShops = byCity.get(cityKey);
-            if (cityShops) cityShops.push(index);
-            else byCity.set(cityKey, [index]);
+            appendIndex(byCity, cityKey, index);
           });
-          hierarchyIndex = { countryCounts, regionCounts, byCity };
+          hierarchyIndex = { countryCounts, regionCounts, byCountry, byRegion, byCity };
           return hierarchyIndex;
         },
         metadata: {
@@ -514,20 +521,38 @@ export function createOvertureBikeShopCatalog(options = {}) {
     },
     async browse(input = {}) {
       const catalog = await load();
+      const request = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
       const hierarchyIndex = catalog.hierarchyIndex;
-      const countryCode = hierarchyText(input.countryCode, 8).toUpperCase();
-      const region = hierarchyText(input.region, 160);
-      const locality = hierarchyText(input.locality, 160);
-      if (!/^[A-Z]{2}$/u.test(countryCode) || !region || !locality) {
-        throw new RangeError('Choose a country, state or province, and city.');
+      const countryCode = hierarchyText(request.countryCode, 8).toUpperCase();
+      const region = hierarchyText(request.region, 160);
+      const locality = hierarchyText(request.locality, 160);
+      const rawOffset = request.offset === undefined || request.offset === null || request.offset === ''
+        ? 0
+        : Number(request.offset);
+      if (!Number.isInteger(rawOffset) || rawOffset < 0 || rawOffset > maximumCatalogRecords) {
+        throw new RangeError('The bike shop directory page is invalid.');
       }
-      const matches = [...(hierarchyIndex.byCity.get(
-        hierarchyKey(countryCode, region, locality),
-      ) ?? [])].sort((left, right) => (
+      if (!/^[A-Z]{2}$/u.test(countryCode)) {
+        throw new RangeError('Choose a country before browsing bike shops.');
+      }
+      if (locality && !region) {
+        throw new RangeError('Choose a state or province before choosing a city.');
+      }
+      const matchKey = region
+        ? locality
+          ? hierarchyKey(countryCode, region, locality)
+          : hierarchyKey(countryCode, region, '')
+        : countryCode;
+      const matchIndex = locality
+        ? hierarchyIndex.byCity
+        : region
+          ? hierarchyIndex.byRegion
+          : hierarchyIndex.byCountry;
+      const matches = [...(matchIndex.get(matchKey) ?? [])].sort((left, right) => (
         catalog.shops[left][1].localeCompare(catalog.shops[right][1])
         || catalog.shops[left][0].localeCompare(catalog.shops[right][0])
       ));
-      const selectedIndexes = matches.slice(0, maximumBrowseRecords);
+      const selectedIndexes = matches.slice(rawOffset, rawOffset + maximumBrowseRecords);
       const selected = selectedIndexes.map((index) => materializeCatalogRecord(catalog.shops[index]));
       const longitudeExtent = minimalLongitudeExtent(selected.map((shop) => shop.longitude));
       const bounds = selected.length > 0 ? {
@@ -539,7 +564,9 @@ export function createOvertureBikeShopCatalog(options = {}) {
       return {
         location: { countryCode, region, locality },
         shops: selected,
-        truncated: matches.length > maximumBrowseRecords,
+        offset: rawOffset,
+        limit: selected.length,
+        truncated: rawOffset + selected.length < matches.length,
         total: matches.length,
         bounds,
       };

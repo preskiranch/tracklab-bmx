@@ -57,6 +57,10 @@ invariant(
   countryHierarchy.items.some((item) => item.value === 'US' && item.count > 1_000),
   'The global hierarchy is missing expected United States coverage.',
 );
+invariant(
+  countryHierarchy.items.some((item) => item.value === 'AU' && item.count > 0),
+  'The global hierarchy is missing Australia coverage.',
+);
 
 const vacaville = await catalog.search({
   latitude: 38.3566,
@@ -80,6 +84,7 @@ console.log(JSON.stringify({
   records: stats.count,
   minimumConfidence: stats.minimumConfidence,
   countries: countryHierarchy.items.length,
+  australiaShops: countryHierarchy.items.find((item) => item.value === 'AU')?.count || 0,
   knownVacavilleShops: requiredVacavilleNames,
   inputSha256: stats.inputSha256,
   catalogSha256: stats.catalogSha256,

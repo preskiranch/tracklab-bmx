@@ -133,6 +133,29 @@ describe('preloaded Overture bike shop catalog', () => {
     }
   });
 
+  it('keeps the complete worldwide hierarchy browseable at country and region level', async () => {
+    const catalog = createOvertureBikeShopCatalog();
+    const australia = await catalog.browse({ countryCode: 'AU' });
+    expect(australia.total).toBeGreaterThan(0);
+    expect(australia.shops.length).toBeLessThanOrEqual(500);
+    expect(australia.shops.every((shop) => shop.address.countryCode === 'AU')).toBe(true);
+    expect(australia.truncated).toBe(australia.total > australia.shops.length);
+
+    const regions = await catalog.hierarchy({ countryCode: 'AU' });
+    expect(regions.items.some(({ value, count }) => value === 'NSW' && count > 0)).toBe(true);
+    const newSouthWales = await catalog.browse({ countryCode: 'AU', region: 'NSW' });
+    expect(newSouthWales.total).toBeGreaterThan(0);
+    expect(newSouthWales.truncated).toBe(false);
+    expect(newSouthWales.shops.every((shop) => (
+      shop.address.countryCode === 'AU' && shop.address.region === 'NSW'
+    ))).toBe(true);
+
+    const nextPage = await catalog.browse({ countryCode: 'AU', offset: 500 });
+    expect(nextPage.offset).toBe(500);
+    expect(nextPage.shops[0]?.address.countryCode).toBe('AU');
+    expect(nextPage.shops.every((shop) => shop.address.countryCode === 'AU')).toBe(true);
+  });
+
   it('propagates a dense real-catalog viewport as truncated through the public directory', async () => {
     const catalog = createOvertureBikeShopCatalog();
     const directory = createBikeShopDirectory({

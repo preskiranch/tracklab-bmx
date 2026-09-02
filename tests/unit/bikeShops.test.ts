@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { PublicBikeShopDirectory } from '../../src/components/PublicBikeShopDirectory';
 import {
   bikeShopClaimSourceUrl,
+  browseBikeShopsByScope,
   browseBikeShopsByCity,
   nearbyTracksForShop,
   listBikeShopClaimsForAdmin,
@@ -253,6 +254,37 @@ describe('public bike shop directory client', () => {
     }, browseFetcher)).resolves.toMatchObject({
       shops: [{ name: "Ray's Cycle" }], total: 1, truncated: false,
     });
+  });
+
+  it('browses country and state pages without requiring a city selection', async () => {
+    const fetcher = vi.fn(async (_url: string, request?: RequestInit) => {
+      expect(JSON.parse(String(request?.body))).toEqual({ countryCode: 'AU', offset: 500 });
+      return jsonResponse({
+        location: { countryCode: 'AU', region: '', locality: '' },
+        shops: [{
+          id: 'overture:11111111-1111-4111-8111-111111111111',
+          name: 'Australia Cycle Center',
+          latitude: -33.87,
+          longitude: 151.21,
+          address: { locality: 'Sydney', region: 'NSW', countryCode: 'AU' },
+          source: { provider: 'Overture Maps', elementType: 'place', elementId: '11111111-1111-4111-8111-111111111111' },
+        }],
+        offset: 500,
+        limit: 1,
+        total: 1466,
+        truncated: true,
+        bounds: { north: -33.87, south: -33.87, east: 151.21, west: 151.21 },
+      });
+    });
+    await expect(browseBikeShopsByScope({ countryCode: 'au', offset: 500 }, fetcher)).resolves.toMatchObject({
+      location: { countryCode: 'AU', region: '', locality: '' },
+      shops: [{ name: 'Australia Cycle Center' }],
+      offset: 500,
+      total: 1466,
+      truncated: true,
+    });
+    expect(fetcher).toHaveBeenCalledWith('/api/bike-shops/browse', expect.objectContaining({ method: 'POST' }));
+    await expect(browseBikeShopsByScope({ countryCode: 'AU', locality: 'Sydney' }, fetcher)).rejects.toMatchObject({ status: 400 });
   });
 
   it('loads and withdraws personal claims and supports the private administrator review contract', async () => {

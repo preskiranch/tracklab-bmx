@@ -305,17 +305,19 @@ export function BikeShopDirectoryMap({
     ? 'Loading Google Maps'
     : mapStatus === 'error'
       ? mapError
-      : zoomStepsRemaining > 0
-        ? `Zoom in ${zoomStepsRemaining} more ${zoomStepsRemaining === 1 ? 'level' : 'levels'} to load bike shops.`
-        : busy
-          ? 'Loading bike shops in this map area.'
-          : requestError
-            ? requestError
-            : truncated
-              ? 'Many shops are in this view. Zoom in to see a more complete area.'
-              : hasLoadedViewport && shops.length === 0
-                ? 'No mapped bike shops are visible in this area.'
-                : `${shops.length} bike ${shops.length === 1 ? 'shop' : 'shops'} visible in this area.`;
+      : busy
+        ? 'Loading bike shops in this map area.'
+        : requestError
+          ? requestError
+          : shops.length > 0
+            ? `${shops.length.toLocaleString()} bike ${shops.length === 1 ? 'shop' : 'shops'} available in this directory area.`
+            : zoomStepsRemaining > 0
+              ? `Zoom in ${zoomStepsRemaining} more ${zoomStepsRemaining === 1 ? 'level' : 'levels'} to load bike shops.`
+              : truncated
+                ? 'Many shops are in this view. Zoom in to see a more complete area.'
+                : hasLoadedViewport
+                  ? 'No mapped bike shops are visible in this area.'
+                  : 'Move or zoom the map to browse bike shops.';
 
   return (
     <section className="public-bike-shop-map" aria-label="Interactive global bike shop map">

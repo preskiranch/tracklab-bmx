@@ -474,6 +474,27 @@
   color: var(--ink);
 }
 
+.public-bike-shop-directory__load-more {
+  display: grid;
+  padding: 4px 0 2px;
+}
+
+.public-bike-shop-directory__load-more button {
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid rgba(101, 214, 54, 0.62);
+  border-radius: 8px;
+  background: #ecfbe7;
+  color: #24571a;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.public-bike-shop-directory__load-more button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .public-bike-shop-directory__detail {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

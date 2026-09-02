@@ -94,14 +94,28 @@ export type BikeShopHierarchyResponse = {
   attributions: BikeShopAttribution[];
 };
 
-export type BikeShopCityBrowseResponse = {
+export type BikeShopBrowseLocation = {
+  countryCode: string;
+  region?: string;
+  locality?: string;
+  offset?: number;
+};
+
+export type BikeShopDirectoryBrowseResponse = {
   location: { countryCode: string; region: string; locality: string };
   shops: BikeShopRecord[];
+  offset: number;
+  limit: number;
   total: number;
   truncated: boolean;
   bounds: { north: number; south: number; east: number; west: number } | null;
   attributions: BikeShopAttribution[];
 };
+
+// Kept as an alias so callers that specifically browse a city retain the
+// descriptive type while the directory can now page country- and region-wide
+// listings too.
+export type BikeShopCityBrowseResponse = BikeShopDirectoryBrowseResponse;
 
 export type NearbyBikeShopTrack = {
   track: TrackRecord | TrackLocatorRecord;
@@ -670,28 +684,41 @@ export async function listBikeShopHierarchy(
   } satisfies BikeShopHierarchyResponse;
 }
 
-export async function browseBikeShopsByCity(
-  location: { countryCode: string; region: string; locality: string },
+export async function browseBikeShopsByScope(
+  location: BikeShopBrowseLocation,
   fetcher: typeof fetch = fetch,
   signal?: AbortSignal,
 ) {
   const countryCode = cleanText(location.countryCode, 8).toUpperCase();
   const region = cleanText(location.region, 160);
   const locality = cleanText(location.locality, 160);
-  if (!/^[A-Z]{2}$/.test(countryCode) || !region || !locality) {
-    throw new BikeShopDirectoryError('Choose a country, state or province, and city.', 400);
+  const offset = location.offset === undefined
+    ? 0
+    : Math.round(Number(location.offset));
+  if (!/^[A-Z]{2}$/.test(countryCode)) {
+    throw new BikeShopDirectoryError('Choose a country before browsing bike shops.', 400);
   }
+  if (locality && !region) {
+    throw new BikeShopDirectoryError('Choose a state or province before choosing a city.', 400);
+  }
+  if (!Number.isInteger(offset) || offset < 0 || offset > 200_000) {
+    throw new BikeShopDirectoryError('The bike shop directory page is invalid.', 400);
+  }
+  const body: Record<string, string | number> = { countryCode };
+  if (region) body.region = region;
+  if (locality) body.locality = locality;
+  if (offset > 0) body.offset = offset;
   const response = await fetcher('/api/bike-shops/browse', {
     method: 'POST',
     credentials: 'same-origin',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ countryCode, region, locality }),
+    body: JSON.stringify(body),
     ...(signal ? { signal } : {}),
   });
   const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
   if (!response.ok) {
     throw new BikeShopDirectoryError(
-      cleanText(payload.error, 240) || `The bike shop city directory returned ${response.status}.`,
+      cleanText(payload.error, 240) || `The bike shop directory returned ${response.status}.`,
       response.status,
     );
   }
@@ -709,14 +736,33 @@ export async function browseBikeShopsByCity(
     : null;
   const shops = normalizeShops(payload.shops, maximumViewportResponseShops);
   const total = Math.max(shops.length, Math.min(200_000, Math.round(finiteNumber(payload.total) ?? shops.length)));
+  const responseOffset = Math.max(0, Math.min(200_000, Math.round(finiteNumber(payload.offset) ?? offset)));
+  const responseLimit = Math.max(0, Math.min(maximumViewportResponseShops, Math.round(finiteNumber(payload.limit) ?? shops.length)));
+  const rawLocation = payload.location && typeof payload.location === 'object'
+    ? payload.location as Record<string, unknown>
+    : {};
   return {
-    location: { countryCode, region, locality },
+    location: {
+      countryCode: cleanText(rawLocation.countryCode, 8).toUpperCase() || countryCode,
+      region: cleanText(rawLocation.region, 160) || region,
+      locality: cleanText(rawLocation.locality, 160) || locality,
+    },
     shops,
+    offset: responseOffset,
+    limit: responseLimit,
     total,
-    truncated: payload.truncated === true || total > shops.length,
+    truncated: payload.truncated === true || responseOffset + shops.length < total,
     bounds,
     attributions: normalizeAttributions(payload.attributions),
-  } satisfies BikeShopCityBrowseResponse;
+  } satisfies BikeShopDirectoryBrowseResponse;
+}
+
+export async function browseBikeShopsByCity(
+  location: { countryCode: string; region: string; locality: string },
+  fetcher: typeof fetch = fetch,
+  signal?: AbortSignal,
+) {
+  return browseBikeShopsByScope(location, fetcher, signal);
 }
 
 export class BikeShopDirectoryError extends Error {

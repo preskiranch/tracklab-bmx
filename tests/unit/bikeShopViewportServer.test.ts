@@ -145,6 +145,35 @@ describe('public bike shop viewport API', () => {
     expect(await foursquare.text()).toContain('TrackLab further filtered');
   });
 
+  it('serves Australia from the bundled hierarchy and country directory list', async () => {
+    const hierarchy = await request('/api/bike-shops/hierarchy?countryCode=AU');
+    expect(hierarchy.status).toBe(200);
+    const hierarchyBody = await hierarchy.json() as any;
+    expect(hierarchyBody.level).toBe('region');
+    expect(hierarchyBody.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ value: 'NSW', count: expect.any(Number) }),
+    ]));
+
+    const browse = await request('/api/bike-shops/browse', {
+      method: 'POST',
+      body: { countryCode: 'AU' },
+    });
+    expect(browse.status).toBe(200);
+    expect(browse.headers.get('cache-control')).toContain('private');
+    expect(browse.headers.get('cache-control')).toContain('no-store');
+    const browseBody = await browse.json() as any;
+    expect(browseBody).toMatchObject({
+      location: { countryCode: 'AU', region: '', locality: '' },
+      offset: 0,
+      limit: expect.any(Number),
+      total: expect.any(Number),
+      truncated: expect.any(Boolean),
+    });
+    expect(browseBody.total).toBeGreaterThan(0);
+    expect(browseBody.shops.length).toBeGreaterThan(0);
+    expect(browseBody.shops.every((shop: any) => shop.address.countryCode === 'AU')).toBe(true);
+  });
+
   it('uses a bounded body-only contract with exact post-filtering and private responses', async () => {
     expect((await request('/api/bike-shops/viewport')).status).toBe(405);
     expect((await request('/api/bike-shops/viewport?north=38.4', {
