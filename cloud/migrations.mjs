@@ -210,7 +210,7 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           finish_time_ms INTEGER NOT NULL,
           thirty_foot_time_ms INTEGER,
           color_name TEXT NOT NULL DEFAULT 'lime',
-          accent TEXT NOT NULL DEFAULT '#178f4d',
+          accent TEXT NOT NULL DEFAULT '#7ade36',
           race_source TEXT NOT NULL DEFAULT 'live',
           lap_count INTEGER NOT NULL DEFAULT 1,
           analytics_public BOOLEAN NOT NULL DEFAULT false,
@@ -2247,6 +2247,18 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           )) NOT VALID`,
         `ALTER TABLE ${schema}.push_events
           VALIDATE CONSTRAINT push_events_kind_check`,
+      ],
+    },
+    {
+      version: 43,
+      name: 'use evergreen for green ghost riders',
+      statements: [
+        `ALTER TABLE ${schema}.ghost_laps
+          ALTER COLUMN accent SET DEFAULT '#178f4d'`,
+        `UPDATE ${schema}.ghost_laps
+          SET accent = '#178f4d'
+          WHERE color_name IN ('lime', 'green')
+            AND accent = '#7ade36'`,
       ],
     },
   ];
