@@ -49,9 +49,11 @@ body {
 }
 
 html.tracklab-race-active,
-body.tracklab-race-active {
+body.tracklab-race-active,
+body.tracklab-race-active #root {
   width: 100%;
   height: 100%;
+  background: #07100b;
   overflow: hidden;
   overscroll-behavior: none;
 }

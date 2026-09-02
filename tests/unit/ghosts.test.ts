@@ -220,4 +220,90 @@ describe('ghost lap categories and privacy metadata', () => {
       finishedAt: null,
     });
   });
+
+  it('interpolates a sparse race ghost forward across normal and dropped render frames', () => {
+    const savedGhost = rawGhost(1, 'Frame-stable ghost');
+    savedGhost.finishTimeMs = 1_000;
+    savedGhost.points = [
+      { elapsedMs: 0, distanceMeters: 0, velocityMps: 0, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+      { elapsedMs: 250, distanceMeters: 10, velocityMps: 20, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+      { elapsedMs: 1_000, distanceMeters: 40, velocityMps: 0, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+    ];
+    const ghost = sanitizeGhostLap(savedGhost);
+    expect(ghost).not.toBeNull();
+
+    // Includes a 250ms dropped-frame gap between 250ms and 500ms. Playback
+    // must advance from elapsed time, not reset or wait for every frame.
+    const playback = [0, 16, 33, 250, 500, 750, 999, 1_000, 1_250]
+      .map((elapsedMs) => playbackGhostLap(ghost!, elapsedMs, 0)!);
+
+    expect(playback.map((rider) => rider.distance)).toEqual([
+      0,
+      0.64,
+      1.32,
+      10,
+      20,
+      30,
+      39.96,
+      40,
+      40,
+    ]);
+    expect(playback.every((rider, index) => (
+      index === 0 || rider.distance >= playback[index - 1].distance
+    ))).toBe(true);
+    expect(playback.at(-1)).toMatchObject({
+      distance: 40,
+      velocity: 0,
+      finishedAt: 1_000,
+    });
+  });
+
+  it('interpolates a late first trace sample from the start line instead of teleporting', () => {
+    const savedGhost = rawGhost(1, 'Late trace rider');
+    savedGhost.points = [
+      // Older recordings could start at the first post-render point rather
+      // than an explicit gate-origin sample.
+      { elapsedMs: 800, distanceMeters: 8, velocityMps: 10, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+      { elapsedMs: 20_000, distanceMeters: 300, velocityMps: 0, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+    ];
+
+    const ghost = sanitizeGhostLap(savedGhost);
+    expect(ghost).not.toBeNull();
+    expect(ghost!.points[0]).toMatchObject({ elapsedMs: 0, distanceMeters: 0, velocityMps: 0 });
+    expect(playbackGhostLap(ghost!, 80, 0)?.distance).toBeCloseTo(0.8, 5);
+    expect(playbackGhostLap(ghost!, 400, 0)?.distance).toBeCloseTo(4, 5);
+  });
+
+  it('holds the final traced ghost position through a terminal trace gap', () => {
+    const savedGhost = rawGhost(1, 'Interrupted trace rider');
+    savedGhost.finishTimeMs = 1_000;
+    savedGhost.points = [
+      { elapsedMs: 0, distanceMeters: 0, velocityMps: 0, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+      { elapsedMs: 800, distanceMeters: 8, velocityMps: 10, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+    ];
+
+    const ghost = sanitizeGhostLap(savedGhost);
+    expect(ghost).not.toBeNull();
+    expect(playbackGhostLap(ghost!, 900, 0)).toMatchObject({
+      distance: 8,
+      velocity: 0,
+      finishedAt: null,
+    });
+  });
+
+  it('keeps malformed ghost trace distances monotonic instead of correcting backward', () => {
+    const savedGhost = rawGhost(1, 'Corrected trace rider');
+    savedGhost.points = [
+      { elapsedMs: 0, distanceMeters: 0, velocityMps: 0, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+      { elapsedMs: 100, distanceMeters: 5, velocityMps: 20, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+      { elapsedMs: 200, distanceMeters: 2, velocityMps: 20, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+      { elapsedMs: 20_000, distanceMeters: 300, velocityMps: 0, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+    ];
+
+    const ghost = sanitizeGhostLap(savedGhost);
+    expect(ghost).not.toBeNull();
+    expect(ghost!.points.every((point, index) => (
+      index === 0 || point.distanceMeters >= ghost!.points[index - 1].distanceMeters
+    ))).toBe(true);
+  });
 });

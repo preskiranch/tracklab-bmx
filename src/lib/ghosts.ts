@@ -140,6 +140,49 @@ function sanitizeGhostPoint(value: unknown): GhostLapPoint | null {
   };
 }
 
+function normalizeGhostPlaybackPoints(points: GhostLapPoint[], finishTimeMs: number) {
+  if (points.length === 0) {
+    return [];
+  }
+
+  const ordered = points
+    .map((point, index) => ({ point, index }))
+    .sort((left, right) => left.point.elapsedMs - right.point.elapsedMs || left.index - right.index)
+    .map(({ point }) => point);
+  const first = ordered[0];
+  // The first React render after a gate drop can arrive after the rider has
+  // already moved. Always give playback a canonical start-line point so it
+  // interpolates to a late first trace sample rather than snapping to it.
+  const normalized: GhostLapPoint[] = [{
+    ...first,
+    elapsedMs: 0,
+    distanceMeters: 0,
+    velocityMps: 0,
+    phase: 'pedaling',
+    pitch: 0,
+    actualBranches: {},
+  }];
+
+  ordered.forEach((point) => {
+    const previous = normalized[normalized.length - 1];
+    const elapsedMs = Math.min(finishTimeMs, Math.max(0, point.elapsedMs));
+    if (elapsedMs <= previous.elapsedMs) {
+      return;
+    }
+
+    // Never allow a malformed trace point to move the ghost backward. A
+    // backward correction looks like a teleport and makes the race target
+    // impossible to follow.
+    normalized.push({
+      ...point,
+      elapsedMs,
+      distanceMeters: Math.max(previous.distanceMeters, point.distanceMeters),
+    });
+  });
+
+  return normalized;
+}
+
 export function sanitizeGhostLap(value: unknown): GhostLap | null {
   if (!value || typeof value !== 'object') {
     return null;
@@ -148,9 +191,12 @@ export function sanitizeGhostLap(value: unknown): GhostLap | null {
   const raw = value as Partial<GhostLap>;
   const finishTimeMs = Math.round(finiteNumber(raw.finishTimeMs, Number.NaN));
   const rawPoints = Array.isArray(raw.points) ? raw.points.slice(0, maxGhostPoints) : [];
-  const points = rawPoints
+  const sanitizedPoints = rawPoints
     .map(sanitizeGhostPoint)
     .filter((point): point is GhostLapPoint => point != null);
+  const points = Number.isFinite(finishTimeMs) && finishTimeMs > 0
+    ? normalizeGhostPlaybackPoints(sanitizedPoints, finishTimeMs)
+    : [];
   const summaryMetricsAccepted = recordedBikeMetricsAreAccepted(raw.summary);
   const zoneMetricsAccepted = recordedBikeMetricsAreAccepted(raw.zoneResults);
   const pointSpeedWasRejected = rawPoints.some((point) => (
@@ -208,7 +254,7 @@ export function sanitizeGhostLap(value: unknown): GhostLap | null {
     medalRank: raw.medalRank === 1 || raw.medalRank === 2 || raw.medalRank === 3 ? raw.medalRank : null,
     summary: raw.summary && typeof raw.summary === 'object' ? raw.summary as RaceSummaryEntry : null,
     zoneResults: sanitizeGhostZoneResults(raw.zoneResults),
-    points: points.sort((left, right) => left.elapsedMs - right.elapsedMs),
+    points,
   };
 }
 
@@ -411,6 +457,26 @@ export function playbackGhostLap(ghost: GhostLap, elapsedMs: number, index: numb
   }
 
   let upperIndex = points.findIndex((point) => point.elapsedMs >= safeElapsedMs);
+  if (upperIndex < 0) {
+    // Older or interrupted recordings may stop tracing before their recorded
+    // finish time. Hold the latest known position until the finish instead of
+    // falling through to the first point and resetting the ghost to the gate.
+    const lastPoint = points[points.length - 1];
+    return {
+      id: ghost.id,
+      name: ghost.riderName,
+      colorName: playbackColorName,
+      accent: playbackAccent,
+      distance: lastPoint.distanceMeters,
+      velocity: 0,
+      phase: lastPoint.phase,
+      pitch: lastPoint.pitch,
+      rank: lastPoint.rank || index + 1,
+      finishedAt: null,
+      actualBranches: lastPoint.actualBranches,
+    };
+  }
+
   if (upperIndex <= 0) {
     const firstPoint = points[0];
     return {

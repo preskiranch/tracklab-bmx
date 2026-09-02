@@ -1,5 +1,5 @@
 export const getPulledFullscreenStyles = `
-.utility-fullscreen .get-pulled-view{box-sizing:border-box;width:100%;height:100%;min-height:0;overflow:hidden;grid-template-rows:minmax(0,1fr) auto;grid-auto-rows:auto;gap:clamp(6px,1.2vh,12px);gap:clamp(6px,1.2dvh,12px);padding:max(10px,calc(env(safe-area-inset-top,0px) + 10px)) max(10px,calc(env(safe-area-inset-right,0px) + 10px)) max(10px,calc(env(safe-area-inset-bottom,0px) + 10px)) max(10px,calc(env(safe-area-inset-left,0px) + 10px));background:#07100b}
+.utility-fullscreen .get-pulled-view{box-sizing:border-box;width:100%;height:100%;min-height:0;overflow:hidden;grid-template-rows:minmax(0,1fr) auto;grid-auto-rows:auto;gap:clamp(6px,1.2vh,12px);gap:clamp(6px,1.2dvh,12px);padding:max(10px,calc(env(safe-area-inset-top,0px) + 10px)) max(10px,calc(env(safe-area-inset-right,0px) + 10px)) max(10px,calc(env(safe-area-inset-bottom,0px) + 10px)) max(10px,calc(env(safe-area-inset-left,0px) + 10px));background:#07100b;color:#fff}
 .utility-fullscreen .get-pulled-hero{height:100%;min-height:0;overflow:hidden}
 .utility-fullscreen .get-pulled-hero>.pull-sled-scene{height:100%!important;min-height:0!important}
 .utility-fullscreen .get-pulled-config,.utility-fullscreen .get-pulled-privacy{display:none}

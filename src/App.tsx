@@ -5128,7 +5128,7 @@ export default function App() {
     }
   }, [raceViewFullscreen]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const fullscreenActive = raceViewFullscreen || exploreRideFullscreen || utilityFullscreen;
     document.documentElement.classList.toggle('tracklab-race-active', fullscreenActive);
     document.body.classList.toggle('tracklab-race-active', fullscreenActive);
@@ -9049,8 +9049,19 @@ export default function App() {
     cadenceStartedAtRef.current = 0;
     falseStartActiveRef.current = false;
     ghostRaceStartedAtRef.current = gateDropAt;
-    ghostTraceRef.current = new Map();
-    ghostTraceLastSampleAtRef.current = new Map();
+    // Seed every local race trace at the gate. Effects may not observe the
+    // first rendered rider frame immediately, and a trace whose first point is
+    // already down-course would make later ghost playback appear to teleport.
+    ghostTraceRef.current = new Map(racePlayers.map((player) => [player.id, [{
+      elapsedMs: 0,
+      distanceMeters: 0,
+      velocityMps: 0,
+      phase: 'pedaling' as const,
+      pitch: 0,
+      rank: player.id,
+      actualBranches: {},
+    }]]));
+    ghostTraceLastSampleAtRef.current = new Map(racePlayers.map((player) => [player.id, gateDropAt]));
     const personalBestOwnerKey = clubTabletSessionActive ? clubTabletProfileKey : cloudProfileKey;
     setPreviousRaceBestTimes(demoMode
       ? {}

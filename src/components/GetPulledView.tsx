@@ -782,7 +782,11 @@ export function GetPulledView({
   const isShowingNewPersonalRecord = phase === 'results' && newPersonalRecord != null;
 
   return (
-    <main className="get-pulled-view" aria-label="Get Pulled timed Wattbike test">
+    <main
+      className={`get-pulled-view${phase === 'setup' ? '' : ' get-pulled-session-active'}`}
+      data-pull-phase={phase}
+      aria-label="Get Pulled timed Wattbike test"
+    >
       {fullscreen && <style>{getPulledFullscreenStyles}</style>}
       {fullscreen && (
         phase === 'countdown' || phase === 'armed' || phase === 'active' || fullscreenSecondaryAction

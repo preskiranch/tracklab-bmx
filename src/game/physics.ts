@@ -7,13 +7,20 @@ import { crossedTakeoff, surfaceAngleDeg } from './trackProfile';
 const gravityPx = 430;
 const groundRecoveryPerSecond = 4.2;
 const maxAirPx = 34;
-const liveMetricWindowMs = 1800;
+// Wattbike BLE characteristics are delivered independently. A cadence value can
+// therefore remain unchanged while a fresh power or speed packet proves that the
+// bike is still connected and reporting. Keep a normal three-second packet window
+// so a rider does not coast between those partial updates.
+const liveMetricWindowMs = 3000;
 const liveRaceStartSampleGraceMs = 0;
 const rollingFrictionMps2 = 0.42;
 const airDragPerMeter = 0.0038;
 const stopVelocityMps = 0.04;
 const freewheelEngagementToleranceMps = 0.05;
-const minimumRaceDriveWatts = 10;
+// The first post-gate Wattbike signal is often a single low-watt packet. The
+// start gate already rejects pre-gate noise, so let any positive live wattage
+// begin the rider response immediately.
+const minimumRaceDriveWatts = 1;
 const minimumRaceDriveCadenceRpm = 1;
 const minimumRaceDriveSpeedKph = 1.609344;
 const initialLaunchResponseMps = 0.6;
@@ -44,8 +51,19 @@ function metricIsUsable(sample: BikeSample | null | undefined, metricAt: number 
     return false;
   }
 
-  const recordedAt = metricAt ?? sample.at;
-  return recordedAt >= raceStartedAt - liveRaceStartSampleGraceMs && nowMs - recordedAt <= liveMetricWindowMs;
+  const metricRecordedAt = metricAt ?? sample.at;
+  // The value itself must have been captured after the start gate. A later packet
+  // must not make a pre-gate cadence or power value eligible for a false start.
+  if (metricRecordedAt < raceStartedAt - liveRaceStartSampleGraceMs) {
+    return false;
+  }
+
+  // Once a post-gate metric is eligible, the newest packet receipt can safely
+  // keep it live. Direct BLE updates intentionally retain values that were not
+  // included in the latest characteristic, while `sample.at` advances for each
+  // fresh motion packet.
+  const latestPacketAt = Math.max(metricRecordedAt, sample.at);
+  return nowMs - latestPacketAt <= liveMetricWindowMs;
 }
 
 function wattsFallbackVelocityMps(watts: number, currentVelocityMps: number) {

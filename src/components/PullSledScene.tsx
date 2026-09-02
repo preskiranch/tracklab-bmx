@@ -27,6 +27,59 @@ const venueGeometry = {
   roadBottom: 764,
 } as const;
 
+function hasRenderableBox(box: DOMRect) {
+  return Number.isFinite(box.width)
+    && Number.isFinite(box.height)
+    && box.width > 0
+    && box.height > 0;
+}
+
+// iPad Safari can briefly report a zero-sized layout while it is rotating or
+// entering native fullscreen. Re-run after both viewport and element changes,
+// and retain the last valid geometry instead of writing an invalid SVG viewBox
+// or finish-line position into the scene.
+function observePullSceneLayout(targets: readonly Element[], update: () => void) {
+  let frame: number | null = null;
+  let settleTimer: number | null = null;
+  const run = () => {
+    if (frame != null) {
+      window.cancelAnimationFrame(frame);
+      frame = null;
+    }
+    update();
+  };
+  const schedule = () => {
+    if (frame != null) window.cancelAnimationFrame(frame);
+    if (settleTimer != null) window.clearTimeout(settleTimer);
+    frame = window.requestAnimationFrame(() => {
+      frame = null;
+      update();
+    });
+    // Safari's visual viewport can settle after the ResizeObserver callback.
+    settleTimer = window.setTimeout(() => {
+      settleTimer = null;
+      run();
+    }, 320);
+  };
+  const resizeObserver = typeof ResizeObserver === 'undefined'
+    ? null
+    : new ResizeObserver(schedule);
+  targets.forEach((target) => resizeObserver?.observe(target));
+  window.addEventListener('resize', schedule);
+  window.addEventListener('orientationchange', schedule);
+  window.visualViewport?.addEventListener('resize', schedule);
+  schedule();
+
+  return () => {
+    resizeObserver?.disconnect();
+    if (frame != null) window.cancelAnimationFrame(frame);
+    if (settleTimer != null) window.clearTimeout(settleTimer);
+    window.removeEventListener('resize', schedule);
+    window.removeEventListener('orientationchange', schedule);
+    window.visualViewport?.removeEventListener('resize', schedule);
+  };
+}
+
 export function PullSledScene({
   active,
   cadenceRpm = 0,
@@ -74,6 +127,7 @@ export function PullSledScene({
       const assemblyBox = assembly.getBoundingClientRect();
       const hitchBox = sledHitch.getBoundingClientRect();
       const axleBox = rearAxle.getBoundingClientRect();
+      if (![assemblyBox, hitchBox, axleBox].every(hasRenderableBox)) return;
       const start = {
         x: hitchBox.left + hitchBox.width / 2 - assemblyBox.left,
         y: hitchBox.top + hitchBox.height / 2 - assemblyBox.top,
@@ -99,11 +153,7 @@ export function PullSledScene({
     };
 
     updateTowBar();
-    const resizeObserver = new ResizeObserver(updateTowBar);
-    resizeObserver.observe(assembly);
-    resizeObserver.observe(sledHitch);
-    resizeObserver.observe(rearAxle);
-    return () => resizeObserver.disconnect();
+    return observePullSceneLayout([assembly, sledHitch, rearAxle], updateTowBar);
   }, [compact]);
 
   useLayoutEffect(() => {
@@ -113,6 +163,7 @@ export function PullSledScene({
 
     const clipFinishLineToRoad = () => {
       const sceneBox = scene.getBoundingClientRect();
+      if (!hasRenderableBox(sceneBox)) return;
       const coverScale = Math.max(
         sceneBox.width / venueGeometry.width,
         sceneBox.height / venueGeometry.height,
@@ -132,9 +183,7 @@ export function PullSledScene({
     };
 
     clipFinishLineToRoad();
-    const resizeObserver = new ResizeObserver(clipFinishLineToRoad);
-    resizeObserver.observe(scene);
-    return () => resizeObserver.disconnect();
+    return observePullSceneLayout([scene], clipFinishLineToRoad);
   }, [compact]);
 
   return (

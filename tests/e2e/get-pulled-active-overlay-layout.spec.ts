@@ -11,6 +11,7 @@ const viewports = [
   { columns: 6, label: 'iPad mini landscape', width: 1_133, height: 744 },
   { columns: 6, label: 'studio iPad landscape', width: 1_024, height: 768 },
   { columns: 6, label: 'iPad Pro landscape', width: 1_366, height: 1_024 },
+  { columns: 6, label: 'desktop', width: 1_440, height: 900 },
 ] as const;
 
 // Keep this fixture independent of authentication, Bluetooth, and pull timing.
@@ -26,7 +27,7 @@ test('keeps active Get Pulled status and session actions clear at every supporte
   await page.setContent(`
     <div class="platform-shell utility-fullscreen">
       <main class="platform-main">
-        <main class="get-pulled-view" aria-label="Get Pulled timed Wattbike test">
+        <main class="get-pulled-view get-pulled-session-active" data-pull-phase="active" aria-label="Get Pulled timed Wattbike test">
           <div class="get-pulled-fullscreen-actions" role="group" aria-label="Get Pulled session controls">
             <button aria-label="Cancel sprint" class="get-pulled-exit-fullscreen" type="button">
               <svg aria-hidden="true" width="18" height="18"></svg><span>Cancel sprint</span>
@@ -73,6 +74,10 @@ test('keeps active Get Pulled status and session actions clear at every supporte
     .utility-fullscreen .platform-main{width:100%;height:100%;min-height:0;padding:0;overflow:auto}
     .utility-fullscreen .pull-sled-scene{position:relative;width:100%;height:420px;min-height:420px;overflow:hidden;border-radius:22px;background:#425d45}
   ` });
+  await page.evaluate(() => {
+    document.documentElement.classList.add('tracklab-race-active');
+    document.body.classList.add('tracklab-race-active');
+  });
 
   const fullscreen = page.locator('.platform-shell.utility-fullscreen');
   const readOverlayLayout = () => fullscreen.evaluate((shell) => {
@@ -189,6 +194,7 @@ test('keeps active Get Pulled status and session actions clear at every supporte
           ? []
           : [`${cardIndex}:${card.clientWidth}x${card.clientHeight}/${card.scrollWidth}x${card.scrollHeight}`]
       )),
+      metricCardSurfaces: metricCards.slice(0, 5).map((card) => getComputedStyle(card).backgroundColor),
       metricColumns: getComputedStyle(metrics).gridTemplateColumns.split(' ').filter(Boolean).length,
       metricOverlaps,
       metricRows,
@@ -207,6 +213,11 @@ test('keeps active Get Pulled status and session actions clear at every supporte
       sceneDominatesMetrics: sceneRect.height >= metricsRect.height * 2,
       sceneRatio: sceneRect.height / viewRect.height,
       sceneWithinView: inside(viewRect, sceneRect) && insideViewport(sceneRect),
+      sessionSurface: getComputedStyle(view).backgroundColor,
+      viewportSurfaces: [
+        getComputedStyle(document.documentElement).backgroundColor,
+        getComputedStyle(document.body).backgroundColor,
+      ],
       timerTextContained: contentFits(timer),
       viewContained: contentFits(view),
     };
@@ -230,6 +241,7 @@ test('keeps active Get Pulled status and session actions clear at every supporte
         mainContained: true,
         metricCardsContained: true,
         metricCardOverflows: [],
+        metricCardSurfaces: Array(5).fill('rgb(24, 37, 28)'),
         metricColumns: viewport.columns,
         metricOverlaps: [],
         metricRows: Math.ceil(6 / viewport.columns),
@@ -237,8 +249,10 @@ test('keeps active Get Pulled status and session actions clear at every supporte
         phaseHandled: true,
         sceneDominatesMetrics: true,
         sceneWithinView: true,
+        sessionSurface: 'rgb(7, 16, 11)',
         timerTextContained: true,
         viewContained: true,
+        viewportSurfaces: ['rgb(7, 16, 11)', 'rgb(7, 16, 11)'],
       });
       expect(layout.dashboardBottomGap, `${context} keeps the dashboard bottom-anchored`).toBeLessThanOrEqual(12.5);
       const phone = Math.min(viewport.width, viewport.height) <= 430;
@@ -307,6 +321,12 @@ test('native TrackLab tablets use CSS utility fullscreen without requesting brow
     Object.defineProperty(window.navigator, 'userAgent', {
       configurable: true,
       get: () => 'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) TrackLabBMX-iOS',
+    });
+    // The Get Pulled scene must retain valid geometry on an older WebView as
+    // well as during iPad rotation, even when ResizeObserver is unavailable.
+    Object.defineProperty(window, 'ResizeObserver', {
+      configurable: true,
+      value: undefined,
     });
     let requestCalls = 0;
     const requestFullscreen = async () => {

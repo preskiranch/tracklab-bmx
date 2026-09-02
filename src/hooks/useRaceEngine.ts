@@ -28,6 +28,33 @@ export type RaceMetricAccumulator = {
   wattsSamples: number;
 };
 
+const maximumRacePhysicsStepSeconds = 0.05;
+const maximumRaceCatchUpSeconds = 2;
+
+/**
+ * Split a delayed animation frame into stable physics steps without discarding
+ * foreground time. Ghost playback uses the same real race clock, so dropping
+ * everything beyond 50 ms here made a live rider pause while the ghost kept
+ * moving. The two-second ceiling prevents a long-backgrounded tab from doing
+ * unbounded work when it becomes visible again.
+ */
+export function racePhysicsFrameSteps(elapsedMs: number) {
+  const elapsedSeconds = Math.min(
+    maximumRaceCatchUpSeconds,
+    Math.max(0.001, Number.isFinite(elapsedMs) ? elapsedMs / 1_000 : 0.001),
+  );
+  const steps: number[] = [];
+  let remaining = elapsedSeconds;
+
+  while (remaining > 0.000_001) {
+    const step = Math.min(maximumRacePhysicsStepSeconds, remaining);
+    steps.push(step);
+    remaining -= step;
+  }
+
+  return steps;
+}
+
 export function readyRaceRosterSignature(
   players: PlayerSlot[],
   branchChoicesByPlayer: BranchChoicesByPlayer = {},
@@ -248,13 +275,13 @@ export function useRaceEngine(
 
     const tick = (now: number) => {
       const last = lastFrameRef.current || now;
-      const dt = Math.min(0.05, Math.max(0.001, (now - last) / 1000));
+      const frameSteps = racePhysicsFrameSteps(now - last);
       lastFrameRef.current = now;
 
       setRiders((current) => {
         const frameNow = Date.now();
-        const next = stepRiders(
-          current,
+        const next = frameSteps.reduce((frameRiders, dt) => stepRiders(
+          frameRiders,
           playersRef.current,
           samplesRef.current,
           dt,
@@ -265,7 +292,7 @@ export function useRaceEngine(
           trackZonesRef.current,
           frameNow,
           inputAllowedAtRef.current,
-        );
+        ), current);
         const finishDeadline = nextRaceFinishDeadline(finishWindowEndsAtRef.current, next, frameNow);
         if (finishDeadline !== finishWindowEndsAtRef.current) {
           finishWindowEndsAtRef.current = finishDeadline;

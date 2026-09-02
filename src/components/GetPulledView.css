@@ -1,4 +1,5 @@
 .get-pulled-view{container:get-pulled / inline-size;display:grid;gap:16px;padding:18px;min-width:0}
+.get-pulled-view.get-pulled-session-active{background:#07100b;color:#fff}
 .get-pulled-hero{position:relative;min-width:0}
 .get-pulled-overlay{position:absolute;inset:18px 18px auto;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;z-index:2;pointer-events:none}
 .get-pulled-timer,.get-pulled-phase{border:1px solid rgba(255,255,255,.2);background:rgba(8,15,13,.86);color:#fff;border-radius:14px;padding:10px 16px;box-shadow:0 10px 28px rgba(0,0,0,.28);backdrop-filter:blur(10px)}
@@ -41,6 +42,9 @@
 .get-pulled-metric{border:1px solid #dce4dc;background:#fff;border-radius:14px;padding:14px;text-align:center}
 .get-pulled-metric strong{display:block;font-size:clamp(24px,3.2vw,42px);font-variant-numeric:tabular-nums}
 .get-pulled-metric small{color:#637064;text-transform:uppercase;letter-spacing:.06em}
+.get-pulled-session-active .get-pulled-metric{background:#18251c;border-color:#304435;color:#fff}
+.get-pulled-session-active .get-pulled-metric small{color:#b7c4b9}
+.get-pulled-session-active .get-pulled-pr-badge{color:#b6f18e}
 .get-pulled-results{border:2px solid #78df3b;background:#101a13;color:#fff;border-radius:16px;padding:18px}
 .get-pulled-results h3{margin:0 0 12px}
 .get-pulled-results .get-pulled-metric{background:#18251c;border-color:#304435}

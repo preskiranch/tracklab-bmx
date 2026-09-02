@@ -52,10 +52,38 @@ describe('race physics input gating', () => {
   });
 
   it('does not propel a rider from stale telemetry', () => {
-    const rider = step(10_000, 7_000);
+    const rider = step(13_001, 9_001);
     expect(rider.driveSource).toBe('coast');
     expect(rider.velocity).toBe(0);
     expect(rider.distance).toBe(0);
+  });
+
+  it('keeps a post-gate cadence live through a fresh partial Wattbike packet', () => {
+    const initialRider = step(10_000, 10_000);
+    const retainedCadencePacket: BikeSample = {
+      ...sample(10_000),
+      // A power characteristic arrived, but the cadence characteristic was not
+      // repeated. Browser Bluetooth preserves the latest cadence in this case.
+      at: 12_200,
+      watts: 0,
+      wattsAt: 12_200,
+      cadenceAt: 10_000,
+    };
+    const rider = stepRiders(
+      [initialRider],
+      [player],
+      new Map([[58701, retainedCadencePacket]]),
+      0.1,
+      9_000,
+      400,
+      {},
+      [],
+      [],
+      12_200,
+    )[0];
+
+    expect(rider.driveSource).toBe('cadence');
+    expect(rider.velocity).toBeGreaterThan(initialRider.velocity);
   });
 
   it('does not derive speed, distance, or a finish from over-limit cadence', () => {
@@ -103,6 +131,31 @@ describe('race physics input gating', () => {
     expect(rider.distance).toBe(0);
   });
 
+  it('does not make pre-gate cadence eligible when a later packet arrives', () => {
+    const riders = createInitialRiders([player]);
+    const rider = stepRiders(
+      riders,
+      [player],
+      new Map([[58701, {
+        ...sample(9_999),
+        at: 10_000,
+        watts: 0,
+        wattsAt: 10_000,
+        cadenceAt: 9_999,
+      }]]),
+      0.1,
+      10_000,
+      400,
+      {},
+      [],
+      [],
+      10_000,
+    )[0];
+
+    expect(rider.driveSource).toBe('coast');
+    expect(rider.distance).toBe(0);
+  });
+
   it('uses a valid post-red sample immediately on the first gate-drop frame', () => {
     const riders = createInitialRiders([player]);
     const rider = stepRiders(
@@ -124,11 +177,11 @@ describe('race physics input gating', () => {
     expect(rider.distance).toBeGreaterThan(0);
   });
 
-  it('moves on the first low but valid post-gate drive packet', () => {
+  it('moves on the first one-watt post-gate drive packet', () => {
     const riders = createInitialRiders([player]);
     const launchSample = {
       ...sample(10_000),
-      watts: 20,
+      watts: 1,
       cadence: 0,
       speedKph: null,
     };
