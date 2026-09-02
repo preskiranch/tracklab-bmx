@@ -9632,7 +9632,12 @@ export default function App() {
       setAppleBillingStatus('idle');
       setAppleBillingAction(null);
       setAppleBillingMessage(user.admin ? 'Administrator racer access unlocked.' : null);
-      setShowMembershipLanding(false);
+      // A normal sign-up/sign-in completes at Community Home, matching every
+      // other ordinary app or web launch. Deep links such as club and friend
+      // invitations keep their deliberate in-app destination instead.
+      setShowMembershipLanding(shouldOpenCommunityHomeOnLaunch(
+        typeof window === 'undefined' ? '/' : window.location.href,
+      ));
       setPlayMode('multiplayer');
       setAppMode('race');
       return true;
