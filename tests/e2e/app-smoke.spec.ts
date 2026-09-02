@@ -587,9 +587,13 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   await expect(createAccount).toBeDisabled();
   releaseRegistration?.();
 
-  await expect(page.getByLabel('Race controls')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Your BMX home base.' })).toBeVisible();
   await expect(page).not.toHaveURL(/locator=/);
+  await page.getByRole('button', { name: 'Open App', exact: true }).click();
+  await expect(page.getByLabel('Race controls')).toBeVisible();
   await page.reload();
+  await expect(page.getByRole('heading', { name: 'Your BMX home base.' })).toBeVisible();
+  await page.getByRole('button', { name: 'Open App', exact: true }).click();
   await expect(page.getByLabel('Race controls')).toBeVisible();
   await expect(page.locator('.race-control-dock')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Straight Sprint', exact: true })).toBeVisible();
