@@ -17,10 +17,13 @@ describe('startup Community landing', () => {
     )).toBe(true);
   });
 
-  it('does not replace an explicit activity, room, or invitation deep link', () => {
+  it('keeps a selected track for Open App but starts the session from Community home', () => {
     expect(shouldOpenCommunityHomeOnLaunch(
       'https://tracklab-bmx.onrender.com/?track=chula-vista-elite-bmx',
-    )).toBe(false);
+    )).toBe(true);
+  });
+
+  it('does not replace a room, invitation, or account handoff deep link', () => {
     expect(shouldOpenCommunityHomeOnLaunch(
       'https://tracklab-bmx.onrender.com/?room=club-race',
     )).toBe(false);

@@ -4,8 +4,10 @@
  * TrackLab's normal entry point is the Community home. The public directory
  * URLs are also rendered by that surface, so they intentionally remain there
  * and select their requested tab. In contrast, invitations, rooms, and a
- * saved activity-track URL have a specific in-app destination and must not be
- * replaced by the Community home on launch.
+ * saved track selection remains available after the rider chooses Open App,
+ * but it must not bypass the Community home on launch. Invitations, rooms,
+ * and account handoffs do have a specific in-app destination and remain
+ * direct launches.
  */
 export function shouldOpenCommunityHomeOnLaunch(href: string | null | undefined) {
   try {
@@ -17,8 +19,7 @@ export function shouldOpenCommunityHomeOnLaunch(href: string | null | undefined)
 
     if (opensCommunityDirectory) return true;
 
-    const opensWorkspace = url.searchParams.has('track')
-      || url.searchParams.has('room')
+    const opensWorkspace = url.searchParams.has('room')
       || url.searchParams.has('clubInvite')
       || url.searchParams.has('friendInvite')
       || url.searchParams.has('heartRateStudioInvite')
