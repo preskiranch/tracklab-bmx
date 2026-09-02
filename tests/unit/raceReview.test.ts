@@ -432,4 +432,66 @@ describe('post-race pedal-zone results', () => {
     expect(finalZone?.topWatts).toBeLessThan(middleZone?.topWatts ?? 0);
     expect(results.every((zone) => (zone.riders[0]?.topWatts ?? 0) > 0)).toBe(true);
   });
+
+  it('uses captured live frames when delayed bike packets do not cover later zones', () => {
+    const capture = baseCapture();
+    capture.players = [capture.players[0]];
+    capture.summary = [capture.summary[0]];
+    capture.frames = [
+      frame(1_000, [{ playerId: 1, distanceMeters: 0, speedKph: 0, cadence: 0, watts: 0 }]),
+      frame(2_000, [{ playerId: 1, distanceMeters: 20, speedKph: 20, cadence: 90, watts: 500 }]),
+      frame(3_000, [{ playerId: 1, distanceMeters: 40, speedKph: 30, cadence: 110, watts: 800 }]),
+      frame(4_000, [{ playerId: 1, distanceMeters: 60, speedKph: 25, cadence: 95, watts: 600 }]),
+    ];
+    // These are real device packets, but their position did not advance beyond
+    // the first zone before the ride finished. The persisted race frames are
+    // the trustworthy position history for this recording.
+    capture.samples = [
+      {
+        at: 1_200,
+        elapsedMs: 200,
+        playerId: 1,
+        riderName: 'Rider 1',
+        deviceId: 58_701,
+        deviceLabel: 'Bike 58701',
+        source: 'bluetooth',
+        watts: 450,
+        cadence: 85,
+        speedKph: 18,
+        signal: 90,
+        riderDistanceMeters: 4,
+        riderVelocityMps: 5,
+        riderPhase: 'pedaling',
+        rank: 1,
+      },
+      {
+        at: 2_200,
+        elapsedMs: 1_200,
+        playerId: 1,
+        riderName: 'Rider 1',
+        deviceId: 58_701,
+        deviceLabel: 'Bike 58701',
+        source: 'bluetooth',
+        watts: 500,
+        cadence: 90,
+        speedKph: 20,
+        signal: 90,
+        riderDistanceMeters: 8,
+        riderVelocityMps: 5.56,
+        riderPhase: 'pedaling',
+        rank: 1,
+      },
+    ];
+
+    const secondZone = zoneRiderResult(buildRaceZoneResults(capture), 'zone-2', 1);
+
+    expect(secondZone).toMatchObject({
+      sampleCount: 3,
+      entryElapsedMs: 1_500,
+      exitElapsedMs: 3_000,
+      topCadence: 110,
+      topWatts: 800,
+    });
+    expect(secondZone?.averageSpeedKph).toBeGreaterThan(20);
+  });
 });

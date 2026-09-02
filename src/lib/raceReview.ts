@@ -127,13 +127,45 @@ function dedupePoints(points: RaceMetricPoint[]) {
   ));
 }
 
+function samplePointsCoverRecordedRace(
+  samplePoints: RaceMetricPoint[],
+  framePoints: RaceMetricPoint[],
+  summary: RaceSummaryEntry | undefined,
+) {
+  if (samplePoints.length < 2) {
+    return false;
+  }
+
+  const recordedDistanceMeters = Math.max(
+    summary?.distanceMeters ?? 0,
+    ...samplePoints.map((point) => point.distanceMeters),
+    ...framePoints.map((point) => point.distanceMeters),
+  );
+  let furthestDistanceMeters = samplePoints[0].distanceMeters;
+
+  for (const point of samplePoints.slice(1)) {
+    // Zone boundary interpolation requires an ordered position history. A
+    // delayed device packet can otherwise make a completed race look like it
+    // never reached the later zones.
+    if (point.distanceMeters < furthestDistanceMeters - distanceEpsilonMeters) {
+      return false;
+    }
+    furthestDistanceMeters = Math.max(furthestDistanceMeters, point.distanceMeters);
+  }
+
+  return furthestDistanceMeters >= recordedDistanceMeters - distanceEpsilonMeters;
+}
+
 function pointsForPlayer(capture: RaceCapture, playerId: PlayerSlot['id']) {
   const samplePoints = pointsFromSamples(capture, playerId);
   const framePoints = pointsFromFrames(capture, playerId);
   const summary = capture.summary.find((entry) => entry.playerId === playerId);
-  // Bike packets carry the authoritative cadence and power readings. Frames are
-  // a fallback for devices that emit too few packets to cover a complete race.
-  const points = dedupePoints(samplePoints.length >= 2 ? samplePoints : framePoints)
+  // Bike packets carry the authoritative cadence and power readings, but only
+  // use them as the position series when they cover the recorded ride. Frames
+  // capture the same live rider telemetry alongside the simulated position and
+  // keep later zones reviewable when a device reports a stale location packet.
+  const useSamplePoints = samplePointsCoverRecordedRace(samplePoints, framePoints, summary);
+  const points = dedupePoints(useSamplePoints || framePoints.length === 0 ? samplePoints : framePoints)
     .filter((point) => summary?.finishTimeMs == null || point.elapsedMs <= summary.finishTimeMs);
   if (points.length === 0) {
     return points;
