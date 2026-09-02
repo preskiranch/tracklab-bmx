@@ -72,6 +72,7 @@ import {
   updateBikeRaceAudio,
 } from './lib/bikeRaceAudio';
 import { safeSetLocalStorage } from './lib/browserStorage';
+import { shouldOpenCommunityHomeOnLaunch } from './lib/startupLanding';
 import { resolveHeartRateResultsMetricState } from './lib/heartRateMetric';
 import { isTrackLabNativeShell, trackLabServiceOrigin } from './lib/serviceOrigins';
 import {
@@ -2097,11 +2098,8 @@ export default function App() {
     || (resultsMode && lastRaceWasSprintRef.current) ? 'straight-sprint' : 'race';
   const [membership, setMembership] = useState<MembershipState>(() => initialMembershipRef.current ?? createMembership('visitor'));
   const [showMembershipLanding, setShowMembershipLanding] = useState(
-    () => !initialClubTabletDeviceRef.current && (
-      initialMembershipRef.current?.tier === 'visitor'
-      || currentSearchParam('locator') != null
-      || window.location.hash === '#track-locator'
-      || window.location.hash === '#bike-shop-directory'
+    () => !initialClubTabletDeviceRef.current && shouldOpenCommunityHomeOnLaunch(
+      typeof window === 'undefined' ? '/' : window.location.href,
     ),
   );
   const [appleConnectionCount, setAppleConnectionCount] = useState(() => (
@@ -3517,7 +3515,10 @@ export default function App() {
   }, [catalogDatabaseReady, catalogTracks, selectedCountry, selectedState, selectedTrackId]);
 
   useEffect(() => {
-    if (initialUrlTrackPending || currentSearchParam('locator') != null) {
+    // The Community hub is the regular launch surface. Do not turn a clean
+    // home URL into an activity deep link while it is visible; otherwise a
+    // normal refresh would unexpectedly bypass the home page.
+    if (showMembershipLanding || initialUrlTrackPending || currentSearchParam('locator') != null) {
       return;
     }
 
@@ -3528,7 +3529,7 @@ export default function App() {
     const url = new URL(window.location.href);
     url.searchParams.set('track', selectedTrackId);
     window.history.replaceState(null, '', url);
-  }, [initialUrlTrackPending, selectedTrackId]);
+  }, [initialUrlTrackPending, selectedTrackId, showMembershipLanding]);
 
   const countries = useMemo(() => countriesForCatalog(baseCatalogTracks), [baseCatalogTracks]);
   const states = useMemo(() => statesForCountry(selectedCountry, baseCatalogTracks), [baseCatalogTracks, selectedCountry]);

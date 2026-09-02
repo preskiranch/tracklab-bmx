@@ -492,6 +492,28 @@ test('public app hub keeps tabs, deep links, scroll, and responsive pricing in s
   expect(pricingGeometry.documentFits).toBe(true);
 });
 
+test('signed-in root launch opens Community home without creating an activity URL', async ({ page }) => {
+  const authUser = {
+    id: 'community-home-rider',
+    profileKey: 'user:community-home-rider',
+    email: 'community-home@tracklab.test',
+    name: 'Community Home Rider',
+    admin: false,
+    membership: { tier: 'spectator', bikeSeats: 1, updatedAt: Date.now() },
+  };
+  await page.route('**/api/auth/me', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ user: authUser }),
+  }));
+  await page.route('https://maps.googleapis.com/**', (route) => route.abort());
+
+  await page.goto('/');
+
+  await expect(page.getByRole('heading', { name: 'Your BMX home base.' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open App', exact: true })).toBeVisible();
+  await expect.poll(() => new URL(page.url()).searchParams.has('track')).toBe(false);
+});
+
 test('first-run profile flow opens the TrackLab dashboard', async ({ page }, testInfo) => {
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
