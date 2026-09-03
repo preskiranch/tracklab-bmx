@@ -4,7 +4,6 @@ import {
   Globe2,
   Map as MapIcon,
   MapPin,
-  PersonStanding,
   RotateCcw,
   Store,
 } from 'lucide-react';
@@ -31,7 +30,6 @@ import {
   publicTrackExplorerPoint,
 } from '../lib/publicTrackExplorer';
 import type { TrackLocatorRecord } from '../types';
-import { PublicTrackStreetViewCoverage } from './PublicTrackStreetViewCoverage';
 
 type PublicTrackEarthViewProps = {
   onClose: () => void;
@@ -137,9 +135,10 @@ function createBikeShopMarker(
   try {
     const marker = new Constructor({
       altitudeMode: 'RELATIVE_TO_GROUND',
-      collisionBehavior: 'OPTIONAL_AND_HIDES_LOWER_PRIORITY',
+      collisionBehavior: 'REQUIRED',
       drawsWhenOccluded: false,
-      extruded: false,
+      extruded: true,
+      label: shop.name,
       position: { lat: shop.latitude, lng: shop.longitude, altitude },
       sizePreserved: true,
       title: `${shop.name}. Open TrackLab bike shop details`,
@@ -183,7 +182,6 @@ export function PublicTrackEarthView({
   const allMarkers = useMemo(() => publicTrackExplorerMarkers(tracks), [tracks]);
   const originPoint = useMemo(() => publicTrackExplorerPoint(originTrack), [originTrack]);
   const [viewState, setViewState] = useState<EarthViewState>('loading');
-  const [earthMode, setEarthMode] = useState<'3d' | 'street-view'>('3d');
   const [showMapLabels, setShowMapLabels] = useState(true);
   const [showBikeShops, setShowBikeShops] = useState(false);
   const [bikeShops, setBikeShops] = useState<BikeShopRecord[]>([]);
@@ -193,7 +191,6 @@ export function PublicTrackEarthView({
     center: originPoint ?? { lat: 0, lng: 0 },
     range: publicTrackEarthInitialRangeMeters,
   }));
-  const [streetViewCenter, setStreetViewCenter] = useState(() => originPoint ?? { lat: 0, lng: 0 });
   const [visibleTrackCount, setVisibleTrackCount] = useState(1);
   onShopSelectRef.current = onShopSelect;
   onTrackSelectRef.current = onTrackSelect;
@@ -447,7 +444,6 @@ export function PublicTrackEarthView({
   }, [bikeShopStatus, bikeShops, showBikeShops]);
 
   const resetToOrigin = () => {
-    setEarthMode('3d');
     const map = mapRef.current;
     if (!map || !originPoint) return;
     const camera = {
@@ -485,16 +481,6 @@ export function PublicTrackEarthView({
     setShowBikeShops((current) => !current);
   };
 
-  const toggleStreetView = () => {
-    if (earthMode === 'street-view') {
-      setEarthMode('3d');
-      return;
-    }
-    const center = validCameraCenter(mapRef.current?.center, originPoint ?? cameraSnapshot.center);
-    setStreetViewCenter(center);
-    setEarthMode('street-view');
-  };
-
   const bikeShopStatusLabel = bikeShopStatus === 'loading'
     ? 'Loading bike shops in this view…'
     : bikeShopStatus === 'zoom'
@@ -520,38 +506,25 @@ export function PublicTrackEarthView({
           <ArrowLeft size={19} /> <span>Back to TrackLab</span>
         </button>
         <div className="public-track-earth-title">
-          <span>{earthMode === '3d' ? 'Global 3D Track Explorer' : 'Street View Explorer'}</span>
-          <strong>{earthMode === '3d' ? originTrack.name : 'Current 3D map area'}</strong>
+          <span>Global 3D Track Explorer</span>
+          <strong>{originTrack.name}</strong>
         </div>
         <div className="public-track-earth-toolbar-actions">
-          {earthMode === '3d' && (
-            <>
-              <button
-                type="button"
-                aria-pressed={showMapLabels}
-                aria-label={showMapLabels ? 'Hide map boundaries and labels' : 'Show map boundaries and labels'}
-                onClick={toggleMapLabels}
-              >
-                <MapIcon size={18} /> <span>{showMapLabels ? 'Labels on' : 'Labels off'}</span>
-              </button>
-              <button
-                type="button"
-                aria-pressed={showBikeShops}
-                aria-label={showBikeShops ? 'Hide blue bike shop pins' : 'Show blue bike shop pins'}
-                onClick={toggleBikeShops}
-              >
-                <Store size={18} /> <span>{showBikeShops ? 'Shops on' : 'Shops off'}</span>
-              </button>
-            </>
-          )}
           <button
             type="button"
-            aria-pressed={earthMode === 'street-view'}
-            aria-label={earthMode === 'street-view' ? 'Return to the 3D track map' : 'Show Street View coverage and Pegman'}
-            onClick={toggleStreetView}
+            aria-pressed={showMapLabels}
+            aria-label={showMapLabels ? 'Hide map boundaries and labels' : 'Show map boundaries and labels'}
+            onClick={toggleMapLabels}
           >
-            {earthMode === 'street-view' ? <Globe2 size={18} /> : <PersonStanding size={18} />}
-            <span>{earthMode === 'street-view' ? '3D view' : 'Street View'}</span>
+            <MapIcon size={18} /> <span>{showMapLabels ? 'Labels on' : 'Labels off'}</span>
+          </button>
+          <button
+            type="button"
+            aria-pressed={showBikeShops}
+            aria-label={showBikeShops ? 'Hide blue bike shop pins' : 'Show blue bike shop pins'}
+            onClick={toggleBikeShops}
+          >
+            <Store size={18} /> <span>{showBikeShops ? 'Bike shops on' : 'Bike shops off'}</span>
           </button>
           <button type="button" onClick={resetToOrigin} aria-label={`Return global explorer to ${originTrack.name}`}>
             <RotateCcw size={18} /> <span>Return to track</span>
@@ -559,49 +532,36 @@ export function PublicTrackEarthView({
         </div>
       </header>
 
-      <div className={`public-track-earth-map${earthMode === '3d' ? '' : ' is-hidden'}`} ref={containerRef} />
-      {earthMode === 'street-view' && (
-        <PublicTrackStreetViewCoverage
-          center={streetViewCenter}
-          onBackTo3D={() => setEarthMode('3d')}
-        />
-      )}
+      <div className="public-track-earth-map" ref={containerRef} />
 
-      <div className={`public-track-earth-guide ${earthMode}`} role="status" aria-live="polite">
-        {earthMode === '3d' ? <MapPin size={18} /> : <PersonStanding size={18} />}
-        {earthMode === '3d' ? (
-          <span>
-            <strong>{visibleTrackCount.toLocaleString()} red {visibleTrackCount === 1 ? 'track pin' : 'track pins'} loaded</strong>
-            <small>
-              <span>Zoom out for more tracks. {showBikeShops ? bikeShopStatusLabel : 'Turn on shops to add clickable blue bike-shop pins.'}</span>
-              {showBikeShops && bikeShopStatus === 'ready' && bikeShopViewportMeta?.notice && (
-                <span>{bikeShopViewportMeta.notice}</span>
-              )}
-              {showBikeShops && bikeShopStatus === 'ready' && bikeShopViewportMeta?.degraded && !bikeShopViewportMeta.notice && (
-                <span>Some bike-shop sources are temporarily unavailable; the visible pins may be incomplete.</span>
-              )}
-              {showBikeShops && bikeShopStatus === 'ready' && bikeShopViewportMeta && bikeShopViewportMeta.attributions.length > 0 && (
-                <span className="public-track-earth-guide__attribution">
-                  Bike shop sources:{' '}
-                  {bikeShopViewportMeta.attributions.map((attribution, index) => (
-                    <span key={`${attribution.url}-${attribution.text}`}>
-                      {index > 0 && ' · '}
-                      <a href={attribution.url} target="_blank" rel="noreferrer">{attribution.text}</a>
-                    </span>
-                  ))}
-                </span>
-              )}
-            </small>
-          </span>
-        ) : (
-          <span>
-            <strong>Street View coverage in the current map area</strong>
-            <small>Blue roads have Street View imagery. Click a blue road or use Google Pegman, then return to the preserved 3D view.</small>
-          </span>
-        )}
+      <div className="public-track-earth-guide" role="status" aria-live="polite">
+        <MapPin size={18} />
+        <span>
+          <strong>{visibleTrackCount.toLocaleString()} red {visibleTrackCount === 1 ? 'track pin' : 'track pins'} loaded</strong>
+          <small>
+            <span>Zoom out for more tracks. {showBikeShops ? bikeShopStatusLabel : 'Turn on bike shops to add clickable blue bike-shop pins.'}</span>
+            {showBikeShops && bikeShopStatus === 'ready' && bikeShopViewportMeta?.notice && (
+              <span>{bikeShopViewportMeta.notice}</span>
+            )}
+            {showBikeShops && bikeShopStatus === 'ready' && bikeShopViewportMeta?.degraded && !bikeShopViewportMeta.notice && (
+              <span>Some bike-shop sources are temporarily unavailable; the visible pins may be incomplete.</span>
+            )}
+            {showBikeShops && bikeShopStatus === 'ready' && bikeShopViewportMeta && bikeShopViewportMeta.attributions.length > 0 && (
+              <span className="public-track-earth-guide__attribution">
+                Bike shop sources:{' '}
+                {bikeShopViewportMeta.attributions.map((attribution, index) => (
+                  <span key={`${attribution.url}-${attribution.text}`}>
+                    {index > 0 && ' · '}
+                    <a href={attribution.url} target="_blank" rel="noreferrer">{attribution.text}</a>
+                  </span>
+                ))}
+              </span>
+            )}
+          </small>
+        </span>
       </div>
 
-      {earthMode === '3d' && viewState !== 'ready' && (
+      {viewState !== 'ready' && (
         <div className={`public-track-earth-loading ${viewState}`}>
           <Globe2 size={34} />
           <strong>{viewState === 'loading' ? 'Opening the global track explorer' : 'Global 3D Track Explorer is unavailable'}</strong>

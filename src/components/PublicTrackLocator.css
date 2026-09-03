@@ -825,127 +825,6 @@
   background: #101b25;
 }
 
-.public-track-earth-map.is-hidden {
-  visibility: hidden;
-}
-
-.public-track-street-view {
-  position: relative;
-  z-index: 2;
-  grid-area: 2 / 1;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  background: #101b25;
-}
-
-.public-track-street-view__coverage,
-.public-track-street-view__panorama,
-.public-track-street-view__panorama > div:first-child {
-  position: absolute;
-  inset: 0;
-}
-
-.public-track-street-view__status {
-  position: absolute;
-  z-index: 4;
-  inset: 0;
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: 7px;
-  padding: 24px;
-  background: rgba(7, 16, 24, 0.92);
-  color: #ffffff;
-  text-align: center;
-}
-
-.public-track-street-view__status > span {
-  max-width: 460px;
-  color: #d8e2ea;
-  font-size: 13px;
-  line-height: 1.45;
-}
-
-.public-track-street-view__status.error strong {
-  color: #ffb7b7;
-}
-
-.public-track-street-view__status > div {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 6px;
-}
-
-.public-track-street-view__status button,
-.public-track-street-view__panorama > header button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-height: 44px;
-  padding: 0 13px;
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  border-radius: 8px;
-  background: rgba(7, 16, 24, 0.94);
-  color: #ffffff;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 900;
-}
-
-.public-track-street-view__panorama {
-  z-index: 5;
-  background: #101b25;
-}
-
-.public-track-street-view__panorama > header {
-  position: absolute;
-  z-index: 3;
-  top: max(10px, env(safe-area-inset-top));
-  left: max(10px, env(safe-area-inset-left));
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  max-width: calc(100% - 20px);
-}
-
-.public-track-street-view__panorama > header > span {
-  display: grid;
-  min-width: 0;
-  padding: 8px 11px;
-  border-radius: 8px;
-  background: rgba(7, 16, 24, 0.92);
-  color: #ffffff;
-}
-
-.public-track-street-view__panorama > header strong,
-.public-track-street-view__panorama > header small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.public-track-street-view__panorama > header small {
-  color: #d8e2ea;
-  font-size: 11px;
-}
-
-.public-track-street-view__panorama > footer {
-  position: absolute;
-  z-index: 3;
-  right: 10px;
-  bottom: 10px;
-  max-width: calc(100% - 20px);
-  padding: 7px 10px;
-  border-radius: 7px;
-  background: rgba(7, 16, 24, 0.88);
-  color: #ffffff;
-  font-size: 11px;
-}
-
 .public-track-earth-guide {
   grid-area: 3 / 1;
   display: flex;
@@ -966,10 +845,6 @@
   color: #ef3038;
 }
 
-.public-track-earth-guide.street-view > svg {
-  color: #1687ff;
-}
-
 .public-track-earth-guide > span {
   display: grid;
   gap: 1px;
@@ -978,10 +853,6 @@
 .public-track-earth-guide strong {
   color: #ff6b70;
   font-size: 13px;
-}
-
-.public-track-earth-guide.street-view strong {
-  color: #5ba9ff;
 }
 
 .public-track-earth-guide small {

@@ -183,34 +183,6 @@ async function installGoogleEarthMock(page: Page) {
       }
     }
 
-    class MockStreetViewCoverageLayer {
-      setMap(map: MockMap | null) {
-        const state = (window as typeof window & { __tracklabEarthState?: { coverageMap: MockMap | null } }).__tracklabEarthState;
-        if (state) state.coverageMap = map;
-      }
-    }
-
-    class MockStreetViewService {
-      async getPanorama(request: { location: Point }) {
-        return {
-          data: {
-            copyright: 'Mock Street View',
-            imageDate: '2026-09',
-            location: { description: 'Mock blue road', pano: 'mock-pano', point: request.location },
-          },
-        };
-      }
-    }
-
-    class MockStreetViewPanorama {
-      constructor(_element: HTMLElement, options: Record<string, unknown>) {
-        const state = (window as typeof window & { __tracklabEarthState?: { panoramas: Array<Record<string, unknown>> } }).__tracklabEarthState;
-        state?.panoramas.push(options);
-      }
-      focus() {}
-      setVisible() {}
-    }
-
     if (!customElements.get('tracklab-public-map-3d')) {
       customElements.define('tracklab-public-map-3d', MockMap3DElement);
       customElements.define('tracklab-public-polyline-3d', MockPolyline3DElement);
@@ -225,17 +197,11 @@ async function installGoogleEarthMock(page: Page) {
       Polyline3DElement: customElements.get('tracklab-public-polyline-3d'),
     };
     const markerLibrary = { PinElement: customElements.get('tracklab-public-pin') };
-    const streetViewLibrary = {
-      StreetViewCoverageLayer: MockStreetViewCoverageLayer,
-      StreetViewPanorama: MockStreetViewPanorama,
-      StreetViewService: MockStreetViewService,
-    };
     const state = {
-      coverageMap: null as MockMap | null,
+      imports: [] as string[],
       maps: [] as MockMap3DElement[],
       maps2d: [] as MockMap[],
       markers: [] as MockMarker3DElement[],
-      panoramas: [] as Array<Record<string, unknown>>,
       pins: [] as MockPinElement[],
     };
     Object.defineProperty(window, '__tracklabEarthState', { configurable: true, value: state });
@@ -244,13 +210,14 @@ async function installGoogleEarthMock(page: Page) {
       value: {
         maps: {
           event: { trigger() {} },
-          importLibrary: async (name: string) => name === 'maps3d'
-            ? maps3d
-            : name === 'marker'
-              ? markerLibrary
-              : name === 'streetView'
-                ? streetViewLibrary
-                : {},
+          importLibrary: async (name: string) => {
+            state.imports.push(name);
+            return name === 'maps3d'
+              ? maps3d
+              : name === 'marker'
+                ? markerLibrary
+                : {};
+          },
           LatLngBounds: MockBounds,
           Map: MockMap,
           Marker: MockMarker,
@@ -320,7 +287,7 @@ test('global 3D explorer starts at one track, reveals tracks with camera range, 
   const earth = page.getByRole('dialog', { name: `Global 3D track explorer starting at ${tracks[0].name}` });
   await expect(earth).toBeVisible();
   await expect(earth.getByText('1 red track pin loaded')).toBeVisible();
-  await expect(earth.getByText(/Turn on shops to add clickable blue bike-shop pins/)).toBeVisible();
+  await expect(earth.getByText(/Turn on bike shops to add clickable blue bike-shop pins/)).toBeVisible();
   await expect.poll(() => page.evaluate(() => {
     type Point = { lat: number; lng: number; altitude?: number };
     const state = (window as typeof window & {
@@ -425,7 +392,9 @@ test('global 3D explorer toggles blue bike-shop pins and opens the exact shop in
   const earth = page.getByRole('dialog', { name: `Global 3D track explorer starting at ${tracks[0].name}` });
   const shopToggle = earth.getByRole('button', { name: 'Show blue bike shop pins' });
   await expect(shopToggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(shopToggle).toContainText('Bike shops off');
   await shopToggle.click();
+  await expect(earth.getByRole('button', { name: 'Hide blue bike shop pins' })).toContainText('Bike shops on');
   await expect(earth.getByText(/1 bike shop loaded as blue pins.*result limit/)).toBeVisible();
   await expect(earth.getByText('Showing catalog results while one live source is unavailable.')).toBeVisible();
   const attributionLink = earth.getByRole('link', { name: '© OpenStreetMap contributors' });
@@ -437,11 +406,31 @@ test('global 3D explorer toggles blue bike-shop pins and opens the exact shop in
   );
   await expect.poll(() => page.evaluate((shopName) => {
     const state = (window as any).__tracklabEarthState;
+    const shopMarker = state.markers.find(
+      (marker: any) => marker.isConnected && marker.title.includes(shopName),
+    );
     return {
       bluePins: state.pins.filter((pin: any) => pin.isConnected && pin.background === '#1687ff').length,
-      shopMarkers: state.markers.filter((marker: any) => marker.isConnected && marker.title.includes(shopName)).length,
+      shopMarker: shopMarker ? {
+        altitudeMode: shopMarker.altitudeMode,
+        collisionBehavior: shopMarker.collisionBehavior,
+        elevated: Number(shopMarker.position.altitude) > 0,
+        extruded: shopMarker.extruded,
+        label: shopMarker.label,
+        sizePreserved: shopMarker.sizePreserved,
+      } : null,
     };
-  }, bikeShop.name)).toEqual({ bluePins: 1, shopMarkers: 1 });
+  }, bikeShop.name)).toEqual({
+    bluePins: 1,
+    shopMarker: {
+      altitudeMode: 'RELATIVE_TO_GROUND',
+      collisionBehavior: 'REQUIRED',
+      elevated: true,
+      extruded: true,
+      label: bikeShop.name,
+      sizePreserved: true,
+    },
+  });
 
   await page.evaluate((shopName) => {
     const marker = (window as any).__tracklabEarthState.markers
@@ -456,7 +445,7 @@ test('global 3D explorer toggles blue bike-shop pins and opens the exact shop in
   await expect(directory.getByText(bikeShop.name, { exact: true }).first()).toBeVisible();
 });
 
-test('Street View person control shows official blue coverage roads and opens a clickable panorama', async ({ page }) => {
+test('global 3D explorer omits the removed Street View companion mode', async ({ page }) => {
   await installGoogleEarthMock(page);
   await routePublicDirectory(page);
   await page.goto(`/?locator=${tracks[0].id}#track-locator`);
@@ -465,28 +454,12 @@ test('Street View person control shows official blue coverage roads and opens a 
   }).click();
 
   const earth = page.getByRole('dialog', { name: `Global 3D track explorer starting at ${tracks[0].name}` });
-  await earth.getByRole('button', { name: 'Show Street View coverage and Pegman' }).click();
-  await expect(earth.getByRole('region', { name: 'Street View coverage in the current map area' })).toBeVisible();
-  await expect(earth.getByText(/Blue roads have Street View imagery/)).toBeVisible();
-  await expect.poll(() => page.evaluate(() => {
-    const state = (window as any).__tracklabEarthState;
-    return {
-      coverageActive: Boolean(state.coverageMap),
-      streetViewControl: state.coverageMap?.options?.streetViewControl,
-    };
-  })).toEqual({ coverageActive: true, streetViewControl: true });
-
-  await page.evaluate(() => {
-    (window as any).__tracklabEarthState.coverageMap?.emitClick({ lat: 38.299, lng: -122.284 });
-  });
-  const panorama = earth.getByRole('region', { name: 'Street View in the selected map area' });
-  await expect(panorama).toBeVisible();
-  await expect(panorama.getByText('Mock blue road')).toBeVisible();
-  await expect.poll(() => page.evaluate(() => (window as any).__tracklabEarthState.panoramas.length)).toBe(1);
-  await panorama.getByRole('button', { name: 'Back to blue roads' }).click();
-  await expect(panorama).toHaveCount(0);
-  await earth.getByRole('button', { name: 'Return to the 3D track map' }).click();
-  await expect(earth.getByRole('button', { name: 'Show Street View coverage and Pegman' })).toBeVisible();
+  await expect(earth.getByRole('button', { name: /Street View/i })).toHaveCount(0);
+  await expect(earth.getByRole('region', { name: /Street View/i })).toHaveCount(0);
+  await expect(earth.getByText(/Blue roads have Street View imagery/)).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (
+    (window as any).__tracklabEarthState.imports.includes('streetView')
+  ))).toBe(false);
 });
 
 test('global 3D controls fit tablet and phone viewports and return focus to their separate launcher', async ({ page }) => {
