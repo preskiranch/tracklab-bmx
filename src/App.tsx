@@ -101,6 +101,7 @@ import {
 } from './lib/bmxGateStart';
 import {
   appendProSetZoneBoundaryMeter,
+  applyTrackRouteVariant,
   applyUserTrackMapping,
   captureZoneBoundaryAnchors,
   clubEventTrackMapping,
@@ -138,6 +139,10 @@ import {
 } from './lib/trackMapping';
 import { playerVisualForSlot } from './lib/playerIdentity';
 import { canonicalPlayerAccent } from './lib/playerPalette';
+import {
+  canonicalizeMultiplayerRaceSetup,
+  multiplayerRaceSetupLabel,
+} from './lib/multiplayerRaceSetup';
 import {
   fetchLocationPredictions,
   hasGoogleMapsApiKey,
@@ -381,6 +386,7 @@ import type {
   MappingEditMode,
   MetricKey,
   MultiplayerRaceState,
+  MultiplayerRaceSetup,
   MultiplayerTrackVoteCandidate,
   PersonalRecords,
   PlayerId,
@@ -476,6 +482,7 @@ const loadMultiplayerPanel = () => import('./components/MultiplayerPanel').then(
   default: module.MultiplayerPanel,
 }));
 const MultiplayerPanel = lazy(loadMultiplayerPanel);
+const QuickRaceLobby = lazy(() => import('./components/QuickRaceLobby'));
 
 const defaultTrack = trackCatalog.find((track) => track.id === 'chula-vista-elite-bmx') ?? trackCatalog[0];
 const customRouteInitialZoom = 18;
@@ -1956,6 +1963,7 @@ export default function App() {
   const cloudUserDataAvailableRef = useRef(false);
   const mappingBackfillProfileRef = useRef<string | null>(null);
   const roomTrackApplyRef = useRef<string | null>(null);
+  const roomSetupApplyRef = useRef<string | null>(null);
   const lastRoomRaceTokenRef = useRef<string | null>(null);
   const latestRoomRaceKeyRef = useRef<string | null>(null);
   const roomRaceStartTimeoutRef = useRef<number | null>(null);
@@ -1989,6 +1997,8 @@ export default function App() {
   const [customRoutes, setCustomRoutes] = useState<TrackRecord[]>(initialCustomRoutes);
   const [publicCustomRoutes, setPublicCustomRoutes] = useState<TrackRecord[]>([]);
   const [clubEventTrack, setClubEventTrack] = useState<TrackRecord | null>(null);
+  const [multiplayerRaceSetup, setMultiplayerRaceSetup] = useState<MultiplayerRaceSetup | null>(null);
+  const [multiplayerSetupSelectionRoomId, setMultiplayerSetupSelectionRoomId] = useState<string | null>(null);
   const [storedMappings, setStoredMappings] = useState<StoredTrackMappings>(readStoredTrackMappings);
   const storedMappingsRef = useRef(storedMappings);
   const [publicTrackMappings, setPublicTrackMappings] = useState<StoredTrackMappings>({});
@@ -3451,14 +3461,23 @@ export default function App() {
     ? savedStraightSprintCourses
     : publicStraightSprintCourses;
   const straightSprintVenueCourses = useMemo<StraightSprintCourse[]>(() => {
-    if (clubEventLaunch?.activityType !== 'straight-sprint' || !clubEventTrack) {
+    const sharedSprintCourseActive = clubEventLaunch?.activityType === 'straight-sprint'
+      || multiplayerRaceSetup?.configuration.activityType === 'straight-sprint'
+      || multiplayerSetupSelectionRoomId != null;
+    if (!sharedSprintCourseActive || !clubEventTrack) {
       return savedStraightSprintCourses;
     }
     return [
       { track: clubEventTrack, course: clubEventTrack, mapping: undefined },
       ...savedStraightSprintCourses.filter(({ track }) => track.id !== clubEventTrack.id),
     ];
-  }, [clubEventLaunch?.activityType, clubEventTrack, savedStraightSprintCourses]);
+  }, [
+    clubEventLaunch?.activityType,
+    clubEventTrack,
+    multiplayerRaceSetup?.configuration.activityType,
+    multiplayerSetupSelectionRoomId,
+    savedStraightSprintCourses,
+  ]);
   const persistentCatalogTracks = useMemo(
     () => {
       const regularTracks = [...baseCatalogTracks, ...availableCustomRoutes];
@@ -3548,8 +3567,28 @@ export default function App() {
   // launch reaches App, so keep this type-only to preserve the lazy event UI
   // chunk instead of pulling the entire event client into the initial bundle.
   const activeClubEventRaceView = clubEventLaunch?.configuration.raceView ?? null;
+  const activeMultiplayerConfiguration = multiplayerRaceSetup?.configuration ?? null;
+  const activeMultiplayerRaceView = activeMultiplayerConfiguration?.raceView ?? null;
+  const multiplayerSetupTrackId = activeMultiplayerConfiguration
+    ? activeMultiplayerConfiguration.activityType === 'bmx-race'
+      ? activeMultiplayerConfiguration.trackId
+      : activeMultiplayerConfiguration.courseId
+    : null;
+  const multiplayerSetupMatchesTrack = Boolean(
+    multiplayerRaceSetup
+    && activeMultiplayerConfiguration
+    && activeMultiplayerConfiguration.activityType === (
+      raceWorkspaceMode === 'straight-sprint' ? 'straight-sprint' : 'bmx-race'
+    )
+    && multiplayerSetupTrackId === selectedTrack.id,
+  );
+  const multiplayerTrackSnapshotApplies = multiplayerSetupMatchesTrack
+    && clubEventTrack?.id === selectedTrack.id;
+  const multiplayerRaceViewApplies = multiplayerSetupMatchesTrack
+    && activeMultiplayerRaceView != null;
   const clubEventConfigurationLocked = clubEventLaunch?.activityType === 'bmx-race'
-    || clubEventLaunch?.activityType === 'straight-sprint';
+    || clubEventLaunch?.activityType === 'straight-sprint'
+    || (multiplayerRaceSetup != null && multiplayerSetupSelectionRoomId == null);
   const clubEventLaunchMatchesTrack = Boolean(
     clubEventLaunch
     && clubEventLaunch.activityType === (
@@ -3621,6 +3660,7 @@ export default function App() {
   // track without a saved camera uses the legacy authoring frame so the rider
   // panel and 3-D scene still scale to this tablet instead of using raw pixels.
   const clubTabletRaceViewApplies = !clubEventRaceViewApplies
+    && !multiplayerRaceViewApplies
     && clubTabletKioskMode;
   useEffect(() => {
     selectedTrackIdRef.current = selectedTrack.id;
@@ -3636,15 +3676,19 @@ export default function App() {
     setMappingSaveStatus('idle');
     setMappingSaveMessage(null);
   }, [selectedTrack.id]);
-  const selectedTrackMapping = clubEventTrackSnapshotApplies
+  const selectedTrackMapping = clubEventTrackSnapshotApplies || multiplayerTrackSnapshotApplies
     ? undefined
     : newestTrackMapping(
       developerUiActive ? storedMappings[selectedTrack.id] : undefined,
       publicTrackMappings[selectedTrack.id],
     );
   const selectedRouteVariants = useMemo(
-    () => (selectedTrackMapping ? routeVariantsFromMapping(selectedTrackMapping) : []),
-    [selectedTrackMapping],
+    () => (selectedTrackMapping
+      ? routeVariantsFromMapping(selectedTrackMapping)
+      : multiplayerTrackSnapshotApplies
+        ? selectedTrack.routeVariants ?? []
+        : []),
+    [multiplayerTrackSnapshotApplies, selectedTrack.routeVariants, selectedTrackMapping],
   );
   const savedRouteVariantIds = useMemo(
     () => selectedRouteVariants.map((variant) => variant.id),
@@ -3668,6 +3712,8 @@ export default function App() {
   useEffect(() => {
     const savedCamera = clubEventRaceViewApplies
       ? activeClubEventRaceView?.camera
+      : multiplayerRaceViewApplies
+        ? activeMultiplayerRaceView?.camera
       : clubTabletKioskMode
         ? clubTabletRaceCamera
         : accountRaceCamera;
@@ -3680,21 +3726,37 @@ export default function App() {
     setEarthZoom(savedCamera?.zoom ?? fallbackZoom);
   }, [
     activeClubEventRaceView?.camera,
+    activeMultiplayerRaceView?.camera,
     accountRaceCamera,
     clubTabletRaceCamera,
     clubTabletKioskMode,
     clubEventRaceViewApplies,
+    multiplayerRaceViewApplies,
     selectedTrack.countryCode,
     selectedTrack.id,
     selectedTrack.latitude,
     selectedTrack.longitude,
   ]);
-  const satelliteEffectiveTrack = useMemo(
-    () => (selectedTrackMapping
-      ? applyUserTrackMapping(selectedTrack, selectedTrackMapping, hasDualStartRoutes ? raceRouteVariantId : undefined)
-      : selectedTrack),
-    [hasDualStartRoutes, raceRouteVariantId, selectedTrack, selectedTrackMapping],
-  );
+  const satelliteEffectiveTrack = useMemo(() => {
+    if (selectedTrackMapping) {
+      return applyUserTrackMapping(
+        selectedTrack,
+        selectedTrackMapping,
+        hasDualStartRoutes ? raceRouteVariantId : undefined,
+      );
+    }
+    if (multiplayerTrackSnapshotApplies) {
+      const routeVariant = selectedTrack.routeVariants?.find((variant) => variant.id === raceRouteVariantId);
+      if (routeVariant) return applyTrackRouteVariant(selectedTrack, routeVariant);
+    }
+    return selectedTrack;
+  }, [
+    hasDualStartRoutes,
+    multiplayerTrackSnapshotApplies,
+    raceRouteVariantId,
+    selectedTrack,
+    selectedTrackMapping,
+  ]);
   const bmxRaceViewMode: TrackRaceViewMode = selectedTrackMapping?.raceViewMode === '3d' ? '3d' : 'satellite';
   const effectiveTrack = satelliteEffectiveTrack;
   const straightSprintGameArenaAvailable = supportsDragStripGameArena(effectiveTrack);
@@ -3703,6 +3765,12 @@ export default function App() {
     ? activeClubEventRaceView.mode === 'game'
       ? raceWorkspaceMode === 'straight-sprint' && straightSprintGameArenaAvailable ? 'game' : 'satellite'
       : activeClubEventRaceView.mode
+    : null;
+  const activeMultiplayerRaceViewMode: TrackRaceViewMode | null = multiplayerRaceViewApplies
+    && activeMultiplayerRaceView
+    ? activeMultiplayerRaceView.mode === 'game'
+      ? raceWorkspaceMode === 'straight-sprint' && straightSprintGameArenaAvailable ? 'game' : 'satellite'
+      : activeMultiplayerRaceView.mode
     : null;
   const baseRouteLengthMeters = useMemo(() => {
     if (!effectiveTrack.centerline || effectiveTrack.centerline.length < 2) {
@@ -3736,13 +3804,17 @@ export default function App() {
     const eventTrackId = typeof eventLaunch?.configuration.trackId === 'string'
       ? eventLaunch.configuration.trackId.trim()
       : '';
-    const configuredLaps = eventLaunch?.activityType === 'bmx-race' && eventTrackId === selectedTrack.id
+    const eventLaps = eventLaunch?.activityType === 'bmx-race' && eventTrackId === selectedTrack.id
       ? Math.max(1, Math.min(20, Math.round(Number(
         eventLaunch.configuration.lapCount ?? eventLaunch.configuration.laps,
       ) || 1)))
-      : 1;
-    setLapCount(configuredLaps);
-  }, [selectedTrack.id, raceRouteVariantId]);
+      : null;
+    const multiplayerLaps = activeMultiplayerConfiguration?.activityType === 'bmx-race'
+      && activeMultiplayerConfiguration.trackId === selectedTrack.id
+      ? activeMultiplayerConfiguration.lapCount
+      : null;
+    setLapCount(eventLaps ?? multiplayerLaps ?? 1);
+  }, [activeMultiplayerConfiguration, selectedTrack.id, raceRouteVariantId]);
   const multiplayerVoteCandidates = useMemo<MultiplayerTrackVoteCandidate[]>(() => {
     return catalogTracks.flatMap((track) => {
       const mapping = newestTrackMapping(
@@ -4224,6 +4296,32 @@ export default function App() {
     );
     return applyStudioRiderAssignments(enteredPlayers, availableStudioRiders, studioRiderAssignments);
   }, [activePlayers, availableStudioRiders, demoMode, liveRaceReadyDeviceIds, studioRiderAssignments]);
+  const localMultiplayerSetupProblem = useMemo(() => {
+    if (appMode !== 'race' && appMode !== 'straight-sprint') return '';
+    if (enteredRacePlayers.length < 1) {
+      return 'Choose at least one athlete for this race.';
+    }
+    if (
+      effectiveTrack.routeStatus !== 'user-mapped'
+      || !effectiveTrack.centerline
+      || effectiveTrack.centerline.length < 2
+    ) {
+      return appMode === 'straight-sprint'
+        ? 'Choose a saved, mapped Straight Sprint course.'
+        : 'Map this track before starting a multiplayer race.';
+    }
+    if (appMode === 'straight-sprint' && !straightSprintRouteReady) {
+      return `Map at least ${straightSprintDistanceFeet} ft for this Straight Sprint.`;
+    }
+    return '';
+  }, [
+    appMode,
+    effectiveTrack.centerline,
+    effectiveTrack.routeStatus,
+    enteredRacePlayers.length,
+    straightSprintDistanceFeet,
+    straightSprintRouteReady,
+  ]);
   const clubTabletDemoMultiplayerConfiguration = useMemo<ClubTabletDemoMultiplayerConfiguration | null>(() => {
     if (appMode === 'race') {
       return {
@@ -4265,6 +4363,79 @@ export default function App() {
     straightSprintAirSetting,
     straightSprintDistanceFeet,
   ]);
+  const localMultiplayerRaceSetup = useMemo<MultiplayerRaceSetup | null>(() => {
+    if (
+      (appMode !== 'race' && appMode !== 'straight-sprint')
+      || localMultiplayerSetupProblem
+    ) return null;
+
+    const mode: TrackRaceViewMode = appMode === 'straight-sprint' && straightSprintGameArenaAvailable
+      ? 'game'
+      : bmxRaceViewMode;
+    const raceView = mode === 'game'
+      ? { mode } as const
+      : {
+          mode,
+          camera: clubEventCameraSnapshot({
+            angle: earthAngle,
+            heading: earthHeading,
+            ...(earthCenter ? { center: earthCenter } : {}),
+            ...(earthZoom != null ? { zoom: earthZoom } : {}),
+            referenceViewport: currentRacePresentationViewport(),
+            updatedAt: Date.now(),
+          }),
+          riderOverlay: clubEventRiderOverlaySnapshot(accountRiderOverlay),
+        } as const;
+    const trackRecord = clubEventTrackSnapshot(effectiveTrack);
+    const configuration = appMode === 'straight-sprint'
+      ? {
+          activityType: 'straight-sprint' as const,
+          courseId: effectiveTrack.id,
+          courseName: effectiveTrack.name,
+          courseSource: effectiveTrack.countryCode === 'CUSTOM' ? 'saved-map' as const : 'catalog-track' as const,
+          trackRecord,
+          raceView,
+          distanceFeet: straightSprintDistanceFeet,
+          airSetting: straightSprintAirSetting,
+        }
+      : {
+          activityType: 'bmx-race' as const,
+          trackId: effectiveTrack.id,
+          trackName: effectiveTrack.name,
+          trackRecord,
+          raceView,
+          lapCount: isLoopTrack ? lapCount : 1,
+          routeVariantId: hasDualStartRoutes ? raceRouteVariantId : null,
+        };
+
+    return canonicalizeMultiplayerRaceSetup({
+      version: 1,
+      revision: 1,
+      configurationId: 'derived-client-side',
+      configuration,
+    });
+  }, [
+    accountRiderOverlay,
+    appMode,
+    bmxRaceViewMode,
+    earthAngle,
+    earthCenter,
+    earthHeading,
+    earthZoom,
+    effectiveTrack,
+    hasDualStartRoutes,
+    isLoopTrack,
+    lapCount,
+    localMultiplayerSetupProblem,
+    raceRouteVariantId,
+    straightSprintAirSetting,
+    straightSprintDistanceFeet,
+    straightSprintGameArenaAvailable,
+  ]);
+  const currentMultiplayerRaceSetup = multiplayerSetupSelectionRoomId
+    ? localMultiplayerRaceSetup
+    : multiplayerRaceSetup ?? localMultiplayerRaceSetup;
+  const currentMultiplayerRaceSetupLabel = multiplayerRaceSetupLabel(currentMultiplayerRaceSetup);
   const multiplayerIdentityOverride = useMemo<MultiplayerIdentityOverride | null>(() => {
     if (!clubTabletKioskMode || !clubTabletDevice) return null;
     if (!clubTabletSessionActive || !clubTabletSession) {
@@ -4353,6 +4524,20 @@ export default function App() {
       : undefined,
     onWattbikeCapacityChange: handleWattbikeCapacityChange,
   });
+  useEffect(() => {
+    const room = multiplayer.currentRoom;
+    const nextRoomId = playMode === 'multiplayer'
+      && room?.purpose === 'race'
+      && room.flow.phase === 'setup-select'
+      && room.hostId === multiplayer.clientId
+        ? room.id
+        : null;
+    setMultiplayerSetupSelectionRoomId((current) => current === nextRoomId ? current : nextRoomId);
+  }, [
+    multiplayer.clientId,
+    multiplayer.currentRoom,
+    playMode,
+  ]);
   latestRoomExitSequenceRef.current = multiplayer.roomExit.sequence;
   useEffect(() => {
     const eventId = clubEventLaunch?.eventId;
@@ -4926,9 +5111,17 @@ export default function App() {
     }, {});
   }, [branchChoicesByPlayer, demoMode, demoRaceSeed, racePlayers, splitDecisionPoints.length]);
   useEffect(() => {
-    const roomFlow = multiplayer.currentRoom?.flow;
+    const room = multiplayer.currentRoom;
+    const roomFlow = room?.flow;
     const clientId = multiplayer.clientId;
-    if (playMode !== 'multiplayer' || roomFlow?.phase !== 'route-select' || !clientId) {
+    const configuredRaceLineActive = room?.purpose === 'race'
+      && room.setup?.configuration.activityType === 'bmx-race'
+      && (roomFlow?.phase === 'lobby' || roomFlow?.phase === 'race');
+    if (
+      playMode !== 'multiplayer'
+      || !clientId
+      || (roomFlow?.phase !== 'route-select' && !configuredRaceLineActive)
+    ) {
       return;
     }
 
@@ -4944,7 +5137,7 @@ export default function App() {
       });
       return changed ? next : current;
     });
-  }, [multiplayer.clientId, multiplayer.currentRoom?.flow, playMode, racePlayers]);
+  }, [multiplayer.clientId, multiplayer.currentRoom, playMode, racePlayers]);
   const {
     raceState,
     riders,
@@ -5308,31 +5501,100 @@ export default function App() {
   }, [cancelActiveClubOwnerTrainingGroup, clearStartGateSequence, releaseRaceFullscreen, resetRace]);
 
   useEffect(() => {
-    if (playMode !== 'multiplayer' || !multiplayer.currentRoom?.track.id) {
+    const room = multiplayer.currentRoom;
+    const hostSelectingNextSetup = playMode === 'multiplayer'
+      && room?.purpose === 'race'
+      && room.flow.phase === 'setup-select'
+      && room.hostId === multiplayer.clientId;
+    if (hostSelectingNextSetup) {
+      roomSetupApplyRef.current = null;
+      setMultiplayerRaceSetup((current) => current == null ? current : null);
+      return;
+    }
+    const setup = canonicalizeMultiplayerRaceSetup(room?.setup);
+    if (playMode !== 'multiplayer' || !room || !setup) {
+      roomSetupApplyRef.current = null;
+      setMultiplayerRaceSetup((current) => current == null ? current : null);
+      return;
+    }
+
+    setMultiplayerRaceSetup((current) => (
+      current?.revision === setup.revision
+      && current.configurationId === setup.configurationId
+        ? current
+        : setup
+    ));
+
+    const configuration = setup.configuration;
+    const roomTrackId = configuration.activityType === 'bmx-race'
+      ? configuration.trackId
+      : configuration.courseId;
+    const roomTrack = configuration.trackRecord
+      ?? catalogTracks.find((track) => track.id === roomTrackId);
+    const applyKey = `${room.id}:${setup.revision}:${setup.configurationId}`;
+    if (roomSetupApplyRef.current === applyKey) return;
+    roomSetupApplyRef.current = applyKey;
+
+    setMappingMode(false);
+    setSelectedGhostIds([]);
+    setAppMode(configuration.activityType === 'straight-sprint' ? 'straight-sprint' : 'race');
+    if (configuration.activityType === 'straight-sprint') {
+      setStraightSprintDistanceFeet(configuration.distanceFeet);
+      setStraightSprintAirSetting(configuration.airSetting);
+    } else {
+      setLapCount(configuration.lapCount);
+      setRaceRouteVariantId(configuration.routeVariantId ?? 'amateur');
+    }
+
+    if (!roomTrack) return;
+    if (configuration.trackRecord) setClubEventTrack(configuration.trackRecord);
+    if (roomTrack.id !== selectedTrackId) {
+      roomTrackApplyRef.current = roomTrack.id;
+      prepareForTrackSelection(roomTrack.id);
+      setSelectedCountry(roomTrack.country);
+      setSelectedState(roomTrack.state);
+      setSelectedTrackId(roomTrack.id);
+    }
+  }, [
+    catalogTracks,
+    multiplayer.clientId,
+    multiplayer.currentRoom,
+    playMode,
+    prepareForTrackSelection,
+    selectedTrackId,
+  ]);
+
+  useEffect(() => {
+    if (
+      playMode !== 'multiplayer'
+      || multiplayer.currentRoom?.setup
+      || !multiplayer.currentRoom?.track.id
+    ) {
       return;
     }
 
     const roomTrackId = multiplayer.currentRoom.track.id;
-    if (roomTrackId === selectedTrackId) {
-      return;
-    }
-
+    if (roomTrackId === selectedTrackId) return;
     const roomTrack = catalogTracks.find((track) => track.id === roomTrackId);
-    if (!roomTrack) {
-      return;
-    }
+    if (!roomTrack) return;
 
     roomTrackApplyRef.current = roomTrackId;
     prepareForTrackSelection(roomTrack.id);
     setSelectedCountry(roomTrack.country);
     setSelectedState(roomTrack.state);
     setSelectedTrackId(roomTrack.id);
-  }, [catalogTracks, multiplayer.currentRoom?.track.id, playMode, prepareForTrackSelection, selectedTrackId]);
+  }, [catalogTracks, multiplayer.currentRoom, playMode, prepareForTrackSelection, selectedTrackId]);
 
   useEffect(() => {
     const roomId = multiplayer.currentRoom?.id;
     const roomTrackId = multiplayer.currentRoom?.track.id;
-    if (playMode !== 'multiplayer' || !roomId || !roomTrackId || effectiveTrack.id === roomTrackId) {
+    if (
+      playMode !== 'multiplayer'
+      || multiplayer.currentRoom?.setup
+      || !roomId
+      || !roomTrackId
+      || effectiveTrack.id === roomTrackId
+    ) {
       return;
     }
 
@@ -5342,7 +5604,54 @@ export default function App() {
     }
 
     void multiplayer.syncTrack(effectiveTrack);
-  }, [effectiveTrack, multiplayer.currentRoom?.id, multiplayer.currentRoom?.track.id, multiplayer.syncTrack, playMode]);
+  }, [effectiveTrack, multiplayer.currentRoom, multiplayer.syncTrack, playMode]);
+
+  const configuredMultiplayerRoomReady = useMemo(() => {
+    if (multiplayer.currentRoom?.flow.phase !== 'lobby') return false;
+    if (localMultiplayerSetupProblem || enteredRacePlayers.length < 1) return false;
+    const setup = canonicalizeMultiplayerRaceSetup(multiplayer.currentRoom?.setup);
+    if (!setup) return multiplayer.currentRoom?.setup == null;
+    if (
+      multiplayerRaceSetup?.revision !== setup.revision
+      || multiplayerRaceSetup.configurationId !== setup.configurationId
+    ) return false;
+
+    const configuration = setup.configuration;
+    const expectedTrackId = configuration.activityType === 'bmx-race'
+      ? configuration.trackId
+      : configuration.courseId;
+    if (selectedTrackId !== expectedTrackId) return false;
+    if (configuration.trackRecord && clubEventTrack?.id !== expectedTrackId) return false;
+    const localRoomMember = multiplayer.currentRoom?.members.find(
+      (member) => member.id === multiplayer.clientId && member.roomRole !== 'spectator',
+    );
+    if (!localRoomMember) return false;
+    const assignedLocalSeats = Math.max(1, Math.round(localRoomMember.racerSeatCount ?? 1));
+    if (enteredRacePlayers.length < assignedLocalSeats) return false;
+    if (configuration.activityType === 'straight-sprint') {
+      return appMode === 'straight-sprint'
+        && straightSprintDistanceFeet === configuration.distanceFeet
+        && straightSprintAirSetting === configuration.airSetting;
+    }
+    return appMode === 'race'
+      && lapCount === configuration.lapCount
+      && raceRouteVariantId === (configuration.routeVariantId ?? 'amateur');
+  }, [
+    appMode,
+    clubEventTrack?.id,
+    enteredRacePlayers.length,
+    lapCount,
+    localMultiplayerSetupProblem,
+    multiplayer.clientId,
+    multiplayer.currentRoom?.flow.phase,
+    multiplayer.currentRoom?.members,
+    multiplayer.currentRoom?.setup,
+    multiplayerRaceSetup,
+    raceRouteVariantId,
+    selectedTrackId,
+    straightSprintAirSetting,
+    straightSprintDistanceFeet,
+  ]);
 
   useEffect(() => {
     if (playMode !== 'multiplayer' || !multiplayer.currentRoom) {
@@ -5398,7 +5707,7 @@ export default function App() {
 
     latestRaceSyncRef.current = {
       sessionId: raceCapture?.sessionId ?? `${multiplayer.currentRoom.id}:${effectiveTrack.id}:manual`,
-      ...(multiplayer.currentRoom.demo && lastRoomRaceTokenRef.current
+      ...((multiplayer.currentRoom.demo || multiplayer.currentRoom.setup) && lastRoomRaceTokenRef.current
         ? { raceToken: lastRoomRaceTokenRef.current }
         : {}),
       trackId: effectiveTrack.id,
@@ -5629,7 +5938,7 @@ export default function App() {
 
     multiplayer.sendRaceState({
       sessionId,
-      ...(multiplayer.currentRoom.demo && lastRoomRaceTokenRef.current
+      ...((multiplayer.currentRoom.demo || multiplayer.currentRoom.setup) && lastRoomRaceTokenRef.current
         ? { raceToken: lastRoomRaceTokenRef.current }
         : {}),
       trackId: effectiveTrack.id,
@@ -7486,6 +7795,9 @@ export default function App() {
       setLapCount(Math.max(1, Math.min(20, Math.round(Number(
         configuration.lapCount ?? configuration.laps,
       ) || 1))));
+      if (configuration.routeVariantId === 'amateur' || configuration.routeVariantId === 'pro') {
+        setRaceRouteVariantId(configuration.routeVariantId);
+      }
       return;
     }
 
@@ -9979,24 +10291,6 @@ export default function App() {
     });
   }, [authUser, clubTabletKioskMode, handleSignOut]);
 
-  const openFreeSpectatorAccess = useCallback(() => {
-    if (!requireAccountProfile()) {
-      return;
-    }
-
-    const nextMembership = adminProfileActive
-      ? createMembership('racer', maxPlayers)
-      : createMembership('spectator', 1);
-    setMembership(nextMembership);
-    multiplayer.setProfile({ membershipTier: nextMembership.tier });
-    setAppleBillingMessage(null);
-    setAppleBillingStatus('idle');
-    setAppleBillingAction(null);
-    setShowMembershipLanding(false);
-    setPlayMode('multiplayer');
-    setAppMode('race');
-  }, [adminProfileActive, multiplayer, requireAccountProfile]);
-
   const startBenchmarkDemo = useCallback(() => {
     if (!adminProfileActive) {
       return;
@@ -11821,7 +12115,7 @@ export default function App() {
   const membershipLabel = membership.tier === 'racer'
     ? `Racer / ${membership.bikeSeats} bike${membership.bikeSeats === 1 ? '' : 's'}`
     : membership.tier === 'spectator'
-      ? 'Free spectator'
+      ? 'Free account'
       : 'Visitor';
   const connectedBikeDisplayCount = demoMode ? demoBikeCount : activePlayers.length;
   const displayedBikeCapacity = demoMode ? demoBikeCount : liveBikeSeatLimit;
@@ -12171,8 +12465,6 @@ export default function App() {
           profileComplete={accountProfileComplete}
           profileError={profileFormError}
           isAdminProfile={adminProfileActive}
-          onlineRiderCount={multiplayer.onlineRiders.length}
-          liveRoomCount={multiplayer.rooms.length}
           catalogReady={catalogDatabaseReady}
           tracks={baseCatalogTracks}
           onAuthModeChange={(mode) => {
@@ -12193,7 +12485,6 @@ export default function App() {
           }}
           onProfileSubmit={saveRequiredProfile}
           onSignOut={handleSignOut}
-          onJoinFree={openFreeSpectatorAccess}
           onEnterApp={openRaceDashboard}
           onOpenRaceIntervals={() => {
             setShowMembershipLanding(false);
@@ -13630,11 +13921,14 @@ export default function App() {
                   raceCameraLocked={raceCameraLocked}
                   raceCameraImmutable={
                     clubEventRaceViewApplies
+                    || multiplayerRaceViewApplies
                     || clubTabletRaceViewApplies
                     || raceCameraLocked
                   }
                   raceCameraSnapshot={clubEventRaceViewApplies
                     ? clubEventRaceCamera
+                    : multiplayerRaceViewApplies
+                      ? activeMultiplayerRaceView?.camera
                     : clubTabletRaceViewApplies
                       ? clubTabletRaceCamera
                       : raceCameraLocked
@@ -13648,6 +13942,12 @@ export default function App() {
                         referenceViewport: clubEventRaceCamera?.referenceViewport
                           ?? legacyRacePresentationViewport,
                       }
+                    : multiplayerRaceViewApplies
+                      ? activeMultiplayerRaceView?.riderOverlay ?? {
+                          ...defaultRaceRiderOverlayLayout,
+                          referenceViewport: activeMultiplayerRaceView?.camera?.referenceViewport
+                            ?? legacyRacePresentationViewport,
+                        }
                     : clubTabletRaceViewApplies
                       ? clubTabletRiderOverlay ?? {
                           ...defaultRaceRiderOverlayLayout,
@@ -13663,7 +13963,8 @@ export default function App() {
                   mappingObstacleView3D={mappingObstacleView3D}
                   raceViewMode={appMode === 'straight-sprint' && straightSprintGameArenaAvailable
                     ? 'game'
-                    : activeClubEventRaceViewMode
+                    : activeMultiplayerRaceViewMode
+                      ?? activeClubEventRaceViewMode
                       ?? (mappingMode ? mappingRaceViewMode : bmxRaceViewMode)}
                   mappingRouteVariantId={mappingRouteVariantId}
                   mappingZoneBranchChoice={mappingZoneBranchChoice}
@@ -13832,6 +14133,70 @@ export default function App() {
                   />
                 </Suspense>
 
+                {(appMode === 'race' || appMode === 'straight-sprint')
+                  && !clubTabletDemoClubLiveActive
+                  && !multiplayer.currentRoom?.clubEventId ? (
+                  <Suspense fallback={panelLoadingFallback}>
+                    <QuickRaceLobby
+                      room={playMode === 'multiplayer' ? multiplayer.currentRoom : null}
+                      localRiderId={multiplayer.clientId}
+                      isAuthenticatedClubTablet={clubTabletSessionActive}
+                      setupLabel={multiplayer.currentRoom?.flow.phase === 'setup-select'
+                        && multiplayer.currentRoom.hostId === multiplayer.clientId
+                          ? multiplayerRaceSetupLabel(localMultiplayerRaceSetup)
+                          : currentMultiplayerRaceSetupLabel}
+                      setupProblem={multiplayer.currentRoom?.flow.phase === 'setup-select'
+                        && multiplayer.currentRoom.hostId === multiplayer.clientId
+                          ? localMultiplayerSetupProblem
+                          : playMode === 'local' || !multiplayer.currentRoom
+                            ? localMultiplayerSetupProblem
+                            : ''}
+                      matchmaking={multiplayer.matchmaking}
+                      localEntry={playMode === 'local'}
+                      canConfirmSetup={Boolean(localMultiplayerRaceSetup)}
+                      setupReady={configuredMultiplayerRoomReady}
+                      statusMessage={playMode === 'multiplayer' ? multiplayer.status : ''}
+                      disabled={playMode === 'multiplayer' && multiplayer.connection !== 'open'}
+                      onEnterMultiplayer={() => setPlayMode('multiplayer')}
+                      onQuickMatch={(scope) => {
+                        if (currentMultiplayerRaceSetup) {
+                          multiplayer.quickMatch(scope, currentMultiplayerRaceSetup);
+                        }
+                      }}
+                      onCancelMatchmaking={multiplayer.cancelMatchmaking}
+                      onStartStudioMatch={multiplayer.startStudioMatch}
+                      onCreatePrivate={() => {
+                        if (currentMultiplayerRaceSetup) {
+                          multiplayer.createPrivateRoom(currentMultiplayerRaceSetup);
+                        }
+                      }}
+                      onJoinCode={multiplayer.joinRoom}
+                      onReady={(ready) => {
+                        if (!configuredMultiplayerRoomReady) return;
+                        primeRaceAudio();
+                        multiplayer.setRoomReady(ready);
+                      }}
+                      onStart={() => {
+                        primeRaceAudio();
+                        multiplayer.startRoomRace();
+                      }}
+                      onRaceAgain={() => {
+                        primeRaceAudio();
+                        multiplayer.raceAgain();
+                      }}
+                      onChangeSetup={multiplayer.beginRoomSetupSelection}
+                      onConfirmSetup={() => {
+                        if (localMultiplayerRaceSetup) {
+                          multiplayer.updateRoomSetup(localMultiplayerRaceSetup);
+                        }
+                      }}
+                      onRouteChoice={handleRoomRouteChoice}
+                      onLeave={multiplayer.leaveRoom}
+                      onShare={shareMultiplayerInvite}
+                      onUseSoloTraining={() => setPlayMode('local')}
+                    />
+                  </Suspense>
+                ) : (
                 <Suspense fallback={panelLoadingFallback}>
                   <MultiplayerPanel
                   clubTabletDemoActive={clubTabletDemoClubLiveActive}
@@ -13903,6 +14268,7 @@ export default function App() {
                     onVoiceStop={roomVoice.stop}
                   />
                 </Suspense>
+                )}
               </div>
             </div>
           </>

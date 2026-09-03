@@ -117,7 +117,10 @@ beforeAll(async () => {
       ...process.env,
       PORT: String(port),
       DATABASE_URL: '',
-      TRACKLAB_ADMIN_EMAILS: 'moderation-admin@tracklab.test',
+      // Both room participants need racer access now that private race rooms no
+      // longer admit free spectator accounts. The reported account remains a
+      // non-admin fixture so the moderation authorization boundary is covered.
+      TRACKLAB_ADMIN_EMAILS: 'moderation-admin@tracklab.test,moderation-reporter@tracklab.test',
       TRACKLAB_APPLE_IAP_ENABLED: '0',
       OPENAI_API_KEY: '',
     },

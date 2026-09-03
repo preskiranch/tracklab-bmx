@@ -3185,20 +3185,98 @@ export async function saveAppleServerNotification(notification, reconciliation =
 
 export async function saveRoom(room, host) {
   return query(
-    `INSERT INTO ${schema}.rooms (id, host_guest_key, host_name, private, track)
-     VALUES ($1, $2, $3, $4, $5::jsonb)
+    `INSERT INTO ${schema}.rooms (
+       id, host_guest_key, host_name, private, track, setup,
+       studio_club_id, matchmaking_scope, round_number
+     )
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9)
      ON CONFLICT (id) DO UPDATE SET
        track = EXCLUDED.track,
        private = EXCLUDED.private,
+       setup = EXCLUDED.setup,
+       studio_club_id = EXCLUDED.studio_club_id,
+       matchmaking_scope = EXCLUDED.matchmaking_scope,
+       round_number = EXCLUDED.round_number,
        closed_at = null`,
-    [room.id, host.guestKey, host.name, room.private, json(room.track)],
+    [
+      room.id,
+      host.guestKey,
+      host.name,
+      room.private,
+      json(room.track),
+      room.setup ? json(room.setup) : null,
+      room.studioClubId ?? null,
+      room.matchmakingScope ?? null,
+      Math.max(1, Math.round(Number(room.roundNumber) || 1)),
+    ],
   );
+}
+
+export function resolveReturningRoomHost(room, client) {
+  if (!client?.id || !client?.guestKey) return null;
+  const durableGuestKey = typeof room?.hostGuestKey === 'string' && room.hostGuestKey
+    ? room.hostGuestKey
+    : null;
+  const durableHostPending = room?.durableHostPending === true && Boolean(durableGuestKey);
+  if (durableHostPending && client.guestKey === durableGuestKey) {
+    return {
+      hostId: client.id,
+      hostGuestKey: durableGuestKey,
+      durableHostPending: false,
+      persistHost: false,
+    };
+  }
+  if (room?.hostId) return null;
+  if (durableHostPending) {
+    return {
+      hostId: client.id,
+      hostGuestKey: durableGuestKey,
+      durableHostPending: true,
+      persistHost: false,
+    };
+  }
+  return {
+    hostId: client.id,
+    hostGuestKey: client.guestKey,
+    durableHostPending: false,
+    persistHost: true,
+  };
 }
 
 export async function updateRoomTrack(room) {
   return query(
     `UPDATE ${schema}.rooms SET track = $2::jsonb WHERE id = $1`,
     [room.id, json(room.track)],
+  );
+}
+
+export async function updateRoomConfiguration(room) {
+  return query(
+    `UPDATE ${schema}.rooms
+     SET track = $2::jsonb,
+         setup = $3::jsonb,
+         studio_club_id = $4,
+         matchmaking_scope = $5,
+         round_number = $6
+     WHERE id = $1 AND closed_at IS NULL`,
+    [
+      room.id,
+      json(room.track),
+      room.setup ? json(room.setup) : null,
+      room.studioClubId ?? null,
+      room.matchmakingScope ?? null,
+      Math.max(1, Math.round(Number(room.roundNumber) || 1)),
+    ],
+  );
+}
+
+export async function updateRoomHost(roomId, client) {
+  if (!client?.guestKey) return null;
+  return query(
+    `UPDATE ${schema}.rooms
+     SET host_guest_key = $2, host_name = $3
+     WHERE id = $1 AND closed_at IS NULL`,
+    [roomId, client.guestKey, client.name],
   );
 }
 
@@ -3241,7 +3319,9 @@ export async function saveRoomMessage(roomId, client, message) {
 
 export async function loadRoom(roomId) {
   const result = await query(
-    `SELECT id, host_guest_key, private, track, created_at FROM ${schema}.rooms WHERE id = $1 AND closed_at IS NULL`,
+    `SELECT id, host_guest_key, host_name, private, track, setup, studio_club_id,
+            matchmaking_scope, round_number, created_at
+     FROM ${schema}.rooms WHERE id = $1 AND closed_at IS NULL`,
     [roomId],
   );
   const row = result?.rows?.[0];
@@ -3253,14 +3333,32 @@ export async function loadRoom(roomId) {
     `SELECT id, author_name, body, created_at FROM ${schema}.room_messages WHERE room_id = $1 ORDER BY created_at DESC LIMIT 40`,
     [roomId],
   );
+  const savedMembers = await query(
+    `SELECT guest_key, display_name, role, seat_count
+     FROM ${schema}.room_members
+     WHERE room_id = $1
+     ORDER BY joined_at ASC`,
+    [roomId],
+  );
+  const memberRows = savedMembers?.rows ?? [];
 
   return {
     id: row.id,
     hostId: null,
     hostGuestKey: row.host_guest_key,
+    hostName: row.host_name,
     private: row.private,
     track: fromJson(row.track, null),
+    setup: fromJson(row.setup, null),
+    studioClubId: row.studio_club_id ?? null,
+    matchmakingScope: row.matchmaking_scope ?? null,
+    roundNumber: Math.max(1, Math.round(Number(row.round_number) || 1)),
     createdAt: new Date(row.created_at).getTime(),
+    allowedGuestKeys: new Set(memberRows.map((member) => member.guest_key).filter(Boolean)),
+    savedSeatCountByGuestKey: new Map(memberRows.map((member) => [
+      member.guest_key,
+      Math.max(1, Math.min(4, Math.round(Number(member.seat_count) || 1))),
+    ])),
     members: new Set(),
     raceStates: new Map(),
     messages: (messages?.rows ?? [])
@@ -12524,6 +12622,7 @@ export async function startClubEvent({ ownerProfileKey, eventId, leadMs = 8_000 
       if (event.status !== 'lobby') return { status: 'not-lobby', event: cloneMemoryClubEvent(event) };
       const participants = [...(memoryClubEventParticipantsByEventId.get(eventId)?.values() ?? [])];
       if (participants.length === 0) return { status: 'empty', event: cloneMemoryClubEvent(event) };
+      if (participants.length < 2) return { status: 'too-few', event: cloneMemoryClubEvent(event) };
       if (participants.some((participant) => participant.ready !== true)) {
         return { status: 'not-ready', event: cloneMemoryClubEvent(event) };
       }
@@ -12560,6 +12659,7 @@ export async function startClubEvent({ ownerProfileKey, eventId, leadMs = 8_000 
       [eventId],
     );
     if (participants.rows.length === 0) return { status: 'empty', event: await clubEventAggregateWithClient(client, row) };
+    if (participants.rows.length < 2) return { status: 'too-few', event: await clubEventAggregateWithClient(client, row) };
     if (participants.rows.some((participant) => participant.ready !== true)) {
       return { status: 'not-ready', event: await clubEventAggregateWithClient(client, row) };
     }

@@ -97,7 +97,7 @@ Use two independent internet connections and at least two accounts:
 - verify ready state, selected track, route choice, and rider count on both clients;
 - start a synchronized race and record clock offset and visible movement delay;
 - interrupt and restore one connection without duplicating the rider;
-- verify spectators cannot control racers or read private analytics;
+- verify free accounts cannot enter race rooms or receive live race telemetry;
 - confirm race results and ghost visibility match each account's permissions.
 
 The current single-region service must be tested from the intended launch

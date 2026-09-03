@@ -432,6 +432,13 @@ test('public app hub keeps tabs, deep links, scroll, and responsive pricing in s
   await nav.getByRole('button', { name: 'Home', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Your BMX home base.' })).toBeVisible();
   await expect(page).not.toHaveURL(/locator=|#track-locator/);
+  await expect(page.getByText('Live race viewing', { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/Watch live rooms|Free accounts can watch live sessions/i)).toHaveCount(0);
+  await expect(page.getByText(/riders online|active rooms/i)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Browse free directories', exact: true }).click();
+  await expect(page.locator('#track-locator')).toBeVisible();
+  await expect(page.getByLabel('Race controls')).toHaveCount(0);
+  await nav.getByRole('button', { name: 'Home', exact: true }).click();
 
   await page.evaluate(() => {
     const url = new URL(window.location.href);
@@ -7781,7 +7788,7 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
-        trackMappings: {},
+        trackMappings: { [mockPedalZoneMapping.trackId]: mockPedalZoneMapping },
         customRoutes: [],
         bikeProfiles: [],
         studioRiders: [studioRider],
@@ -7854,7 +7861,7 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
   await page.route('**/api/club-events', async (route) => {
     const request = route.request().postDataJSON() as Record<string, unknown>;
     currentClubEvent = {
-      id: 'coach-explore-event',
+      id: 'studio-race-event',
       clubId: 'club-preski-ranch',
       clubName: 'Preski Ranch LLC',
       activityType: request.activityType,
@@ -7863,7 +7870,7 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
       startAt: null,
       createdAt: now,
       updatedAt: now,
-      slots: Array.from({ length: 4 }, (_, index) => index === 1 ? {
+      slots: Array.from({ length: 4 }, (_, index) => index <= 1 ? {
         seatNumber: index + 1,
         deviceId: `club-tablet-${index + 1}`,
         deviceName: `Studio Tablet ${index + 1}`,
@@ -7871,9 +7878,9 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
         status: 'ready',
         ready: true,
         athlete: {
-          studioRiderId: studioRider.id,
-          riderName: studioRider.name,
-          athleteName: 'Rasheen Hicks',
+          studioRiderId: index === 1 ? studioRider.id : 'studio-taylor',
+          riderName: index === 1 ? studioRider.name : 'Taylor',
+          athleteName: index === 1 ? 'Rasheen Hicks' : 'Taylor',
         },
         bikeDeviceId: '58702',
         joinedAt: now,
@@ -7908,27 +7915,6 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ event: currentClubEvent, pollAfterMs: 2_000 }),
-    });
-  });
-  await page.route('**/api/explore/route', async (route) => {
-    const request = route.request().postDataJSON() as Record<string, unknown>;
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        route: {
-          id: 'owner-authored-club-route',
-          name: request.routeName,
-          origin: request.origin,
-          destination: request.destination,
-          originLabel: request.originLabel,
-          destinationLabel: request.destinationLabel,
-          travelMode: 'bicycle',
-          distanceMeters: 12_345,
-          durationSeconds: 2_400,
-          encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
-          createdAt: now,
-        },
-      }),
     });
   });
   await page.route('**/api/club-live/sessions', async (route) => {
@@ -7966,6 +7952,7 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
     });
   });
 
+  await mockPublishedPedalZoneTrack(page);
   await page.goto('/?track=black-mountain-bmx');
   await openSignedInAppIfNeeded(page);
 
@@ -7977,7 +7964,7 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
   const monitor = page.getByLabel('Club Live Monitor');
   await expect(monitor.getByText('Owner-only view', { exact: true })).toBeVisible();
   await expect(monitor.getByRole('button', { name: /Independent Training/ })).toBeVisible();
-  await expect(monitor.getByRole('button', { name: /Coach-led Event/ })).toBeVisible();
+  await expect(monitor.getByRole('button', { name: /Studio Race/ })).toBeVisible();
   await expect(monitor.getByText('Riders control their own tablet', { exact: true })).toBeVisible();
   await expect(monitor.locator('.club-live-tablet-slot')).toHaveCount(4);
   await expect(monitor.getByText('1 bike connected', { exact: true })).toBeVisible();
@@ -7994,14 +7981,18 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
   await expect(monitor.getByRole('button', { name: /Pause|Resume|Stop|Cancel|Control/i })).toHaveCount(0);
 
   const eventConsole = monitor.getByRole('region', { name: 'Club Event control' });
-  await eventConsole.getByRole('button', { name: /Coach-led Event/ }).click();
-  await eventConsole.getByRole('combobox', { name: 'Event', exact: true }).selectOption('explore');
-  await eventConsole.getByLabel('Start', { exact: true }).fill('38.1, -122.2');
-  await eventConsole.getByLabel('Destination', { exact: true }).fill('37.8199, -122.4783');
-  await eventConsole.getByRole('button', { name: 'Open four-tablet lobby' }).click();
-  await expect(eventConsole.getByText('1 of 4 ready', { exact: true })).toBeVisible();
+  await eventConsole.getByRole('button', { name: /Studio Race/ }).click();
+  const studioEventSelect = eventConsole.getByRole('combobox', { name: 'Event', exact: true });
+  await expect(studioEventSelect.locator('option')).toHaveText(['BMX Race Intervals', 'Straight Sprint']);
+  const studioRaceSteps = eventConsole.getByLabel('Studio Race setup steps');
+  await expect(eventConsole.getByRole('button', { name: 'Open race lobby' })).toBeVisible();
+  await expect(studioRaceSteps.getByText('Riders tap Ready', { exact: true })).toBeVisible();
+  await expect(studioRaceSteps.getByText('Start together', { exact: true })).toBeVisible();
+  await eventConsole.getByRole('button', { name: 'Open race lobby' }).click();
+  await expect(eventConsole.getByText('2 riders ready', { exact: true })).toBeVisible();
   await expect(eventConsole.locator('.club-event-seat').filter({ hasText: 'Studio Tablet 2' })).toContainText('Rasheen Hicks');
-  await eventConsole.getByRole('button', { name: 'Start all ready riders' }).click();
+  await expect(eventConsole.getByText('2 riders are ready. Start together now, or wait for 2 more.', { exact: true })).toBeVisible();
+  await eventConsole.getByRole('button', { name: 'Start together' }).click();
   await expect(eventConsole.locator('.club-event-lobby')).toContainText(/Starting in 8|tablets launched/);
 
   tabletDeviceFeedFails = true;

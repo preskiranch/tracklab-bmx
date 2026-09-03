@@ -5,6 +5,9 @@ import type {
   MultiplayerExploreState,
   MultiplayerLatencySnapshot,
   MultiplayerMatchInvite,
+  MultiplayerMatchmakingScope,
+  MultiplayerMatchmakingState,
+  MultiplayerRaceSetup,
   MultiplayerRaceState,
   MultiplayerRider,
   MultiplayerRoom,
@@ -136,9 +139,28 @@ const initialLatency: MultiplayerLatencySnapshot = {
   measuredAt: null,
 };
 
+const initialMatchmaking: MultiplayerMatchmakingState = {
+  active: false,
+  scope: null,
+  activityType: null,
+  queuedAt: null,
+  queuedRacers: 0,
+  message: '',
+};
+
 export const profileStorageKey = 'tracklab-bmx-multiplayer-profile-v1';
 const profileCookieName = 'tracklab_profile_key';
 const profileQueryParamNames = ['profileKey', 'profile'];
+
+export function normalizeMultiplayerRoomId(value: string) {
+  const code = value.trim().toUpperCase();
+  return /^[A-Z0-9]{6}$/.test(code) ? `ROOM-${code}` : code;
+}
+
+/** Exact number of entered athletes represented by this browser connection. */
+export function quickRaceEnteredRacerCount(value: number) {
+  return Number.isInteger(value) && value >= 1 && value <= 4 ? value : null;
+}
 
 function createGuestKey() {
   return `guest-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -291,6 +313,8 @@ export function useMultiplayer({
   const capacityGrantExpiryTimerRef = useRef<number | null>(null);
   const pendingPingRef = useRef<Map<string, number>>(new Map());
   const pendingInviteRoomRef = useRef<string | null>(null);
+  const pendingRoomJoinRetryTimerRef = useRef<number | null>(null);
+  const pendingRoomJoinAttemptRef = useRef(0);
   const identityScopeRef = useRef('');
   const identityOverrideActiveRef = useRef(Boolean(identityOverride));
   const latestClubTabletSessionRef = useRef(clubTabletSession);
@@ -299,6 +323,7 @@ export function useMultiplayer({
   const latestProfileRef = useRef<MultiplayerProfile | null>(null);
   const latestWattbikeConnectionCountRef = useRef(wattbikeConnectionCount);
   const latestTrackRef = useRef<MultiplayerTrackSummary | null>(null);
+  const currentRoomRef = useRef<MultiplayerRoom | null>(null);
   const onFriendNetworkChangeRef = useRef(onFriendNetworkChange);
   const onWattbikeCapacityChangeRef = useRef(onWattbikeCapacityChange);
   const sendPresenceRef = useRef<(nextProfile?: MultiplayerProfile) => boolean>(() => false);
@@ -334,6 +359,9 @@ export function useMultiplayer({
   const [social, setSocial] = useState<MultiplayerSocialState>(emptySocialState);
   const [status, setStatus] = useState('Multiplayer offline.');
   const [latency, setLatency] = useState<MultiplayerLatencySnapshot>(initialLatency);
+  const [matchmaking, setMatchmaking] = useState<MultiplayerMatchmakingState>(initialMatchmaking);
+
+  currentRoomRef.current = currentRoom;
 
   const resetTransientMultiplayerState = useCallback(() => {
     setClientId(null);
@@ -348,6 +376,7 @@ export function useMultiplayer({
     setIncomingMatchInvites([]);
     setSocial(emptySocialState);
     setLatency(initialLatency);
+    setMatchmaking(initialMatchmaking);
     pendingPingRef.current.clear();
   }, []);
 
@@ -466,7 +495,10 @@ export function useMultiplayer({
     identityScopeRef.current = identityScopeKey;
     if (!scopeChanged) {
       if (!identityOverride) {
-        pendingInviteRoomRef.current = new URLSearchParams(window.location.search).get('room');
+        const requestedRoom = new URLSearchParams(window.location.search).get('room');
+        pendingInviteRoomRef.current = requestedRoom
+          ? normalizeMultiplayerRoomId(requestedRoom)
+          : null;
       }
       return;
     }
@@ -492,7 +524,15 @@ export function useMultiplayer({
   }, [enabled, resetTransientMultiplayerState]);
 
   useEffect(() => {
+    const clearPendingRoomJoinRetry = (resetAttempts = true) => {
+      if (pendingRoomJoinRetryTimerRef.current != null) {
+        window.clearTimeout(pendingRoomJoinRetryTimerRef.current);
+        pendingRoomJoinRetryTimerRef.current = null;
+      }
+      if (resetAttempts) pendingRoomJoinAttemptRef.current = 0;
+    };
     if (!transportEnabled) {
+      clearPendingRoomJoinRetry();
       setConnection('idle');
       socketRef.current?.close();
       socketRef.current = null;
@@ -569,6 +609,24 @@ export function useMultiplayer({
       }));
       socketRef.current = socket;
       const connectionIdentityScopeKey = identityScopeKey;
+      const joinPendingRoom = () => {
+        clearPendingRoomJoinRetry(false);
+        const pendingRoom = pendingInviteRoomRef.current;
+        if (
+          !pendingRoom
+          || cancelled
+          || socketRef.current !== socket
+          || socket.readyState !== WebSocket.OPEN
+          || currentRoomRef.current
+        ) return;
+        socket.send(JSON.stringify({ type: 'join-room', roomId: pendingRoom }));
+        pendingRoomJoinAttemptRef.current += 1;
+        // Retain the target until room-state/room-left confirms the outcome,
+        // while bounding retries on one socket for stale or expired codes.
+        if (pendingRoomJoinAttemptRef.current < 4) {
+          pendingRoomJoinRetryTimerRef.current = window.setTimeout(joinPendingRoom, 2_500);
+        }
+      };
 
       socket.addEventListener('open', () => {
         if (socketRef.current !== socket) return;
@@ -663,6 +721,7 @@ export function useMultiplayer({
             // The server derives the identity and room; no athlete or owner
             // profile is borrowed and no race result is persisted.
             pendingInviteRoomRef.current = null;
+            clearPendingRoomJoinRetry();
             const demoConfiguration = latestClubTabletDemoConfigurationRef.current;
             if (!demoConfiguration) {
               setStatus('Open BMX Race Intervals or Straight Sprint before starting demo multiplayer.');
@@ -678,8 +737,8 @@ export function useMultiplayer({
           }
           const pendingRoom = pendingInviteRoomRef.current;
           if (pendingRoom) {
-            pendingInviteRoomRef.current = null;
-            socket.send(JSON.stringify({ type: 'join-room', roomId: pendingRoom }));
+            pendingRoomJoinAttemptRef.current = 0;
+            joinPendingRoom();
           }
         }
 
@@ -706,6 +765,11 @@ export function useMultiplayer({
 
         if (message.type === 'room-state') {
           if (!enabled) return;
+          if (message.room?.id) {
+            pendingInviteRoomRef.current = null;
+            clearPendingRoomJoinRetry();
+          }
+          setMatchmaking(initialMatchmaking);
           setCurrentRoom(message.room ?? null);
           setRoomMessages(formatRoomMessages(Array.isArray(message.messages) ? message.messages : []));
           setRoomRaceStates(Array.isArray(message.raceStates) ? message.raceStates : []);
@@ -720,6 +784,8 @@ export function useMultiplayer({
 
         if (message.type === 'room-left') {
           if (!enabled) return;
+          pendingInviteRoomRef.current = null;
+          clearPendingRoomJoinRetry();
           setRoomExit((current) => ({
             sequence: current.sequence + 1,
             roomId: typeof message.roomId === 'string' ? message.roomId : null,
@@ -730,6 +796,7 @@ export function useMultiplayer({
           setRoomRaceStates([]);
           setRoomExploreStates([]);
           setVoiceSignals([]);
+          setMatchmaking(initialMatchmaking);
           const url = new URL(window.location.href);
           url.searchParams.delete('room');
           window.history.replaceState(null, '', url);
@@ -738,6 +805,27 @@ export function useMultiplayer({
         if (message.type === 'room-chat') {
           if (!enabled) return;
           setRoomMessages(formatRoomMessages(Array.isArray(message.messages) ? message.messages : []));
+        }
+
+        if (message.type === 'matchmaking-state') {
+          if (!enabled) return;
+          const rawState = message.state && typeof message.state === 'object' ? message.state : {};
+          const scope = rawState.scope === 'studio' || rawState.scope === 'world'
+            ? rawState.scope
+            : null;
+          const activityType = rawState.activityType === 'bmx-race' || rawState.activityType === 'straight-sprint'
+            ? rawState.activityType
+            : null;
+          const nextMatchmaking: MultiplayerMatchmakingState = {
+            active: rawState.active === true,
+            scope,
+            activityType,
+            queuedAt: Number.isFinite(Number(rawState.queuedAt)) ? Number(rawState.queuedAt) : null,
+            queuedRacers: Math.max(0, Math.min(4, Math.round(Number(rawState.queuedRacers) || 0))),
+            message: typeof rawState.message === 'string' ? rawState.message.slice(0, 240) : '',
+          };
+          setMatchmaking(nextMatchmaking);
+          if (nextMatchmaking.message) setStatus(nextMatchmaking.message);
         }
 
         if (message.type === 'room-safety-result') {
@@ -821,6 +909,19 @@ export function useMultiplayer({
 
       socket.addEventListener('close', () => {
         if (socketRef.current !== socket) return;
+        clearPendingRoomJoinRetry();
+        const interruptedRoom = currentRoomRef.current;
+        if (
+          interruptedRoom
+          && interruptedRoom.purpose === 'race'
+          && !interruptedRoom.demo
+          && !interruptedRoom.clubEventId
+        ) {
+          // Preserve the private room across a transient Wi-Fi/app interruption.
+          // The next authenticated socket must still pass the server's room,
+          // studio-club, racer-seat, and current-setup checks before rejoining.
+          pendingInviteRoomRef.current = interruptedRoom.id;
+        }
         setConnection('closed');
         setStatus('Multiplayer disconnected. Reconnecting...');
         socketRef.current = null;
@@ -829,6 +930,7 @@ export function useMultiplayer({
         setIncomingMatchInvites([]);
         setRoomExploreStates([]);
         setLatency(initialLatency);
+        setMatchmaking(initialMatchmaking);
         pendingPingRef.current.clear();
         if (pingTimerRef.current != null) {
           window.clearInterval(pingTimerRef.current);
@@ -852,6 +954,7 @@ export function useMultiplayer({
 
     return () => {
       cancelled = true;
+      clearPendingRoomJoinRetry();
       if (reconnectTimerRef.current != null) {
         window.clearTimeout(reconnectTimerRef.current);
       }
@@ -922,23 +1025,20 @@ export function useMultiplayer({
     send,
   ]);
 
-  const createPrivateRoom = useCallback(() => {
+  const createPrivateRoom = useCallback((setup?: MultiplayerRaceSetup) => {
+    const racerSeatCount = quickRaceEnteredRacerCount(bikeCount);
+    if (!racerSeatCount) {
+      setStatus('Choose at least one athlete before creating a race.');
+      return false;
+    }
+    pendingInviteRoomRef.current = null;
     setStatus('Opening private room.');
     return send({
       type: 'create-room',
       private: true,
-      racerSeatCount: Math.max(1, bikeCount),
+      racerSeatCount,
       track: currentTrack,
-    });
-  }, [bikeCount, currentTrack, send]);
-
-  const createPublicRoom = useCallback(() => {
-    setStatus('Opening public lobby.');
-    return send({
-      type: 'create-room',
-      private: false,
-      racerSeatCount: Math.max(1, bikeCount),
-      track: currentTrack,
+      ...(setup ? { setup } : {}),
     });
   }, [bikeCount, currentTrack, send]);
 
@@ -953,8 +1053,11 @@ export function useMultiplayer({
   }, [send]);
 
   const joinRoom = useCallback((roomId: string) => {
-    setStatus(`Joining ${roomId}.`);
-    return send({ type: 'join-room', roomId });
+    const normalizedRoomId = normalizeMultiplayerRoomId(roomId);
+    if (!normalizedRoomId) return false;
+    pendingInviteRoomRef.current = normalizedRoomId;
+    setStatus(`Joining ${normalizedRoomId}.`);
+    return send({ type: 'join-room', roomId: normalizedRoomId });
   }, [send]);
 
   const joinClubEvent = useCallback((eventId: string) => {
@@ -974,7 +1077,7 @@ export function useMultiplayer({
   }, [send]);
 
   const syncTrack = useCallback((nextTrack: TrackRecord) => {
-    if (!currentRoom) {
+    if (!currentRoom || currentRoom.setup) {
       return false;
     }
 
@@ -1031,7 +1134,7 @@ export function useMultiplayer({
       return false;
     }
     if (
-      currentRoom.demo
+      (currentRoom.demo || currentRoom.setup)
       && (
         !currentRoom.flow.raceToken
         || state.raceToken !== currentRoom.flow.raceToken
@@ -1100,10 +1203,89 @@ export function useMultiplayer({
     return send({ type: 'group-invite-response', inviteId, accepted });
   }, [send]);
 
-  const quickMatch = useCallback(() => {
-    setStatus('Looking for an available rider.');
-    return send({ type: 'quick-match', track: currentTrack });
-  }, [currentTrack, send]);
+  const quickMatch = useCallback((
+    scope: MultiplayerMatchmakingScope = 'world',
+    setup?: MultiplayerRaceSetup,
+  ) => {
+    if (!setup) {
+      setStatus('Choose Race Intervals or Straight Sprint settings before matchmaking.');
+      return false;
+    }
+    const racerSeatCount = quickRaceEnteredRacerCount(bikeCount);
+    if (!racerSeatCount) {
+      setStatus('Choose at least one athlete before finding a race.');
+      return false;
+    }
+    pendingInviteRoomRef.current = null;
+    setStatus(scope === 'studio'
+      ? 'Looking for this studio’s authorized tablets.'
+      : 'Looking for racers worldwide.');
+    return send({ type: 'quick-race', scope, setup, racerSeatCount });
+  }, [bikeCount, send]);
+
+  const cancelMatchmaking = useCallback(() => {
+    setStatus('Leaving the matchmaking queue.');
+    return send({ type: 'matchmaking-cancel' });
+  }, [send]);
+
+  const startStudioMatch = useCallback(() => {
+    setStatus('Starting with the studio racers who are ready now.');
+    return send({ type: 'quick-race-start-now' });
+  }, [send]);
+
+  const setRoomReady = useCallback((ready: boolean) => {
+    if (!currentRoom?.setup) return false;
+    if (ready) {
+      const enteredRacerCount = quickRaceEnteredRacerCount(bikeCount);
+      const localMember = currentRoom.members.find((member) => member.id === clientId);
+      const assignedSeatCount = localMember?.roomRole === 'racer'
+        ? quickRaceEnteredRacerCount(Math.round(localMember.racerSeatCount ?? 1))
+        : null;
+      if (!enteredRacerCount || !assignedSeatCount || enteredRacerCount < assignedSeatCount) {
+        setStatus(assignedSeatCount && assignedSeatCount > 1
+          ? `Choose all ${assignedSeatCount} athletes assigned to this device before tapping Ready.`
+          : 'Choose an athlete before tapping Ready.');
+        return false;
+      }
+    }
+    return send({
+      type: 'room-ready',
+      ready,
+      setupRevision: currentRoom.setup.revision,
+    });
+  }, [bikeCount, clientId, currentRoom, send]);
+
+  const startRoomRace = useCallback(() => {
+    if (!currentRoom?.setup) return false;
+    if (!quickRaceEnteredRacerCount(bikeCount)) {
+      setStatus('Choose an athlete before starting the race.');
+      return false;
+    }
+    setStatus('Starting every ready racer together.');
+    return send({ type: 'room-start' });
+  }, [bikeCount, currentRoom, send]);
+
+  const updateRoomSetup = useCallback((setup: MultiplayerRaceSetup) => {
+    if (!currentRoom?.setup) return false;
+    setStatus('Confirming the new setup for everyone.');
+    return send({ type: 'room-setup', setup });
+  }, [currentRoom, send]);
+
+  const beginRoomSetupSelection = useCallback(() => {
+    if (!currentRoom?.setup) return false;
+    setStatus('Choose the next Race Intervals or Straight Sprint setup.');
+    return send({ type: 'room-setup-edit' });
+  }, [currentRoom, send]);
+
+  const raceAgain = useCallback(() => {
+    if (!currentRoom?.setup) return false;
+    if (!quickRaceEnteredRacerCount(bikeCount)) {
+      setStatus('Choose an athlete before racing again.');
+      return false;
+    }
+    setStatus('Starting the next race with the same group.');
+    return send({ type: 'room-next-round' });
+  }, [bikeCount, currentRoom, send]);
 
   const respondToChallenge = useCallback((challengeId: string, accepted: boolean) => {
     setIncomingChallenges((current) => current.filter((item) => item.challenge.id !== challengeId));
@@ -1130,7 +1312,6 @@ export function useMultiplayer({
     createGroup,
     createMatch,
     createPrivateRoom,
-    createPublicRoom,
     currentRoom,
     demoParticipantEligible,
     incomingChallenges,
@@ -1141,10 +1322,18 @@ export function useMultiplayer({
     joinRoom,
     latency,
     leaveRoom,
+    matchmaking,
     onlineRiders,
     profile,
     profileReadOnly,
     quickMatch,
+    cancelMatchmaking,
+    startStudioMatch,
+    setRoomReady,
+    startRoomRace,
+    beginRoomSetupSelection,
+    updateRoomSetup,
+    raceAgain,
     reportRoomMember,
     respondToChallenge,
     roomMessages,

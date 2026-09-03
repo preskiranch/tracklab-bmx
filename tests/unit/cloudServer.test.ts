@@ -2379,6 +2379,19 @@ describe('cloud API trust boundaries', () => {
       track: { id: 'club-live-track', name: 'Club Live Track' },
     }));
     await waitForSocketMessage(primarySocket, (message) => message.type === 'welcome');
+    const publicRoomStart = primarySocket.messages.length;
+    primarySocket.socket.send(JSON.stringify({
+      type: 'create-room',
+      private: false,
+      racerSeatCount: 1,
+      track: { id: 'club-live-track', name: 'Club Live Track' },
+    }));
+    await expect(waitForSocketMessage(
+      primarySocket,
+      (message) => message.type === 'room-error'
+        && String(message.message).includes('Public race rooms are not available'),
+      publicRoomStart,
+    )).resolves.toBeTruthy();
     const primaryRoomStart = primarySocket.messages.length;
     primarySocket.socket.send(JSON.stringify({
       type: 'create-room',
@@ -2409,7 +2422,7 @@ describe('cloud API trust boundaries', () => {
     });
 
     const duplicateSocket = await openTestSocket(athleteCookie);
-    const duplicateConnected = await waitForSocketMessage(
+    await waitForSocketMessage(
       duplicateSocket,
       (message) => message.type === 'connected',
     );
@@ -2417,16 +2430,13 @@ describe('cloud API trust boundaries', () => {
     await waitForSocketMessage(duplicateSocket, (message) => message.type === 'welcome');
     const duplicateJoinStart = duplicateSocket.messages.length;
     duplicateSocket.socket.send(JSON.stringify({ type: 'join-room', roomId: multiplayerRoomId }));
-    const duplicateRoomState = await waitForSocketMessage(
+    const duplicateRoomError = await waitForSocketMessage(
       duplicateSocket,
-      (message) => message.type === 'room-state'
-        && message.room?.members?.some((member: { id: string }) => member.id === duplicateConnected.clientId),
+      (message) => message.type === 'room-error'
+        && String(message.message).includes('private multiplayer race'),
       duplicateJoinStart,
     );
-    expect(duplicateRoomState.room.members.find(
-      (member: { id: string }) => member.id === duplicateConnected.clientId,
-    )).toMatchObject({ roomRole: 'spectator', racerSeatCount: 0 });
-    expect(duplicateRoomState.room).toMatchObject({ racerCount: 1, racerSeatCount: 1 });
+    expect(duplicateRoomError.message).toContain('Racer access is required');
 
     const raceSyncStart = primarySocket.messages.length;
     const duplicateRaceSyncStart = duplicateSocket.messages.length;
@@ -2453,14 +2463,15 @@ describe('cloud API trust boundaries', () => {
       (message) => message.type === 'race-sync' && message.state?.sessionId === 'club-live-temporary-race',
       raceSyncStart,
     );
-    await waitForSocketMessage(
-      duplicateSocket,
-      (message) => message.type === 'race-sync'
-        && message.state?.sessionId === 'club-live-temporary-race',
-      duplicateRaceSyncStart,
-    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(duplicateSocket.messages.slice(duplicateRaceSyncStart)).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'race-sync',
+        state: expect.objectContaining({ sessionId: 'club-live-temporary-race' }),
+      }),
+    ]));
 
-    const retainedStateStart = duplicateSocket.messages.length;
+    const retainedStateStart = primarySocket.messages.length;
     primarySocket.socket.send(JSON.stringify({
       type: 'race-sync',
       state: {
@@ -2481,7 +2492,7 @@ describe('cloud API trust boundaries', () => {
     }));
     primarySocket.socket.send(JSON.stringify({ type: 'latency', rttMs: 10, clockOffsetMs: 0 }));
     const retainedRoomState = await waitForSocketMessage(
-      duplicateSocket,
+      primarySocket,
       (message) => message.type === 'room-state'
         && message.raceStates?.some(
           (state: { sessionId?: string }) => state.sessionId === 'club-live-temporary-race',
@@ -2691,7 +2702,6 @@ describe('cloud API trust boundaries', () => {
     cookie = ownerCookie;
     await expect((await api('/api/club-live/frames')).json()).resolves.toMatchObject({ frames: [] });
     cookie = athleteCookie;
-    const passiveExpiryStart = primarySocket.messages.length;
     const accessBeforePassiveExpiry = await api(
       `/api/club-live/access?clubId=${claimedMembership.clubId}`,
     );
@@ -2710,37 +2720,16 @@ describe('cloud API trust boundaries', () => {
     });
     expect(expiringPublish.status).toBe(200);
     await new Promise((resolve) => setTimeout(resolve, 1_200));
-    const passivelyDemotedState = await waitForSocketMessage(
-      primarySocket,
-      (message) => message.type === 'room-state'
-        && message.room?.id === multiplayerRoomId
-        && message.room?.members?.find(
-          (member: { id: string }) => member.id === primaryConnected.clientId,
-        )?.roomRole === 'spectator',
-      passiveExpiryStart,
-    );
-    expect(passivelyDemotedState.room).toMatchObject({
-      hostId: null,
-      racerCount: 0,
-      racerSeatCount: 0,
+    const expiredRoomExit = primarySocket.messages.find((message) => (
+      message.type === 'room-left'
+      && message.roomId === multiplayerRoomId
+      && message.reason === 'racer-access-ended'
+    ));
+    expect(expiredRoomExit).toMatchObject({
+      type: 'room-left',
+      roomId: multiplayerRoomId,
+      reason: 'racer-access-ended',
     });
-    expect(passivelyDemotedState.raceStates).toEqual([]);
-
-    const expiredControlStart = primarySocket.messages.length;
-    primarySocket.socket.send(JSON.stringify({
-      type: 'room-vote-start',
-      candidates: [1, 2, 3].map((index) => ({
-        id: `expired-vote-track-${index}`,
-        name: `Expired Track ${index}`,
-        hasPedalZones: true,
-      })),
-    }));
-    await expect(waitForSocketMessage(
-      primarySocket,
-      (message) => message.type === 'room-error'
-        && String(message.message).includes('Only the room host'),
-      expiredControlStart,
-    )).resolves.toBeTruthy();
 
     const restoredAccess = await api(`/api/club-live/access?clubId=${claimedMembership.clubId}`);
     await expect(restoredAccess.json()).resolves.toMatchObject({

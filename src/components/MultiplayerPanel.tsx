@@ -811,7 +811,7 @@ export function MultiplayerPanel({
 
           {rooms.length > 0 && (
             <div className="open-room-list">
-              <span>Live rooms</span>
+              <span>Multiplayer rooms</span>
               {rooms.slice(0, 4).map((room) => (
                 <button
                   className="open-room-link"

@@ -130,12 +130,13 @@ describe('Club Event owner race view', () => {
     const satelliteSource = readFileSync(new URL('../../src/components/GoogleMapsTrackLayer.tsx', import.meta.url), 'utf8');
 
     expect(appSource).toContain('raceCameraSnapshot={clubEventRaceViewApplies');
-    expect(appSource).toContain('? clubEventRaceCamera\n                    : clubTabletRaceViewApplies');
+    expect(appSource).toContain('? clubEventRaceCamera\n                    : multiplayerRaceViewApplies');
+    expect(appSource).toContain('? activeMultiplayerRaceView?.camera\n                    : clubTabletRaceViewApplies');
     expect(appSource).toContain('? clubTabletRaceCamera\n                      : raceCameraLocked');
     expect(appSource).toContain('? accountRaceCamera\n                        : undefined}');
     expect(earthViewSource).toContain('const presentedEarthAngle = raceCameraImmutable');
     expect(appSource).toContain(
-      'clubEventRaceViewApplies\n                    || clubTabletRaceViewApplies\n                    || raceCameraLocked',
+      'clubEventRaceViewApplies\n                    || multiplayerRaceViewApplies\n                    || clubTabletRaceViewApplies\n                    || raceCameraLocked',
     );
     expect(appSource).toContain(': clubTabletKioskMode\n        ? clubTabletRaceCamera');
     expect(appSource).toContain('clubTabletRoster?.device.id === clubTabletDevice?.device.id');
@@ -226,7 +227,8 @@ describe('Club Event owner race view', () => {
 
   it('keeps the active private Sprint snapshot visible in the locked tablet venue list', () => {
     const source = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
-    expect(source).toContain("clubEventLaunch?.activityType !== 'straight-sprint' || !clubEventTrack");
+    expect(source).toContain("const sharedSprintCourseActive = clubEventLaunch?.activityType === 'straight-sprint'");
+    expect(source).toContain('if (!sharedSprintCourseActive || !clubEventTrack)');
     expect(source).toContain('{ track: clubEventTrack, course: clubEventTrack, mapping: undefined }');
     expect(source).toContain('customRoutes={straightSprintVenueCourses.map(({ course }) => course)}');
   });

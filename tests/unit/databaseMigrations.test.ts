@@ -348,6 +348,21 @@ describe('database migration runner', () => {
     expect(statements.match(/VALIDATE CONSTRAINT/g)).toHaveLength(2);
   });
 
+  it('persists the complete synchronized multiplayer room across server restarts', () => {
+    const migration = databaseMigrations().find((candidate) => candidate.version === 44);
+    const statements = migration?.statements.join('\n') ?? '';
+    expect(migration).toMatchObject({
+      version: 44,
+      name: 'preserve configured multiplayer rooms across restarts',
+    });
+    expect(statements).toContain('setup JSONB');
+    expect(statements).toContain('studio_club_id TEXT');
+    expect(statements).toContain('matchmaking_scope TEXT');
+    expect(statements).toContain('round_number INTEGER');
+    expect(statements).toContain("matchmaking_scope IN ('studio', 'world')");
+    expect(statements).toContain('round_number >= 1');
+  });
+
   it('adds accountable administrator review fields to community reports', () => {
     const moderationMigration = databaseMigrations().find((candidate) => candidate.version === 32);
     const statements = moderationMigration?.statements.join('\n') ?? '';

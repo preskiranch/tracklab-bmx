@@ -133,7 +133,7 @@ TRACKLAB_LOAD_P95_MS=1500 \
 npm run probe:load
 ```
 
-5. Complete one spectator login, one administrator login, one saved-map read,
+5. Complete one free-account login, one administrator login, one saved-map read,
    one demo race, one private-room join, and one StoreKit sandbox purchase and
    restore on a signed iOS build.
 6. For bike or race-engine changes, complete the relevant rows in

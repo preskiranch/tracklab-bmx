@@ -1,7 +1,9 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   canonicalizeMultiplayerExploreState,
   canonicalizeMultiplayerRaceState,
+  quickRaceEnteredRacerCount,
   resolveMultiplayerProfile,
   type MultiplayerIdentityOverride,
   type MultiplayerProfile,
@@ -18,6 +20,26 @@ const ownerProfile: MultiplayerProfile = {
 };
 
 describe('multiplayer identity scoping', () => {
+  it('accepts only an exact 1–4 entered-athlete count for quick races', () => {
+    expect(quickRaceEnteredRacerCount(1)).toBe(1);
+    expect(quickRaceEnteredRacerCount(4)).toBe(4);
+    expect(quickRaceEnteredRacerCount(0)).toBeNull();
+    expect(quickRaceEnteredRacerCount(1.5)).toBeNull();
+    expect(quickRaceEnteredRacerCount(5)).toBeNull();
+  });
+
+  it('retains a pending room through bounded reconnect retries until the server confirms it', () => {
+    const source = readFileSync(new URL('../../src/hooks/useMultiplayer.ts', import.meta.url), 'utf8');
+    expect(source).toContain('pendingRoomJoinAttemptRef.current < 4');
+    expect(source).toContain('window.setTimeout(joinPendingRoom, 2_500)');
+    expect(source).toContain("socket.send(JSON.stringify({ type: 'join-room', roomId: pendingRoom }))");
+    expect(source).toContain("if (message.type === 'room-state')");
+    expect(source).toContain('pendingInviteRoomRef.current = null;\n            clearPendingRoomJoinRetry();');
+    expect(source).toContain("return send({ type: 'quick-race', scope, setup, racerSeatCount });");
+    expect(source).toContain('racerSeatCount,\n      track: currentTrack');
+    expect(source).not.toContain('racerSeatCount: Math.max(1, bikeCount)');
+  });
+
   it('uses the exact selected Club Tablet athlete without mutating owner identity', () => {
     const athleteOverride: MultiplayerIdentityOverride = {
       scopeKey: 'tablet-session-1',

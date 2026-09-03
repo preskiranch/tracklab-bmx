@@ -2261,6 +2261,29 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
             AND accent = '#7ade36'`,
       ],
     },
+    {
+      version: 44,
+      name: 'preserve configured multiplayer rooms across restarts',
+      statements: [
+        `ALTER TABLE ${schema}.rooms ADD COLUMN IF NOT EXISTS setup JSONB`,
+        `ALTER TABLE ${schema}.rooms ADD COLUMN IF NOT EXISTS studio_club_id TEXT`,
+        `ALTER TABLE ${schema}.rooms ADD COLUMN IF NOT EXISTS matchmaking_scope TEXT`,
+        `ALTER TABLE ${schema}.rooms ADD COLUMN IF NOT EXISTS round_number INTEGER NOT NULL DEFAULT 1`,
+        `ALTER TABLE ${schema}.rooms
+          DROP CONSTRAINT IF EXISTS rooms_matchmaking_scope_check`,
+        `ALTER TABLE ${schema}.rooms
+          ADD CONSTRAINT rooms_matchmaking_scope_check
+          CHECK (matchmaking_scope IS NULL OR matchmaking_scope IN ('studio', 'world')) NOT VALID`,
+        `ALTER TABLE ${schema}.rooms
+          VALIDATE CONSTRAINT rooms_matchmaking_scope_check`,
+        `ALTER TABLE ${schema}.rooms
+          DROP CONSTRAINT IF EXISTS rooms_round_number_check`,
+        `ALTER TABLE ${schema}.rooms
+          ADD CONSTRAINT rooms_round_number_check CHECK (round_number >= 1) NOT VALID`,
+        `ALTER TABLE ${schema}.rooms
+          VALIDATE CONSTRAINT rooms_round_number_check`,
+      ],
+    },
   ];
 }
 

@@ -7512,7 +7512,8 @@ input:focus {
     order: 3;
   }
 
-  .platform-shell:not(.race-fullscreen):not(.map-fullscreen) .multiplayer-panel {
+  .platform-shell:not(.race-fullscreen):not(.map-fullscreen) .multiplayer-panel,
+  .platform-shell:not(.race-fullscreen):not(.map-fullscreen) .quick-race-lobby {
     order: 4;
   }
 

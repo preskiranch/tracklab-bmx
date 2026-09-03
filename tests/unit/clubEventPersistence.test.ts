@@ -24,12 +24,23 @@ describe('Club Event persistence availability', () => {
     const studioRiderId = `launch-rider-${suffix}`;
     const bikeDeviceId = `launch-bike-${suffix}`;
     const sessionTokenHash = `launch-athlete-session-${suffix}`;
+    const secondDeviceId = `launch-device-two-${suffix}`;
+    const secondStudioRiderId = `launch-rider-two-${suffix}`;
+    const secondBikeDeviceId = `launch-bike-two-${suffix}`;
+    const secondSessionTokenHash = `launch-athlete-session-two-${suffix}`;
     const authSessionTokenHash = `launch-owner-session-${suffix}`;
+    const secondAuthSessionTokenHash = `launch-owner-session-two-${suffix}`;
     await ensureClub(ownerProfileKey, 'Launch Test Club', clubId);
     await createAuthSession({
       id: `launch-auth-${suffix}`,
       userId: ownerUserId,
       tokenHash: authSessionTokenHash,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    await createAuthSession({
+      id: `launch-auth-two-${suffix}`,
+      userId: ownerUserId,
+      tokenHash: secondAuthSessionTokenHash,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
     await expect(enrollClubTabletDevice({
@@ -38,9 +49,18 @@ describe('Club Event persistence availability', () => {
       ownerUserId,
       name: 'Launch tablet',
       tokenHash: `launch-device-token-${suffix}`,
+      authSessionTokenHash: secondAuthSessionTokenHash,
+    })).resolves.toBeTruthy();
+    await expect(enrollClubTabletDevice({
+      id: secondDeviceId,
+      ownerProfileKey,
+      ownerUserId,
+      name: 'Launch tablet two',
+      tokenHash: `launch-device-token-two-${suffix}`,
       authSessionTokenHash,
     })).resolves.toBeTruthy();
     await ensureClubRosterMember(ownerProfileKey, studioRiderId, 'Launch Rider');
+    await ensureClubRosterMember(ownerProfileKey, secondStudioRiderId, 'Launch Rider Two');
     await expect(createClubEvent({
       id: eventId,
       ownerProfileKey,
@@ -56,6 +76,15 @@ describe('Club Event persistence availability', () => {
       bikeDeviceId,
       sessionTokenHash,
     })).resolves.toMatchObject({ status: 'joined' });
+    await expect(joinClubEvent({
+      clubId,
+      eventId,
+      deviceId: secondDeviceId,
+      studioRiderId: secondStudioRiderId,
+      riderName: 'Launch Rider Two',
+      bikeDeviceId: secondBikeDeviceId,
+      sessionTokenHash: secondSessionTokenHash,
+    })).resolves.toMatchObject({ status: 'joined' });
     await expect(startClubEvent({ ownerProfileKey, eventId, leadMs: 3_000 }))
       .resolves.toMatchObject({ status: 'started' });
 
@@ -67,7 +96,8 @@ describe('Club Event persistence availability', () => {
       bikeDeviceId,
       sessionTokenHash,
     })).resolves.toMatchObject({ status: 'authorized' });
-    expect((await loadCurrentClubEvent(clubId))?.participants[0]?.launchedAt).toBeNull();
+    expect((await loadCurrentClubEvent(clubId))?.participants
+      .find((participant) => participant.deviceId === deviceId)?.launchedAt).toBeNull();
 
     await expect(markClubEventParticipantLaunched({
       clubId,
@@ -77,7 +107,8 @@ describe('Club Event persistence availability', () => {
       bikeDeviceId,
       sessionTokenHash,
     })).resolves.toMatchObject({ status: 'launched' });
-    expect((await loadCurrentClubEvent(clubId))?.participants[0]?.launchedAt).toEqual(expect.any(Number));
+    expect((await loadCurrentClubEvent(clubId))?.participants
+      .find((participant) => participant.deviceId === deviceId)?.launchedAt).toEqual(expect.any(Number));
   });
 
   it('does not turn a configured database outage into an empty current event', () => {

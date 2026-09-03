@@ -71,6 +71,16 @@
   background: #f4f7f2;
 }
 
+.club-event-builder-intro {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 3px;
+  padding-bottom: 2px;
+}
+
+.club-event-builder-intro strong { color: #243220; font-size: 15px; }
+.club-event-builder-intro span { color: #63705f; font-size: 12px; line-height: 1.45; }
+
 .club-event-builder label { display: grid; min-width: 0; gap: 6px; }
 .club-event-builder label > span { color: #586454; font-size: 11px; font-weight: 900; text-transform: uppercase; }
 .club-event-builder input,
@@ -86,6 +96,41 @@
 
 .club-event-builder-wide { grid-column: span 2; }
 .club-event-builder .club-event-primary { align-self: end; }
+
+.club-event-flow {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.club-event-flow li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid #d7e0d3;
+  border-radius: 10px;
+  background: #fff;
+  color: #4d5a49;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.club-event-flow b {
+  display: grid;
+  width: 23px;
+  height: 23px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 7px;
+  background: #172118;
+  color: #7ade36;
+}
 
 .club-event-race-view {
   display: grid;
@@ -170,6 +215,9 @@
 
 .club-event-lobby-actions { justify-content: flex-end; }
 .club-event-lobby-actions button:not(.club-event-primary) { border-color: #d1dad0; background: #fff; color: #4c5849; }
+.club-event-start-action { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+.club-event-start-action p { max-width: 330px; margin: 0; color: #9a5b1a; font-size: 11px; font-weight: 800; line-height: 1.35; text-align: right; }
+.club-event-start-action p.ready { color: #397b20; }
 .club-event-message { margin: 0; color: #566252; font-size: 13px; }
 
 @media (max-width: 900px) {
@@ -182,10 +230,13 @@
   .club-event-mode-switch { width: 100%; flex-direction: column; }
   .club-event-builder { grid-template-columns: minmax(0, 1fr); }
   .club-event-builder-wide { grid-column: auto; }
+  .club-event-flow { grid-template-columns: minmax(0, 1fr); }
   .club-event-race-view > div { grid-template-columns: minmax(0, 1fr); }
   .club-event-seats { grid-template-columns: minmax(0, 1fr); }
   .club-event-lobby-title { align-items: flex-start; flex-wrap: wrap; }
   .club-event-lobby-actions { align-items: stretch; flex-direction: column; }
+  .club-event-start-action { align-items: stretch; flex-direction: column; }
+  .club-event-start-action p { max-width: none; text-align: left; }
 }
 
 .spin { animation: club-event-spin 900ms linear infinite; }

@@ -132,8 +132,94 @@ export type MultiplayerTrackVoteCandidate = MultiplayerTrackSummary & {
   hasSplits: boolean;
 };
 
-export type MultiplayerRoomPhase = 'lobby' | 'voting' | 'route-select' | 'race';
+/** The only activities that may enter a synchronized multiplayer race. */
+export type MultiplayerRaceActivityType = 'bmx-race' | 'straight-sprint';
+export type MultiplayerRaceSetupVersion = 1;
+
+export type MultiplayerRaceViewCamera = Readonly<{
+  angle: number;
+  heading: number;
+  center?: TrackPoint;
+  zoom?: number;
+  referenceViewport?: RacePresentationViewport;
+}>;
+
+export type MultiplayerRaceRiderOverlay = Readonly<{
+  xPct: number;
+  yPct: number;
+  width: number;
+  height: number;
+  locked: boolean;
+  referenceViewport?: RacePresentationViewport;
+}>;
+
+/** Immutable presentation snapshot shared by every device in a match. */
+export type MultiplayerRaceView = Readonly<{
+  mode: TrackRaceViewMode;
+  camera?: MultiplayerRaceViewCamera;
+  riderOverlay?: MultiplayerRaceRiderOverlay;
+}>;
+
+export type MultiplayerRaceIntervalsConfiguration = Readonly<{
+  activityType: 'bmx-race';
+  trackId: string;
+  trackName: string;
+  /** Course geometry snapshot for saved/custom tracks unavailable in another client catalog. */
+  trackRecord?: TrackRecord;
+  raceView: MultiplayerRaceView;
+  lapCount: number;
+  /** `null` means the track has one route rather than an Amateur/Pro choice. */
+  routeVariantId: TrackRouteVariantId | null;
+}>;
+
+export type MultiplayerStraightSprintCourseSource = 'saved-map' | 'catalog-track';
+
+export type MultiplayerStraightSprintConfiguration = Readonly<{
+  activityType: 'straight-sprint';
+  courseId: string;
+  courseName: string;
+  courseSource: MultiplayerStraightSprintCourseSource;
+  /** Course geometry snapshot lets a saved sprint map run identically elsewhere. */
+  trackRecord?: TrackRecord;
+  raceView: MultiplayerRaceView;
+  distanceFeet: number;
+  airSetting: number;
+}>;
+
+export type MultiplayerRaceConfiguration =
+  | MultiplayerRaceIntervalsConfiguration
+  | MultiplayerStraightSprintConfiguration;
+
+/**
+ * Versioned multiplayer setup envelope. A higher revision supersedes any
+ * ready-state created for an earlier revision; configurationId identifies the
+ * canonical configuration itself independently of that revision.
+ */
+export type MultiplayerRaceSetup = Readonly<{
+  version: MultiplayerRaceSetupVersion;
+  revision: number;
+  configurationId: string;
+  configuration: MultiplayerRaceConfiguration;
+}>;
+
+export type MultiplayerRoomPhase =
+  | 'lobby'
+  | 'setup-select'
+  | 'voting'
+  | 'route-select'
+  | 'race'
+  | 'round-complete';
 export type MultiplayerLatencyQuality = 'unknown' | 'good' | 'ok' | 'poor';
+export type MultiplayerMatchmakingScope = 'studio' | 'world';
+
+export type MultiplayerMatchmakingState = Readonly<{
+  active: boolean;
+  scope: MultiplayerMatchmakingScope | null;
+  activityType: MultiplayerRaceActivityType | null;
+  queuedAt: number | null;
+  queuedRacers: number;
+  message: string;
+}>;
 export type ExploreTravelMode = 'bicycle' | 'drive';
 export type ExploreDistanceUnit = 'mi' | 'km';
 
@@ -319,6 +405,8 @@ export type MultiplayerRider = {
   track: MultiplayerTrackSummary;
   roomId: string | null;
   roomRole?: 'racer' | 'spectator' | null;
+  /** Ready always applies to the room's current setup revision. */
+  ready?: boolean;
   lastSeen: number;
 };
 
@@ -335,6 +423,14 @@ export type MultiplayerRoom = {
   private: boolean;
   purpose?: 'race' | 'live-audio' | 'club-event';
   track: MultiplayerTrackSummary;
+  /** Exact course, whole-route choice, and display settings shared by every racer. */
+  setup?: MultiplayerRaceSetup | null;
+  /** Studio rooms are discoverable only by authenticated tablets from the same club. */
+  studio?: boolean;
+  /** Present for one-tap studio/world rooms, which start automatically after every racer is Ready. */
+  matchmakingScope?: MultiplayerMatchmakingScope;
+  roundNumber?: number;
+  readyMemberIds?: string[];
   flow: MultiplayerRoomFlow;
   createdAt: number;
   members: MultiplayerRider[];

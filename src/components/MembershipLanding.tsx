@@ -64,8 +64,6 @@ type MembershipLandingProps = {
   profileComplete: boolean;
   profileError: string | null;
   isAdminProfile: boolean;
-  onlineRiderCount: number;
-  liveRoomCount: number;
   catalogReady: boolean;
   tracks: TrackRecord[];
   onAuthModeChange: (mode: AuthMode) => void;
@@ -74,7 +72,6 @@ type MembershipLandingProps = {
   onProfilePasswordChange: (password: string) => void;
   onProfileSubmit: () => boolean | Promise<boolean>;
   onSignOut: () => void;
-  onJoinFree: () => void;
   onEnterApp: () => void;
   onOpenRaceIntervals: () => void;
   onOpenStraightSprint: () => void;
@@ -105,8 +102,6 @@ export function MembershipLanding({
   profileComplete,
   profileError,
   isAdminProfile,
-  onlineRiderCount,
-  liveRoomCount,
   catalogReady,
   tracks,
   onAuthModeChange,
@@ -115,7 +110,6 @@ export function MembershipLanding({
   onProfilePasswordChange,
   onProfileSubmit,
   onSignOut,
-  onJoinFree,
   onEnterApp,
   onOpenRaceIntervals,
   onOpenStraightSprint,
@@ -135,7 +129,6 @@ export function MembershipLanding({
     if (url.hash === '#track-locator' || url.searchParams.has('locator')) return 'tracks';
     return 'home';
   };
-  const isMember = membership.tier !== 'visitor';
   const creatingAccount = authMode === 'register';
   const selectedOffer = appleProducts.find((product) => product.bikeSeats === bikeSeats);
   const productPriceAvailable = Boolean(selectedOffer?.displayPrice.trim());
@@ -356,9 +349,7 @@ export function MembershipLanding({
             <span className="membership-pill"><Globe2 size={15} /> Global BMX community</span>
             <h2>Discover globally. Train when you are ready.</h2>
             <p>Track and bike-shop directories are free to explore. Signed-in riders also get direct access to every Wattbike activity and their saved results.</p>
-            <div className="membership-hub-status" aria-label="TrackLab live status">
-              <span><strong>{onlineRiderCount}</strong> riders online</span>
-              <span><strong>{liveRoomCount}</strong> active rooms</span>
+            <div className="membership-hub-status" aria-label="TrackLab account status">
               <span><strong>{membership.tier === 'racer' ? membership.bikeSeats : 'Free'}</strong> {membership.tier === 'racer' ? 'bike seats' : 'directory access'}</span>
             </div>
           </section>
@@ -441,8 +432,8 @@ export function MembershipLanding({
           <span className="eyebrow">Login required</span>
           <h2>{profileComplete ? 'Account ready' : creatingAccount ? 'Create your free TrackLab account' : 'Sign in to TrackLab'}</h2>
           <p>
-            Every spectator and racer signs in before entering TrackLab. Free accounts can watch live sessions;
-            racer accounts can connect Wattbikes and join private rooms.
+            Every rider signs in before using account features. Free accounts can explore the public BMX track and
+            mapped bike shop directories; racer accounts can connect Wattbikes and join private multiplayer races.
           </p>
           {shopClaimPrompt && !profileComplete && <p className="shop-claim-account-prompt" role="status">{shopClaimPrompt}</p>}
         </div>
@@ -532,19 +523,19 @@ export function MembershipLanding({
           <div className="card-icon">
             <Activity size={20} />
           </div>
-          <span className="eyebrow">Spectator</span>
+          <span className="eyebrow">Free account</span>
           <h3>Free membership</h3>
           <p>
-            Watch live rooms, follow race activity, and explore the public BMX track and mapped bike shop directories without a paid bike seat.
+            Explore the public BMX track and mapped bike shop directories, save favorites, and build your community profile without a paid bike seat.
           </p>
           <ul>
-            <li>Live race viewing</li>
             <li>Public track directory</li>
             <li>Mapped bike shop directory</li>
             <li>Community profile</li>
+            <li>Saved track favorites</li>
           </ul>
-          <button className="secondary-button full-width" type="button" onClick={profileComplete ? () => enterFromLocator(onJoinFree) : () => { void submitProfile(); }} disabled={!profileComplete && authLoading}>
-            {isMember ? 'Use Free Access' : 'Create Free Membership'}
+          <button className="secondary-button full-width" type="button" onClick={() => selectTab('tracks')}>
+            Browse free directories
           </button>
         </article>
 

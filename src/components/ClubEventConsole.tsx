@@ -26,10 +26,8 @@ import {
   type ClubEventRaceViewMode,
   type ClubEventSnapshot,
 } from '../lib/clubEvent';
-import { prepareClubEventExploreConfiguration } from '../lib/clubEventExplore';
 import { supportsDragStripGameArena } from '../lib/dragStripGameArena';
-import { fetchExploreRoute } from '../lib/exploreRoutes';
-import { resolveLocationText } from '../lib/googleMaps';
+import { applyTrackRouteVariant } from '../lib/trackMapping';
 import { straightSprintDistanceOptions } from '../lib/straightSprint';
 import type { TrackRecord } from '../types';
 import './ClubEventConsole.css';
@@ -49,6 +47,27 @@ type ClubEventConsoleProps = Readonly<{
   sprintRoutes: readonly ClubEventCourseOption[];
   raceViewsReady?: boolean;
 }>;
+
+type StudioRaceActivityType = Exclude<ClubEventActivityType, 'explore'>;
+
+export const clubEventStudioRaceMinimumRiders = 2;
+
+export function clubEventStudioRaceCanStart(readyCount: number) {
+  return readyCount >= clubEventStudioRaceMinimumRiders;
+}
+
+export function clubEventStudioRaceReadinessMessage(readyCount: number) {
+  const safeReadyCount = Math.max(0, Math.min(4, Math.round(readyCount) || 0));
+  if (safeReadyCount < clubEventStudioRaceMinimumRiders) {
+    const remaining = clubEventStudioRaceMinimumRiders - safeReadyCount;
+    return `${remaining} more rider${remaining === 1 ? '' : 's'} must tap Ready before the race can start.`;
+  }
+  if (safeReadyCount === 4) {
+    return 'All 4 riders are ready. Start together when everyone is set.';
+  }
+  const openSeats = 4 - safeReadyCount;
+  return `${safeReadyCount} riders are ready. Start together now, or wait for ${openSeats} more.`;
+}
 
 function displayAthlete(event: ClubEventSnapshot, deviceId: string | null) {
   const slot = event.slots.find((candidate) => candidate.deviceId === deviceId);
@@ -95,7 +114,12 @@ function eventConfigurationSummary(event: ClubEventSnapshot) {
     const track = typeof configuration.trackName === 'string' ? configuration.trackName : 'Selected BMX track';
     const laps = Math.max(1, Math.round(Number(configuration.lapCount ?? configuration.laps) || 1));
     const view = raceViewLabel(configuration.raceView);
-    return `${track} · ${laps} lap${laps === 1 ? '' : 's'}${view ? ` · ${view}` : ''}`;
+    const route = configuration.routeVariantId === 'pro'
+      ? 'Pro Track'
+      : configuration.routeVariantId === 'amateur'
+        ? 'Amateur Track'
+        : '';
+    return `${track}${route ? ` · ${route}` : ''} · ${laps} lap${laps === 1 ? '' : 's'}${view ? ` · ${view}` : ''}`;
   }
   if (event.activityType === 'straight-sprint') {
     const distance = Math.max(30, Math.round(Number(configuration.distanceFeet) || 100));
@@ -117,16 +141,14 @@ export function ClubEventConsole({
   const requestGenerationRef = useRef(0);
   const [mode, setMode] = useState<'independent' | 'coach'>('independent');
   const [event, setEvent] = useState<ClubEventSnapshot | null>(null);
-  const [activityType, setActivityType] = useState<ClubEventActivityType>('bmx-race');
+  const [activityType, setActivityType] = useState<StudioRaceActivityType>('bmx-race');
   const [raceTrackId, setRaceTrackId] = useState(raceTracks[0]?.id ?? '');
   const [lapCount, setLapCount] = useState(1);
+  const [raceRouteVariantId, setRaceRouteVariantId] = useState<'amateur' | 'pro'>('amateur');
   const [sprintRouteId, setSprintRouteId] = useState(sprintRoutes[0]?.id ?? '');
   const [sprintDistanceFeet, setSprintDistanceFeet] = useState(100);
   const [airSetting, setAirSetting] = useState(1);
   const [raceViewMode, setRaceViewMode] = useState<ClubEventRaceViewMode>('satellite');
-  const [exploreOrigin, setExploreOrigin] = useState('Preski Ranch');
-  const [exploreDestination, setExploreDestination] = useState('');
-  const [exploreName, setExploreName] = useState('Club Explore ride');
   const [busy, setBusy] = useState<'idle' | 'creating' | 'starting' | 'cancelling'>('idle');
   const [message, setMessage] = useState('');
   const [now, setNow] = useState(Date.now());
@@ -194,12 +216,18 @@ export function ClubEventConsole({
     () => sprintRoutes.find((route) => route.id === sprintRouteId) ?? null,
     [sprintRouteId, sprintRoutes],
   );
+  const selectedRaceRouteVariants = selectedRaceTrack?.track.routeVariants ?? [];
+  const selectedRaceRouteVariant = selectedRaceRouteVariants.find((variant) => (
+    variant.id === raceRouteVariantId
+  )) ?? selectedRaceRouteVariants[0] ?? null;
+  const selectedRaceTrackRecord = selectedRaceTrack && selectedRaceRouteVariant
+    ? applyTrackRouteVariant(selectedRaceTrack.track, selectedRaceRouteVariant)
+    : selectedRaceTrack?.track ?? null;
   const selectedCourse = activityType === 'bmx-race' ? selectedRaceTrack : selectedSprintRoute;
   const gameArenaAvailable = activityType === 'straight-sprint'
     && Boolean(selectedSprintRoute && supportsDragStripGameArena(selectedSprintRoute.track));
 
   useEffect(() => {
-    if (activityType === 'explore') return;
     const savedMode = selectedCourse?.raceView?.mode;
     setRaceViewMode(gameArenaAvailable
       ? 'game'
@@ -228,11 +256,12 @@ export function ClubEventConsole({
       configuration = {
         trackId: selectedRaceTrack.id,
         trackName: selectedRaceTrack.name,
-        trackRecord: selectedRaceTrack.track,
+        trackRecord: selectedRaceTrackRecord,
         lapCount,
+        routeVariantId: selectedRaceRouteVariant?.id ?? null,
         raceView: clubEventRaceViewForCourse(selectedRaceTrack, raceViewMode),
       };
-    } else if (activityType === 'straight-sprint') {
+    } else {
       if (!selectedSprintRoute) {
         setMessage('Create or select a saved Straight Sprint route before opening the lobby.');
         return;
@@ -245,48 +274,37 @@ export function ClubEventConsole({
         airSetting,
         raceView: clubEventRaceViewForCourse(selectedSprintRoute, raceViewMode, sprintDistanceFeet),
       };
-    } else {
-      if (!exploreOrigin.trim() || !exploreDestination.trim()) {
-        setMessage('Enter the shared start and destination before opening the Explore lobby.');
-        return;
-      }
     }
 
     setBusy('creating');
-    setMessage(activityType === 'explore'
-      ? 'Resolving both locations and building the shared bicycle route…'
-      : 'Opening the four-tablet lobby…');
+    setMessage('Opening the Studio Race lobby…');
     try {
-      if (activityType === 'explore') {
-        configuration = await prepareClubEventExploreConfiguration({
-          origin: exploreOrigin,
-          destination: exploreDestination,
-          routeName: exploreName,
-        }, resolveLocationText, fetchExploreRoute);
-        setMessage('Route ready. Opening the four-tablet lobby…');
-      }
-      if (!configuration) throw new Error('The coach event configuration could not be prepared.');
+      if (!configuration) throw new Error('The Studio Race configuration could not be prepared.');
       const envelope = await createClubEvent(activityType, configuration);
       setEvent(envelope.event);
       setMode('coach');
-      setMessage('Lobby open. Riders can choose their name on any available tablet and tap Ready.');
+      setMessage('Race lobby open. Riders choose their name on a tablet and tap Ready. Start when 2 to 4 riders are ready.');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'The coach event could not be created.');
+      setMessage(error instanceof Error ? error.message : 'The Studio Race could not be created.');
     } finally {
       setBusy('idle');
     }
   };
 
   const start = async () => {
-    if (!event || readyCount === 0) return;
+    if (!event) return;
+    if (!clubEventStudioRaceCanStart(readyCount)) {
+      setMessage(clubEventStudioRaceReadinessMessage(readyCount));
+      return;
+    }
     setBusy('starting');
-    setMessage('Starting every ready tablet from the same server clock…');
+    setMessage(`Starting ${readyCount} riders together from the same server clock…`);
     try {
       const envelope = await startCurrentClubEvent(event.id);
       setEvent(envelope.event);
-      setMessage('Start sent. Waiting for each ready tablet to confirm its program and private room.');
+      setMessage('Start sent. Every ready tablet is opening the same race and exact setup.');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'The coach event could not start.');
+      setMessage(error instanceof Error ? error.message : 'The Studio Race could not start.');
     } finally {
       setBusy('idle');
     }
@@ -299,9 +317,9 @@ export function ClubEventConsole({
       const envelope = await cancelCurrentClubEvent(event.id);
       setEvent(envelope.event);
       setMode('independent');
-      setMessage('Coach event ended. Completed activities stay open for rider review until End activity; tablets that had not completed return to Independent Training.');
+      setMessage('Studio Race ended. Completed activities stay open for rider review until End activity; tablets that had not completed return to Independent Training.');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'The coach event could not be ended.');
+      setMessage(error instanceof Error ? error.message : 'The Studio Race could not be ended.');
     } finally {
       setBusy('idle');
     }
@@ -312,7 +330,7 @@ export function ClubEventConsole({
       <div className="club-event-console-header">
         <div>
           <span className="eyebrow"><RadioTower size={15} /> Studio control</span>
-          <h3>How should the four tablets run?</h3>
+          <h3>How should the studio tablets run?</h3>
         </div>
         <div className="club-event-mode-switch" role="group" aria-label="Club Tablet operating mode">
           <button
@@ -329,7 +347,7 @@ export function ClubEventConsole({
             disabled={busy !== 'idle'}
             onClick={() => setMode('coach')}
           >
-            <Users size={17} /> Coach-led Event
+            <Users size={17} /> Studio Race
           </button>
         </div>
       </div>
@@ -339,19 +357,24 @@ export function ClubEventConsole({
           <CheckCircle2 size={24} />
           <div>
             <strong>Riders control their own tablet</strong>
-            <p>Each athlete may choose BMX Race Intervals, Straight Sprint, Get Pulled, or Explore the World independently. This owner screen remains read-only and can watch all four live.</p>
+            <p>Each athlete may choose BMX Race Intervals, Straight Sprint, Get Pulled, or Explore the World independently. The owner monitor shows tablet, bike, athlete, and session status.</p>
           </div>
         </div>
       )}
 
       {!event && mode === 'coach' && (
         <div className="club-event-builder">
+          <div className="club-event-builder-intro">
+            <strong>Set up one race for 2–4 riders</strong>
+            <span>The event, mapped course, laps or distance, Wattbike Air, and saved view open identically on every ready tablet.</span>
+          </div>
           <label>
             <span>Event</span>
-            <select value={activityType} onChange={(event) => setActivityType(event.target.value as ClubEventActivityType)}>
+            <select value={activityType} onChange={(event) => setActivityType(
+              event.target.value === 'straight-sprint' ? 'straight-sprint' : 'bmx-race',
+            )}>
               <option value="bmx-race">BMX Race Intervals</option>
               <option value="straight-sprint">Straight Sprint</option>
-              <option value="explore">Explore the World</option>
             </select>
           </label>
 
@@ -366,6 +389,21 @@ export function ClubEventConsole({
               <span>Laps</span>
               <input type="number" min={1} max={20} value={lapCount} onChange={(event) => setLapCount(Math.max(1, Math.min(20, Math.round(Number(event.target.value) || 1))))} />
             </label>
+            {selectedRaceRouteVariants.length > 1 && (
+              <label>
+                <span>Race route</span>
+                <select
+                  value={selectedRaceRouteVariant?.id ?? 'amateur'}
+                  onChange={(event) => setRaceRouteVariantId(event.target.value === 'pro' ? 'pro' : 'amateur')}
+                >
+                  {selectedRaceRouteVariants.map((route) => (
+                    <option value={route.id} key={route.id}>
+                      {route.id === 'pro' ? 'Pro Track' : 'Amateur Track'}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </>}
 
           {activityType === 'straight-sprint' && <>
@@ -389,8 +427,7 @@ export function ClubEventConsole({
             </label>
           </>}
 
-          {(activityType === 'bmx-race' || activityType === 'straight-sprint')
-            && selectedCourse
+          {selectedCourse
             && !gameArenaAvailable && (
             <div className="club-event-race-view club-event-builder-wide">
               <span>Tablet race view</span>
@@ -416,12 +453,6 @@ export function ClubEventConsole({
             </div>
           )}
 
-          {activityType === 'explore' && <>
-            <label><span>Start</span><input value={exploreOrigin} onChange={(event) => setExploreOrigin(event.target.value)} placeholder="Preski Ranch" /></label>
-            <label><span>Destination</span><input value={exploreDestination} onChange={(event) => setExploreDestination(event.target.value)} placeholder="Choose a shared destination" /></label>
-            <label className="club-event-builder-wide"><span>Ride name</span><input value={exploreName} onChange={(event) => setExploreName(event.target.value)} /></label>
-          </>}
-
           <button
             className="club-event-primary"
             type="button"
@@ -431,8 +462,13 @@ export function ClubEventConsole({
             {busy === 'creating' ? <LoaderCircle className="spin" size={18} /> : <Users size={18} />}
             {clubEventLobbyNeedsRaceViews(activityType, raceViewsReady)
               ? 'Loading saved track views…'
-              : 'Open four-tablet lobby'}
+              : 'Open race lobby'}
           </button>
+          <ol className="club-event-flow" aria-label="Studio Race setup steps">
+            <li><b>1</b><span>Open race lobby</span></li>
+            <li><b>2</b><span>Riders tap Ready</span></li>
+            <li><b>3</b><span>Start together</span></li>
+          </ol>
         </div>
       )}
 
@@ -446,7 +482,7 @@ export function ClubEventConsole({
               <p>{eventConfigurationSummary(event)}</p>
             </div>
             <strong>{event.status === 'lobby'
-              ? `${readyCount} of 4 ready`
+              ? `${readyCount} rider${readyCount === 1 ? '' : 's'} ready`
               : `${synchronizedDeviceIds.size} of ${readyCount} tablets synced`}</strong>
           </div>
 
@@ -470,10 +506,15 @@ export function ClubEventConsole({
 
           <div className="club-event-lobby-actions">
             {event.status === 'lobby' && (
-              <button className="club-event-primary" type="button" disabled={readyCount === 0 || busy !== 'idle'} onClick={() => void start()}>
-                {busy === 'starting' ? <LoaderCircle className="spin" size={18} /> : <Play size={18} />}
-                Start all ready riders
-              </button>
+              <div className="club-event-start-action">
+                <p className={clubEventStudioRaceCanStart(readyCount) ? 'ready' : ''}>
+                  {clubEventStudioRaceReadinessMessage(readyCount)}
+                </p>
+                <button className="club-event-primary" type="button" disabled={!clubEventStudioRaceCanStart(readyCount) || busy !== 'idle'} onClick={() => void start()}>
+                  {busy === 'starting' ? <LoaderCircle className="spin" size={18} /> : <Play size={18} />}
+                  Start together
+                </button>
+              </div>
             )}
             <button type="button" disabled={busy !== 'idle'} onClick={() => void cancel()}>
               <X size={18} /> {event.status === 'active' ? 'End event' : 'Cancel lobby'}

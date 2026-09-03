@@ -175,9 +175,10 @@ same remembered device ID will be matched when it broadcasts.
 ## Membership And Apple In-App Purchases
 
 TrackLab now opens with a membership page before the race dashboard. Free
-spectator membership can view live rooms and run demo mode on the benchmark
-track. Racer membership unlocks live Wattbike connection, private race rooms,
-challenges, and race analytics.
+membership includes the public BMX-track and bike-shop directories plus the
+community profile. Public live race viewing is currently unavailable. Racer
+membership unlocks live Wattbike connection, private race rooms, synchronized
+Quick Match racing, challenges, and race analytics.
 
 The iPhone and iPad app offers four monthly auto-renewable subscription levels:
 one, two, three, or four simultaneous Wattbike connections. All levels belong

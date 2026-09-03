@@ -180,6 +180,18 @@ const clubDemoRoomIdByClubId = new Map();
 const clubEventClosedAtByEventId = new Map();
 const challenges = new Map();
 const matchInvites = new Map();
+// One-tap matchmaking stays process-local like active race rooms. Entries are
+// never advertised publicly: worldwide racers are matched by activity, while
+// studio racers are isolated by the club id proven by their tablet session.
+const quickRaceQueues = new Map();
+const quickRaceQueueKeyByClientId = new Map();
+const quickRaceQueueTimers = new Map();
+const quickRaceRoundTimers = new Map();
+const emptyConfiguredRoomTimers = new Map();
+// PostgreSQL room hydration crosses multiple awaits. Coalesce concurrent
+// reconnects for the same code so every socket receives the exact same
+// in-memory room object instead of attaching to an orphaned duplicate.
+const persistedRoomHydrations = new Map();
 const persistedRaceResultKeys = new Map();
 const clubLiveSessions = new Map();
 // A publish request can remain in flight while the rider ends sharing. Keep a
@@ -335,6 +347,14 @@ const maxClubTabletWebSocketTickets = 4_096;
 const maxClubTabletWebSocketTicketsPerSession = 8;
 const latencyGoodMs = 90;
 const latencyOkMs = 180;
+const configuredQuickRaceRoundTimeoutMs = Number(process.env.TRACKLAB_QUICK_RACE_ROUND_TIMEOUT_MS);
+const quickRaceRoundTimeoutOverrideMs = Number.isFinite(configuredQuickRaceRoundTimeoutMs)
+  ? Math.max(1_000, Math.min(15 * 60 * 1000, Math.round(configuredQuickRaceRoundTimeoutMs)))
+  : null;
+const configuredQuickRaceReconnectGraceMs = Number(process.env.TRACKLAB_QUICK_RACE_RECONNECT_GRACE_MS);
+const quickRaceReconnectGraceMs = Number.isFinite(configuredQuickRaceReconnectGraceMs)
+  ? Math.max(5_000, Math.min(2 * 60 * 1000, Math.round(configuredQuickRaceReconnectGraceMs)))
+  : 30_000;
 const defaultAdminAccountEmail = 'preskiranch@gmail.com';
 const authCookieName = 'tracklab_session';
 const configuredAuthSessionMaxAgeText = String(
@@ -7123,6 +7143,67 @@ function validClubEventTrackSnapshot(value, expectedTrackId) {
     && !Array.isArray(value.leaderboards);
 }
 
+const multiplayerGeometryEarthRadiusMeters = 6371008.8;
+
+function multiplayerGeometryDistanceMeters(left, right) {
+  const leftLatitude = left.lat * (Math.PI / 180);
+  const rightLatitude = right.lat * (Math.PI / 180);
+  const latitudeDelta = (right.lat - left.lat) * (Math.PI / 180);
+  const longitudeDelta = (right.lng - left.lng) * (Math.PI / 180);
+  const haversine = Math.sin(latitudeDelta / 2) ** 2
+    + Math.cos(leftLatitude) * Math.cos(rightLatitude) * Math.sin(longitudeDelta / 2) ** 2;
+  const boundedHaversine = Math.max(0, Math.min(1, haversine));
+  return multiplayerGeometryEarthRadiusMeters * 2 * Math.atan2(
+    Math.sqrt(boundedHaversine),
+    Math.sqrt(1 - boundedHaversine),
+  );
+}
+
+function multiplayerRouteGeometryLengthMeters(points) {
+  if (!Array.isArray(points) || points.length < 2) return 0;
+  return points.slice(1).reduce((total, point, index) => (
+    total + multiplayerGeometryDistanceMeters(points[index], point)
+  ), 0);
+}
+
+function multiplayerDefaultRouteGeometry(trackRecord) {
+  const centerline = Array.isArray(trackRecord?.centerline) ? trackRecord.centerline : [];
+  const splitSections = Array.isArray(trackRecord?.splitSections) ? trackRecord.splitSections : [];
+  if (centerline.length < 2 || splitSections.length === 0) return centerline;
+  const pointsMatch = (left, right, toleranceMeters = 4) => (
+    validClubEventTrackPoint(left)
+    && validClubEventTrackPoint(right)
+    && multiplayerGeometryDistanceMeters(left, right) <= toleranceMeters
+  );
+  const route = [centerline[0]];
+  for (let index = 1; index < centerline.length; index += 1) {
+    const previous = centerline[index - 1];
+    const point = centerline[index];
+    const split = splitSections.find((section) => (
+      pointsMatch(previous, section?.splitPoint)
+      && pointsMatch(point, section?.mergePoint)
+    ));
+    if (!split) {
+      route.push(point);
+      continue;
+    }
+    if (pointsMatch(route[route.length - 1], split.splitPoint)) {
+      route[route.length - 1] = split.splitPoint;
+    } else {
+      route.push(split.splitPoint);
+    }
+    const defaultBranch = split.branches?.find((branch) => branch?.id === 'a')
+      ?? split.branches?.[0];
+    const branchPoints = Array.isArray(defaultBranch?.points) && defaultBranch.points.length >= 2
+      ? defaultBranch.points
+      : [split.splitPoint, split.mergePoint];
+    route.push(...branchPoints.slice(1));
+  }
+  return route.filter((point, index) => (
+    index === 0 || multiplayerGeometryDistanceMeters(route[index - 1], point) > 0.25
+  ));
+}
+
 function sanitizeClubEventRaceView(activityType, value, trackRecord) {
   const normalizedTrackName = String(trackRecord?.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const dragStripGameArenaRequired = activityType === 'straight-sprint'
@@ -7247,7 +7328,27 @@ function sanitizeClubEventActivityConfiguration(activityType, value) {
   if (activityType === 'bmx-race') {
     const lapCount = Number(configuration.lapCount ?? configuration.laps);
     if (!Number.isInteger(lapCount) || lapCount < 1 || lapCount > 20) return null;
-    return { trackId, trackName, trackRecord, lapCount, ...(raceView ? { raceView } : {}) };
+    const routeVariantId = configuration.routeVariantId == null
+      ? null
+      : configuration.routeVariantId === 'amateur' || configuration.routeVariantId === 'pro'
+        ? configuration.routeVariantId
+        : undefined;
+    if (routeVariantId === undefined) return null;
+    if (
+      routeVariantId
+      && (
+        !Array.isArray(trackRecord.routeVariants)
+        || !trackRecord.routeVariants.some((variant) => variant?.id === routeVariantId)
+      )
+    ) return null;
+    return {
+      trackId,
+      trackName,
+      trackRecord,
+      lapCount,
+      routeVariantId,
+      ...(raceView ? { raceView } : {}),
+    };
   }
 
   if (activityType === 'straight-sprint') {
@@ -7274,6 +7375,112 @@ function sanitizeClubEventActivityConfiguration(activityType, value) {
   }
 
   return null;
+}
+
+/**
+ * Canonical room setup for the only two multiplayer activities. This reuses
+ * the strict Club Event geometry/view validator so a remote tablet cannot be
+ * sent an incomplete or oversized custom course.
+ */
+function sanitizeMultiplayerRaceSetup(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (Number(value.version) !== 1) return null;
+  const revision = Math.max(1, Math.min(1_000_000, Math.round(Number(value.revision) || 1)));
+  const candidate = value.configuration;
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null;
+  const activityType = candidate.activityType;
+
+  let configuration;
+  if (activityType === 'bmx-race') {
+    const base = sanitizeClubEventActivityConfiguration('bmx-race', candidate);
+    if (!base || base.trackRecord.routeStatus !== 'user-mapped') return null;
+    const routeVariantId = candidate.routeVariantId == null
+      ? null
+      : candidate.routeVariantId === 'amateur' || candidate.routeVariantId === 'pro'
+        ? candidate.routeVariantId
+        : undefined;
+    if (routeVariantId === undefined) return null;
+    const selectedRouteVariant = routeVariantId && Array.isArray(base.trackRecord.routeVariants)
+      ? base.trackRecord.routeVariants.find((route) => route?.id === routeVariantId)
+      : null;
+    // A route choice is part of the immutable race setup. Never accept a
+    // Pro/Amateur id unless the shared geometry snapshot actually contains it.
+    if (routeVariantId && !selectedRouteVariant) return null;
+    const selectedRouteLengthMeters = selectedRouteVariant
+      ? Number(selectedRouteVariant.lengthMeters)
+      : Number(base.trackRecord.lengthMeters);
+    if (
+      !Number.isFinite(selectedRouteLengthMeters)
+      || selectedRouteLengthMeters <= 0
+      || selectedRouteLengthMeters > 1_000_000
+    ) return null;
+    // Partial-section playback is not a real multiplayer mode. Reject stale
+    // clients that try to smuggle those fields into the configuration hash;
+    // Pro/Am whole-route selection and each rider's mapped split choice are
+    // the only supported Race Intervals route controls.
+    if (candidate.section != null || candidate.startSection != null) return null;
+    configuration = {
+      activityType,
+      trackId: base.trackId,
+      trackName: base.trackName,
+      trackRecord: base.trackRecord,
+      raceView: base.raceView ?? { mode: 'satellite' },
+      lapCount: base.lapCount,
+      routeVariantId,
+    };
+  } else if (activityType === 'straight-sprint') {
+    const courseId = sanitizeText(candidate.courseId, '', 120);
+    const courseName = sanitizeText(candidate.courseName, '', 120);
+    const courseSource = candidate.courseSource === 'saved-map' || candidate.courseSource === 'catalog-track'
+      ? candidate.courseSource
+      : null;
+    if (!courseId || !courseName || !courseSource) return null;
+    const base = sanitizeClubEventActivityConfiguration('straight-sprint', {
+      ...candidate,
+      trackId: courseId,
+      trackName: courseName,
+    });
+    if (!base || base.trackRecord.routeStatus !== 'user-mapped') return null;
+    const runnableRouteMeters = multiplayerRouteGeometryLengthMeters(
+      multiplayerDefaultRouteGeometry(base.trackRecord),
+    );
+    if (runnableRouteMeters + 0.5 < base.distanceFeet * 0.3048) return null;
+    configuration = {
+      activityType,
+      courseId,
+      courseName,
+      courseSource,
+      trackRecord: base.trackRecord,
+      raceView: base.raceView ?? { mode: 'satellite' },
+      distanceFeet: base.distanceFeet,
+      airSetting: base.airSetting,
+    };
+  } else {
+    return null;
+  }
+
+  const serializedConfiguration = JSON.stringify(configuration);
+  if (Buffer.byteLength(serializedConfiguration) > 220 * 1024) return null;
+  const configurationId = `setup-${createHash('sha256').update(serializedConfiguration).digest('hex').slice(0, 24)}`;
+  return { version: 1, revision, configurationId, configuration };
+}
+
+function multiplayerSetupTrack(setup) {
+  const configuration = setup?.configuration;
+  if (configuration?.activityType === 'straight-sprint') {
+    return sanitizeTrack({
+      id: configuration.courseId,
+      name: configuration.courseName,
+      country: configuration.trackRecord?.country || 'Straight Sprint',
+      state: configuration.trackRecord?.state || 'Saved course',
+    });
+  }
+  return sanitizeTrack({
+    id: configuration?.trackId,
+    name: configuration?.trackName,
+    country: configuration?.trackRecord?.country,
+    state: configuration?.trackRecord?.state,
+  });
 }
 
 async function loadClubEventRequestContext(request, { renewSession = false } = {}) {
@@ -10606,7 +10813,7 @@ function sanitizeRaceState(value, client, room) {
 
   return {
     sessionId: sanitizeText(value.sessionId, `${room.id}:${client.guestKey}:${value.trackId ?? room.track.id}`, 160),
-    ...(room.purpose === 'club-demo'
+    ...((room.purpose === 'club-demo' || room.setup)
       ? { raceToken: sanitizeText(value.raceToken, '', 80) }
       : {}),
     clientId: client.id,
@@ -11648,7 +11855,12 @@ function roomLatencySummary(room) {
   };
 }
 
-function publicRider(client, role = client?.roomRole ?? null, racerSeatCount = client?.racerSeatCount ?? 0) {
+function publicRider(
+  client,
+  role = client?.roomRole ?? null,
+  racerSeatCount = client?.racerSeatCount ?? 0,
+  { includePrivateRoom = false } = {},
+) {
   const racerAccess = clientHasRacerAccess(client);
   return {
     id: client.id,
@@ -11660,7 +11872,10 @@ function publicRider(client, role = client?.roomRole ?? null, racerSeatCount = c
     latencyMs: Number.isFinite(Number(client.latencyMs)) ? Math.round(Number(client.latencyMs)) : null,
     latencyQuality: latencyQualityForMs(client.latencyMs),
     track: client.track,
-    roomId: client.roomId,
+    // A private room code is a capability. Lobby/presence payloads must not
+    // disclose it to unrelated racers; room members still receive it in their
+    // own room-state member list below.
+    ...(includePrivateRoom && client.roomId ? { roomId: client.roomId } : {}),
     roomRole: role,
     lastSeen: client.lastSeen,
   };
@@ -11708,21 +11923,11 @@ function demoteClubLiveClient(client) {
   client.clubLiveAccess = null;
   const room = client.roomId ? rooms.get(client.roomId) : null;
   if (!room?.racers?.has(client.id)) return;
-  room.racers.delete(client.id);
-  room.spectators.add(client.id);
-  room.racerSeatCounts.delete(client.id);
-  room.raceStates.delete(client.id);
-  room.exploreStates?.delete(client.id);
-  client.roomRole = 'spectator';
-  client.racerSeatCount = 0;
-  if (room.hostId === client.id) {
-    room.hostId = [...room.racers].find((clientId) => (
-      clientHasRacerAccess(clients.get(clientId))
-    )) ?? null;
-  }
-  if (room.purpose === 'race') void persistence.saveRoomJoin(room, client, 'spectator', 0);
-  broadcastRoom(room.id, roomState(room));
-  broadcastLobby();
+  // A temporary studio seat ending must remove the client from the race.
+  // Retaining it as a spectator would expose live race telemetry after racer
+  // authorization has ended, while Club Live Monitor remains available only
+  // through its separate owner-authenticated APIs and stream.
+  leaveRoom(client, 'racer-access-ended');
 }
 
 function requireRacerClient(client, message = 'Racer access is required for that action.') {
@@ -11860,7 +12065,12 @@ function publicRoom(room) {
         return null;
       }
       const role = room.racers?.has(clientId) ? 'racer' : 'spectator';
-      const rider = publicRider(client, role, roomRacerSeatCountForMember(room, clientId));
+      const rider = {
+        ...publicRider(client, role, roomRacerSeatCountForMember(room, clientId), {
+          includePrivateRoom: true,
+        }),
+        ready: room.readyMemberIds?.has(clientId) === true,
+      };
       return room.purpose === 'club-demo'
         ? {
           ...rider,
@@ -11885,6 +12095,13 @@ function publicRoom(room) {
       ? 'live-audio'
       : room.purpose === 'club-event' ? 'club-event' : 'race',
     track: room.track,
+    ...(room.setup ? { setup: room.setup } : {}),
+    ...(room.studioClubId ? { studio: true } : {}),
+    ...(room.matchmakingScope === 'studio' || room.matchmakingScope === 'world'
+      ? { matchmakingScope: room.matchmakingScope }
+      : {}),
+    roundNumber: Math.max(1, Math.round(Number(room.roundNumber) || 1)),
+    readyMemberIds: [...(room.readyMemberIds ?? [])],
     flow: publicRoomFlow(room),
     createdAt: room.createdAt,
     members,
@@ -11905,6 +12122,27 @@ function send(client, payload) {
     client.socket.send(JSON.stringify(payload));
     cloudTelemetry.increment('tracklab_websocket_messages_total', { direction: 'outbound' });
   }
+}
+
+function queueRoomPersistence(room, operation, write) {
+  if (!room) return Promise.resolve(false);
+  const previous = room.persistenceWriteChain ?? Promise.resolve(true);
+  const pending = previous
+    .catch(() => false)
+    .then(async () => {
+      const result = await write();
+      return !persistence.persistenceEnabled() || result != null;
+    })
+    .catch((error) => {
+      cloudTelemetry.warn('multiplayer.room_persistence_failed', {
+        roomId: room.id,
+        operation,
+        error,
+      });
+      return false;
+    });
+  room.persistenceWriteChain = pending;
+  return pending;
 }
 
 function trainingSessionStudioRiderIds(session) {
@@ -11982,6 +12220,9 @@ function notifyTrainingHistoryProfiles(profileKeys, session) {
 
 function visibleRoomsForClient(client) {
   return [...rooms.values()]
+    // Race rooms are invitation-only. Do not advertise legacy public rooms;
+    // friend live-audio and studio rooms retain their existing private rules.
+    .filter((room) => room.purpose !== 'race' || room.members.has(client.id))
     .filter((room) => !room.private || room.members.has(client.id))
     .filter((room) => [...room.members]
       .map((memberId) => clients.get(memberId))
@@ -12049,6 +12290,102 @@ function clearRoomTimers(roomId) {
     clearTimeout(routeTimer);
     routeSelectTimers.delete(roomId);
   }
+
+  const roundTimer = quickRaceRoundTimers.get(roomId);
+  if (roundTimer) {
+    clearTimeout(roundTimer);
+    quickRaceRoundTimers.delete(roomId);
+  }
+}
+
+function completeConfiguredRoomRound(room, message = '') {
+  if (!room?.setup || room.flow?.phase !== 'race') return false;
+  const roundTimer = quickRaceRoundTimers.get(room.id);
+  if (roundTimer) clearTimeout(roundTimer);
+  quickRaceRoundTimers.delete(room.id);
+  room.flow = {
+    ...publicRoomFlow(room),
+    phase: 'round-complete',
+    deadlineAt: null,
+    raceStartAt: null,
+  };
+  addRoomSystemMessage(
+    room,
+    message || `Round ${Math.max(1, Math.round(Number(room.roundNumber) || 1))} complete. The same racers can race again or switch events.`,
+  );
+  broadcastRoom(room.id, roomState(room));
+  broadcastLobby();
+  return true;
+}
+
+function configuredRoomRaceDistanceMeters(room) {
+  const configuration = room?.setup?.configuration;
+  if (configuration?.activityType === 'straight-sprint') {
+    return Math.max(1, Number(configuration.distanceFeet) * 0.3048);
+  }
+  if (configuration?.activityType !== 'bmx-race') return 0;
+  const route = configuration.routeVariantId
+    ? configuration.trackRecord?.routeVariants?.find(
+      (candidate) => candidate?.id === configuration.routeVariantId,
+    )
+    : null;
+  const lapDistanceMeters = Number(route?.lengthMeters ?? configuration.trackRecord?.lengthMeters);
+  const lapCount = Math.max(1, Math.min(20, Math.round(Number(configuration.lapCount) || 1)));
+  return Number.isFinite(lapDistanceMeters) && lapDistanceMeters > 0
+    ? lapDistanceMeters * lapCount
+    : 0;
+}
+
+function configuredRoomRoundTimeoutMs(room) {
+  if (quickRaceRoundTimeoutOverrideMs != null) return quickRaceRoundTimeoutOverrideMs;
+  const distanceMeters = configuredRoomRaceDistanceMeters(room);
+  // Include staging/reconnect headroom, then assume a deliberately
+  // conservative 1.5 m/s average. A 20-lap session therefore receives much
+  // more time than a 30-foot sprint instead of both being cut off at 5 min.
+  const derivedMs = (2 * 60 * 1000) + ((distanceMeters / 1.5) * 1000);
+  return Math.max(2 * 60 * 1000, Math.min(2 * 60 * 60 * 1000, Math.round(derivedMs)));
+}
+
+function configuredRaceParticipantGuestKeys(room) {
+  if (room?.raceParticipantGuestKeys?.size) return [...room.raceParticipantGuestKeys];
+  return [...(room?.raceParticipantIds ?? [])]
+    .map((clientId) => clients.get(clientId)?.guestKey)
+    .filter(Boolean);
+}
+
+function configuredRaceParticipantFinished(room, guestKey) {
+  const clientId = room?.raceParticipantClientIdByGuestKey?.get(guestKey);
+  return Boolean(clientId && room.raceStates.get(clientId)?.raceState === 'finished');
+}
+
+function scheduleConfiguredRoomTimeout(room) {
+  if (!room?.setup || room.flow?.phase !== 'race' || !room.flow?.raceToken) return;
+  const raceToken = room.flow.raceToken;
+  const startsAt = Math.max(Date.now(), Number(room.flow.raceStartAt) || Date.now());
+  const roundTimeoutMs = configuredRoomRoundTimeoutMs(room);
+  const delayMs = Math.max(1_000, (startsAt - Date.now()) + roundTimeoutMs);
+  const timer = setTimeout(() => {
+    quickRaceRoundTimers.delete(room.id);
+    const activeRoom = rooms.get(room.id);
+    if (
+      !activeRoom
+      || activeRoom.flow?.phase !== 'race'
+      || activeRoom.flow?.raceToken !== raceToken
+    ) return;
+    const unfinishedCount = configuredRaceParticipantGuestKeys(activeRoom)
+      .filter((guestKey) => !configuredRaceParticipantFinished(activeRoom, guestKey))
+      .length;
+    completeConfiguredRoomRound(
+      activeRoom,
+      `Round ${Math.max(1, Math.round(Number(activeRoom.roundNumber) || 1))} time limit reached. ${unfinishedCount} unfinished racer${unfinishedCount === 1 ? '' : 's'} treated as DNF for this round; the group can continue.`,
+    );
+  }, delayMs);
+  timer.unref?.();
+  quickRaceRoundTimers.set(room.id, timer);
+  room.flow = {
+    ...publicRoomFlow(room),
+    deadlineAt: startsAt + roundTimeoutMs,
+  };
 }
 
 function roomState(room) {
@@ -12069,7 +12406,11 @@ function addRoomSystemMessage(room, text) {
     at: new Date().toISOString(),
   };
   room.messages = [...room.messages, message].slice(-40);
-  if (room.purpose === 'race') void persistence.saveRoomMessage(room.id, null, message);
+  if (room.purpose === 'race') {
+    void queueRoomPersistence(room, 'save-message', () => (
+      persistence.saveRoomMessage(room.id, null, message)
+    ));
+  }
 }
 
 function applyRoomTrack(room, track) {
@@ -12080,7 +12421,9 @@ function applyRoomTrack(room, track) {
       member.track = room.track;
     }
   });
-  if (room.purpose === 'race') void persistence.updateRoomTrack(room);
+  if (room.purpose === 'race') {
+    void queueRoomPersistence(room, 'update-track', () => persistence.updateRoomTrack(room));
+  }
 }
 
 function beginRoomRace(room, source = 'route selection') {
@@ -12091,12 +12434,32 @@ function beginRoomRace(room, source = 'route selection') {
     // a new socket identity) after this snapshot wait for the next race.
     room.demoRaceParticipantIds = new Set(room.racers ?? []);
   }
+  room.raceParticipantIds = new Set(room.racers ?? []);
+  if (room.setup) {
+    room.raceParticipantGuestKeys = new Set();
+    room.raceParticipantClientIdByGuestKey = new Map();
+    room.raceParticipantSeatCountByGuestKey = new Map();
+    room.raceParticipantIds.forEach((clientId) => {
+      const participant = clients.get(clientId);
+      if (!participant?.guestKey) return;
+      room.raceParticipantGuestKeys.add(participant.guestKey);
+      room.raceParticipantClientIdByGuestKey.set(participant.guestKey, clientId);
+      room.raceParticipantSeatCountByGuestKey.set(
+        participant.guestKey,
+        roomRacerSeatCountForMember(room, clientId),
+      );
+    });
+  }
+  const synchronizedLeadMs = Math.max(
+    1_500,
+    Math.min(4_000, 1_200 + (2 * Math.max(0, Number(latencySummary.maxLatencyMs) || 0))),
+  );
   room.flow = {
     ...publicRoomFlow(room),
     phase: 'race',
     deadlineAt: null,
     raceToken: randomId('RACE', 10),
-    raceStartAt: Date.now() + 800,
+    raceStartAt: Date.now() + synchronizedLeadMs,
   };
   cloudTelemetry.increment('tracklab_multiplayer_races_started_total');
   cloudTelemetry.info('multiplayer.race_started', {
@@ -12111,6 +12474,7 @@ function beginRoomRace(room, source = 'route selection') {
   if (latencySummary.latencyQuality === 'poor' && latencySummary.maxLatencyMs != null) {
     addRoomSystemMessage(room, `Latency warning: highest racer ping is ${latencySummary.maxLatencyMs} ms. Results will still save, but the race may feel delayed.`);
   }
+  scheduleConfiguredRoomTimeout(room);
   broadcastRoom(room.id, roomState(room));
   if (room.purpose === 'club-demo') void refreshClubDemoRoomPresentations(room);
   broadcastLobby();
@@ -12453,6 +12817,7 @@ function createLiveAudioRoom(host, targetProfileId) {
   const room = {
     id,
     hostId: host.id,
+    hostGuestKey: host.guestKey,
     private: true,
     purpose: 'live-audio',
     liveAudioParticipantProfileIds: new Set([host.profileId, targetProfileId]),
@@ -12897,6 +13262,31 @@ function refreshClubExploreClientPresentation(client, { forceIndividual = false 
   });
 }
 
+function clearEmptyConfiguredRoomTimer(roomId) {
+  const timer = emptyConfiguredRoomTimers.get(roomId);
+  if (timer) clearTimeout(timer);
+  emptyConfiguredRoomTimers.delete(roomId);
+}
+
+function retainEmptyConfiguredRoomForReconnect(room, reason) {
+  if (!room?.setup || reason !== 'disconnected') return false;
+  clearEmptyConfiguredRoomTimer(room.id);
+  const timer = setTimeout(() => {
+    emptyConfiguredRoomTimers.delete(room.id);
+    const activeRoom = rooms.get(room.id);
+    if (!activeRoom || activeRoom.members.size > 0) return;
+    clearRoomTimers(activeRoom.id);
+    rooms.delete(activeRoom.id);
+    void persistence.closeRoom(activeRoom.id);
+    cloudTelemetry.increment('tracklab_multiplayer_rooms_closed_total', { reason: 'reconnect-grace-expired' });
+    cloudTelemetry.setGauge('tracklab_multiplayer_rooms', rooms.size);
+    broadcastLobby();
+  }, quickRaceReconnectGraceMs);
+  timer.unref?.();
+  emptyConfiguredRoomTimers.set(room.id, timer);
+  return true;
+}
+
 function leaveRoom(client, reason = 'left') {
   if (!client.roomId) {
     return;
@@ -12904,12 +13294,24 @@ function leaveRoom(client, reason = 'left') {
 
   const room = rooms.get(client.roomId);
   const oldRoomId = client.roomId;
+  const reconnectableActiveParticipant = Boolean(
+    room?.setup
+    && room.flow?.phase === 'race'
+    && room.raceParticipantGuestKeys?.has(client.guestKey)
+    && room.raceParticipantClientIdByGuestKey?.get(client.guestKey) === client.id,
+  );
   if (room?.purpose === 'live-audio') {
     closeLiveAudioRoom(room, reason);
     return;
   }
   client.roomId = null;
-  if (!room || room.purpose === 'race') void persistence.saveRoomLeave(oldRoomId, client);
+  if (!room || room.purpose === 'race') {
+    if (room) {
+      void queueRoomPersistence(room, 'leave', () => persistence.saveRoomLeave(oldRoomId, client));
+    } else {
+      void persistence.saveRoomLeave(oldRoomId, client);
+    }
+  }
 
   if (!room) {
     send(client, { type: 'room-left', roomId: oldRoomId, reason });
@@ -12917,7 +13319,9 @@ function leaveRoom(client, reason = 'left') {
   }
 
   room.members.delete(client.id);
-  room.raceStates.delete(client.id);
+  if (!reconnectableActiveParticipant) room.raceStates.delete(client.id);
+  room.readyMemberIds?.delete(client.id);
+  if (!reconnectableActiveParticipant) room.raceParticipantIds?.delete(client.id);
   room.exploreStates?.delete(client.id);
   room.racers?.delete(client.id);
   room.spectators?.delete(client.id);
@@ -12931,9 +13335,21 @@ function leaveRoom(client, reason = 'left') {
     void refreshClubExploreClientPresentation(client, { forceIndividual: true });
   }
   if (room.hostId === client.id) {
-    room.hostId = [...room.racers].find((clientId) => (
+    const successorId = [...room.racers].find((clientId) => (
       clientHasRacerAccess(clients.get(clientId))
     )) ?? null;
+    room.hostId = successorId;
+    const preservePersistedHost = Boolean(
+      room.durableHostPending
+      && room.hostGuestKey
+      && client.guestKey !== room.hostGuestKey,
+    );
+    if (successorId && !preservePersistedHost) {
+      room.hostGuestKey = clients.get(successorId)?.guestKey ?? room.hostGuestKey;
+      void queueRoomPersistence(room, 'host-failover', () => (
+        persistence.updateRoomHost(room.id, clients.get(successorId))
+      ));
+    }
   }
 
   send(client, { type: 'room-left', roomId: oldRoomId, reason });
@@ -12948,6 +13364,11 @@ function leaveRoom(client, reason = 'left') {
   }
 
   if (room.members.size === 0) {
+    if (retainEmptyConfiguredRoomForReconnect(room, reason)) {
+      broadcastLobby();
+      return;
+    }
+    clearEmptyConfiguredRoomTimer(room.id);
     clearRoomTimers(room.id);
     rooms.delete(room.id);
     if (room.purpose === 'club-event' && clubEventRoomIdByEventId.get(room.clubEventId) === room.id) {
@@ -12961,6 +13382,18 @@ function leaveRoom(client, reason = 'left') {
     if (room.purpose === 'race') void persistence.closeRoom(room.id);
     if (room.purpose === 'club-demo') void refreshClubTabletDemoPresentation(client);
     broadcastLobby();
+    return;
+  }
+
+  if (
+    room.setup
+    && room.flow?.phase === 'race'
+    && configuredRaceParticipantGuestKeys(room).length >= 1
+    && configuredRaceParticipantGuestKeys(room).every((guestKey) => (
+      configuredRaceParticipantFinished(room, guestKey)
+    ))
+  ) {
+    completeConfiguredRoomRound(room);
     return;
   }
 
@@ -12981,8 +13414,15 @@ async function joinRoom(
   room,
   preferredRole = 'racer',
   requestedSeatCount = 1,
-  { broadcast = true } = {},
+  { broadcast = true, reconnectActiveRace = false } = {},
 ) {
+  if (
+    room.studioClubId
+    && room.studioClubId !== sanitizeText(client.clubLiveAccess?.clubId, '', 160)
+  ) {
+    send(client, { type: 'room-error', message: 'That studio race belongs to another club.' });
+    return false;
+  }
   if (room.purpose === 'live-audio') {
     if (
       Number.isFinite(room.liveAudioJoinDeadlineAt)
@@ -13031,6 +13471,35 @@ async function joinRoom(
     preferredRole = 'spectator';
     requestedSeatCount = 0;
   }
+  if (
+    room.purpose === 'race'
+    && (preferredRole !== 'racer' || !clientCanClaimRacerSeat(client))
+  ) {
+    send(client, {
+      type: 'room-error',
+      message: 'Racer access is required to join this private multiplayer race.',
+    });
+    return false;
+  }
+  if (reconnectActiveRace) {
+    const previousClientId = room.raceParticipantClientIdByGuestKey?.get(client.guestKey);
+    const previousClient = previousClientId ? clients.get(previousClientId) : null;
+    if (
+      !room.setup
+      || room.flow?.phase !== 'race'
+      || !room.raceParticipantGuestKeys?.has(client.guestKey)
+      || (previousClient && previousClient.id !== client.id && previousClient.socket?.readyState === WebSocket.OPEN)
+    ) {
+      send(client, { type: 'room-error', message: 'That active race is available only to its original racers.' });
+      return false;
+    }
+    preferredRole = 'racer';
+    requestedSeatCount = room.raceParticipantSeatCountByGuestKey?.get(client.guestKey) ?? 1;
+  }
+  if (room.hydratedFromPersistence && !room.allowedGuestKeys?.has(client.guestKey)) {
+    send(client, { type: 'room-error', message: 'That private race is not available to this account.' });
+    return false;
+  }
   if (client.roomId && client.roomId !== room.id) {
     leaveRoom(client, 'joined-another-room');
   }
@@ -13043,6 +13512,12 @@ async function joinRoom(
   }
   if (!room.racerSeatCounts) {
     room.racerSeatCounts = new Map();
+  }
+  if (!room.readyMemberIds) {
+    room.readyMemberIds = new Set();
+  }
+  if (!room.raceParticipantIds) {
+    room.raceParticipantIds = new Set();
   }
   if (!room.exploreStates) {
     room.exploreStates = new Map();
@@ -13060,18 +13535,37 @@ async function joinRoom(
   const existingSeatCount = room.racerSeatCounts.get(client.id) ?? 0;
   const availableSeatCount = Math.max(0, maxRaceBikeCount - (roomRacerSeatCount(room) - existingSeatCount));
   if (preferredRole === 'racer' && availableSeatCount <= 0) {
+    if (room.purpose === 'race') {
+      send(client, {
+        type: 'room-error',
+        message: 'That private multiplayer race already has four rider seats in use.',
+      });
+      return false;
+    }
     preferredRole = 'spectator';
   }
 
-  if (
-    !room.hostId
-    && preferredRole === 'racer'
-    && room.purpose !== 'club-event'
-  ) {
-    room.hostId = client.id;
+  if (preferredRole === 'racer' && room.purpose !== 'club-event') {
+    const returningHost = persistence.resolveReturningRoomHost(room, client);
+    if (returningHost) {
+      // A non-owner may provisionally operate a rehydrated room so it is never
+      // stranded after a restart. The durable owner still reclaims host as soon
+      // as that exact stable identity returns.
+      room.hostId = returningHost.hostId;
+      room.hostGuestKey = returningHost.hostGuestKey;
+      room.durableHostPending = returningHost.durableHostPending;
+      if (returningHost.persistHost) {
+        void queueRoomPersistence(room, 'restore-host', () => persistence.updateRoomHost(room.id, client));
+      }
+    }
   }
 
+  clearEmptyConfiguredRoomTimer(room.id);
   room.members.add(client.id);
+  room.allowedGuestKeys?.add(client.guestKey);
+  // A newly joined/reconnected socket must explicitly confirm that it loaded
+  // the room's current immutable setup before it can participate in a start.
+  room.readyMemberIds.delete(client.id);
   if (preferredRole === 'spectator') {
     room.racers.delete(client.id);
     room.spectators.add(client.id);
@@ -13091,12 +13585,23 @@ async function joinRoom(
   client.roomId = room.id;
   client.roomRole = preferredRole;
   client.track = room.track;
+  if (reconnectActiveRace) {
+    const previousClientId = room.raceParticipantClientIdByGuestKey.get(client.guestKey);
+    const previousState = room.raceStates.get(previousClientId);
+    room.raceParticipantIds.delete(previousClientId);
+    room.raceStates.delete(previousClientId);
+    room.raceParticipantIds.add(client.id);
+    room.raceParticipantClientIdByGuestKey.set(client.guestKey, client.id);
+    if (previousState) room.raceStates.set(client.id, { ...previousState, clientId: client.id });
+  }
   if (room.purpose === 'live-audio' && room.members.size >= 2) {
     room.liveAudioJoinDeadlineAt = null;
     room.liveAudioAcceptedInvite = null;
   }
   if (room.purpose === 'race') {
-    void persistence.saveRoomJoin(room, client, preferredRole, client.racerSeatCount);
+    void queueRoomPersistence(room, 'join', () => (
+      persistence.saveRoomJoin(room, client, preferredRole, client.racerSeatCount)
+    ));
   }
   cloudTelemetry.increment('tracklab_multiplayer_room_joins_total', { role: preferredRole });
   if (broadcast) {
@@ -13106,7 +13611,7 @@ async function joinRoom(
   return true;
 }
 
-function createRoom(host, track, privateRoom = true, hostSeatCount = 1) {
+function createRoom(host, track, privateRoom = true, hostSeatCount = 1, options = {}) {
   let id = randomId('ROOM', 6);
   while (rooms.has(id)) {
     id = randomId('ROOM', 6);
@@ -13115,9 +13620,23 @@ function createRoom(host, track, privateRoom = true, hostSeatCount = 1) {
   const room = {
     id,
     hostId: host.id,
+    hostGuestKey: host.guestKey,
+    durableHostPending: false,
     private: privateRoom,
     purpose: 'race',
     track: sanitizeTrack(track ?? host.track),
+    setup: options.setup ?? null,
+    studioClubId: sanitizeText(options.studioClubId, '', 160) || null,
+    matchmakingScope: options.matchmakingScope === 'studio' || options.matchmakingScope === 'world'
+      ? options.matchmakingScope
+      : null,
+    roundNumber: 1,
+    readyMemberIds: new Set(),
+    raceParticipantIds: new Set(),
+    raceParticipantGuestKeys: new Set(),
+    raceParticipantClientIdByGuestKey: new Map(),
+    raceParticipantSeatCountByGuestKey: new Map(),
+    allowedGuestKeys: new Set([host.guestKey]),
     flow: defaultRoomFlow(),
     createdAt: Date.now(),
     members: new Set(),
@@ -13131,7 +13650,9 @@ function createRoom(host, track, privateRoom = true, hostSeatCount = 1) {
     messages: [{
       id: randomId('MSG', 10),
       author: 'TrackLab',
-      text: privateRoom ? 'Private room opened.' : 'Public lobby opened.',
+      text: options.studioClubId
+        ? 'Private studio race opened.'
+        : privateRoom ? 'Private room opened.' : 'Public lobby opened.',
       at: new Date().toISOString(),
     }],
   };
@@ -13141,10 +13662,314 @@ function createRoom(host, track, privateRoom = true, hostSeatCount = 1) {
     visibility: privateRoom ? 'private' : 'public',
   });
   cloudTelemetry.setGauge('tracklab_multiplayer_rooms', rooms.size);
-  void persistence.saveRoom(room, host);
-  void persistence.saveRoomMessage(room.id, null, room.messages[0]);
-  joinRoom(host, room, 'racer', hostSeatCount);
+  void queueRoomPersistence(room, 'create', () => persistence.saveRoom(room, host));
+  void queueRoomPersistence(room, 'opening-message', () => (
+    persistence.saveRoomMessage(room.id, null, room.messages[0])
+  ));
+  void joinRoom(host, room, 'racer', hostSeatCount);
   return room;
+}
+
+function quickRaceQueueState(client, active, options = {}) {
+  send(client, {
+    type: 'matchmaking-state',
+    state: {
+      active,
+      scope: active ? options.scope ?? null : null,
+      activityType: active ? options.activityType ?? null : null,
+      queuedAt: active ? options.queuedAt ?? Date.now() : null,
+      queuedRacers: active ? Math.max(1, Math.round(Number(options.queuedRacers) || 1)) : 0,
+      message: sanitizeText(options.message, active ? 'Finding racers…' : '', 180),
+    },
+  });
+}
+
+function quickRaceEntryIsEligible(entry, queue) {
+  const client = clients.get(entry?.clientId);
+  const seatCount = Number(entry?.seatCount);
+  if (
+    !client
+    || client.socket?.readyState !== WebSocket.OPEN
+    || client.roomId
+    || !clientCanClaimRacerSeat(client)
+    || quickRaceQueueKeyByClientId.get(client.id) !== queue?.key
+    || entry?.setup?.configuration?.activityType !== queue?.activityType
+    || !Number.isInteger(seatCount)
+    || seatCount < 1
+    || seatCount > maxRaceBikeCount
+    || seatCount > racerSeatLimitForClient(client)
+  ) return false;
+  if (queue.scope !== 'studio') return queue.scope === 'world';
+  return Boolean(
+    queue.studioClubId
+    && client.clubTabletSessionTokenHash
+    && sanitizeText(client.clubLiveAccess?.clubId, '', 160) === queue.studioClubId
+  );
+}
+
+function quickRaceQueueEntries(queue) {
+  return [...(queue?.entries?.values() ?? [])]
+    .filter((entry) => quickRaceEntryIsEligible(entry, queue))
+    .sort((left, right) => left.queuedAt - right.queuedAt);
+}
+
+function clearQuickRaceQueueTimer(queueKey) {
+  const timer = quickRaceQueueTimers.get(queueKey);
+  if (timer) clearTimeout(timer);
+  quickRaceQueueTimers.delete(queueKey);
+}
+
+function refreshQuickRaceQueue(queue) {
+  if (!queue) return;
+  const entries = quickRaceQueueEntries(queue);
+  queue.entries = new Map(entries.map((entry) => [entry.clientId, entry]));
+  const queuedRacers = entries.reduce((sum, entry) => sum + entry.seatCount, 0);
+  entries.forEach((entry) => {
+    const client = clients.get(entry.clientId);
+    if (client) quickRaceQueueState(client, true, {
+      scope: queue.scope,
+      activityType: queue.activityType,
+      queuedAt: entry.queuedAt,
+      queuedRacers,
+      message: queue.scope === 'studio'
+        ? `${queuedRacers}/4 studio racers connected. Wait for all four or start together now.`
+        : `${queuedRacers}/4 racers found. Waiting briefly for up to four.`,
+    });
+  });
+  if (entries.length === 0) {
+    clearQuickRaceQueueTimer(queue.key);
+    quickRaceQueues.delete(queue.key);
+  }
+}
+
+function removeClientFromQuickRaceQueue(client, message = '') {
+  const queueKey = quickRaceQueueKeyByClientId.get(client?.id);
+  if (!queueKey) return false;
+  quickRaceQueueKeyByClientId.delete(client.id);
+  const queue = quickRaceQueues.get(queueKey);
+  queue?.entries?.delete(client.id);
+  quickRaceQueueState(client, false, { message });
+  refreshQuickRaceQueue(queue);
+  return true;
+}
+
+async function formQuickRaceMatch(queueKey) {
+  clearQuickRaceQueueTimer(queueKey);
+  const queue = quickRaceQueues.get(queueKey);
+  if (!queue || queue.forming) return;
+  queue.forming = true;
+  let formedMatch = false;
+  try {
+    const availableEntries = quickRaceQueueEntries(queue);
+    if (availableEntries.length === 0) {
+      quickRaceQueues.delete(queueKey);
+      return;
+    }
+
+    // Try each queued racer as the seed, oldest first. An oldest racer who
+    // blocks every other entry must not prevent a later mutually compatible
+    // pair from matching forever.
+    let selected = [];
+    let selectedSeats = 0;
+    for (let seedIndex = 0; seedIndex < availableEntries.length; seedIndex += 1) {
+      const candidateSelection = [];
+      let candidateSeats = 0;
+      const orderedCandidates = [
+        availableEntries[seedIndex],
+        ...availableEntries.filter((_, index) => index !== seedIndex),
+      ];
+      for (const entry of orderedCandidates) {
+        const candidate = clients.get(entry.clientId);
+        if (!candidate || candidateSeats + entry.seatCount > maxRaceBikeCount) continue;
+        if (!candidateSelection.every((accepted) => (
+          clientsCanInteract(candidate, clients.get(accepted.clientId))
+          && clientsCanInteract(clients.get(accepted.clientId), candidate)
+        ))) continue;
+        candidateSelection.push(entry);
+        candidateSeats += entry.seatCount;
+      }
+      if (candidateSeats >= 2) {
+        selected = candidateSelection;
+        selectedSeats = candidateSeats;
+        break;
+      }
+    }
+
+    if (selectedSeats < 2) return;
+
+    const first = selected[0];
+    const firstClient = clients.get(first.clientId);
+    if (!firstClient || !quickRaceEntryIsEligible(first, queue)) return;
+    const setup = first.setup;
+    const room = createRoom(
+      firstClient,
+      multiplayerSetupTrack(setup),
+      true,
+      first.seatCount,
+      {
+        setup,
+        studioClubId: queue.scope === 'studio' ? queue.studioClubId : null,
+        matchmakingScope: queue.scope,
+      },
+    );
+    const joined = room.racers?.has(first.clientId) && firstClient.roomId === room.id
+      ? [first]
+      : [];
+    for (const entry of selected.slice(1)) {
+      if (!quickRaceEntryIsEligible(entry, queue)) continue;
+      const candidate = clients.get(entry.clientId);
+      if (candidate && await joinRoom(candidate, room, 'racer', entry.seatCount)) joined.push(entry);
+    }
+
+    if (roomRacerSeatCount(room) < 2) {
+      // Eligibility can change between queueing and room creation (for
+      // example, an account may consume its last seat on another socket).
+      // Keep every still-eligible entry queued instead of announcing a match
+      // that contains only one racer.
+      [...room.members].forEach((clientId) => {
+        const member = clients.get(clientId);
+        if (member?.roomId === room.id) leaveRoom(member, 'matchmaking-retry');
+      });
+      if (rooms.get(room.id) === room) {
+        clearRoomTimers(room.id);
+        rooms.delete(room.id);
+        void persistence.closeRoom(room.id);
+        cloudTelemetry.increment('tracklab_multiplayer_rooms_closed_total', { reason: 'matchmaking-retry' });
+        cloudTelemetry.setGauge('tracklab_multiplayer_rooms', rooms.size);
+      }
+      return;
+    }
+
+    room.matchmakingScope = queue.scope;
+    await room.persistenceWriteChain;
+    addRoomSystemMessage(room, queue.scope === 'studio'
+      ? 'Studio racers matched. Review the shared setup and tap Ready.'
+      : 'Quick Match found racers. Review the shared setup and tap Ready.');
+    joined.forEach((entry) => {
+      queue.entries.delete(entry.clientId);
+      quickRaceQueueKeyByClientId.delete(entry.clientId);
+      const matchedClient = clients.get(entry.clientId);
+      if (matchedClient) quickRaceQueueState(matchedClient, false, {
+        message: `Match found. Room ${room.id} is ready.`,
+      });
+    });
+    formedMatch = true;
+    broadcastRoom(room.id, roomState(room));
+    broadcastLobby();
+  } finally {
+    queue.forming = false;
+    if (quickRaceQueues.get(queueKey) === queue) {
+      refreshQuickRaceQueue(queue);
+      const remainingSeats = quickRaceQueueEntries(queue)
+        .reduce((sum, entry) => sum + entry.seatCount, 0);
+      if (formedMatch && remainingSeats >= maxRaceBikeCount) {
+        queueMicrotask(() => void formQuickRaceMatch(queueKey));
+      } else if (formedMatch && remainingSeats >= 2 && queue.scope === 'world') {
+        scheduleQuickRaceMatch(queue);
+      }
+    }
+  }
+}
+
+function scheduleQuickRaceMatch(queue) {
+  if (!queue || queue.scope !== 'world' || quickRaceQueueTimers.has(queue.key)) return;
+  const timer = setTimeout(() => {
+    void formQuickRaceMatch(queue.key);
+  }, 1_200);
+  timer.unref?.();
+  quickRaceQueueTimers.set(queue.key, timer);
+}
+
+function requestedRacerSeatCount(client, value) {
+  const seatCount = Number(value);
+  if (
+    !Number.isInteger(seatCount)
+    || seatCount < 1
+    || seatCount > maxRaceBikeCount
+    || seatCount > racerSeatLimitForClient(client)
+  ) return null;
+  return seatCount;
+}
+
+function requestedPrivateRoomSeatCount(client, value) {
+  const requested = Number(value);
+  if (!Number.isInteger(requested) || requested < 1 || requested > maxRaceBikeCount) return null;
+  // Older private-room clients sent the account's requested bike count and
+  // relied on the server to grant only the seats this socket actually owns.
+  // Keep that protocol compatible; Quick Match remains strict because its
+  // advertised seat count affects cohort formation.
+  return Math.min(requested, Math.max(1, racerSeatLimitForClient(client)));
+}
+
+function joinQuickRaceQueue(client, scope, setup, seatCount) {
+  removeClientFromQuickRaceQueue(client);
+  const activityType = setup.configuration.activityType;
+  const studioClubId = scope === 'studio'
+    ? sanitizeText(client.clubLiveAccess?.clubId, '', 160)
+    : '';
+  if (scope === 'studio' && (!studioClubId || !client.clubTabletSessionTokenHash)) {
+    send(client, { type: 'room-error', message: 'Studio matching requires an active athlete on an authorized Club Tablet.' });
+    return;
+  }
+  const queueKey = scope === 'studio'
+    ? `studio:${studioClubId}:${activityType}`
+    : `world:${activityType}`;
+  const queue = quickRaceQueues.get(queueKey) ?? {
+    key: queueKey,
+    scope,
+    studioClubId,
+    activityType,
+    entries: new Map(),
+  };
+  const normalizedSeatCount = scope === 'studio' ? 1 : seatCount;
+  const entry = {
+    clientId: client.id,
+    queuedAt: Date.now(),
+    seatCount: normalizedSeatCount,
+    setup,
+  };
+  queue.entries.set(client.id, entry);
+  quickRaceQueues.set(queueKey, queue);
+  quickRaceQueueKeyByClientId.set(client.id, queueKey);
+  refreshQuickRaceQueue(queue);
+  const queuedSeats = quickRaceQueueEntries(queue).reduce((sum, queued) => sum + queued.seatCount, 0);
+  if (queuedSeats >= maxRaceBikeCount) {
+    void formQuickRaceMatch(queueKey);
+  } else if (queuedSeats >= 2 && scope === 'world') {
+    scheduleQuickRaceMatch(queue);
+  }
+}
+
+function configuredRoomStartProblem(room) {
+  if (!room?.setup) return 'This room does not have a synchronized race setup.';
+  const seatCount = roomRacerSeatCount(room);
+  if (seatCount < 2) return 'At least two racers are required to start.';
+  if (seatCount > maxRaceBikeCount) return 'A multiplayer race can have no more than four racers.';
+  const racers = [...(room.racers ?? [])];
+  if (racers.some((clientId) => {
+    const racer = clients.get(clientId);
+    return !racer || Number(racer.bikeCount) < roomRacerSeatCountForMember(room, clientId);
+  })) {
+    return 'Every racer must keep all assigned bikes connected before the race can start.';
+  }
+  if (racers.length === 0 || racers.some((clientId) => !room.readyMemberIds?.has(clientId))) {
+    return 'Every racer must load the shared setup and tap Ready.';
+  }
+  return '';
+}
+
+function startConfiguredRoomRace(room, source) {
+  const problem = configuredRoomStartProblem(room);
+  if (problem) return problem;
+  const routeChoices = publicRoomFlow(room).routeChoices;
+  room.raceStates.clear();
+  room.flow = {
+    ...defaultRoomFlow(),
+    routeChoices,
+    selectedTrackId: multiplayerSetupTrack(room.setup).id,
+  };
+  beginRoomRace(room, source);
+  return '';
 }
 
 function sendChallenge(fromClient, targetClient, track, statusPrefix = 'Challenge sent') {
@@ -13283,31 +14108,74 @@ async function findRoom(roomId) {
   if (activeRoom) {
     return activeRoom;
   }
+  const pendingHydration = persistedRoomHydrations.get(roomId);
+  if (pendingHydration) return pendingHydration;
 
-  const savedRoom = await persistence.loadRoom(roomId);
-  if (!savedRoom) {
-    return null;
+  const hydration = (async () => {
+    const savedRoom = await persistence.loadRoom(roomId);
+    // Another path may have created/restored this code while storage was in
+    // flight. Never overwrite that canonical object.
+    const installedRoom = rooms.get(roomId);
+    if (installedRoom) return installedRoom;
+    if (!savedRoom) return null;
+
+    savedRoom.track = sanitizeTrack(savedRoom.track);
+    const persistedSetup = savedRoom.setup == null
+      ? null
+      : sanitizeMultiplayerRaceSetup(savedRoom.setup);
+    if (savedRoom.setup != null && !persistedSetup) {
+      await persistence.closeRoom(savedRoom.id);
+      return null;
+    }
+    savedRoom.purpose = 'race';
+    savedRoom.flow = defaultRoomFlow();
+    savedRoom.setup = persistedSetup;
+    savedRoom.studioClubId = sanitizeText(savedRoom.studioClubId, '', 160) || null;
+    savedRoom.matchmakingScope = savedRoom.matchmakingScope === 'studio'
+      || savedRoom.matchmakingScope === 'world'
+        ? savedRoom.matchmakingScope
+        : null;
+    if (savedRoom.matchmakingScope === 'studio' && !savedRoom.studioClubId) {
+      await persistence.closeRoom(savedRoom.id);
+      return null;
+    }
+    savedRoom.roundNumber = Math.max(1, Math.round(Number(savedRoom.roundNumber) || 1));
+    savedRoom.readyMemberIds = new Set();
+    savedRoom.raceParticipantIds = new Set();
+    savedRoom.raceParticipantGuestKeys = new Set();
+    savedRoom.raceParticipantClientIdByGuestKey = new Map();
+    savedRoom.raceParticipantSeatCountByGuestKey = new Map();
+    savedRoom.allowedGuestKeys = savedRoom.allowedGuestKeys ?? new Set();
+    savedRoom.hydratedFromPersistence = true;
+    // Keep durable ownership distinct from the provisional runtime host. If
+    // another saved racer reconnects first, the persisted owner can still
+    // reclaim host when their stable guest key returns.
+    savedRoom.durableHostPending = Boolean(savedRoom.hostGuestKey);
+    savedRoom.racers = new Set();
+    savedRoom.spectators = new Set();
+    savedRoom.racerSeatCounts = new Map();
+    savedRoom.exploreStates = new Map();
+    savedRoom.exploreRoute = null;
+    savedRoom.exploreSession = null;
+    savedRoom.messages = savedRoom.messages.length > 0
+      ? savedRoom.messages
+      : [{
+        id: randomId('MSG', 10),
+        author: 'TrackLab',
+        text: 'Private room reopened.',
+        at: new Date().toISOString(),
+      }];
+    rooms.set(savedRoom.id, savedRoom);
+    return savedRoom;
+  })();
+  persistedRoomHydrations.set(roomId, hydration);
+  try {
+    return await hydration;
+  } finally {
+    if (persistedRoomHydrations.get(roomId) === hydration) {
+      persistedRoomHydrations.delete(roomId);
+    }
   }
-
-  savedRoom.track = sanitizeTrack(savedRoom.track);
-  savedRoom.purpose = 'race';
-  savedRoom.flow = defaultRoomFlow();
-  savedRoom.racers = savedRoom.racers ?? new Set();
-  savedRoom.spectators = savedRoom.spectators ?? new Set();
-  savedRoom.racerSeatCounts = savedRoom.racerSeatCounts ?? new Map();
-  savedRoom.exploreStates = new Map();
-  savedRoom.exploreRoute = null;
-  savedRoom.exploreSession = null;
-  savedRoom.messages = savedRoom.messages.length > 0
-    ? savedRoom.messages
-    : [{
-      id: randomId('MSG', 10),
-      author: 'TrackLab',
-      text: 'Private room reopened.',
-      at: new Date().toISOString(),
-    }];
-  rooms.set(savedRoom.id, savedRoom);
-  return savedRoom;
 }
 
 async function handleClientMessage(client, rawMessage) {
@@ -13560,11 +14428,43 @@ async function handleClientMessage(client, rawMessage) {
     if (!requireAvailableRacerSeat(client)) {
       return;
     }
+    if (message.private === false) {
+      send(client, {
+        type: 'room-error',
+        message: 'Public race rooms are not available. Create a private multiplayer race instead.',
+      });
+      return;
+    }
+    const setup = message.setup == null ? null : sanitizeMultiplayerRaceSetup(message.setup);
+    if (message.setup != null && !setup) {
+      send(client, {
+        type: 'room-error',
+        message: 'Choose a complete Race Intervals or Straight Sprint setup before opening the room.',
+      });
+      return;
+    }
+    // Keep legacy private-room clients compatible when they omit the field,
+    // but never coerce an explicitly supplied zero/invalid count to one.
+    const requestedSeats = requestedPrivateRoomSeatCount(
+      client,
+      message.racerSeatCount == null
+        ? Math.max(1, Number(client.bikeCount) || 1)
+        : message.racerSeatCount,
+    );
+    if (requestedSeats == null) {
+      send(client, {
+        type: 'room-error',
+        message: 'Choose between one and four connected racers covered by this account.',
+      });
+      return;
+    }
+    removeClientFromQuickRaceQueue(client);
     createRoom(
       client,
-      message.track,
-      message.private !== false,
-      sanitizeSeatCount(message.racerSeatCount ?? client.bikeCount),
+      setup ? multiplayerSetupTrack(setup) : message.track,
+      true,
+      requestedSeats,
+      { setup },
     );
     return;
   }
@@ -13711,6 +14611,16 @@ async function handleClientMessage(client, rawMessage) {
       send(client, { type: 'room-error', message: 'That private Club Tablet demo room is not available.' });
       return;
     }
+    const reconnectActiveRace = Boolean(
+      room.purpose === 'race'
+      && room.setup
+      && room.flow?.phase === 'race'
+      && room.raceParticipantGuestKeys?.has(client.guestKey),
+    );
+    if (room.purpose === 'race' && room.flow?.phase === 'race' && !reconnectActiveRace) {
+      send(client, { type: 'room-error', message: 'That race is already running and accepts only its original racers.' });
+      return;
+    }
     if (client.websocketScope === 'live-audio' && room.purpose !== 'live-audio') {
       send(client, { type: 'room-error', message: 'This connection can join only its private live audio room.' });
       return;
@@ -13723,17 +14633,21 @@ async function handleClientMessage(client, rawMessage) {
       return;
     }
 
+    removeClientFromQuickRaceQueue(client);
     await joinRoom(
       client,
       room,
       clientHasRacerAccess(client) ? 'racer' : 'spectator',
       sanitizeSeatCount(client.bikeCount),
+      { reconnectActiveRace },
     );
     return;
   }
 
   if (message.type === 'leave-room') {
-    leaveRoom(client);
+    if (!removeClientFromQuickRaceQueue(client, 'Matchmaking cancelled.')) {
+      leaveRoom(client);
+    }
     broadcastLobby();
     return;
   }
@@ -13878,6 +14792,10 @@ async function handleClientMessage(client, rawMessage) {
       send(client, { type: 'room-error', message: 'The coach controls this Club Event track.' });
       return;
     }
+    if (room.setup) {
+      send(client, { type: 'room-error', message: 'This race uses one shared setup. Change it from the race setup controls.' });
+      return;
+    }
 
     if (room.hostId !== client.id || !room.racers?.has(client.id) || !requireRacerClient(client)) {
       send(client, { type: 'room-error', message: 'Only the room host can change the track.' });
@@ -13905,6 +14823,10 @@ async function handleClientMessage(client, rawMessage) {
 
     if (room.purpose === 'club-event') {
       send(client, { type: 'room-error', message: 'Track voting is disabled during a coach-controlled Club Event.' });
+      return;
+    }
+    if (room.setup) {
+      send(client, { type: 'room-error', message: 'Track voting is disabled because this race already has a shared setup.' });
       return;
     }
 
@@ -13942,6 +14864,10 @@ async function handleClientMessage(client, rawMessage) {
     const room = rooms.get(client.roomId);
     if (room?.purpose === 'club-event') {
       send(client, { type: 'room-error', message: 'Track voting is disabled during a coach-controlled Club Event.' });
+      return;
+    }
+    if (room?.setup) {
+      send(client, { type: 'room-error', message: 'Track voting is disabled because this race already has a shared setup.' });
       return;
     }
     if (!room || room.flow?.phase !== 'voting') {
@@ -13983,11 +14909,47 @@ async function handleClientMessage(client, rawMessage) {
       send(client, { type: 'room-error', message: 'The coach controls this Club Event route.' });
       return;
     }
-    if (!room || room.flow?.phase !== 'route-select') {
+    if (!room) {
       return;
     }
 
     if (!room.racers?.has(client.id)) {
+      return;
+    }
+
+    if (room.setup) {
+      const configuration = room.setup.configuration;
+      const routeVariantSplitSections = configuration?.activityType === 'bmx-race' && configuration.routeVariantId
+        ? configuration.trackRecord?.routeVariants?.find(
+          (variant) => variant?.id === configuration.routeVariantId,
+        )?.splitSections
+        : null;
+      const splitSections = configuration?.activityType === 'bmx-race'
+        ? routeVariantSplitSections ?? configuration.trackRecord?.splitSections
+        : null;
+      if (room.purpose !== 'race' || room.flow?.phase !== 'lobby' || !Array.isArray(splitSections) || splitSections.length === 0) {
+        send(client, { type: 'room-error', message: 'A race-line choice is not available for this shared setup.' });
+        return;
+      }
+      const choice = sanitizeBranchChoice(message.choice);
+      const previousChoice = room.flow?.routeChoices?.[client.id] ?? 'a';
+      if (choice === previousChoice) {
+        broadcastRoom(room.id, roomState(room));
+        return;
+      }
+      room.flow = {
+        ...publicRoomFlow(room),
+        routeChoices: {
+          ...(room.flow.routeChoices ?? {}),
+          [client.id]: choice,
+        },
+      };
+      room.readyMemberIds?.delete(client.id);
+      addRoomSystemMessage(room, `${client.name} chose the ${choice === 'b' ? 'Pro Set' : 'Amateur Line'} and must tap Ready again.`);
+      broadcastRoom(room.id, roomState(room));
+      return;
+    }
+    if (room.flow?.phase !== 'route-select') {
       return;
     }
 
@@ -13999,6 +14961,184 @@ async function handleClientMessage(client, rawMessage) {
       },
     };
     broadcastRoom(room.id, roomState(room));
+    return;
+  }
+
+  if (message.type === 'room-ready') {
+    const room = client.roomId ? rooms.get(client.roomId) : null;
+    if (
+      !room
+      || room.purpose !== 'race'
+      || !room.setup
+      || !room.racers?.has(client.id)
+      || !requireRacerClient(client)
+    ) return;
+    if (room.flow?.phase !== 'lobby') {
+      send(client, { type: 'room-error', message: 'Ready can be changed only before the race starts.' });
+      return;
+    }
+    if (Number(message.setupRevision) !== room.setup.revision) {
+      send(client, { type: 'room-error', message: 'The race setup changed. Review the latest setup, then tap Ready again.' });
+      return;
+    }
+    if (!room.readyMemberIds) room.readyMemberIds = new Set();
+    if (
+      message.ready !== false
+      && Number(client.bikeCount) < roomRacerSeatCountForMember(room, client.id)
+    ) {
+      room.readyMemberIds.delete(client.id);
+      send(client, {
+        type: 'room-error',
+        message: 'Reconnect every bike assigned to this racer before tapping Ready.',
+      });
+      broadcastRoom(room.id, roomState(room));
+      return;
+    }
+    if (message.ready === false) room.readyMemberIds.delete(client.id);
+    else room.readyMemberIds.add(client.id);
+    addRoomSystemMessage(room, `${client.name} is ${message.ready === false ? 'not ready' : 'ready'}.`);
+    const automaticallyStart = room.matchmakingScope && !configuredRoomStartProblem(room);
+    if (automaticallyStart) {
+      startConfiguredRoomRace(room, room.matchmakingScope === 'studio'
+        ? 'studio racers ready'
+        : 'Quick Match racers ready');
+    } else {
+      broadcastRoom(room.id, roomState(room));
+    }
+    return;
+  }
+
+  if (message.type === 'room-start') {
+    const room = client.roomId ? rooms.get(client.roomId) : null;
+    if (!room || room.purpose !== 'race') return;
+    if (room.hostId !== client.id || !room.racers?.has(client.id) || !requireRacerClient(client)) {
+      send(client, { type: 'room-error', message: 'Only the race host can start this private room.' });
+      return;
+    }
+    if (room.flow?.phase !== 'lobby') {
+      send(client, { type: 'room-error', message: 'This race is not waiting in the lobby.' });
+      return;
+    }
+    const problem = startConfiguredRoomRace(room, 'all racers ready');
+    if (problem) send(client, { type: 'room-error', message: problem });
+    return;
+  }
+
+  if (message.type === 'room-setup') {
+    const room = client.roomId ? rooms.get(client.roomId) : null;
+    if (!room || room.purpose !== 'race') return;
+    if (room.hostId !== client.id || !room.racers?.has(client.id) || !requireRacerClient(client)) {
+      send(client, { type: 'room-error', message: 'Only the race host can change the shared setup.' });
+      return;
+    }
+    if (room.flow?.phase !== 'setup-select') {
+      send(client, { type: 'room-error', message: 'Choose Change activity/setup after the round before confirming a new setup.' });
+      return;
+    }
+    const requested = sanitizeMultiplayerRaceSetup(message.setup);
+    if (!requested) {
+      send(client, { type: 'room-error', message: 'That shared Race Intervals or Straight Sprint setup is incomplete.' });
+      return;
+    }
+    const previousRevision = Math.max(0, Math.round(Number(room.setup?.revision) || 0));
+    room.setup = { ...requested, revision: previousRevision + 1 };
+    room.roundNumber = Math.max(1, Math.round(Number(room.roundNumber) || 1)) + 1;
+    room.readyMemberIds = new Set();
+    room.raceStates.clear();
+    applyRoomTrack(room, multiplayerSetupTrack(room.setup));
+    room.flow = defaultRoomFlow();
+    addRoomSystemMessage(room, `${client.name} updated the shared setup. Everyone must review it and tap Ready.`);
+    const durable = await queueRoomPersistence(
+      room,
+      'update-configuration',
+      () => persistence.updateRoomConfiguration(room),
+    );
+    if (!durable) {
+      send(client, {
+        type: 'room-error',
+        message: 'The new setup is active for this session, but cloud storage could not confirm it yet.',
+      });
+    }
+    broadcastRoom(room.id, roomState(room));
+    broadcastLobby();
+    return;
+  }
+
+  if (message.type === 'room-setup-edit') {
+    const room = client.roomId ? rooms.get(client.roomId) : null;
+    if (!room || room.purpose !== 'race') return;
+    if (room.hostId !== client.id || !room.racers?.has(client.id) || !requireRacerClient(client)) {
+      send(client, { type: 'room-error', message: 'Only the race host can choose the next shared setup.' });
+      return;
+    }
+    if (room.flow?.phase !== 'round-complete') {
+      send(client, { type: 'room-error', message: 'Finish the current round before choosing a new setup.' });
+      return;
+    }
+
+    clearRoomTimers(room.id);
+    room.readyMemberIds = new Set();
+    room.raceParticipantIds = new Set();
+    room.raceStates.clear();
+    room.flow = {
+      ...defaultRoomFlow(),
+      phase: 'setup-select',
+      selectedTrackId: room.track?.id ?? null,
+    };
+    addRoomSystemMessage(room, `${client.name} is choosing the next Race Intervals or Straight Sprint setup.`);
+    broadcastRoom(room.id, roomState(room));
+    broadcastLobby();
+    return;
+  }
+
+  if (message.type === 'room-next-round') {
+    const room = client.roomId ? rooms.get(client.roomId) : null;
+    if (!room || room.purpose !== 'race') return;
+    if (room.hostId !== client.id || !room.racers?.has(client.id) || !requireRacerClient(client)) {
+      send(client, { type: 'room-error', message: 'Only the race host can start the next round.' });
+      return;
+    }
+    if (room.flow?.phase !== 'round-complete') {
+      send(client, { type: 'room-error', message: 'Finish the current round before racing again.' });
+      return;
+    }
+    const previousParticipants = new Set(room.raceParticipantIds ?? []);
+    const routeChoices = publicRoomFlow(room).routeChoices;
+    room.roundNumber = Math.max(1, Math.round(Number(room.roundNumber) || 1)) + 1;
+    // Returning participants already proved that they loaded this immutable
+    // setup. A racer who joined after the completed round must load it and tap
+    // Ready; never inherit another person's Ready state.
+    room.readyMemberIds = new Set(
+      [...(room.racers ?? [])].filter((clientId) => previousParticipants.has(clientId)),
+    );
+    room.raceParticipantIds = new Set();
+    room.raceStates.clear();
+    room.flow = {
+      ...defaultRoomFlow(),
+      routeChoices,
+      selectedTrackId: multiplayerSetupTrack(room.setup).id,
+    };
+    const durable = await queueRoomPersistence(
+      room,
+      'advance-round',
+      () => persistence.updateRoomConfiguration(room),
+    );
+    if (!durable) {
+      send(client, {
+        type: 'room-error',
+        message: 'The next round is active for this session, but cloud storage could not confirm it yet.',
+      });
+    }
+    const problem = configuredRoomStartProblem(room);
+    if (!problem) {
+      startConfiguredRoomRace(room, `round ${room.roundNumber}`);
+    } else {
+      addRoomSystemMessage(room, previousParticipants.size < (room.racers?.size ?? 0)
+        ? 'A new racer joined. Their device must load this setup and they must tap Ready before the next race.'
+        : problem);
+      broadcastRoom(room.id, roomState(room));
+      broadcastLobby();
+    }
     return;
   }
 
@@ -14024,6 +15164,9 @@ async function handleClientMessage(client, rawMessage) {
 
     clearRoomTimers(room.id);
     room.flow = defaultRoomFlow();
+    room.readyMemberIds = new Set();
+    room.raceParticipantIds = new Set();
+    room.raceStates.clear();
     addRoomSystemMessage(room, 'Lobby reset.');
     broadcastRoom(room.id, roomState(room));
     if (room.purpose === 'club-demo') await refreshClubDemoRoomPresentations(room);
@@ -14169,7 +15312,7 @@ async function handleClientMessage(client, rawMessage) {
     }
 
     if (
-      room.purpose === 'club-demo'
+      (room.purpose === 'club-demo' || room.setup)
       && sanitizeText(message.state?.trackId, '', 120) !== room.track.id
     ) return;
     if (
@@ -14177,6 +15320,15 @@ async function handleClientMessage(client, rawMessage) {
       && (
         !room.flow?.raceToken
         || sanitizeText(message.state?.raceToken, '', 80) !== room.flow.raceToken
+      )
+    ) return;
+    if (
+      room.setup
+      && (
+        room.flow?.phase !== 'race'
+        || !room.flow?.raceToken
+        || sanitizeText(message.state?.raceToken, '', 80) !== room.flow.raceToken
+        || !room.raceParticipantIds?.has(client.id)
       )
     ) return;
     if (
@@ -14223,6 +15375,14 @@ async function handleClientMessage(client, rawMessage) {
       }
     }
     broadcastRoom(room.id, { type: 'race-sync', state: raceState });
+    if (
+      room.setup
+      && room.flow?.phase === 'race'
+      && configuredRaceParticipantGuestKeys(room).length >= 1
+      && configuredRaceParticipantGuestKeys(room).every((guestKey) => (
+        configuredRaceParticipantFinished(room, guestKey)
+      ))
+    ) completeConfiguredRoomRound(room);
     if (
       room.purpose === 'club-demo'
       && demoRestartWasReady !== clubDemoRoomRestartReady(room)
@@ -14350,9 +15510,9 @@ async function handleClientMessage(client, rawMessage) {
       return;
     }
 
-    const beforeRole = roomRacerSeatCount(room) >= maxRaceBikeCount ? 'spectator' : 'racer';
-    joinRoom(client, room, beforeRole, 1);
-    send(client, { type: 'challenge-status', message: beforeRole === 'racer' ? `Joined match ${room.id}.` : `Joined ${room.id} as a spectator.` });
+    const joined = await joinRoom(client, room, 'racer', 1);
+    if (!joined) return;
+    send(client, { type: 'challenge-status', message: `Joined match ${room.id}.` });
     const host = clients.get(invite.fromId);
     if (host) {
       send(host, { type: 'challenge-status', message: `${client.name} joined the match.` });
@@ -14435,24 +15595,62 @@ async function handleClientMessage(client, rawMessage) {
     return;
   }
 
-  if (message.type === 'quick-match') {
+  if (message.type === 'quick-race') {
     if (!requireAvailableRacerSeat(client)) {
       return;
     }
-    const candidates = [...clients.values()]
-      .filter((candidate) => candidate.id !== client.id)
-      .filter((candidate) => clientsCanInteract(client, candidate))
-      .filter((candidate) => candidate.available)
-      .filter((candidate) => clientHasRacerAccess(candidate))
-      .filter((candidate) => candidate.socket.readyState === candidate.socket.OPEN);
-
-    if (candidates.length === 0) {
-      send(client, { type: 'challenge-status', message: 'No available riders are online yet. Stay available and try again.' });
+    if (client.roomId) {
+      send(client, { type: 'room-error', message: 'Leave the current room before finding another race.' });
       return;
     }
+    const setup = sanitizeMultiplayerRaceSetup(message.setup);
+    const scope = message.scope === 'studio' ? 'studio' : message.scope === 'world' ? 'world' : null;
+    if (!setup || !scope) {
+      send(client, { type: 'room-error', message: 'Choose a complete race setup and matchmaking option.' });
+      return;
+    }
+    const requestedSeats = requestedRacerSeatCount(client, message.racerSeatCount);
+    if (requestedSeats == null) {
+      send(client, { type: 'room-error', message: 'Choose between one and four connected racers before matchmaking.' });
+      return;
+    }
+    if (scope === 'studio' && requestedSeats !== 1) {
+      send(client, { type: 'room-error', message: 'Each Club Tablet contributes exactly one racer.' });
+      return;
+    }
+    joinQuickRaceQueue(client, scope, setup, requestedSeats);
+    return;
+  }
 
-    const target = candidates[Math.floor(Math.random() * candidates.length)];
-    sendChallenge(client, target, message.track, 'Quick match request sent');
+  if (message.type === 'quick-race-start-now') {
+    const queueKey = quickRaceQueueKeyByClientId.get(client.id);
+    const queue = queueKey ? quickRaceQueues.get(queueKey) : null;
+    if (!queue || queue.scope !== 'studio' || !quickRaceEntryIsEligible(queue.entries.get(client.id), queue)) {
+      send(client, { type: 'room-error', message: 'Join this studio’s race queue before starting it.' });
+      return;
+    }
+    const queuedSeats = quickRaceQueueEntries(queue)
+      .reduce((sum, entry) => sum + entry.seatCount, 0);
+    if (queuedSeats < 2) {
+      send(client, { type: 'room-error', message: 'At least two studio racers are required to start.' });
+      return;
+    }
+    void formQuickRaceMatch(queue.key);
+    return;
+  }
+
+  if (message.type === 'matchmaking-cancel') {
+    removeClientFromQuickRaceQueue(client, 'Matchmaking cancelled.');
+    return;
+  }
+
+  if (message.type === 'quick-match') {
+    // Older clients used a random challenge/accept exchange. Keep the message
+    // explicit instead of silently creating an unsynchronized race.
+    send(client, {
+      type: 'challenge-status',
+      message: 'Update TrackLab to use one-tap Quick Match with synchronized race settings.',
+    });
     return;
   }
 
@@ -20894,8 +22092,8 @@ async function serveStatic(request, response) {
       return;
     }
     const joinedSlots = preview.slots.filter((slot) => slot.athlete);
-    if (joinedSlots.length === 0) {
-      writeJson(response, 409, { error: 'At least one Club Tablet must join before the event starts.' });
+    if (joinedSlots.length < 2) {
+      writeJson(response, 409, { error: 'At least two Club Tablets must join before the studio race starts.' });
       return;
     }
     if (joinedSlots.some((slot) => !slot.ready)) {
@@ -20910,7 +22108,8 @@ async function serveStatic(request, response) {
     const startErrors = {
       'not-found': [404, 'That Club Event is no longer current.'],
       'not-lobby': [409, 'This Club Event has already started.'],
-      empty: [409, 'At least one Club Tablet must join before the event starts.'],
+      empty: [409, 'At least two Club Tablets must join before the studio race starts.'],
+      'too-few': [409, 'At least two Club Tablets must join before the studio race starts.'],
       'not-ready': [409, 'Every joined Club Tablet must be ready before starting.'],
       unavailable: [503, 'Club Event storage is temporarily unavailable.'],
     };
@@ -23708,7 +24907,11 @@ wss.on('connection', (socket, request) => {
       : Promise.resolve([]);
     unregisterClubLiveStreamClient(client, 'disconnected');
     if (client.websocketScope !== clubLiveStreamWebsocketScope) {
-      leaveRoom(client, 'disconnected');
+      removeClientFromQuickRaceQueue(client);
+      // During a rolling Render restart, leave configured rooms open in
+      // PostgreSQL so clients can use their retained private-room URL to
+      // rejoin the exact setup on the new process.
+      if (!shuttingDown) leaveRoom(client, 'disconnected');
     }
     client.wattbikeCapacityClosed = true;
     client.presenceActive = false;
@@ -24223,8 +25426,12 @@ async function shutdown(signal) {
   clearInterval(persistenceMaintenance);
   voteTimers.forEach(clearTimeout);
   routeSelectTimers.forEach(clearTimeout);
+  quickRaceRoundTimers.forEach(clearTimeout);
+  emptyConfiguredRoomTimers.forEach(clearTimeout);
   voteTimers.clear();
   routeSelectTimers.clear();
+  quickRaceRoundTimers.clear();
+  emptyConfiguredRoomTimers.clear();
   authWebSocketTicketsByHash.forEach((ticket) => {
     if (ticket._expiryTimer) clearTimeout(ticket._expiryTimer);
   });
@@ -24240,6 +25447,15 @@ async function shutdown(signal) {
   heartRateClubLiveStreams.forEach((streams) => streams.forEach((response) => response.end()));
   heartRateClubLiveStreams.clear();
   heartRateStreamWriteChains.clear();
+
+  // Only the new fully configured Quick Race rooms are restart-safe. Close
+  // legacy/unconfigured race rows explicitly; socket close handlers are
+  // intentionally suppressed during shutdown for the configured rooms.
+  await Promise.allSettled(
+    [...rooms.values()]
+      .filter((room) => room.purpose === 'race' && !room.setup)
+      .map((room) => persistence.closeRoom(room.id)),
+  );
 
   wss.clients.forEach((socket) => socket.close(1001, 'Server shutting down'));
   const forceExit = setTimeout(() => {
