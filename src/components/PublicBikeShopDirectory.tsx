@@ -64,10 +64,19 @@ import {
 } from './BikeShopDirectoryMap';
 import './PublicBikeShopDirectory.css';
 
+export type PublicBikeShopDirectoryLaunchRequest = {
+  requestId: number;
+  origin: BikeShopPoint & { label: string };
+  radiusMiles: number;
+  selectedShopId?: string;
+};
+
 type PublicBikeShopDirectoryProps = {
   accountId?: string | null;
   isAdmin?: boolean;
   tracks: ReadonlyArray<TrackRecord | TrackLocatorRecord>;
+  launchRequest?: PublicBikeShopDirectoryLaunchRequest | null;
+  onLaunchRequestConsumed?: (requestId: number) => void;
   onRequireFreeAccount?: (shop: BikeShopRecord) => void;
 };
 
@@ -187,15 +196,20 @@ export function PublicBikeShopDirectory({
   accountId = null,
   isAdmin = false,
   tracks,
+  launchRequest = null,
+  onLaunchRequestConsumed,
   onRequireFreeAccount,
 }: PublicBikeShopDirectoryProps) {
-  const [restoredBrowseState] = useState<PublicBikeShopDirectoryState | null>(() => readPublicBikeShopDirectoryState());
-  const [locationInput, setLocationInput] = useState(() => restoredBrowseState?.locationInput ?? '');
-  const [shopSearchMode, setShopSearchMode] = useState<'location' | 'name'>(() => restoredBrowseState?.shopSearchMode ?? 'location');
+  const [initialLaunchRequest] = useState(() => launchRequest);
+  const [restoredBrowseState] = useState<PublicBikeShopDirectoryState | null>(() => (
+    initialLaunchRequest ? null : readPublicBikeShopDirectoryState()
+  ));
+  const [locationInput, setLocationInput] = useState(() => initialLaunchRequest?.origin.label ?? restoredBrowseState?.locationInput ?? '');
+  const [shopSearchMode, setShopSearchMode] = useState<'location' | 'name'>(() => initialLaunchRequest ? 'location' : restoredBrowseState?.shopSearchMode ?? 'location');
   const [locationPrediction, setLocationPrediction] = useState<PlacePredictionOption | null>(null);
   const [locationPredictions, setLocationPredictions] = useState<PlacePredictionOption[]>([]);
   const [locationPredictionStatus, setLocationPredictionStatus] = useState('');
-  const [radiusMiles, setRadiusMiles] = useState(() => restoredBrowseState?.radiusMiles ?? 25);
+  const [radiusMiles, setRadiusMiles] = useState(() => initialLaunchRequest?.radiusMiles ?? restoredBrowseState?.radiusMiles ?? 25);
   const [shops, setShops] = useState<BikeShopRecord[]>(() => restoredBrowseState?.shops ?? []);
   const [selectedShopId, setSelectedShopId] = useState(() => restoredBrowseState?.selectedShopId ?? '');
   const [status, setStatus] = useState<'idle' | 'locating' | 'searching' | 'ready'>(() => restoredBrowseState?.hasSearched ? 'ready' : 'idle');
@@ -250,6 +264,7 @@ export function PublicBikeShopDirectory({
   const resultListRef = useRef<HTMLOListElement | null>(null);
   const resultListScrollTopRef = useRef(restoredBrowseState?.resultListScrollTop ?? 0);
   const browseStateRef = useRef<PublicBikeShopDirectoryState | null>(restoredBrowseState);
+  const launchHandledRef = useRef(false);
   const mapFocusGenerationRef = useRef(0);
   const resultIntentGenerationRef = useRef(0);
   const accountIdRef = useRef(accountId);
@@ -414,8 +429,9 @@ export function PublicBikeShopDirectory({
   const runNearbyFallbackSearch = async (
     origin: LocatedSearch,
     request: { generation: number; resultIntentGeneration: number; controller: AbortController },
+    options: { radiusMiles?: number; selectedShopId?: string } = {},
   ) => {
-    const requestedRadiusMiles = radiusMiles;
+    const requestedRadiusMiles = options.radiusMiles ?? radiusMiles;
     if (!publicSearchIsCurrent(request)) return;
     setStatus('searching');
     setError('');
@@ -425,7 +441,9 @@ export function PublicBikeShopDirectory({
       const result = await searchNearbyBikeShops(origin, requestedRadiusMiles, fetch, request.controller.signal);
       if (!publicSearchIsCurrent(request)) return;
       setShops(result.shops);
-      setSelectedShopId(result.shops[0]?.id ?? '');
+      setSelectedShopId(options.selectedShopId && result.shops.some((shop) => shop.id === options.selectedShopId)
+        ? options.selectedShopId
+        : result.shops[0]?.id ?? '');
       setResultMode('nearby');
       setNearbyContext({ label: origin.label, radiusMiles: requestedRadiusMiles });
       setViewportTruncated(false);
@@ -445,6 +463,43 @@ export function PublicBikeShopDirectory({
       finishPublicSearch(request);
     }
   };
+
+  useEffect(() => {
+    if (!initialLaunchRequest || launchHandledRef.current) return;
+    launchHandledRef.current = true;
+    onLaunchRequestConsumed?.(initialLaunchRequest.requestId);
+
+    const requestedRadiusMiles = Number.isInteger(initialLaunchRequest.radiusMiles)
+      && initialLaunchRequest.radiusMiles >= 5
+      && initialLaunchRequest.radiusMiles <= 50
+      && initialLaunchRequest.radiusMiles % 5 === 0
+      ? initialLaunchRequest.radiusMiles
+      : 25;
+    clearPublicResults();
+    resetPlaceAutocompleteSession();
+    setShopSearchMode('location');
+    setLocationInput(initialLaunchRequest.origin.label.slice(0, 240));
+    setLocationPrediction(null);
+    setLocationPredictions([]);
+    setLocationPredictionStatus('');
+    setRadiusMiles(requestedRadiusMiles);
+    setCountryFilter(allHierarchyValues);
+    setRegionFilter(allHierarchyValues);
+    setCityFilter(allHierarchyValues);
+    const request = beginPublicSearch();
+    if (!request) {
+      launchHandledRef.current = false;
+      return;
+    }
+    void runNearbyFallbackSearch(initialLaunchRequest.origin, request, {
+      radiusMiles: requestedRadiusMiles,
+      selectedShopId: initialLaunchRequest.selectedShopId,
+    });
+    return () => {
+      request.controller.abort();
+      launchHandledRef.current = false;
+    };
+  }, [initialLaunchRequest, onLaunchRequestConsumed]);
 
   const runBikeShopNameSearch = async (term: string, append = false) => {
     const requestedTerm = append ? nameSearchTerm : term.trim();

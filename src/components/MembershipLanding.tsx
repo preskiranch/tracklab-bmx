@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Activity,
   BarChart3,
@@ -26,8 +26,15 @@ import {
 } from '../lib/membership';
 import { readPublicBikeShopDirectoryState } from '../lib/publicBikeShopDirectoryState';
 import type { TrackRecord } from '../types';
-import { PublicBikeShopDirectory } from './PublicBikeShopDirectory';
-import { PublicTrackLocator } from './PublicTrackLocator';
+import {
+  PublicBikeShopDirectory,
+  type PublicBikeShopDirectoryLaunchRequest,
+} from './PublicBikeShopDirectory';
+import {
+  PublicTrackLocator,
+  type PublicTrackLocatorResumeState,
+  type PublicTrackNearbyBikeShopRequest,
+} from './PublicTrackLocator';
 import './PublicTrackLocator.css';
 import './MembershipLanding.css';
 
@@ -141,7 +148,10 @@ export function MembershipLanding({
   const billingBusy = billingStatus === 'loading';
   const profileSubmitPendingRef = useRef(false);
   const requestedScrollTargetRef = useRef<string | null>(null);
+  const nearbyShopLaunchSequenceRef = useRef(0);
   const [shopClaimPrompt, setShopClaimPrompt] = useState('');
+  const [bikeShopLaunchRequest, setBikeShopLaunchRequest] = useState<PublicBikeShopDirectoryLaunchRequest | null>(null);
+  const [trackLocatorResumeState, setTrackLocatorResumeState] = useState<PublicTrackLocatorResumeState | null>(null);
   const [activeTab, setActiveTab] = useState<LandingTab>(initialLandingTab);
   useEffect(() => {
     if (!profileComplete && (activeTab === 'training' || activeTab === 'results')) {
@@ -169,7 +179,7 @@ export function MembershipLanding({
           : activeTab === 'results'
             ? 'membership-results'
             : 'membership-hub-content-top');
-    const restoredShopScrollY = activeTab === 'shops'
+    const restoredShopScrollY = activeTab === 'shops' && !bikeShopLaunchRequest
       ? readPublicBikeShopDirectoryState()?.pageScrollY ?? 0
       : 0;
     const frame = window.requestAnimationFrame(() => {
@@ -180,7 +190,7 @@ export function MembershipLanding({
       document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [activeTab]);
+  }, [activeTab, bikeShopLaunchRequest]);
   const selectTab = (tab: LandingTab) => {
     if (!profileComplete && (tab === 'training' || tab === 'results')) return;
     setActiveTab(tab);
@@ -238,6 +248,27 @@ export function MembershipLanding({
       window.setTimeout(() => gate?.querySelector<HTMLInputElement>('input')?.focus(), 350);
     });
   };
+  const openNearbyBikeShops = (request: PublicTrackNearbyBikeShopRequest) => {
+    nearbyShopLaunchSequenceRef.current += 1;
+    setTrackLocatorResumeState(request.returnState);
+    setBikeShopLaunchRequest({
+      requestId: nearbyShopLaunchSequenceRef.current,
+      origin: {
+        latitude: request.track.latitude,
+        longitude: request.track.longitude,
+        label: request.track.name,
+      },
+      radiusMiles: request.radiusMiles,
+      ...(request.selectedShop ? { selectedShopId: request.selectedShop.id } : {}),
+    });
+    selectTab('shops');
+  };
+  const consumeTrackLocatorResumeState = useCallback(() => {
+    setTrackLocatorResumeState(null);
+  }, []);
+  const consumeBikeShopLaunchRequest = useCallback((requestId: number) => {
+    setBikeShopLaunchRequest((current) => current?.requestId === requestId ? null : current);
+  }, []);
 
   const trainingActions = [
     { label: 'Race Intervals', detail: 'Mapped BMX racing', icon: Activity, action: onOpenRaceIntervals },
@@ -362,7 +393,14 @@ export function MembershipLanding({
       )}
 
       {activeTab === 'tracks' && (
-        <PublicTrackLocator accountId={profileComplete ? profileEmail : null} catalogReady={catalogReady} tracks={tracks} />
+        <PublicTrackLocator
+          accountId={profileComplete ? profileEmail : null}
+          catalogReady={catalogReady}
+          tracks={tracks}
+          resumeState={trackLocatorResumeState}
+          onResumeStateConsumed={consumeTrackLocatorResumeState}
+          onOpenNearbyBikeShops={openNearbyBikeShops}
+        />
       )}
 
       {activeTab === 'shops' && (
@@ -370,6 +408,8 @@ export function MembershipLanding({
           accountId={profileComplete ? profileEmail : null}
           isAdmin={isAdminProfile}
           tracks={tracks}
+          launchRequest={bikeShopLaunchRequest}
+          onLaunchRequestConsumed={consumeBikeShopLaunchRequest}
           onRequireFreeAccount={(shop) => requireFreeAccountForShopClaim(shop.name)}
         />
       )}

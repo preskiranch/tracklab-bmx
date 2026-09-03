@@ -143,6 +143,17 @@
   .membership-hub-page .public-track-save-group {
     grid-column: 1 / -1;
   }
+
+  .membership-hub-page .public-track-nearby-shops {
+    grid-template-areas:
+      "heading all"
+      "results results";
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .membership-hub-page .public-track-nearby-shops__all {
+    justify-self: end;
+  }
 }
 
 .membership-hub-page > .public-bike-shop-directory {

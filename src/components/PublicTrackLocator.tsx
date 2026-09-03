@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   Check,
+  ChevronRight,
   Copy,
   ExternalLink,
   Globe2,
@@ -13,10 +14,12 @@ import {
   Search,
   Share2,
   Star,
+  Store,
   Users,
   X,
   Youtube,
 } from 'lucide-react';
+import { searchNearbyBikeShops, type BikeShopRecord } from '../lib/bikeShops';
 import {
   copyTrackLocatorLink,
   normalizeTrackLocatorId,
@@ -27,19 +30,46 @@ import {
 import { trackExternalLinks } from '../lib/trackExternalLinks';
 import { createTrackFavoritesApi } from '../lib/trackFavorites';
 import { createFriendsApi, type FriendProfile } from '../lib/friends';
+import { publicTrackExplorerPoint } from '../lib/publicTrackExplorer';
 import type { TrackLocatorRecord, TrackRecord } from '../types';
 import { PublicTrackEarthView } from './PublicTrackEarthView';
 import { PublicTrackMap } from './PublicTrackMap';
+
+export type PublicTrackNearbyBikeShopRequest = {
+  source: 'selected-track';
+  track: {
+    id: string;
+    name: string;
+    latitude: number;
+    longitude: number;
+  };
+  radiusMiles: 25;
+  selectedShop?: BikeShopRecord;
+  returnState: PublicTrackLocatorResumeState;
+};
+
+export type PublicTrackLocatorResumeState = {
+  query: string;
+  country: string;
+  region: string;
+  selectedTrackId: string | null;
+  trackCategory: 'all' | 'favorites';
+};
 
 type PublicTrackLocatorProps = {
   accountId?: string | null;
   catalogReady: boolean;
   tracks: TrackRecord[];
+  resumeState?: PublicTrackLocatorResumeState | null;
+  onResumeStateConsumed?: () => void;
+  onOpenNearbyBikeShops?: (request: PublicTrackNearbyBikeShopRequest) => void;
 };
 
 const allCountries = 'All countries';
 const allRegions = 'All states / regions';
 const maximumVisibleResults = 24;
+const nearbyBikeShopRadiusMiles = 25 as const;
+const nearbyBikeShopSelectionDebounceMs = 250;
 
 function trackLocation(track: TrackLocatorRecord) {
   return [track.city, track.state, track.country].filter(Boolean).join(', ');
@@ -58,6 +88,12 @@ function trackSearchText(track: TrackLocatorRecord) {
   ].filter(Boolean).join(' ').toLowerCase();
 }
 
+function nearbyBikeShopLocation(shop: BikeShopRecord) {
+  return [shop.address.locality, shop.address.region].filter(Boolean).join(', ')
+    || shop.address.countryCode
+    || 'Location not listed';
+}
+
 function initialLocatorRequest() {
   if (typeof window === 'undefined') return { id: null, invalid: false };
   const params = new URLSearchParams(window.location.search);
@@ -65,17 +101,27 @@ function initialLocatorRequest() {
   return { id, invalid: params.has('locator') && !id };
 }
 
-export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: PublicTrackLocatorProps) {
+export function PublicTrackLocator({
+  accountId = null,
+  catalogReady,
+  tracks,
+  resumeState = null,
+  onResumeStateConsumed,
+  onOpenNearbyBikeShops,
+}: PublicTrackLocatorProps) {
   const [initialLocator] = useState(initialLocatorRequest);
-  const [query, setQuery] = useState('');
-  const [country, setCountry] = useState(allCountries);
-  const [region, setRegion] = useState(allRegions);
-  const [selectedTrackId, setSelectedTrackId] = useState<string | null>(initialLocator.id);
+  const [initialResumeState] = useState(() => (
+    !initialLocator.id && !initialLocator.invalid ? resumeState : null
+  ));
+  const [query, setQuery] = useState(() => initialResumeState?.query ?? '');
+  const [country, setCountry] = useState(() => initialResumeState?.country ?? allCountries);
+  const [region, setRegion] = useState(() => initialResumeState?.region ?? allRegions);
+  const [selectedTrackId, setSelectedTrackId] = useState<string | null>(() => initialLocator.id ?? initialResumeState?.selectedTrackId ?? null);
   const [linkedTrackId, setLinkedTrackId] = useState<string | null>(initialLocator.id);
   const [invalidLinkedTrack, setInvalidLinkedTrack] = useState(initialLocator.invalid);
   const [publicTracks, setPublicTracks] = useState<TrackLocatorRecord[] | null>(null);
   const [publicDirectoryFailed, setPublicDirectoryFailed] = useState(false);
-  const [trackCategory, setTrackCategory] = useState<'all' | 'favorites'>('all');
+  const [trackCategory, setTrackCategory] = useState<'all' | 'favorites'>(() => initialResumeState?.trackCategory ?? 'all');
   const [favoriteTrackIds, setFavoriteTrackIds] = useState<Set<string>>(new Set());
   const [favoritesLoading, setFavoritesLoading] = useState(false);
   const [favoriteSaving, setFavoriteSaving] = useState(false);
@@ -87,15 +133,28 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
   const [shareLoading, setShareLoading] = useState(false);
   const [sharingProfileId, setSharingProfileId] = useState('');
   const [earthExplorerActive, setEarthExplorerActive] = useState(false);
+  const [nearbyBikeShops, setNearbyBikeShops] = useState<BikeShopRecord[]>([]);
+  const [nearbyBikeShopStatus, setNearbyBikeShopStatus] = useState<'loading' | 'ready' | 'error' | 'unavailable'>('loading');
+  const [nearbyBikeShopError, setNearbyBikeShopError] = useState('');
+  const [nearbyBikeShopReload, setNearbyBikeShopReload] = useState(0);
   const accountGenerationRef = useRef(0);
+  const accountInitializedRef = useRef(false);
+  const resumeStateConsumedRef = useRef(false);
   const favoriteMutationRef = useRef<object | null>(null);
+  const nearbyBikeShopCacheRef = useRef(new Map<string, BikeShopRecord[]>());
   const globalEarthTriggerRef = useRef<HTMLButtonElement | null>(null);
   const selectedTrackDetailsRef = useRef<HTMLDivElement | null>(null);
   const shareDialogRef = useRef<HTMLElement | null>(null);
   const shareTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const randomTrackIdRef = useRef<string | null>(initialLocator.id || initialLocator.invalid ? 'linked' : null);
+  const randomTrackIdRef = useRef<string | null>(initialLocator.id || initialLocator.invalid || initialResumeState ? 'restored' : null);
   const directoryTracks: TrackLocatorRecord[] = publicTracks ?? tracks;
   const directoryReady = publicTracks !== null || (publicDirectoryFailed && catalogReady);
+
+  useEffect(() => {
+    if (!initialResumeState || resumeStateConsumedRef.current) return;
+    resumeStateConsumedRef.current = true;
+    onResumeStateConsumed?.();
+  }, [initialResumeState, onResumeStateConsumed]);
 
   useEffect(() => {
     let cancelled = false;
@@ -199,10 +258,59 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
   }, [shareFriends, shareSearch]);
 
   useEffect(() => {
+    const point = selectedTrack ? publicTrackExplorerPoint(selectedTrack) : null;
+    setNearbyBikeShops([]);
+    setNearbyBikeShopError('');
+
+    if (!selectedTrack || !point) {
+      setNearbyBikeShopStatus('unavailable');
+      return undefined;
+    }
+
+    const cacheKey = `${selectedTrack.id}:${point.lat.toFixed(6)}:${point.lng.toFixed(6)}:${nearbyBikeShopRadiusMiles}`;
+    if (nearbyBikeShopCacheRef.current.has(cacheKey)) {
+      setNearbyBikeShops(nearbyBikeShopCacheRef.current.get(cacheKey) ?? []);
+      setNearbyBikeShopStatus('ready');
+      return undefined;
+    }
+
+    let controller: AbortController | null = null;
+    setNearbyBikeShopStatus('loading');
+    const timer = window.setTimeout(() => {
+      controller = new AbortController();
+      void searchNearbyBikeShops(
+        { latitude: point.lat, longitude: point.lng },
+        nearbyBikeShopRadiusMiles,
+        fetch,
+        controller.signal,
+      ).then((result) => {
+        if (controller?.signal.aborted) return;
+        const closestShops = result.shops.slice(0, 3);
+        nearbyBikeShopCacheRef.current.set(cacheKey, closestShops);
+        setNearbyBikeShops(closestShops);
+        setNearbyBikeShopStatus('ready');
+      }).catch((error: unknown) => {
+        if (controller?.signal.aborted) return;
+        setNearbyBikeShopStatus('error');
+        setNearbyBikeShopError(error instanceof Error
+          ? error.message
+          : 'Nearby bike shops could not be loaded.');
+      });
+    }, nearbyBikeShopSelectionDebounceMs);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller?.abort();
+    };
+  }, [nearbyBikeShopReload, selectedTrack]);
+
+  useEffect(() => {
     accountGenerationRef.current += 1;
     const generation = accountGenerationRef.current;
+    const firstAccountInitialization = !accountInitializedRef.current;
+    accountInitializedRef.current = true;
     setFavoriteTrackIds(new Set());
-    setTrackCategory('all');
+    if (!firstAccountInitialization || !initialResumeState) setTrackCategory('all');
     setActionMessage('');
     setActionError('');
     setShareOpen(false);
@@ -226,7 +334,7 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
       .finally(() => {
         if (generation === accountGenerationRef.current) setFavoritesLoading(false);
       });
-  }, [accountId]);
+  }, [accountId, initialResumeState]);
 
   useEffect(() => {
     if (!directoryReady || linkedTrackRequested || randomTrackIdRef.current || sortedTracks.length === 0) {
@@ -290,6 +398,36 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
     window.requestAnimationFrame(() => {
       globalEarthTriggerRef.current?.focus();
     });
+  };
+
+  const openNearbyBikeShopDirectory = (selectedShop?: BikeShopRecord) => {
+    if (!selectedTrack) return;
+    const point = publicTrackExplorerPoint(selectedTrack);
+    if (!point) return;
+
+    const request: PublicTrackNearbyBikeShopRequest = {
+      source: 'selected-track',
+      track: {
+        id: selectedTrack.id,
+        name: selectedTrack.name,
+        latitude: point.lat,
+        longitude: point.lng,
+      },
+      radiusMiles: nearbyBikeShopRadiusMiles,
+      ...(selectedShop ? { selectedShop } : {}),
+      returnState: {
+        query,
+        country,
+        region,
+        selectedTrackId: selectedTrack.id,
+        trackCategory,
+      },
+    };
+    if (onOpenNearbyBikeShops) {
+      onOpenNearbyBikeShops(request);
+      return;
+    }
+    window.location.hash = 'bike-shop-directory';
   };
 
   const handleCountryChange = (nextCountry: string) => {
@@ -659,6 +797,65 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
                       <small>3D exploration—not turn-by-turn directions.</small>
                     </div>
                   </div>
+                  <section
+                    className="public-track-nearby-shops"
+                    aria-busy={nearbyBikeShopStatus === 'loading'}
+                    aria-label="Bike shops within 25 miles"
+                  >
+                    <header>
+                      <div>
+                        <Store size={17} />
+                        <span><strong>Nearby bike shops</strong><small>Within 25 miles of {selectedTrack.name}</small></span>
+                      </div>
+                    </header>
+                    {nearbyBikeShopStatus === 'loading' && (
+                      <div className="public-track-nearby-shops__status" role="status" aria-live="polite">
+                        Finding the closest bike shops…
+                      </div>
+                    )}
+                    {nearbyBikeShopStatus === 'unavailable' && (
+                      <div className="public-track-nearby-shops__status" role="status">
+                        Nearby shops are unavailable because this track does not have verified coordinates.
+                      </div>
+                    )}
+                    {nearbyBikeShopStatus === 'error' && (
+                      <div className="public-track-nearby-shops__status public-track-nearby-shops__status--error" role="alert">
+                        <span>{nearbyBikeShopError || 'Nearby bike shops could not be loaded.'}</span>
+                        <button type="button" onClick={() => setNearbyBikeShopReload((value) => value + 1)}>Try again</button>
+                      </div>
+                    )}
+                    {nearbyBikeShopStatus === 'ready' && nearbyBikeShops.length === 0 && (
+                      <div className="public-track-nearby-shops__status" role="status">
+                        No mapped bike shops were found within 25 miles of this track.
+                      </div>
+                    )}
+                    {nearbyBikeShopStatus === 'ready' && nearbyBikeShops.length > 0 && (
+                      <ul>
+                        {nearbyBikeShops.map((shop) => (
+                          <li key={shop.id}>
+                            <button
+                              type="button"
+                              aria-label={`Open ${shop.name}, ${nearbyBikeShopLocation(shop)}, ${shop.distanceMiles.toFixed(1)} mi away in the bike shop directory`}
+                              onClick={() => openNearbyBikeShopDirectory(shop)}
+                            >
+                              <span><strong>{shop.name}</strong><small>{nearbyBikeShopLocation(shop)}</small></span>
+                              <b>{shop.distanceMiles.toFixed(1)} mi</b>
+                              <ChevronRight size={16} />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {nearbyBikeShopStatus !== 'unavailable' && (
+                      <button
+                        className="public-track-nearby-shops__all"
+                        type="button"
+                        onClick={() => openNearbyBikeShopDirectory()}
+                      >
+                        <Store size={15} /> View all nearby bike shops <ChevronRight size={15} />
+                      </button>
+                    )}
+                  </section>
                 </div>
               </>
             ) : (

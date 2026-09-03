@@ -185,12 +185,12 @@ test('favorites, friend sharing, and canonical track links stay exact and respon
   await expect(locator.getByRole('button', { name: 'Favorite', exact: true })).toHaveAttribute('aria-pressed', 'false');
   expect(favoriteMutations).toEqual([`save:${favoriteTrack.id}`, `remove:${favoriteTrack.id}`]);
   for (const viewport of [
-    { width: 1240, height: 960, minimumMapHeight: 460, actionRows: 2, maximumLayoutHeight: 790 },
-    { width: 1280, height: 960, minimumMapHeight: 460, actionRows: 2, maximumLayoutHeight: 790 },
-    { width: 1366, height: 960, minimumMapHeight: 460, actionRows: 2, maximumLayoutHeight: 790 },
-    { width: 1439, height: 960, minimumMapHeight: 460, actionRows: 2, maximumLayoutHeight: 790 },
-    { width: 1519, height: 960, minimumMapHeight: 460, actionRows: 2, maximumLayoutHeight: 790 },
-    { width: 1520, height: 960, minimumMapHeight: 460, actionRows: 1, maximumLayoutHeight: 730 },
+    { width: 1240, height: 960, minimumMapHeight: 460, actionRows: 2, maximumLayoutHeight: 900 },
+    { width: 1280, height: 960, minimumMapHeight: 460, actionRows: 2, maximumLayoutHeight: 900 },
+    { width: 1366, height: 960, minimumMapHeight: 460, actionRows: 2, maximumLayoutHeight: 900 },
+    { width: 1439, height: 960, minimumMapHeight: 460, actionRows: 2, maximumLayoutHeight: 900 },
+    { width: 1519, height: 960, minimumMapHeight: 460, actionRows: 2, maximumLayoutHeight: 900 },
+    { width: 1520, height: 960, minimumMapHeight: 460, actionRows: 1, maximumLayoutHeight: 830 },
     { width: 1024, height: 768, minimumMapHeight: 360, actionRows: null, maximumLayoutHeight: null },
     { width: 390, height: 844, minimumMapHeight: 360, actionRows: null, maximumLayoutHeight: null },
   ]) {
