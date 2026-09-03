@@ -153,8 +153,9 @@ test('favorites, friend sharing, and canonical track links stay exact and respon
   await page.reload();
   await expect(locator.getByRole('heading', { name: favoriteTrack.name })).toBeVisible();
   await locator.getByRole('button', { name: /Favorites \(1\)/ }).click();
-  await expect(locator.getByRole('button', { name: new RegExp(favoriteTrack.name) })).toBeVisible();
-  await expect(locator.getByRole('button', { name: new RegExp(otherTrack.name) })).toHaveCount(0);
+  const trackResults = locator.locator('.public-track-results');
+  await expect(trackResults.getByRole('button', { name: new RegExp(favoriteTrack.name) })).toBeVisible();
+  await expect(trackResults.getByRole('button', { name: new RegExp(otherTrack.name) })).toHaveCount(0);
   await locator.getByLabel('Search tracks').fill(otherTrack.name);
   await expect(locator.getByText('No tracks match those filters.')).toBeVisible();
   await locator.getByLabel('Search tracks').fill('');

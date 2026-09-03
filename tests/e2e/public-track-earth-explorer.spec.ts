@@ -39,25 +39,14 @@ const tracks = [
   },
 ];
 
-async function installGoogleTrackMapMock(page: Page) {
+async function installGoogleEarthMock(page: Page) {
   await page.addInitScript(() => {
-    type Point = { lat: number; lng: number };
+    type Point = { lat: number; lng: number; altitude?: number };
     type Callback = () => void;
 
     class MockBounds {
-      points: Point[] = [];
-      extend(point: Point) { this.points.push({ ...point }); return this; }
+      extend() { return this; }
     }
-
-    const state: {
-      fitBoundsPointCounts: number[];
-      markers: MockMarker[];
-      operationCounts: { setIcon: number; setMap: number; setPosition: number; setTitle: number };
-    } = {
-      fitBoundsPointCounts: [],
-      markers: [],
-      operationCounts: { setIcon: 0, setMap: 0, setPosition: 0, setTitle: 0 },
-    };
 
     class MockMap {
       listeners = new Map<string, Set<Callback>>();
@@ -74,49 +63,97 @@ async function installGoogleTrackMapMock(page: Page) {
       }
 
       emit(name: string) { this.listeners.get(name)?.forEach((callback) => callback()); }
-      fitBounds(bounds: MockBounds) { state.fitBoundsPointCounts.push(bounds.points.length); }
+      fitBounds() {}
       setHeading() {}
       setTilt() {}
       setOptions() {}
     }
 
     class MockMarker {
-      icon: Record<string, unknown> = {};
-      listeners = new Map<string, Set<Callback>>();
-      map: MockMap | null;
-      position: Point;
-      title = '';
-
-      constructor(options: { map?: MockMap; position: Point }) {
-        this.map = options.map ?? null;
-        this.position = options.position;
-        state.markers.push(this);
-      }
-
-      addListener(name: string, callback: Callback) {
-        const listeners = this.listeners.get(name) ?? new Set<Callback>();
-        listeners.add(callback);
-        this.listeners.set(name, listeners);
-        return { remove: () => listeners.delete(callback) };
-      }
-
-      emit(name: string) { this.listeners.get(name)?.forEach((callback) => callback()); }
-      setIcon(icon: Record<string, unknown>) { state.operationCounts.setIcon += 1; this.icon = icon; }
-      setMap(map: MockMap | null) { state.operationCounts.setMap += 1; this.map = map; }
-      setPosition(position: Point) { state.operationCounts.setPosition += 1; this.position = position; }
-      setTitle(title: string) { state.operationCounts.setTitle += 1; this.title = title; }
+      constructor(_options: Record<string, unknown>) {}
+      addListener() { return { remove() {} }; }
+      setIcon() {}
+      setMap() {}
+      setPosition() {}
+      setTitle() {}
     }
 
+    class MockMap3DElement extends HTMLElement {
+      center: Point = { lat: 0, lng: 0, altitude: 0 };
+      heading = 0;
+      mode = 'SATELLITE';
+      range = 1_400;
+      tilt = 62;
+
+      constructor(options: Record<string, unknown> = {}) {
+        super();
+        Object.assign(this, options);
+      }
+
+      connectedCallback() {
+        const state = (window as typeof window & {
+          __tracklabEarthState?: { maps: MockMap3DElement[]; markers: MockMarker3DElement[] };
+        }).__tracklabEarthState;
+        state?.maps.push(this);
+        const event = new Event('gmp-steadychange');
+        Object.defineProperty(event, 'isSteady', { value: true });
+        queueMicrotask(() => this.dispatchEvent(event));
+      }
+
+      flyCameraTo(options: { endCamera?: Record<string, unknown> }) {
+        Object.assign(this, options.endCamera ?? {});
+        this.dispatchEvent(new Event('gmp-centerchange'));
+        this.dispatchEvent(new Event('gmp-rangechange'));
+      }
+    }
+
+    class MockPolyline3DElement extends HTMLElement {}
+
+    class MockMarker3DElement extends HTMLElement {
+      altitudeMode = '';
+      collisionBehavior = '';
+      drawsWhenOccluded = false;
+      extruded = false;
+      label = '';
+      position: Point = { lat: 0, lng: 0 };
+      sizePreserved = false;
+      title = '';
+      zIndex = 0;
+
+      constructor(options: Record<string, unknown> = {}) {
+        super();
+        Object.assign(this, options);
+        const state = (window as typeof window & {
+          __tracklabEarthState?: { maps: MockMap3DElement[]; markers: MockMarker3DElement[] };
+        }).__tracklabEarthState;
+        state?.markers.push(this);
+      }
+
+      emitClick() {
+        this.dispatchEvent(new Event('gmp-click'));
+      }
+    }
+
+    if (!customElements.get('tracklab-public-map-3d')) {
+      customElements.define('tracklab-public-map-3d', MockMap3DElement);
+      customElements.define('tracklab-public-polyline-3d', MockPolyline3DElement);
+      customElements.define('tracklab-public-marker-3d', MockMarker3DElement);
+    }
+
+    const maps3d = {
+      Map3DElement: customElements.get('tracklab-public-map-3d'),
+      Marker3DElement: customElements.get('tracklab-public-marker-3d'),
+      Marker3DInteractiveElement: customElements.get('tracklab-public-marker-3d'),
+      Polyline3DElement: customElements.get('tracklab-public-polyline-3d'),
+    };
+    const state = { maps: [] as MockMap3DElement[], markers: [] as MockMarker3DElement[] };
+    Object.defineProperty(window, '__tracklabEarthState', { configurable: true, value: state });
     Object.defineProperty(window, 'google', {
       configurable: true,
       value: {
         maps: {
           event: { trigger() {} },
-          importLibrary: async (name: string) => {
-            if (name === 'maps') return { Map: MockMap };
-            if (name === 'marker') return { Marker: MockMarker };
-            return {};
-          },
+          importLibrary: async (name: string) => name === 'maps3d' ? maps3d : {},
           LatLngBounds: MockBounds,
           Map: MockMap,
           Marker: MockMarker,
@@ -124,15 +161,10 @@ async function installGoogleTrackMapMock(page: Page) {
         },
       },
     });
-    Object.defineProperty(window, '__tracklabPublicTrackMapState', {
-      configurable: true,
-      value: state,
-    });
   });
 }
 
-test('Earth view shows the full catalog and opens marker-selected TrackLab details', async ({ page }) => {
-  await installGoogleTrackMapMock(page);
+async function routePublicDirectory(page: Page) {
   await page.route('**/api/auth/me', async (route) => {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: null }) });
   });
@@ -142,123 +174,133 @@ test('Earth view shows the full catalog and opens marker-selected TrackLab detai
       body: JSON.stringify({ generatedAt: '2026-09-02T00:00:00.000Z', tracks }),
     });
   });
+}
 
+test('Google Earth starts at one track, reveals tracks with camera range, and returns through TrackLab', async ({ page }) => {
+  await installGoogleEarthMock(page);
+  await routePublicDirectory(page);
   await page.goto(`/?locator=${tracks[0].id}#track-locator`);
+
   const locator = page.locator('#track-locator');
   await expect(locator.getByRole('heading', { name: tracks[0].name })).toBeVisible();
-  const earthGroup = locator.getByRole('group', { name: 'Global satellite explorer—not directions' });
-  const exploreButton = earthGroup.getByRole('button', { name: 'Explore all tracks' });
-  await exploreButton.click();
+  await expect(locator.getByRole('button', { name: 'Explore all tracks' })).toHaveCount(0);
 
-  await expect(locator.getByRole('status')).toContainText('3 TrackLab track markers on the satellite map');
-  await expect(earthGroup.getByRole('button', { name: 'Show selected track only' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(earthGroup.getByRole('link', { name: /Google Earth—not turn-by-turn directions/ })).toHaveAttribute(
-    'href',
-    /earth\.google\.com/,
-  );
+  const earthGroup = locator.getByRole('group', { name: `Google Earth view for ${tracks[0].name}` });
+  await expect(earthGroup.getByText('Explore this track', { exact: true })).toBeVisible();
+  await earthGroup.getByRole('button', { name: `Open Google Earth view at ${tracks[0].name}` }).click();
+
+  const earth = page.getByRole('dialog', { name: `Google Earth track view starting at ${tracks[0].name}` });
+  await expect(earth).toBeVisible();
+  await expect(earth.getByText('1 track pin loaded')).toBeVisible();
+  await expect(earth.getByText('Zoom out to reveal more BMX tracks. Select any named pin to open that track in TrackLab.')).toBeVisible();
   await expect.poll(() => page.evaluate(() => {
+    type Point = { lat: number; lng: number; altitude?: number };
     const state = (window as typeof window & {
-      __tracklabPublicTrackMapState?: {
-        fitBoundsPointCounts: number[];
-        markers: Array<{ map: unknown; title: string }>;
-      };
-    }).__tracklabPublicTrackMapState;
-    return {
-      activeMarkers: state?.markers.filter((marker) => marker.map !== null).length ?? 0,
-      largestBounds: Math.max(...(state?.fitBoundsPointCounts ?? [0])),
-      titles: state?.markers.filter((marker) => marker.map !== null).map((marker) => marker.title).sort() ?? [],
-    };
-  })).toEqual({
-    activeMarkers: 3,
-    largestBounds: 3,
-    titles: [
-      'London Track BMX — London, England, United Kingdom. Open TrackLab track details',
-      'Melbourne Track BMX — Melbourne, Victoria, Australia. Open TrackLab track details',
-      'Napa Track BMX — Napa, California, United States. Open TrackLab track details',
-    ],
-  });
-
-  await page.evaluate((trackName) => {
-    const state = (window as typeof window & {
-      __tracklabPublicTrackMapState?: {
-        markers: Array<{ emit: (name: string) => void; map: unknown; title: string }>;
-      };
-    }).__tracklabPublicTrackMapState;
-    state?.markers.find((marker) => marker.map !== null && marker.title.startsWith(trackName))?.emit('click');
-  }, tracks[1].name);
-
-  await expect(locator.getByRole('heading', { name: tracks[1].name })).toBeVisible();
-  await expect(page).toHaveURL(new RegExp(`locator=${tracks[1].id}`));
-  await expect(locator.locator('.public-track-details p')).toContainText('Melbourne, Victoria, Australia');
-  await expect(locator.getByRole('status')).toContainText('3 TrackLab track markers on the satellite map');
-  await expect.poll(() => page.evaluate((selectedTitle) => {
-    const state = (window as typeof window & {
-      __tracklabPublicTrackMapState?: {
+      __tracklabEarthState?: {
+        maps: Array<{ center: Point; description: string; range: number; tilt: number }>;
         markers: Array<{
-          icon: { fillColor?: string; scale?: number };
-          map: unknown;
-          title: string;
+          altitudeMode: string;
+          collisionBehavior: string;
+          extruded: boolean;
+          isConnected: boolean;
+          label: string;
+          position: Point;
+          sizePreserved: boolean;
         }>;
       };
-    }).__tracklabPublicTrackMapState;
-    const marker = state?.markers.find((candidate) => candidate.map !== null && candidate.title === selectedTitle);
-    return marker?.icon;
-  }, 'Melbourne Track BMX — Melbourne, Victoria, Australia. Open TrackLab track details')).toMatchObject({
-    fillColor: '#65d636',
-    scale: 9,
+    }).__tracklabEarthState;
+    const activeMarkers = state?.markers.filter((marker) => marker.isConnected) ?? [];
+    return {
+      activeMarkers: activeMarkers.map((marker) => ({
+        altitude: marker.position.altitude,
+        altitudeMode: marker.altitudeMode,
+        collisionBehavior: marker.collisionBehavior,
+        extruded: marker.extruded,
+        label: marker.label,
+        sizePreserved: marker.sizePreserved,
+      })),
+      map: state?.maps[0] ? {
+        center: state.maps[0].center,
+        description: state.maps[0].description,
+        range: state.maps[0].range,
+        tilt: state.maps[0].tilt,
+      } : null,
+    };
+  })).toEqual({
+    activeMarkers: [{
+      altitude: expect.any(Number),
+      altitudeMode: 'RELATIVE_TO_GROUND',
+      collisionBehavior: 'REQUIRED',
+      extruded: true,
+      label: tracks[0].name,
+      sizePreserved: true,
+    }],
+    map: {
+      center: { lat: tracks[0].latitude, lng: tracks[0].longitude, altitude: 0 },
+      description: `Interactive 3D satellite view centered on ${tracks[0].name}. Zoom out to reveal more named BMX tracks.`,
+      range: 1_400,
+      tilt: 62,
+    },
   });
-});
 
-test('selecting among 1,305 global markers updates only the old and new selection', async ({ page }) => {
-  await installGoogleTrackMapMock(page);
-  const largeCatalog = Array.from({ length: 1_305 }, (_, index) => ({
-    ...tracks[index % tracks.length],
-    id: `global-track-${index}`,
-    name: `Global Track ${index}`,
-    latitude: -60 + (index % 120),
-    longitude: -170 + (index * 37 % 340),
-  }));
-  await page.route('**/api/auth/me', async (route) => {
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: null }) });
+  await page.evaluate(() => {
+    const map = (window as typeof window & {
+      __tracklabEarthState?: { maps: Array<{ range: number; dispatchEvent: (event: Event) => boolean }> };
+    }).__tracklabEarthState?.maps[0];
+    if (!map) throw new Error('Earth map did not mount');
+    map.range = 4_200_000;
+    map.dispatchEvent(new Event('gmp-rangechange'));
   });
-  await page.route('**/data/track-locator.json', async (route) => {
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({ generatedAt: '2026-09-02T00:00:00.000Z', tracks: largeCatalog }),
-    });
-  });
-
-  await page.goto(`/?locator=${largeCatalog[0].id}#track-locator`);
-  const locator = page.locator('#track-locator');
-  await locator.getByRole('button', { name: 'Explore all tracks' }).click();
-  await expect(locator.getByRole('status')).toContainText('1,305 TrackLab track markers');
-  await expect.poll(() => page.evaluate(() => {
-    const state = (window as typeof window & {
-      __tracklabPublicTrackMapState?: { markers: Array<{ map: unknown }> };
-    }).__tracklabPublicTrackMapState;
-    return state?.markers.filter((marker) => marker.map !== null).length ?? 0;
-  })).toBe(1_305);
+  await expect(earth.getByText('3 track pins loaded')).toBeVisible();
 
   await page.evaluate((trackName) => {
-    const state = (window as typeof window & {
-      __tracklabPublicTrackMapState?: {
-        markers: Array<{ emit: (name: string) => void; map: unknown; title: string }>;
-        operationCounts: { setIcon: number; setMap: number; setPosition: number; setTitle: number };
-      };
-    }).__tracklabPublicTrackMapState;
-    if (!state) return;
-    state.operationCounts = { setIcon: 0, setMap: 0, setPosition: 0, setTitle: 0 };
-    state.markers.find((marker) => marker.map !== null && marker.title.startsWith(trackName))?.emit('click');
-  }, largeCatalog[777].name);
+    const marker = (window as typeof window & {
+      __tracklabEarthState?: { markers: Array<{ emitClick: () => void; isConnected: boolean; label: string }> };
+    }).__tracklabEarthState?.markers.find((candidate) => candidate.isConnected && candidate.label === trackName);
+    marker?.emitClick();
+  }, tracks[1].name);
 
-  await expect(page).toHaveURL(new RegExp(`locator=${largeCatalog[777].id}`));
-  await expect(locator.getByRole('heading', { name: largeCatalog[777].name })).toBeVisible();
-  await expect.poll(() => page.evaluate(() => {
-    const state = (window as typeof window & {
-      __tracklabPublicTrackMapState?: {
-        operationCounts: { setIcon: number; setMap: number; setPosition: number; setTitle: number };
-      };
-    }).__tracklabPublicTrackMapState;
-    return state?.operationCounts;
-  })).toEqual({ setIcon: 2, setMap: 0, setPosition: 0, setTitle: 0 });
+  await expect(earth).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`locator=${tracks[1].id}.*#track-locator`));
+  await expect(locator.getByRole('heading', { name: tracks[1].name })).toBeVisible();
+  await expect(locator.locator('.public-track-details p')).toContainText('Melbourne, Victoria, Australia');
+  await expect(locator.getByRole('button', { name: `Open Google Earth view at ${tracks[1].name}` })).toBeFocused();
+});
+test('Earth controls fit tablet and phone viewports and return focus to the selected track action', async ({ page }) => {
+  await installGoogleEarthMock(page);
+  await routePublicDirectory(page);
+  await page.goto(`/?locator=${tracks[0].id}#track-locator`);
+  const openButton = page.getByRole('button', { name: `Open Google Earth view at ${tracks[0].name}` });
+
+  for (const viewport of [
+    { width: 1024, height: 768 },
+    { width: 844, height: 390 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await openButton.click();
+    const earth = page.getByRole('dialog', { name: `Google Earth track view starting at ${tracks[0].name}` });
+    await expect(earth).toBeVisible();
+    const geometry = await earth.evaluate((element) => ({
+      height: Math.round(element.getBoundingClientRect().height),
+      overflow: element.scrollWidth - element.clientWidth,
+      width: Math.round(element.getBoundingClientRect().width),
+    }));
+    expect(geometry).toEqual({ height: viewport.height, overflow: 0, width: viewport.width });
+    const buttons = await earth.locator('header button').evaluateAll((items) => items.map((item) => ({
+      height: Math.round(item.getBoundingClientRect().height),
+      width: Math.round(item.getBoundingClientRect().width),
+    })));
+    expect(buttons.every(({ height, width }) => height >= 44 && width >= 44)).toBe(true);
+    const mapAndGuide = await earth.evaluate((element) => {
+      const map = element.querySelector('.public-track-earth-map')!.getBoundingClientRect();
+      const guide = element.querySelector('.public-track-earth-guide')!.getBoundingClientRect();
+      return { guideTop: Math.round(guide.top), mapBottom: Math.round(map.bottom) };
+    });
+    expect(mapAndGuide.guideTop).toBeGreaterThanOrEqual(mapAndGuide.mapBottom);
+
+    await earth.getByRole('button', { name: 'Back to TrackLab track details' }).click();
+    await expect(earth).toHaveCount(0);
+    await expect(openButton).toBeFocused();
+  }
 });

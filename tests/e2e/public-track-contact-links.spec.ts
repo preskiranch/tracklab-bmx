@@ -82,14 +82,10 @@ test('track contacts and map actions stay clear, callable, and responsive', asyn
   await expect(directions.getByRole('link', { name: 'Google Maps' })).toHaveAttribute('href', /google\.com\/maps\/dir\/.*destination=/);
   await expect(directions.getByRole('link')).toHaveCount(1);
 
-  const earth = locator.getByRole('group', { name: 'Global satellite explorer—not directions' });
-  await expect(earth.getByText('Global satellite explorer', { exact: true })).toBeVisible();
-  await expect(earth.getByRole('button', { name: 'Explore all tracks' })).toBeVisible();
-  await expect(earth.getByRole('link', { name: /Open selected track .* Google Earth—not turn-by-turn directions/ })).toHaveAttribute(
-    'href',
-    /earth\.google\.com/,
-  );
-  await expect(earth.getByText(/In-app satellite: all TrackLab markers/)).toBeVisible();
+  const earth = locator.getByRole('group', { name: `Google Earth view for ${contactTrack.name}` });
+  await expect(earth.getByText('Explore this track', { exact: true })).toBeVisible();
+  await expect(earth.getByRole('button', { name: `Open Google Earth view at ${contactTrack.name}` })).toBeVisible();
+  await expect(earth.getByText(/Zoom out to reveal named BMX tracks/)).toBeVisible();
   await expect(directions.getByRole('link', { name: /Google Earth/ })).toHaveCount(0);
 
   const actionTargets = locator.locator(
@@ -146,7 +142,7 @@ test('track contacts and map actions stay clear, callable, and responsive', asyn
   ]) {
     await page.setViewportSize(viewport);
     await locator.scrollIntoViewIfNeeded();
-    await expect(earth.getByRole('link', { name: /Google Earth—not turn-by-turn directions/ })).toBeVisible();
+    await expect(earth.getByRole('button', { name: `Open Google Earth view at ${contactTrack.name}` })).toBeVisible();
     const [layoutBox, earthBox] = await Promise.all([
       locator.locator('.public-locator-layout').boundingBox(),
       earth.boundingBox(),
@@ -187,7 +183,7 @@ test('track contacts and map actions stay clear, callable, and responsive', asyn
 
   await page.setViewportSize({ width: 1280, height: 900 });
   await locator.getByLabel('Search tracks').fill(noContactTrack.name);
-  await locator.getByRole('button', { name: new RegExp(noContactTrack.name) }).click();
+  await locator.locator('.public-track-results').getByRole('button', { name: new RegExp(noContactTrack.name) }).click();
   await expect(locator.getByRole('heading', { name: noContactTrack.name })).toBeVisible();
   await expect(locator.getByRole('navigation', { name: /Social and contact links/ })).toHaveCount(0);
   await expect(locator.getByRole('link', { name: 'Facebook' })).toHaveCount(0);

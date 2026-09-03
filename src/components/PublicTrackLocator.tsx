@@ -20,7 +20,6 @@ import {
 import {
   copyTrackLocatorLink,
   trackGoogleMapsDirectionsUrl,
-  trackGoogleEarthUrl,
   normalizeTrackLocatorId,
   trackLocatorShareUrl,
 } from '../lib/mapLinks';
@@ -28,6 +27,7 @@ import { trackExternalLinks } from '../lib/trackExternalLinks';
 import { createTrackFavoritesApi } from '../lib/trackFavorites';
 import { createFriendsApi, type FriendProfile } from '../lib/friends';
 import type { TrackLocatorRecord, TrackRecord } from '../types';
+import { PublicTrackEarthView } from './PublicTrackEarthView';
 import { PublicTrackMap } from './PublicTrackMap';
 
 type PublicTrackLocatorProps = {
@@ -90,6 +90,7 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
   const favoriteMutationRef = useRef<object | null>(null);
   const shareDialogRef = useRef<HTMLElement | null>(null);
   const shareTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const earthTriggerRef = useRef<HTMLButtonElement | null>(null);
   const randomTrackIdRef = useRef<string | null>(initialLocator.id || initialLocator.invalid ? 'linked' : null);
   const directoryTracks: TrackLocatorRecord[] = publicTracks ?? tracks;
   const directoryReady = publicTracks !== null || (publicDirectoryFailed && catalogReady);
@@ -266,6 +267,7 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
   };
 
   const selectTrackFromEarthExplorer = (track: TrackLocatorRecord) => {
+    setEarthExplorerActive(false);
     setQuery('');
     setCountry(allCountries);
     setRegion(allRegions);
@@ -273,13 +275,18 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
     selectTrack(track);
     window.requestAnimationFrame(() => {
       document.querySelector('.public-track-details')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      earthTriggerRef.current?.focus({ preventScroll: true });
     });
   };
 
-  const toggleEarthExplorer = () => {
-    setEarthExplorerActive((current) => !current);
+  const openEarthExplorer = () => {
+    setEarthExplorerActive(true);
+  };
+
+  const closeEarthExplorer = () => {
+    setEarthExplorerActive(false);
     window.requestAnimationFrame(() => {
-      document.querySelector('.public-track-map')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      earthTriggerRef.current?.focus();
     });
   };
 
@@ -528,12 +535,7 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
           <div className="public-locator-preview">
             {selectedTrack ? (
               <>
-                <PublicTrackMap
-                  exploreAll={earthExplorerActive}
-                  onTrackSelect={selectTrackFromEarthExplorer}
-                  track={selectedTrack}
-                  tracks={sortedTracks}
-                />
+                <PublicTrackMap track={selectedTrack} />
                 {(selectedExternalLinks.websiteUrl
                   || selectedExternalLinks.facebookUrl
                   || selectedExternalLinks.instagramUrl
@@ -618,27 +620,19 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
                         </a>
                       </div>
                     </div>
-                    <div className="public-track-link-group public-track-earth-group" role="group" aria-label="Global satellite explorer—not directions">
-                      <span>Global satellite explorer</span>
+                    <div className="public-track-link-group public-track-earth-group" role="group" aria-label={`Google Earth view for ${selectedTrack.name}`}>
+                      <span>Explore this track</span>
                       <div className="public-track-actions">
                         <button
+                          ref={earthTriggerRef}
                           type="button"
-                          aria-pressed={earthExplorerActive}
-                          aria-label={earthExplorerActive ? 'Show selected track only' : 'Explore all tracks'}
-                          onClick={toggleEarthExplorer}
+                          aria-label={`Open Google Earth view at ${selectedTrack.name}`}
+                          onClick={openEarthExplorer}
                         >
-                          <Globe2 size={16} /> {earthExplorerActive ? 'Selected only' : 'All tracks'}
+                          <Globe2 size={16} /> Google Earth
                         </button>
-                        <a
-                          href={trackGoogleEarthUrl(selectedTrack)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          aria-label={`Open selected track ${selectedTrack.name} in Google Earth—not turn-by-turn directions`}
-                        >
-                          <ExternalLink size={16} /> Google Earth
-                        </a>
                       </div>
-                      <small>In-app satellite: all TrackLab markers. External Google Earth: selected track only.</small>
+                      <small>Starts at this track. Zoom out to reveal named BMX tracks and open their TrackLab pages.</small>
                     </div>
                   </div>
                 </div>
@@ -695,6 +689,14 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
             <a className="public-track-share-preview" href={trackLocatorShareUrl(selectedTrack.id)}><ExternalLink size={15} /> Preview the shareable track link</a>
           </section>
         </div>
+      )}
+      {earthExplorerActive && selectedTrack && (
+        <PublicTrackEarthView
+          onClose={closeEarthExplorer}
+          onTrackSelect={selectTrackFromEarthExplorer}
+          originTrack={selectedTrack}
+          tracks={sortedTracks}
+        />
       )}
     </section>
   );

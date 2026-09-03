@@ -339,12 +339,12 @@ test('public landing page exposes the global track locator without an account', 
   expect(locatorGeometry.detailsBottom).toBeLessThanOrEqual(locatorGeometry.previewBottom + 1);
   await expect(locator.getByRole('heading', { name: 'North Bay BMX' })).toBeVisible();
   await expect(locator.getByRole('link', { name: 'Google Maps' })).toHaveAttribute('href', /google\.com\/maps\/dir\/.*destination=/);
-  await expect(locator.getByRole('button', { name: 'Explore all tracks' })).toBeVisible();
-  await expect(locator.getByRole('link', { name: /Google Earth—not turn-by-turn directions/ })).toHaveAttribute('href', /earth\.google\.com/);
+  await expect(locator.getByRole('button', { name: /Open Google Earth view at North Bay BMX/ })).toBeVisible();
+  await expect(locator.getByRole('button', { name: 'Explore all tracks' })).toHaveCount(0);
   await expect(locator.getByText('Needs manual mapping')).toHaveCount(0);
 
   await locator.getByLabel('Search tracks').fill('ADF Cycling Club');
-  const websiteTrack = locator.getByRole('button', { name: /ADF Cycling Club/ });
+  const websiteTrack = locator.locator('.public-track-results').getByRole('button', { name: /ADF Cycling Club/ });
   await expect(websiteTrack).toBeVisible();
   await websiteTrack.click();
   await expect(locator.getByRole('heading', { name: 'ADF Cycling Club' })).toBeVisible();
@@ -377,7 +377,7 @@ test('public landing page exposes the global track locator without an account', 
   });
 
   await locator.getByLabel('Search tracks').fill('Bicicross Parque Araucano');
-  await locator.getByRole('button', { name: /Bicicross Parque Araucano/ }).click();
+  await locator.locator('.public-track-results').getByRole('button', { name: /Bicicross Parque Araucano/ }).click();
   const longFederationLink = locator.getByRole('link', {
     name: 'Federation: Federación Deportiva Nacional de Ciclismo de Chile',
   });
@@ -392,7 +392,7 @@ test('public landing page exposes the global track locator without an account', 
 
   await page.setViewportSize({ width: 1280, height: 900 });
   await locator.getByLabel('Search tracks').fill('Air Time BMX');
-  await locator.getByRole('button', { name: /Air Time BMX/ }).click();
+  await locator.locator('.public-track-results').getByRole('button', { name: /Air Time BMX/ }).click();
   await expect(locator.getByRole('link', { name: 'Facebook' })).toHaveAttribute(
     'href',
     'https://www.facebook.com/airtimebmx.reedley/',

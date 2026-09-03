@@ -259,6 +259,7 @@ type GoogleMapsRuntime = {
 export type GoogleMap3DElement = HTMLElement & {
   cameraPosition?: { lat: number; lng: number; altitude?: number };
   center?: { lat: number; lng: number; altitude?: number };
+  description?: string;
   flyCameraTo?: (options: {
     endCamera: {
       altitudeMode?: 'ABSOLUTE' | 'RELATIVE_TO_GROUND';
@@ -287,6 +288,7 @@ export type GoogleMarker3DElement = HTMLElement & {
 };
 
 type Google3DMarkerConstructor = new (options?: Record<string, unknown>) => GoogleMarker3DElement;
+type GooglePinConstructor = new (options?: Record<string, unknown>) => HTMLElement;
 
 export type GoogleMaps3DLibrary = {
   Map3DElement: new (options?: Record<string, unknown>) => GoogleMap3DElement;
@@ -294,6 +296,7 @@ export type GoogleMaps3DLibrary = {
   Marker3DInteractiveElement?: Google3DMarkerConstructor;
   MarkerElement?: Google3DMarkerConstructor;
   MarkerInteractiveElement?: Google3DMarkerConstructor;
+  PinElement?: GooglePinConstructor;
   Polyline3DElement: new (options?: Record<string, unknown>) => GooglePolyline3DElement;
 };
 
@@ -532,12 +535,17 @@ export async function loadGoogleMaps3DLibrary(): Promise<GoogleMaps3DLibrary> {
     throw new Error('Google 3D Maps requires a current Maps JavaScript runtime.');
   }
 
-  const library = await google.maps.importLibrary('maps3d') as Partial<GoogleMaps3DLibrary>;
+  const [library, markerLibrary] = await Promise.all([
+    google.maps.importLibrary('maps3d') as Promise<Partial<GoogleMaps3DLibrary>>,
+    (google.maps.importLibrary('marker') as Promise<{ PinElement?: GooglePinConstructor }>)
+      .catch(() => ({})),
+  ]);
   if (!library.Map3DElement || !library.Polyline3DElement) {
     throw new Error('Google 3D Maps is unavailable for this API key.');
   }
 
-  return library as GoogleMaps3DLibrary;
+  const PinElement = 'PinElement' in markerLibrary ? markerLibrary.PinElement : undefined;
+  return { ...library, PinElement } as GoogleMaps3DLibrary;
 }
 
 export function parseLatLngText(value: string): LatLngLiteral | null {

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  publicTrackEarthPinAltitudeMeters,
+  publicTrackEarthRevealRadiusMeters,
+  publicTrackEarthVisibleMarkers,
   publicTrackExplorerMarkers,
   publicTrackExplorerMarkerTitle,
   publicTrackExplorerPoint,
@@ -55,5 +58,51 @@ describe('public track Earth explorer', () => {
     expect(publicTrackExplorerMarkerTitle(melbourne)).toBe(
       'Melbourne BMX — Melbourne, Victoria, Australia. Open TrackLab track details',
     );
+  });
+
+  it('reveals more named track pins as the Earth camera rises', () => {
+    const selected = track();
+    const nearby = track({ id: 'nearby', name: 'Nearby BMX', latitude: 38.32, longitude: -122.3 });
+    const regional = track({ id: 'regional', name: 'Regional BMX', latitude: 39.3, longitude: -122.3 });
+    const distant = track({ id: 'distant', name: 'Distant BMX', latitude: -37.8, longitude: 144.9 });
+    const markers = publicTrackExplorerMarkers([selected, nearby, regional, distant]);
+    const center = { lat: 38.3, lng: -122.3 };
+
+    expect(publicTrackEarthVisibleMarkers(markers, center, 1_000, selected.id).map(({ track: item }) => item.id))
+      .toEqual(['track-one', 'nearby']);
+    expect(publicTrackEarthVisibleMarkers(markers, center, 30_000, selected.id).map(({ track: item }) => item.id))
+      .toEqual(['track-one', 'nearby', 'regional']);
+    expect(publicTrackEarthVisibleMarkers(markers, center, 4_200_000, selected.id)).toHaveLength(4);
+  });
+
+  it('keeps the selected track available after panning and scales its ground tether for camera range', () => {
+    const selected = track();
+    const markers = publicTrackExplorerMarkers([selected]);
+
+    expect(publicTrackEarthVisibleMarkers(markers, { lat: -37.8, lng: 144.9 }, 1_000, selected.id)[0]?.track.id)
+      .toBe(selected.id);
+    expect(publicTrackEarthRevealRadiusMeters(1_000)).toBe(5_000);
+    expect(publicTrackEarthPinAltitudeMeters(20_000)).toBeGreaterThan(publicTrackEarthPinAltitudeMeters(1_000));
+    expect(publicTrackEarthPinAltitudeMeters(Number.POSITIVE_INFINITY)).toBeGreaterThanOrEqual(90);
+  });
+
+  it('loads every valid directory pin at global range without losing the selected track', () => {
+    const catalog = Array.from({ length: 1_305 }, (_, index) => track({
+      id: `global-${index}`,
+      name: `Global Track ${index}`,
+      latitude: -80 + ((index * 37) % 160),
+      longitude: -179 + ((index * 53) % 358),
+    }));
+    const markers = publicTrackExplorerMarkers(catalog);
+    const visible = publicTrackEarthVisibleMarkers(
+      markers,
+      { lat: 0, lng: 0 },
+      4_200_000,
+      catalog[712].id,
+    );
+
+    expect(visible).toHaveLength(1_305);
+    expect(visible[0]?.track.id).toBe(catalog[712].id);
+    expect(new Set(visible.map(({ track: item }) => item.id)).size).toBe(1_305);
   });
 });
