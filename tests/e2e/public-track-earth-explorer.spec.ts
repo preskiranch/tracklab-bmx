@@ -176,28 +176,33 @@ async function routePublicDirectory(page: Page) {
   });
 }
 
-test('Google Earth starts at one track, reveals tracks with camera range, and returns through TrackLab', async ({ page }) => {
+test('global 3D explorer starts at one track, reveals tracks with camera range, and returns through TrackLab', async ({ page }) => {
   await installGoogleEarthMock(page);
   await routePublicDirectory(page);
   await page.goto(`/?locator=${tracks[0].id}#track-locator`);
 
   const locator = page.locator('#track-locator');
   await expect(locator.getByRole('heading', { name: tracks[0].name })).toBeVisible();
-  await expect(locator.getByRole('button', { name: 'Explore all tracks' })).toHaveCount(0);
+  const selectedTrackEarth = locator.getByRole('group', { name: 'Explore in 3D—not directions' });
+  await expect(selectedTrackEarth.getByRole('link', {
+    name: `Explore ${tracks[0].name} in Google Earth—not turn-by-turn directions`,
+  })).toHaveAttribute('href', /earth\.google\.com/);
 
-  const earthGroup = locator.getByRole('group', { name: `Google Earth view for ${tracks[0].name}` });
-  await expect(earthGroup.getByText('Explore this track', { exact: true })).toBeVisible();
-  await earthGroup.getByRole('button', { name: `Open Google Earth view at ${tracks[0].name}` }).click();
+  const globalExplorer = locator.getByRole('region', { name: 'Global 3D Track Explorer' });
+  await expect(globalExplorer.getByText('All BMX tracks in 3D', { exact: true })).toBeVisible();
+  await globalExplorer.getByRole('button', {
+    name: `Open global 3D track explorer starting at ${tracks[0].name}`,
+  }).click();
 
-  const earth = page.getByRole('dialog', { name: `Google Earth track view starting at ${tracks[0].name}` });
+  const earth = page.getByRole('dialog', { name: `Global 3D track explorer starting at ${tracks[0].name}` });
   await expect(earth).toBeVisible();
   await expect(earth.getByText('1 track pin loaded')).toBeVisible();
-  await expect(earth.getByText('Zoom out to reveal more BMX tracks. Select any named pin to open that track in TrackLab.')).toBeVisible();
+  await expect(earth.getByText(/Toggle labels to show or hide cities, states\/regions, roads, and boundaries/)).toBeVisible();
   await expect.poll(() => page.evaluate(() => {
     type Point = { lat: number; lng: number; altitude?: number };
     const state = (window as typeof window & {
       __tracklabEarthState?: {
-        maps: Array<{ center: Point; description: string; range: number; tilt: number }>;
+        maps: Array<{ center: Point; description: string; mode: string; range: number; tilt: number }>;
         markers: Array<{
           altitudeMode: string;
           collisionBehavior: string;
@@ -222,6 +227,7 @@ test('Google Earth starts at one track, reveals tracks with camera range, and re
       map: state?.maps[0] ? {
         center: state.maps[0].center,
         description: state.maps[0].description,
+        mode: state.maps[0].mode,
         range: state.maps[0].range,
         tilt: state.maps[0].tilt,
       } : null,
@@ -237,11 +243,26 @@ test('Google Earth starts at one track, reveals tracks with camera range, and re
     }],
     map: {
       center: { lat: tracks[0].latitude, lng: tracks[0].longitude, altitude: 0 },
-      description: `Interactive 3D satellite view centered on ${tracks[0].name}. Zoom out to reveal more named BMX tracks.`,
+      description: `Interactive global 3D BMX track map starting at ${tracks[0].name}. Zoom out to reveal more named BMX tracks.`,
+      mode: 'HYBRID',
       range: 1_400,
       tilt: 62,
     },
   });
+
+  const labelsToggle = earth.getByRole('button', { name: 'Hide map boundaries and labels' });
+  await expect(labelsToggle).toHaveAttribute('aria-pressed', 'true');
+  await labelsToggle.click();
+  await expect(earth.getByRole('button', { name: 'Show map boundaries and labels' })).toHaveAttribute('aria-pressed', 'false');
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & { __tracklabEarthState?: { maps: Array<{ mode: string }> } })
+      .__tracklabEarthState?.maps[0]?.mode
+  ))).toBe('SATELLITE');
+  await earth.getByRole('button', { name: 'Show map boundaries and labels' }).click();
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & { __tracklabEarthState?: { maps: Array<{ mode: string }> } })
+      .__tracklabEarthState?.maps[0]?.mode
+  ))).toBe('HYBRID');
 
   await page.evaluate(() => {
     const map = (window as typeof window & {
@@ -264,13 +285,21 @@ test('Google Earth starts at one track, reveals tracks with camera range, and re
   await expect(page).toHaveURL(new RegExp(`locator=${tracks[1].id}.*#track-locator`));
   await expect(locator.getByRole('heading', { name: tracks[1].name })).toBeVisible();
   await expect(locator.locator('.public-track-details p')).toContainText('Melbourne, Victoria, Australia');
-  await expect(locator.getByRole('button', { name: `Open Google Earth view at ${tracks[1].name}` })).toBeFocused();
+  await expect(locator.locator('.public-track-details')).toBeFocused();
 });
-test('Earth controls fit tablet and phone viewports and return focus to the selected track action', async ({ page }) => {
+test('global 3D controls fit tablet and phone viewports and return focus to their separate launcher', async ({ page }) => {
   await installGoogleEarthMock(page);
   await routePublicDirectory(page);
   await page.goto(`/?locator=${tracks[0].id}#track-locator`);
-  const openButton = page.getByRole('button', { name: `Open Google Earth view at ${tracks[0].name}` });
+  const search = page.getByLabel('Search tracks');
+  const country = page.getByLabel('Country');
+  const region = page.getByLabel('State / region');
+  await search.fill('Napa');
+  await country.selectOption({ label: 'United States' });
+  await region.selectOption({ label: 'California' });
+  const openButton = page.getByRole('button', {
+    name: `Open global 3D track explorer starting at ${tracks[0].name}`,
+  });
 
   for (const viewport of [
     { width: 1024, height: 768 },
@@ -279,7 +308,7 @@ test('Earth controls fit tablet and phone viewports and return focus to the sele
   ]) {
     await page.setViewportSize(viewport);
     await openButton.click();
-    const earth = page.getByRole('dialog', { name: `Google Earth track view starting at ${tracks[0].name}` });
+    const earth = page.getByRole('dialog', { name: `Global 3D track explorer starting at ${tracks[0].name}` });
     await expect(earth).toBeVisible();
     const geometry = await earth.evaluate((element) => ({
       height: Math.round(element.getBoundingClientRect().height),
@@ -302,5 +331,8 @@ test('Earth controls fit tablet and phone viewports and return focus to the sele
     await earth.getByRole('button', { name: 'Back to TrackLab track details' }).click();
     await expect(earth).toHaveCount(0);
     await expect(openButton).toBeFocused();
+    await expect(search).toHaveValue('Napa');
+    await expect(country).toHaveValue('United States');
+    await expect(region).toHaveValue('California');
   }
 });

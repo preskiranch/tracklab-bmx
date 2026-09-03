@@ -19,8 +19,9 @@ import {
 } from 'lucide-react';
 import {
   copyTrackLocatorLink,
-  trackGoogleMapsDirectionsUrl,
   normalizeTrackLocatorId,
+  trackGoogleEarthUrl,
+  trackGoogleMapsDirectionsUrl,
   trackLocatorShareUrl,
 } from '../lib/mapLinks';
 import { trackExternalLinks } from '../lib/trackExternalLinks';
@@ -88,9 +89,10 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
   const [earthExplorerActive, setEarthExplorerActive] = useState(false);
   const accountGenerationRef = useRef(0);
   const favoriteMutationRef = useRef<object | null>(null);
+  const globalEarthTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const selectedTrackDetailsRef = useRef<HTMLDivElement | null>(null);
   const shareDialogRef = useRef<HTMLElement | null>(null);
   const shareTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const earthTriggerRef = useRef<HTMLButtonElement | null>(null);
   const randomTrackIdRef = useRef<string | null>(initialLocator.id || initialLocator.invalid ? 'linked' : null);
   const directoryTracks: TrackLocatorRecord[] = publicTracks ?? tracks;
   const directoryReady = publicTracks !== null || (publicDirectoryFailed && catalogReady);
@@ -274,8 +276,8 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
     setTrackCategory('all');
     selectTrack(track);
     window.requestAnimationFrame(() => {
-      document.querySelector('.public-track-details')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      earthTriggerRef.current?.focus({ preventScroll: true });
+      selectedTrackDetailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      selectedTrackDetailsRef.current?.focus({ preventScroll: true });
     });
   };
 
@@ -286,7 +288,7 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
   const closeEarthExplorer = () => {
     setEarthExplorerActive(false);
     window.requestAnimationFrame(() => {
-      earthTriggerRef.current?.focus();
+      globalEarthTriggerRef.current?.focus();
     });
   };
 
@@ -461,6 +463,28 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
             : 'Loading directory'}</strong>
         </header>
 
+        <section className="public-track-global-earth" aria-labelledby="public-track-global-earth-title">
+          <div>
+            <span className="eyebrow"><Globe2 size={14} /> All BMX tracks in 3D</span>
+            <h3 id="public-track-global-earth-title">Global 3D Track Explorer</h3>
+            <p>Start at the selected track, then zoom out to reveal more named BMX tracks around the world.</p>
+          </div>
+          <div className="public-track-global-earth-action">
+            <button
+              ref={globalEarthTriggerRef}
+              type="button"
+              disabled={!selectedTrack}
+              aria-label={selectedTrack
+                ? `Open global 3D track explorer starting at ${selectedTrack.name}`
+                : 'Open global 3D track explorer'}
+              onClick={openEarthExplorer}
+            >
+              <Globe2 size={18} /> Explore all tracks in 3D
+            </button>
+            <small>{selectedTrack ? `Starting near ${selectedTrack.name}` : 'Choose a track to begin'}</small>
+          </div>
+        </section>
+
         <div className="public-locator-layout">
           <div className="public-locator-search-panel">
             <label className="public-track-search">
@@ -594,7 +618,7 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
                     )}
                   </nav>
                 )}
-                <div className="public-track-details">
+                <div ref={selectedTrackDetailsRef} className="public-track-details" tabIndex={-1}>
                   <div>
                     <span className="eyebrow">Selected track</span>
                     <h3>{selectedTrack.name}</h3>
@@ -620,19 +644,19 @@ export function PublicTrackLocator({ accountId = null, catalogReady, tracks }: P
                         </a>
                       </div>
                     </div>
-                    <div className="public-track-link-group public-track-earth-group" role="group" aria-label={`Google Earth view for ${selectedTrack.name}`}>
-                      <span>Explore this track</span>
+                    <div className="public-track-link-group public-track-earth-group" role="group" aria-label="Explore in 3D—not directions">
+                      <span>Explore in 3D</span>
                       <div className="public-track-actions">
-                        <button
-                          ref={earthTriggerRef}
-                          type="button"
-                          aria-label={`Open Google Earth view at ${selectedTrack.name}`}
-                          onClick={openEarthExplorer}
+                        <a
+                          href={trackGoogleEarthUrl(selectedTrack)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label={`Explore ${selectedTrack.name} in Google Earth—not turn-by-turn directions`}
                         >
-                          <Globe2 size={16} /> Google Earth
-                        </button>
+                          <ExternalLink size={16} /> Google Earth
+                        </a>
                       </div>
-                      <small>Starts at this track. Zoom out to reveal named BMX tracks and open their TrackLab pages.</small>
+                      <small>3D exploration—not turn-by-turn directions.</small>
                     </div>
                   </div>
                 </div>

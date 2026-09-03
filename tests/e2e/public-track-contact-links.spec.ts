@@ -82,11 +82,25 @@ test('track contacts and map actions stay clear, callable, and responsive', asyn
   await expect(directions.getByRole('link', { name: 'Google Maps' })).toHaveAttribute('href', /google\.com\/maps\/dir\/.*destination=/);
   await expect(directions.getByRole('link')).toHaveCount(1);
 
-  const earth = locator.getByRole('group', { name: `Google Earth view for ${contactTrack.name}` });
-  await expect(earth.getByText('Explore this track', { exact: true })).toBeVisible();
-  await expect(earth.getByRole('button', { name: `Open Google Earth view at ${contactTrack.name}` })).toBeVisible();
-  await expect(earth.getByText(/Zoom out to reveal named BMX tracks/)).toBeVisible();
+  const earth = locator.getByRole('group', { name: 'Explore in 3D—not directions' });
+  await expect(earth.getByText('Explore in 3D', { exact: true })).toBeVisible();
+  const selectedTrackEarthLink = earth.getByRole('link', {
+    name: `Explore ${contactTrack.name} in Google Earth—not turn-by-turn directions`,
+  });
+  await expect(selectedTrackEarthLink).toHaveAttribute(
+    'href',
+    `https://earth.google.com/web/search/${encodeURIComponent(`${contactTrack.latitude},${contactTrack.longitude}`)}`,
+  );
+  await expect(selectedTrackEarthLink).toHaveAttribute('target', '_blank');
+  await expect(selectedTrackEarthLink).toHaveAttribute('rel', 'noopener noreferrer');
+  await expect(earth.getByText('3D exploration—not turn-by-turn directions.')).toBeVisible();
   await expect(directions.getByRole('link', { name: /Google Earth/ })).toHaveCount(0);
+  const globalExplorer = locator.getByRole('region', { name: 'Global 3D Track Explorer' });
+  await expect(globalExplorer).toBeVisible();
+  await expect(globalExplorer.getByRole('button', {
+    name: `Open global 3D track explorer starting at ${contactTrack.name}`,
+  })).toBeVisible();
+  await expect(globalExplorer.locator('.public-track-details')).toHaveCount(0);
 
   const actionTargets = locator.locator(
     '.public-track-official-links a, .public-track-actions a, .public-track-actions button',
@@ -142,7 +156,10 @@ test('track contacts and map actions stay clear, callable, and responsive', asyn
   ]) {
     await page.setViewportSize(viewport);
     await locator.scrollIntoViewIfNeeded();
-    await expect(earth.getByRole('button', { name: `Open Google Earth view at ${contactTrack.name}` })).toBeVisible();
+    await expect(selectedTrackEarthLink).toBeVisible();
+    await expect(globalExplorer.getByRole('button', {
+      name: `Open global 3D track explorer starting at ${contactTrack.name}`,
+    })).toBeVisible();
     const [layoutBox, earthBox] = await Promise.all([
       locator.locator('.public-locator-layout').boundingBox(),
       earth.boundingBox(),

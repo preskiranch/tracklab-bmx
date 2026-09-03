@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Globe2, MapPin, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Globe2, Map as MapIcon, MapPin, RotateCcw } from 'lucide-react';
 import {
   loadGoogleMaps3DLibrary,
   type GoogleMap3DElement,
@@ -106,11 +106,13 @@ export function PublicTrackEarthView({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<GoogleMap3DElement | null>(null);
   const markerEntriesRef = useRef<Map<string, EarthMarkerEntry>>(new Map());
+  const mapLabelsRef = useRef(true);
   const updateTimerRef = useRef(0);
   const onTrackSelectRef = useRef(onTrackSelect);
   const allMarkers = useMemo(() => publicTrackExplorerMarkers(tracks), [tracks]);
   const originPoint = useMemo(() => publicTrackExplorerPoint(originTrack), [originTrack]);
   const [viewState, setViewState] = useState<EarthViewState>('loading');
+  const [showMapLabels, setShowMapLabels] = useState(true);
   const [visibleTrackCount, setVisibleTrackCount] = useState(1);
   onTrackSelectRef.current = onTrackSelect;
 
@@ -161,10 +163,10 @@ export function PublicTrackEarthView({
 
         const map = new library.Map3DElement({
           center: { ...originPoint, altitude: 0 },
-          description: `Interactive 3D satellite view centered on ${originTrack.name}. Zoom out to reveal more named BMX tracks.`,
+          description: `Interactive global 3D BMX track map starting at ${originTrack.name}. Zoom out to reveal more named BMX tracks.`,
           gestureHandling: 'GREEDY',
           heading: 0,
-          mode: 'SATELLITE',
+          mode: mapLabelsRef.current ? 'HYBRID' : 'SATELLITE',
           range: publicTrackEarthInitialRangeMeters,
           tilt: 62,
         });
@@ -283,11 +285,20 @@ export function PublicTrackEarthView({
     map.tilt = camera.tilt;
   };
 
+  const toggleMapLabels = () => {
+    setShowMapLabels((current) => {
+      const next = !current;
+      mapLabelsRef.current = next;
+      if (mapRef.current) mapRef.current.mode = next ? 'HYBRID' : 'SATELLITE';
+      return next;
+    });
+  };
+
   return (
     <dialog
       ref={dialogRef}
       className="public-track-earth-view"
-      aria-label={`Google Earth track view starting at ${originTrack.name}`}
+      aria-label={`Global 3D track explorer starting at ${originTrack.name}`}
       onCancel={(event) => {
         event.preventDefault();
         onClose();
@@ -297,13 +308,23 @@ export function PublicTrackEarthView({
         <button type="button" onClick={onClose} aria-label="Back to TrackLab track details">
           <ArrowLeft size={19} /> <span>Back to TrackLab</span>
         </button>
-        <div>
-          <span>Google Earth view</span>
+        <div className="public-track-earth-title">
+          <span>Global 3D Track Explorer</span>
           <strong>{originTrack.name}</strong>
         </div>
-        <button type="button" onClick={resetToOrigin} aria-label={`Return Earth view to ${originTrack.name}`}>
-          <RotateCcw size={18} /> <span>Return to track</span>
-        </button>
+        <div className="public-track-earth-toolbar-actions">
+          <button
+            type="button"
+            aria-pressed={showMapLabels}
+            aria-label={showMapLabels ? 'Hide map boundaries and labels' : 'Show map boundaries and labels'}
+            onClick={toggleMapLabels}
+          >
+            <MapIcon size={18} /> <span>{showMapLabels ? 'Labels on' : 'Labels off'}</span>
+          </button>
+          <button type="button" onClick={resetToOrigin} aria-label={`Return global explorer to ${originTrack.name}`}>
+            <RotateCcw size={18} /> <span>Return to track</span>
+          </button>
+        </div>
       </header>
 
       <div className="public-track-earth-map" ref={containerRef} />
@@ -312,14 +333,14 @@ export function PublicTrackEarthView({
         <MapPin size={18} />
         <span>
           <strong>{visibleTrackCount.toLocaleString()} {visibleTrackCount === 1 ? 'track pin' : 'track pins'} loaded</strong>
-          <small>Zoom out to reveal more BMX tracks. Select any named pin to open that track in TrackLab.</small>
+          <small>Zoom out for more tracks. Toggle labels to show or hide cities, states/regions, roads, and boundaries.</small>
         </span>
       </div>
 
       {viewState !== 'ready' && (
         <div className={`public-track-earth-loading ${viewState}`}>
           <Globe2 size={34} />
-          <strong>{viewState === 'loading' ? 'Opening the Earth at this track' : 'Google Earth view is unavailable'}</strong>
+          <strong>{viewState === 'loading' ? 'Opening the global track explorer' : 'Global 3D Track Explorer is unavailable'}</strong>
           <span>{viewState === 'loading'
             ? 'TrackLab is placing the nearby BMX track pins.'
             : 'You can still open this selected location directly in Google Earth.'}</span>

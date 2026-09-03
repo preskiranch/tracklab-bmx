@@ -339,7 +339,11 @@ test('public landing page exposes the global track locator without an account', 
   expect(locatorGeometry.detailsBottom).toBeLessThanOrEqual(locatorGeometry.previewBottom + 1);
   await expect(locator.getByRole('heading', { name: 'North Bay BMX' })).toBeVisible();
   await expect(locator.getByRole('link', { name: 'Google Maps' })).toHaveAttribute('href', /google\.com\/maps\/dir\/.*destination=/);
-  await expect(locator.getByRole('button', { name: /Open Google Earth view at North Bay BMX/ })).toBeVisible();
+  await expect(locator.getByRole('link', { name: /Explore North Bay BMX in Google Earth/ })).toHaveAttribute(
+    'href',
+    /earth\.google\.com\/web\/search/,
+  );
+  await expect(locator.getByRole('button', { name: /Open global 3D track explorer starting at North Bay BMX/ })).toBeVisible();
   await expect(locator.getByRole('button', { name: 'Explore all tracks' })).toHaveCount(0);
   await expect(locator.getByText('Needs manual mapping')).toHaveCount(0);
 

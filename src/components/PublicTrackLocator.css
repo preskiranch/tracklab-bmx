@@ -48,6 +48,90 @@
   font-size: 13px;
 }
 
+.public-track-global-earth {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 112px;
+  margin-bottom: 16px;
+  padding: 18px 20px;
+  overflow: hidden;
+  border: 1px solid rgba(101, 214, 54, 0.5);
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 86% 28%, rgba(216, 255, 62, 0.17), transparent 32%),
+    linear-gradient(135deg, #0b151e 0%, #14232e 100%);
+  color: #ffffff;
+}
+
+.public-track-global-earth > div:first-child {
+  min-width: 0;
+}
+
+.public-track-global-earth .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #d8ff3e;
+}
+
+.public-track-global-earth h3 {
+  margin-top: 5px;
+  font-size: 22px;
+}
+
+.public-track-global-earth p {
+  max-width: 660px;
+  margin-top: 5px;
+  color: #c8d3dc;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.public-track-global-earth-action {
+  display: grid;
+  flex: 0 0 min(310px, 38%);
+  gap: 5px;
+}
+
+.public-track-global-earth-action button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 14px;
+  border: 1px solid #d8ff3e;
+  border-radius: 8px;
+  background: #d8ff3e;
+  color: #0b1117;
+  font-size: 14px;
+  font-weight: 950;
+  line-height: 1.2;
+}
+
+.public-track-global-earth-action button:hover,
+.public-track-global-earth-action button:focus-visible {
+  border-color: #ffffff;
+  background: #ffffff;
+}
+
+.public-track-global-earth-action button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.public-track-global-earth-action small {
+  overflow: hidden;
+  color: #aebbc6;
+  font-size: 10px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .public-locator-layout {
   display: grid;
   grid-template-columns: minmax(290px, 360px) minmax(0, 1fr);
@@ -504,14 +588,14 @@
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
 }
 
-.public-track-earth-toolbar > div {
+.public-track-earth-title {
   display: grid;
   min-width: 0;
   justify-items: center;
   text-align: center;
 }
 
-.public-track-earth-toolbar > div span {
+.public-track-earth-title span {
   color: #d8ff3e;
   font-size: 10px;
   font-weight: 950;
@@ -519,7 +603,7 @@
   text-transform: uppercase;
 }
 
-.public-track-earth-toolbar > div strong {
+.public-track-earth-title strong {
   max-width: 100%;
   margin-top: 2px;
   overflow: hidden;
@@ -545,12 +629,15 @@
   white-space: nowrap;
 }
 
-.public-track-earth-toolbar button:first-child {
+.public-track-earth-toolbar > button:first-child {
   justify-self: start;
 }
 
-.public-track-earth-toolbar button:last-child {
+.public-track-earth-toolbar-actions {
+  display: flex;
+  align-items: center;
   justify-self: end;
+  gap: 7px;
 }
 
 .public-track-earth-toolbar button:hover,
@@ -862,6 +949,10 @@
     font-size: 26px;
   }
 
+  .public-track-global-earth {
+    min-height: 104px;
+  }
+
   .public-locator-layout {
     grid-template-columns: 1fr;
     grid-template-rows: auto auto;
@@ -942,7 +1033,7 @@
 
 @media (max-width: 560px) {
   .public-track-earth-toolbar {
-    grid-template-columns: 48px minmax(0, 1fr) 48px;
+    grid-template-columns: 48px minmax(0, 1fr) auto;
     gap: 7px;
     min-height: 64px;
     padding-bottom: 8px;
@@ -953,16 +1044,32 @@
     padding: 0;
   }
 
+  .public-track-earth-toolbar-actions {
+    gap: 5px;
+  }
+
   .public-track-earth-toolbar button span {
     display: none;
   }
 
-  .public-track-earth-toolbar > div strong {
+  .public-track-earth-title strong {
     font-size: 14px;
   }
 
   .public-track-earth-guide {
     justify-content: flex-start;
+  }
+
+  .public-track-global-earth {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px;
+  }
+
+  .public-track-global-earth-action {
+    flex-basis: auto;
+    width: 100%;
   }
 
   .public-track-details > div:first-child {
