@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  publicTrackEarthBikeShopViewport,
   publicTrackEarthPinAltitudeMeters,
   publicTrackEarthRevealRadiusMeters,
   publicTrackEarthVisibleMarkers,
@@ -84,6 +85,22 @@ describe('public track Earth explorer', () => {
     expect(publicTrackEarthRevealRadiusMeters(1_000)).toBe(5_000);
     expect(publicTrackEarthPinAltitudeMeters(20_000)).toBeGreaterThan(publicTrackEarthPinAltitudeMeters(1_000));
     expect(publicTrackEarthPinAltitudeMeters(Number.POSITIVE_INFINITY)).toBeGreaterThanOrEqual(90);
+  });
+
+  it('builds a bounded bike-shop viewport only while the 3D camera is close enough', () => {
+    expect(publicTrackEarthBikeShopViewport({ lat: 38.3, lng: -122.3 }, 1_400)).toEqual({
+      north: expect.closeTo(38.312576, 5),
+      south: expect.closeTo(38.287424, 5),
+      east: expect.any(Number),
+      west: expect.any(Number),
+      zoom: 16,
+    });
+    expect(publicTrackEarthBikeShopViewport({ lat: 0, lng: 179.9 }, 2_800)).toMatchObject({
+      east: expect.any(Number),
+      west: expect.any(Number),
+      zoom: 15,
+    });
+    expect(publicTrackEarthBikeShopViewport({ lat: 38.3, lng: -122.3 }, 50_000)).toBeNull();
   });
 
   it('loads every valid directory pin at global range without losing the selected track', () => {

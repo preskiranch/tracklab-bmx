@@ -1,4 +1,5 @@
 import type { TrackLocatorRecord } from '../types';
+import type { BikeShopViewport } from './bikeShops';
 import { distanceBetweenTrackPoints } from './trackMapping';
 
 export type PublicTrackExplorerMarker = {
@@ -7,6 +8,40 @@ export type PublicTrackExplorerMarker = {
 };
 
 export const publicTrackEarthInitialRangeMeters = 1_400;
+export const publicTrackEarthShopMinimumZoom = 11;
+
+function wrapLongitude(longitude: number) {
+  return ((longitude + 180) % 360 + 360) % 360 - 180;
+}
+
+/**
+ * Approximate the visible ground rectangle for the 3D camera. Google does not
+ * expose a viewport-bounds getter for Map3DElement, so the camera range is the
+ * stable input for the shop directory's bounded viewport API.
+ */
+export function publicTrackEarthBikeShopViewport(
+  center: { lat: number; lng: number },
+  rangeMeters: number,
+): BikeShopViewport | null {
+  const range = Number.isFinite(rangeMeters)
+    ? Math.max(200, rangeMeters)
+    : publicTrackEarthInitialRangeMeters;
+  const zoom = 16 - Math.log2(range / publicTrackEarthInitialRangeMeters);
+  if (zoom < publicTrackEarthShopMinimumZoom) return null;
+
+  const latitude = Math.max(-85, Math.min(85, center.lat));
+  const longitude = wrapLongitude(center.lng);
+  const latitudeDelta = Math.min(20, range / 111_320);
+  const longitudeScale = Math.max(0.08, Math.cos(latitude * Math.PI / 180));
+  const longitudeDelta = Math.min(179.9, range / (111_320 * longitudeScale));
+  return {
+    north: Math.min(85, latitude + latitudeDelta),
+    south: Math.max(-85, latitude - latitudeDelta),
+    east: wrapLongitude(longitude + longitudeDelta),
+    west: wrapLongitude(longitude - longitudeDelta),
+    zoom: Math.round(Math.min(24, zoom) * 10) / 10,
+  };
+}
 
 /**
  * Google 3D's camera range is the distance from the camera to its target, not

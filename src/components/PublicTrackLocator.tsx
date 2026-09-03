@@ -36,7 +36,7 @@ import { PublicTrackEarthView } from './PublicTrackEarthView';
 import { PublicTrackMap } from './PublicTrackMap';
 
 export type PublicTrackNearbyBikeShopRequest = {
-  source: 'selected-track';
+  source: 'earth-explorer' | 'selected-track';
   track: {
     id: string;
     name: string;
@@ -175,6 +175,7 @@ export function PublicTrackLocator({
   const nearbyBikeShopCacheRef = useRef(new Map<string, BikeShopRecord[]>());
   const globalEarthTriggerRef = useRef<HTMLButtonElement | null>(null);
   const selectedTrackDetailsRef = useRef<HTMLDivElement | null>(null);
+  const pendingEarthTrackFocusRef = useRef<string | null>(null);
   const shareDialogRef = useRef<HTMLElement | null>(null);
   const shareTriggerRef = useRef<HTMLButtonElement | null>(null);
   const randomTrackIdRef = useRef<string | null>(initialLocator.id || initialLocator.invalid || initialResumeState ? 'restored' : null);
@@ -186,6 +187,17 @@ export function PublicTrackLocator({
     resumeStateConsumedRef.current = true;
     onResumeStateConsumed?.();
   }, [initialResumeState, onResumeStateConsumed]);
+
+  useEffect(() => {
+    if (earthExplorerActive || pendingEarthTrackFocusRef.current !== selectedTrackId) return undefined;
+
+    pendingEarthTrackFocusRef.current = null;
+    const focusFrame = window.requestAnimationFrame(() => {
+      selectedTrackDetailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      selectedTrackDetailsRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(focusFrame);
+  }, [earthExplorerActive, selectedTrackId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -420,16 +432,13 @@ export function PublicTrackLocator({
   };
 
   const selectTrackFromEarthExplorer = (track: TrackLocatorRecord) => {
+    pendingEarthTrackFocusRef.current = track.id;
     setEarthExplorerActive(false);
     setQuery('');
     setCountry(allCountries);
     setRegion(allRegions);
     setTrackCategory('all');
     selectTrack(track);
-    window.requestAnimationFrame(() => {
-      selectedTrackDetailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      selectedTrackDetailsRef.current?.focus({ preventScroll: true });
-    });
   };
 
   const openEarthExplorer = () => {
@@ -458,6 +467,34 @@ export function PublicTrackLocator({
       },
       radiusMiles: nearbyBikeShopRadiusMiles,
       ...(selectedShop ? { selectedShop } : {}),
+      returnState: {
+        query,
+        country,
+        region,
+        selectedTrackId: selectedTrack.id,
+        trackCategory,
+      },
+    };
+    if (onOpenNearbyBikeShops) {
+      onOpenNearbyBikeShops(request);
+      return;
+    }
+    window.location.hash = 'bike-shop-directory';
+  };
+
+  const openBikeShopFromEarthExplorer = (shop: BikeShopRecord) => {
+    if (!selectedTrack) return;
+    setEarthExplorerActive(false);
+    const request: PublicTrackNearbyBikeShopRequest = {
+      source: 'earth-explorer',
+      track: {
+        id: selectedTrack.id,
+        name: shop.name,
+        latitude: shop.latitude,
+        longitude: shop.longitude,
+      },
+      radiusMiles: nearbyBikeShopRadiusMiles,
+      selectedShop: shop,
       returnState: {
         query,
         country,
@@ -958,6 +995,7 @@ export function PublicTrackLocator({
       {earthExplorerActive && selectedTrack && (
         <PublicTrackEarthView
           onClose={closeEarthExplorer}
+          onShopSelect={openBikeShopFromEarthExplorer}
           onTrackSelect={selectTrackFromEarthExplorer}
           originTrack={selectedTrack}
           tracks={sortedTracks}

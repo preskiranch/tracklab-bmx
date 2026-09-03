@@ -209,6 +209,9 @@ type GoogleStreetViewPanorama = {
 };
 
 type GoogleStreetViewLibrary = {
+  StreetViewCoverageLayer?: new () => {
+    setMap: (map: GoogleMap | null) => void;
+  };
   StreetViewPanorama?: new (
     element: HTMLElement,
     options?: Record<string, unknown>,
@@ -337,6 +340,10 @@ export type GoogleStreetViewSession = {
   description: string;
   destroy: () => void;
   imageDate: string;
+};
+
+export type GoogleStreetViewCoverageSession = {
+  destroy: () => void;
 };
 
 declare global {
@@ -1033,6 +1040,57 @@ export async function createGoogleStreetViewSession(
       || '',
     destroy: () => panorama.setVisible(false),
     imageDate: response.data.imageDate?.trim() ?? '',
+  };
+}
+
+/**
+ * Mount a conventional Google map with the official Street View coverage
+ * layer. Map3DElement does not support this layer, so the global 3D explorer
+ * swaps to this companion surface while preserving its 3D camera in memory.
+ */
+export async function createGoogleStreetViewCoverageSession(
+  element: HTMLElement,
+  point: LatLngLiteral,
+  onPointSelect: (point: LatLngLiteral) => void,
+): Promise<GoogleStreetViewCoverageSession> {
+  const google = await loadGoogleBaseMap();
+  const imported = google.maps.importLibrary
+    ? await google.maps.importLibrary('streetView') as GoogleStreetViewLibrary
+    : {};
+  const StreetViewCoverageLayer = imported.StreetViewCoverageLayer;
+  if (!StreetViewCoverageLayer) {
+    throw new Error('Google Street View coverage is unavailable for this Maps key.');
+  }
+
+  const map = new google.maps.Map(element, {
+    center: point,
+    clickableIcons: false,
+    fullscreenControl: false,
+    gestureHandling: 'greedy',
+    mapTypeControl: true,
+    mapTypeId: 'satellite',
+    streetViewControl: true,
+    zoom: 15,
+    zoomControl: true,
+  });
+  const coverage = new StreetViewCoverageLayer();
+  coverage.setMap(map);
+  const clickListener = map.addListener('click', (event) => {
+    const selected = event?.latLng?.toJSON();
+    if (!selected
+      || !Number.isFinite(selected.lat)
+      || !Number.isFinite(selected.lng)
+      || Math.abs(selected.lat) > 90
+      || Math.abs(selected.lng) > 180) return;
+    onPointSelect(selected);
+  });
+
+  return {
+    destroy: () => {
+      clickListener.remove();
+      coverage.setMap(null);
+      element.replaceChildren();
+    },
   };
 }
 
