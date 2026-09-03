@@ -70,6 +70,7 @@ const allRegions = 'All states / regions';
 const maximumVisibleResults = 24;
 const nearbyBikeShopRadiusMiles = 25 as const;
 const nearbyBikeShopSelectionDebounceMs = 250;
+const lastRandomTrackStorageKey = 'tracklab.public-track-locator.last-random-track-id';
 
 function trackLocation(track: TrackLocatorRecord) {
   return [track.city, track.state, track.country].filter(Boolean).join(', ');
@@ -92,6 +93,36 @@ function nearbyBikeShopLocation(shop: BikeShopRecord) {
   return [shop.address.locality, shop.address.region].filter(Boolean).join(', ')
     || shop.address.countryCode
     || 'Location not listed';
+}
+
+function chooseRandomTrack(tracks: TrackLocatorRecord[]) {
+  if (tracks.length === 0) return null;
+  let previousTrackId = '';
+  try {
+    previousTrackId = window.localStorage.getItem(lastRandomTrackStorageKey) ?? '';
+  } catch {
+    // Private browsing or a restricted web view can make local storage unavailable.
+  }
+
+  const previousIndex = tracks.length > 1
+    ? tracks.findIndex((track) => track.id === previousTrackId)
+    : -1;
+  const candidateCount = previousIndex >= 0 ? tracks.length - 1 : tracks.length;
+  const randomCandidateIndex = Math.min(
+    candidateCount - 1,
+    Math.floor(Math.random() * candidateCount),
+  );
+  const randomTrackIndex = previousIndex >= 0 && randomCandidateIndex >= previousIndex
+    ? randomCandidateIndex + 1
+    : randomCandidateIndex;
+  const selected = tracks[randomTrackIndex] ?? tracks[0];
+
+  try {
+    window.localStorage.setItem(lastRandomTrackStorageKey, selected.id);
+  } catch {
+    // Random selection still works when local storage cannot remember the prior visit.
+  }
+  return selected;
 }
 
 function initialLocatorRequest() {
@@ -239,12 +270,24 @@ export function PublicTrackLocator({
   const linkedTrackUnavailable = Boolean(directoryReady && linkedTrackRequested && !linkedTrack);
   const selectedTrack = linkedTrackRequested
     ? linkedTrack
-    : filteredTracks.find((track) => track.id === selectedTrackId)
-      ?? (filteredTracks.length > 0
-        ? filteredTracks[0]
-        : trackCategory === 'favorites'
-          ? null
-          : sortedTracks.find((track) => track.id === selectedTrackId) ?? sortedTracks[0] ?? null);
+    : selectedTrackId
+      ? filteredTracks.find((track) => track.id === selectedTrackId)
+        ?? (filteredTracks.length > 0
+          ? filteredTracks[0]
+          : trackCategory === 'favorites'
+            ? null
+            : sortedTracks.find((track) => track.id === selectedTrackId) ?? sortedTracks[0] ?? null)
+      : null;
+  const visibleTracks = useMemo(() => {
+    const firstResults = filteredTracks.slice(0, maximumVisibleResults);
+    if (!selectedTrack || firstResults.some((track) => track.id === selectedTrack.id)) {
+      return firstResults;
+    }
+    const selectedResult = filteredTracks.find((track) => track.id === selectedTrack.id);
+    return selectedResult
+      ? [selectedResult, ...firstResults.slice(0, maximumVisibleResults - 1)]
+      : firstResults;
+  }, [filteredTracks, selectedTrack]);
   const selectedExternalLinks = selectedTrack ? trackExternalLinks(selectedTrack) : {};
   const selectedFavorite = Boolean(selectedTrack && favoriteTrackIds.has(selectedTrack.id));
   const shareableFriends = useMemo(() => {
@@ -340,14 +383,14 @@ export function PublicTrackLocator({
     if (!directoryReady || linkedTrackRequested || randomTrackIdRef.current || sortedTracks.length === 0) {
       return;
     }
-    const randomIndex = Math.floor(Math.random() * sortedTracks.length);
-    const randomTrack = sortedTracks[randomIndex] ?? sortedTracks[0];
+    const randomTrack = chooseRandomTrack(sortedTracks);
+    if (!randomTrack) return;
     randomTrackIdRef.current = randomTrack.id;
     setSelectedTrackId(randomTrack.id);
   }, [directoryReady, linkedTrackRequested, sortedTracks]);
 
   useEffect(() => {
-    if (!directoryReady || !selectedTrack || selectedTrack.id === selectedTrackId) {
+    if (!directoryReady || !selectedTrackId || !selectedTrack || selectedTrack.id === selectedTrackId) {
       return;
     }
 
@@ -674,12 +717,13 @@ export function PublicTrackLocator({
               {filteredTracks.length > maximumVisibleResults && <span>Refine the search to see more</span>}
             </div>
             <div className="public-track-results" aria-label="BMX track search results">
-              {filteredTracks.slice(0, maximumVisibleResults).map((track) => (
+              {visibleTracks.map((track) => (
                 <button
                   className={track.id === selectedTrack?.id ? 'selected' : ''}
                   key={track.id}
                   type="button"
                   aria-pressed={track.id === selectedTrack?.id}
+                  aria-current={track.id === selectedTrack?.id ? 'true' : undefined}
                   onClick={() => selectTrack(track)}
                 >
                   <strong>{track.name}{favoriteTrackIds.has(track.id) && <Star size={14} fill="currentColor" aria-label="Favorite" />}</strong>
