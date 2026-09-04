@@ -255,8 +255,8 @@ test('iPhone portrait shell is fixed-width with readable navigation and headers'
 
   expect(layout.documentFits).toBe(true);
   expect(layout.shellFits).toBe(true);
-  expect(layout.navButtonCount).toBe(10);
-  expect(layout.navItemCount).toBe(11);
+  expect(layout.navButtonCount).toBe(11);
+  expect(layout.navItemCount).toBe(12);
   expect(layout.navRowCount).toBe(3);
   expect(layout.navFontSize).toBeGreaterThanOrEqual(13);
   expect(layout.navFontWeight).toBeGreaterThanOrEqual(700);

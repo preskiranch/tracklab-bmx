@@ -245,8 +245,8 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
       >
         <img
           className="reaction-scene-image"
-          src="/assets/reaction-test-start-hill.png"
-          alt="BMX start hill and race course"
+          src="/assets/reaction-test-start-hill-side-close.png"
+          alt="Side profile of a BMX start hill and race course"
         />
         <div className="reaction-scene-vignette" aria-hidden="true" />
 
@@ -276,16 +276,20 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
         </div>
 
         <div className="reaction-gate-stage" aria-label={gateReleased ? 'Starting gate released' : 'Starting gate upright and locked'}>
-          <span className="reaction-gate-side-caption" aria-hidden="true">SIDE VIEW · START GATE</span>
+          <span className="reaction-gate-side-caption" aria-hidden="true">SIDE VIEW · BARREL SAFETY GATE</span>
           <div className={`reaction-gate ${gateReleased ? 'is-dropping' : ''}`}>
+            <span className="reaction-gate-bed" />
+            <span className="reaction-gate-actuator" />
+            <span className="reaction-gate-leaf-motion">
+              <img
+                className="reaction-gate-leaf"
+                src="/assets/reaction-test-barrel-gate.png"
+                alt=""
+                aria-hidden="true"
+                draggable={false}
+              />
+            </span>
             <span className="reaction-gate-hinge" />
-            <span className="reaction-gate-side-post" />
-            <div className="reaction-gate-panel">
-              <span className="reaction-gate-bar reaction-gate-bar-top" />
-              <span className="reaction-gate-bar reaction-gate-bar-mid" />
-              <span className="reaction-gate-bar reaction-gate-bar-bottom" />
-              <span className="reaction-gate-brand">TRACKLAB START</span>
-            </div>
           </div>
         </div>
 

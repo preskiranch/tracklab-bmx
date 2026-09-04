@@ -138,8 +138,8 @@
 
 .reaction-gate-stage {
   position: absolute;
-  right: clamp(6%, 12vw, 18%);
   bottom: 16%;
+  left: 38%;
   width: min(36vw, 510px);
   height: min(35vw, 350px);
   pointer-events: none;
@@ -153,24 +153,31 @@
   height: 86%;
 }
 
-.reaction-gate-panel {
+.reaction-gate-leaf-motion {
   position: absolute;
-  bottom: 4%;
-  left: 20%;
-  width: 24%;
-  height: 84%;
+  bottom: -9%;
+  left: 0;
+  z-index: 2;
+  width: auto;
+  height: 100%;
   transform: rotate(0deg);
-  transform-origin: 50% 100%;
-  border: 7px solid #606b65;
-  border-bottom-width: 11px;
-  border-radius: 10px 10px 2px 2px;
-  background: linear-gradient(90deg, #313b35 0 10%, #cbd6ce 11% 27%, #6d796f 28% 73%, #2b3530 74% 100%);
-  box-shadow: 0 -6px 0 #141b17 inset, 0 8px 18px rgb(0 0 0 / 40%);
+  transform-origin: 58% 90%;
+  filter: drop-shadow(0 10px 10px rgb(0 0 0 / 48%));
   will-change: transform;
+  user-select: none;
 }
 
-.reaction-gate.is-dropping .reaction-gate-panel {
-  animation: reaction-gate-drop 540ms cubic-bezier(.15, .7, .23, 1) forwards;
+.reaction-gate-leaf {
+  display: block;
+  width: auto;
+  height: 100%;
+  transform: scaleX(-1);
+  clip-path: inset(0 0 7% 0);
+  user-select: none;
+}
+
+.reaction-gate.is-dropping .reaction-gate-leaf-motion {
+  animation: reaction-gate-drop 540ms cubic-bezier(.12, .64, .22, 1) forwards;
 }
 
 .reaction-gate-side-caption {
@@ -189,59 +196,52 @@
 
 .reaction-gate-hinge {
   position: absolute;
-  bottom: 0;
-  left: 18%;
-  width: 38%;
-  height: 18px;
-  border: 4px solid #404b44;
-  border-radius: 12px;
-  background: linear-gradient(180deg, #c2cdc3, #4d5a50);
-  box-shadow: 0 4px 6px rgb(0 0 0 / 42%);
+  bottom: -1%;
+  left: 22%;
+  z-index: 4;
+  width: clamp(23px, 3.4vw, 45px);
+  aspect-ratio: 1;
+  border: clamp(3px, .35vw, 5px) solid #313a35;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 34%, #f4f8f4 0 8%, #9ca7a0 10% 30%, #465149 32% 57%, #111713 59% 100%);
+  box-shadow: 0 5px 8px rgb(0 0 0 / 54%), inset 0 0 0 2px rgb(255 255 255 / 28%);
 }
 
-.reaction-gate-side-post {
+.reaction-gate-bed {
   position: absolute;
-  bottom: 0;
-  left: 13%;
-  width: 17px;
-  height: 95%;
-  border-radius: 10px;
-  background: linear-gradient(90deg, #27302b, #d4ddd4 50%, #3b463f);
-  box-shadow: 0 3px 6px rgb(0 0 0 / 40%);
+  right: 22%;
+  bottom: -2%;
+  left: 17%;
+  z-index: 1;
+  height: clamp(13px, 1.5vw, 22px);
+  transform: skewX(-18deg);
+  border: 2px solid #354139;
+  border-radius: 5px;
+  background: repeating-linear-gradient(90deg, #737f77 0 6px, #26302a 6px 10px);
+  box-shadow: 0 5px 8px rgb(0 0 0 / 44%);
 }
 
-.reaction-gate-bar {
+.reaction-gate-actuator {
   position: absolute;
-  right: 13%;
-  left: 13%;
-  height: 8px;
-  border-radius: 8px;
-  background: linear-gradient(180deg, #eef5ef, #465148);
-  box-shadow: 0 2px 3px rgb(0 0 0 / 42%);
-}
-
-.reaction-gate-bar-top { top: 19%; }
-.reaction-gate-bar-mid { top: 47%; }
-.reaction-gate-bar-bottom { top: 75%; }
-
-.reaction-gate-brand {
-  position: absolute;
-  top: 24%;
-  left: 50%;
-  transform: translateX(-50%) rotate(-90deg);
-  transform-origin: center;
-  color: #d5fc32;
-  font-size: clamp(.46rem, .8vw, .66rem);
-  font-weight: 1000;
-  letter-spacing: .14em;
-  text-shadow: 0 2px 3px #111;
-  white-space: nowrap;
+  bottom: 1%;
+  left: 5%;
+  z-index: 0;
+  width: 29%;
+  height: clamp(9px, 1vw, 14px);
+  transform: rotate(-12deg);
+  transform-origin: right center;
+  border: 2px solid #252d29;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #d8e0db, #667169 48%, #252d29 52% 100%);
+  box-shadow: 0 3px 5px rgb(0 0 0 / 42%);
 }
 
 @keyframes reaction-gate-drop {
   0% { transform: rotate(0deg) translateY(0); }
-  18% { transform: rotate(8deg) translateY(1px); }
-  100% { transform: rotate(77deg) translateY(8px); }
+  12% { transform: rotate(3deg) translateY(0); }
+  52% { transform: rotate(51deg) translateY(1px); }
+  86% { transform: rotate(103deg) translateY(3px); }
+  100% { transform: rotate(114deg) translateY(3px); }
 }
 
 .reaction-bottom-panel {
@@ -329,12 +329,12 @@
   .reaction-tree { top: 8.5rem; left: 14px; width: 94px; padding: 8px; gap: 5px; }
   .reaction-light { grid-template-columns: 25px 1fr; font-size: .48rem; }
   .reaction-light-bulb { width: 23px; border-width: 2px; }
-  .reaction-gate-stage { right: 8%; bottom: 21%; width: 40vw; height: 42vw; }
+  .reaction-gate-stage { bottom: 15%; left: 37%; width: 46vw; height: 42vw; }
   .reaction-bottom-panel { display: grid; gap: 11px; padding: 13px; }
   .reaction-primary-action { width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .reaction-gate.is-dropping .reaction-gate-panel { animation-duration: 1ms; }
+  .reaction-gate.is-dropping .reaction-gate-leaf-motion { animation-duration: 1ms; }
   .reaction-light.current { transform: none; }
 }
