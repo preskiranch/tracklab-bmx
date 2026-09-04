@@ -601,6 +601,9 @@ export type PersonalRecords = {
   getPulledMaxWatts?: number;
   getPulledMaxWattsSource?: PersonalRecordSource;
   getPulledMaxWattsUpdatedAt?: number;
+  /** Lowest valid first-tone-to-touch result, retained with sub-millisecond precision. */
+  reactionTestBestMs?: number;
+  reactionTestBestUpdatedAt?: number;
 };
 
 export type UnitPreferences = {

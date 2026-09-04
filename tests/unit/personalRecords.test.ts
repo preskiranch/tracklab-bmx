@@ -5,6 +5,8 @@ import {
   personalRecordAchievements,
   previousPersonalBestTimes,
   recordGetPulledPersonalBest,
+  reactionTestPersonalBest,
+  recordReactionTestPersonalBest,
   setManualGetPulledPersonalRecord,
 } from '../../src/lib/personalRecords';
 import type { GhostLap, PlayerSlot } from '../../src/types';
@@ -98,6 +100,24 @@ describe('Get Pulled max-watts records', () => {
       getPulledMaxWattsUpdatedAt: 10_000,
     });
     expect(setManualGetPulledPersonalRecord(0, 10_000)).toBeUndefined();
+    expect(setManualGetPulledPersonalRecord(900, 10_000, {
+      reactionTestBestMs: 182.345,
+      reactionTestBestUpdatedAt: 9_000,
+    })).toMatchObject({
+      getPulledMaxWatts: 900,
+      reactionTestBestMs: 182.345,
+      reactionTestBestUpdatedAt: 9_000,
+    });
+    expect(setManualGetPulledPersonalRecord(null, 10_000, {
+      getPulledMaxWatts: 900,
+      getPulledMaxWattsSource: 'manual',
+      getPulledMaxWattsUpdatedAt: 10_000,
+      reactionTestBestMs: 182.345,
+      reactionTestBestUpdatedAt: 9_000,
+    })).toEqual({
+      reactionTestBestMs: 182.345,
+      reactionTestBestUpdatedAt: 9_000,
+    });
   });
 
   it('only promotes a recorded peak when it beats the current record', () => {
@@ -115,6 +135,51 @@ describe('Get Pulled max-watts records', () => {
     expect(recordGetPulledPersonalBest(undefined, 1_100, 10)).toMatchObject({
       getPulledMaxWatts: 1_100,
       getPulledMaxWattsSource: 'recorded',
+    });
+  });
+});
+
+describe('Reaction Test personal records', () => {
+  it('normalizes a reaction-only record while preserving high-resolution timing', () => {
+    expect(normalizePersonalRecords({
+      reactionTestBestMs: '182.3454',
+      reactionTestBestUpdatedAt: '123.6',
+    })).toEqual({
+      reactionTestBestMs: 182.345,
+      reactionTestBestUpdatedAt: 124,
+    });
+    expect(normalizePersonalRecords({ reactionTestBestMs: 0 })).toBeUndefined();
+    expect(normalizePersonalRecords({ reactionTestBestMs: 60_001 })).toBeUndefined();
+    expect(reactionTestPersonalBest({ reactionTestBestMs: 181.2345 })).toBe(181.235);
+  });
+
+  it('establishes the first result and only promotes a strictly faster result', () => {
+    const first = recordReactionTestPersonalBest(undefined, 245.6789, 10);
+    expect(first).toEqual({
+      reactionTestBestMs: 245.679,
+      reactionTestBestUpdatedAt: 10,
+    });
+    expect(recordReactionTestPersonalBest(first, 245.679, 20)).toEqual(first);
+    expect(recordReactionTestPersonalBest(first, 300, 20)).toEqual(first);
+    expect(recordReactionTestPersonalBest(first, 199.8764, 30)).toEqual({
+      reactionTestBestMs: 199.876,
+      reactionTestBestUpdatedAt: 30,
+    });
+  });
+
+  it('preserves Get Pulled fields when recording a faster reaction', () => {
+    expect(recordReactionTestPersonalBest({
+      getPulledMaxWatts: 1_200,
+      getPulledMaxWattsSource: 'recorded',
+      getPulledMaxWattsUpdatedAt: 50,
+      reactionTestBestMs: 220,
+      reactionTestBestUpdatedAt: 40,
+    }, 180.1234, 60)).toEqual({
+      getPulledMaxWatts: 1_200,
+      getPulledMaxWattsSource: 'recorded',
+      getPulledMaxWattsUpdatedAt: 50,
+      reactionTestBestMs: 180.123,
+      reactionTestBestUpdatedAt: 60,
     });
   });
 });

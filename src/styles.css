@@ -546,7 +546,8 @@ input:focus {
   min-height: 34px;
 }
 
-.platform-shell.race-fullscreen {
+.platform-shell.race-fullscreen,
+.platform-shell.reaction-fullscreen {
   position: fixed;
   inset: 0;
   z-index: 2147480000;
@@ -562,12 +563,14 @@ input:focus {
 .race-fullscreen .platform-topbar,
 .race-fullscreen .control-panel,
 .race-fullscreen .analytics-panel,
-.race-fullscreen .dashboard-secondary-column {
+.race-fullscreen .dashboard-secondary-column,
+.reaction-fullscreen > .sidebar,
+.reaction-fullscreen .platform-topbar {
   display: none;
 }
 
-.race-fullscreen .platform-main {
-  width: 100%;
+.race-fullscreen .platform-main,
+.reaction-fullscreen .platform-main {
   height: 100%;
   min-height: 0;
   padding: 0;

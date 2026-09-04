@@ -1,4 +1,4 @@
-import { Flag, RotateCcw, Timer, Trophy } from 'lucide-react';
+import { Flag, RotateCcw, Timer, Trophy, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   playStartGateTone,
@@ -27,6 +27,9 @@ type ReactionTestRunState = 'ready' | 'arming' | 'waiting' | 'running' | 'finish
 export type ReactionTestViewProps = {
   /** Results are persisted by the existing TrackLab session-history layer. */
   onResult?: (result: ReactionTestResult) => void | Promise<void>;
+  /** The rider's durable all-time best, measured from the first UCI tone. */
+  personalBestMs?: number | null;
+  onExit?: () => void;
 };
 
 function monotonicNow() {
@@ -47,12 +50,16 @@ function ratingLabel(result: ReactionTestResult) {
  * A free-standing, touch-first BMX start reaction exercise. CSS handles only
  * scene motion; timing and scoring stay in the UCI cadence plan.
  */
-export function ReactionTestView({ onResult }: ReactionTestViewProps) {
+export function ReactionTestView({ onResult, personalBestMs = null, onExit }: ReactionTestViewProps) {
   const [runState, setRunState] = useState<ReactionTestRunState>('ready');
   const [activeStage, setActiveStage] = useState<ReactionTestStage>('idle');
   const [gateReleased, setGateReleased] = useState(false);
   const [gateSettled, setGateSettled] = useState(false);
   const [result, setResult] = useState<ReactionTestResult | null>(null);
+  const [displayedPersonalBestMs, setDisplayedPersonalBestMs] = useState<number | null>(() => (
+    Number.isFinite(personalBestMs) && Number(personalBestMs) > 0 ? Number(personalBestMs) : null
+  ));
+  const [newPersonalRecord, setNewPersonalRecord] = useState(false);
   const [notice, setNotice] = useState('Press start, then tap anywhere on the race surface when you react.');
 
   const generationRef = useRef(0);
@@ -63,6 +70,7 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
   const cadencePlanRef = useRef<ReactionTestCadencePlan | null>(null);
   const resultCapturedRef = useRef(false);
   const runStateRef = useRef<ReactionTestRunState>('ready');
+  const personalBestRef = useRef(displayedPersonalBestMs);
 
   const setRunStateSafely = useCallback((next: ReactionTestRunState) => {
     runStateRef.current = next;
@@ -87,11 +95,21 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
     setGateReleased(false);
     setGateSettled(false);
     setResult(null);
+    setNewPersonalRecord(false);
     setNotice('Press start, then tap anywhere on the race surface when you react.');
     setRunStateSafely('ready');
   }, [clearTimers, setRunStateSafely]);
 
   useEffect(() => resetAttempt, [resetAttempt]);
+
+  useEffect(() => {
+    const incoming = Number(personalBestMs);
+    if (!Number.isFinite(incoming) || incoming <= 0) return;
+    if (personalBestRef.current == null || incoming < personalBestRef.current) {
+      personalBestRef.current = incoming;
+      setDisplayedPersonalBestMs(incoming);
+    }
+  }, [personalBestMs]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -103,6 +121,16 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
   const saveResult = useCallback((nextResult: ReactionTestResult) => {
     if (resultCapturedRef.current) return;
     resultCapturedRef.current = true;
+    let beatExistingRecord = false;
+    if (nextResult.valid && nextResult.reactionTimeMs != null) {
+      const previousBest = personalBestRef.current;
+      if (previousBest == null || nextResult.reactionTimeMs < previousBest) {
+        beatExistingRecord = previousBest != null;
+        personalBestRef.current = nextResult.reactionTimeMs;
+        setDisplayedPersonalBestMs(nextResult.reactionTimeMs);
+      }
+    }
+    setNewPersonalRecord(beatExistingRecord);
     setResult(nextResult);
     void Promise.resolve(onResult?.(nextResult)).catch((error: unknown) => {
       console.warn('Could not save Reaction Test result:', error);
@@ -134,7 +162,7 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
           : 'GREEN — tap now for a late reaction.');
         const settledTimeout = window.setTimeout(() => {
           if (generation === generationRef.current) setGateSettled(true);
-        }, 560);
+        }, 450);
         timeoutsRef.current.push(settledTimeout);
       }
       playStartGateTone(event.tone);
@@ -203,7 +231,7 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
     // The start/retry controls sit inside the generous reaction surface. They
     // are controls, not rider reactions, even though capture listeners run
     // before a button can stop its bubbling pointer event.
-    if (source instanceof Element && source.closest('.reaction-primary-action')) return;
+    if (source instanceof Element && source.closest('.reaction-control-action')) return;
     const currentRunState = runStateRef.current;
     if (currentRunState === 'ready' || currentRunState === 'finished' || resultCapturedRef.current) return;
 
@@ -277,6 +305,17 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
         }}
         aria-label="Reaction area. Tap anywhere after the first red light to record your reaction."
       >
+        {onExit && (
+          <button
+            aria-label="Exit Reaction Test"
+            className="reaction-exit-action reaction-control-action"
+            type="button"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={onExit}
+          >
+            <X aria-hidden="true" size={20} />
+          </button>
+        )}
         <img
           className="reaction-scene-image"
           src="/assets/reaction-test-start-hill-side-close.png"
@@ -286,7 +325,6 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
 
         <header className="reaction-hud">
           <div className="reaction-title">
-            <span>Free BMX skill drill</span>
             <strong><Timer size={19} /> Reaction Test</strong>
           </div>
           <div className="reaction-status" aria-live="polite">{notice}</div>
@@ -310,9 +348,7 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
         </div>
 
         <div className="reaction-gate-stage" aria-label={gateReleased ? 'Starting gate released' : 'Starting gate upright and locked'}>
-          <span className="reaction-gate-side-caption" aria-hidden="true">SIDE VIEW · BARREL SAFETY GATE</span>
           <div className={`reaction-gate ${gateReleased ? 'is-dropping' : ''}`}>
-            <span className="reaction-gate-bed" />
             <span className="reaction-gate-actuator" />
             <span className="reaction-gate-leaf-motion">
               <img
@@ -328,25 +364,37 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
         </div>
 
         <div className="reaction-bottom-panel">
-          {result ? (
-            <div className={`reaction-result-card ${result.falseStart ? 'false-start' : result.rating}`}>
-              <span className="reaction-result-label">{result.falseStart ? 'REACTION RESULT' : 'REACTION TIME'}</span>
-              <strong>{result.falseStart ? '—' : `${formatReactionTime(result.reactionTimeMs)} sec`}</strong>
-              <em>{ratingLabel(result)}</em>
-              <small>{result.falseStart
-                ? 'This try was saved as invalid and does not count as a reaction time.'
-                : `${result.stage === 'red' ? 'First red' : result.stage.replace('-', ' ')} stage · saved to your TrackLab history`}</small>
+          <div className="reaction-result-stack">
+            {result ? (
+              <div className={`reaction-result-card ${result.falseStart ? 'false-start' : result.rating}`}>
+                <span className="reaction-result-label">{result.falseStart ? 'REACTION RESULT' : 'REACTION TIME'}</span>
+                <strong>{result.falseStart ? '—' : `${formatReactionTime(result.reactionTimeMs)} sec`}</strong>
+                <em>{ratingLabel(result)}</em>
+                <small>{result.falseStart
+                  ? 'This try was saved as invalid and does not count as a reaction time.'
+                  : `${result.stage === 'red' ? 'First red' : result.stage.replace('-', ' ')} stage · saved to your TrackLab history`}</small>
+              </div>
+            ) : (
+              <div className="reaction-ready-card">
+                <Flag size={20} />
+                <span>{runState === 'ready' ? 'Ready at the gate' : 'Tap the entire race surface — no small button to find.'}</span>
+              </div>
+            )}
+            <div
+              className={`reaction-pr-badge${newPersonalRecord ? ' is-new-record' : ''}`}
+              role={newPersonalRecord ? 'status' : undefined}
+              aria-live="polite"
+            >
+              <Trophy aria-hidden="true" size={17} />
+              <span>{newPersonalRecord ? 'NEW PR' : 'PR'} · {displayedPersonalBestMs == null
+                ? '—'
+                : `${formatReactionTime(displayedPersonalBestMs)} sec`}</span>
             </div>
-          ) : (
-            <div className="reaction-ready-card">
-              <Flag size={20} />
-              <span>{runState === 'ready' ? 'Ready at the gate' : 'Tap the entire race surface — no small button to find.'}</span>
-            </div>
-          )}
+          </div>
 
           {runState === 'ready' ? (
             <button
-              className="reaction-primary-action"
+              className="reaction-primary-action reaction-control-action"
               type="button"
               onPointerDown={(event) => event.stopPropagation()}
               onClick={startAttempt}
@@ -356,7 +404,7 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
             </button>
           ) : retryAvailable ? (
             <button
-              className="reaction-primary-action"
+              className="reaction-primary-action reaction-control-action"
               type="button"
               onPointerDown={(event) => event.stopPropagation()}
               onClick={resetAttempt}

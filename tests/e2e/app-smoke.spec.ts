@@ -526,7 +526,7 @@ test('signed-in root launch opens Community home without creating an activity UR
   await expect.poll(() => new URL(page.url()).searchParams.has('track')).toBe(false);
 });
 
-test('Reaction Test waits until the voice ends, then uses a random hold and large responsive lights', async ({ page }, testInfo) => {
+test('Reaction Test is a full-screen activity with UCI timing, responsive lights, and a durable PR card', async ({ page }, testInfo) => {
   const now = Date.now();
   const authUser = {
     id: 'reaction-test-rider',
@@ -566,9 +566,21 @@ test('Reaction Test waits until the voice ends, then uses a random hold and larg
       customRoutes: [],
       bikeProfiles: [],
       studioRiders: [],
-      accountProfile: { updatedAt: now },
+      accountProfile: {
+        personalRecords: { reactionTestBestMs: 2_000, reactionTestBestUpdatedAt: now - 1_000 },
+        updatedAt: now,
+      },
     }),
   }));
+  await page.route('**/api/training-sessions', async (route) => {
+    const requestBody = route.request().postDataJSON() as { session?: Record<string, unknown> };
+    const session = requestBody.session ?? {};
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ session: { ...session, source: 'live', createdAt: now, updatedAt: now } }),
+    });
+  });
   await page.route('https://maps.googleapis.com/**', (route) => route.abort());
 
   await page.goto('/');
@@ -576,6 +588,12 @@ test('Reaction Test waits until the voice ends, then uses a random hold and larg
   await page.getByRole('button', { name: 'Reaction Test', exact: true }).click();
   const reactionView = page.getByLabel('BMX Reaction Test');
   await expect(reactionView).toBeVisible();
+  await expect(page.locator('.platform-shell')).toHaveClass(/reaction-fullscreen/);
+  await expect(page.locator('.sidebar')).toBeHidden();
+  await expect(page.locator('.platform-topbar')).toBeHidden();
+  await expect(reactionView.getByText('Free BMX skill drill')).toHaveCount(0);
+  await expect(reactionView.getByText('SIDE VIEW · BARREL SAFETY GATE')).toHaveCount(0);
+  await expect(reactionView.getByText('PR · 2.00 sec')).toBeVisible();
 
   const desktopBulbWidth = await reactionView.locator('.reaction-light-bulb').first().evaluate(
     (element) => element.getBoundingClientRect().width,
@@ -583,13 +601,28 @@ test('Reaction Test waits until the voice ends, then uses a random hold and larg
   expect(desktopBulbWidth).toBeGreaterThanOrEqual(50);
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await reactionView.scrollIntoViewIfNeeded();
   const mobileGeometry = await reactionView.evaluate((element) => ({
     bulbWidth: element.querySelector<HTMLElement>('.reaction-light-bulb')?.getBoundingClientRect().width ?? 0,
+    rect: element.getBoundingClientRect().toJSON(),
+    surfaceRect: element.querySelector<HTMLElement>('.reaction-race-surface')?.getBoundingClientRect().toJSON(),
+    exitRect: element.querySelector<HTMLElement>('.reaction-exit-action')?.getBoundingClientRect().toJSON(),
+    gateRect: element.querySelector<HTMLElement>('.reaction-gate-stage')?.getBoundingClientRect().toJSON(),
     documentFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    documentHeightFits: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
   }));
   expect(mobileGeometry.bulbWidth).toBeGreaterThanOrEqual(38);
   expect(mobileGeometry.documentFits).toBe(true);
+  expect(mobileGeometry.documentHeightFits).toBe(true);
+  expect(mobileGeometry.rect).toMatchObject({ x: 0, y: 0, width: 390, height: 844 });
+  expect(mobileGeometry.surfaceRect).toMatchObject({ x: 0, y: 0, width: 390, height: 844 });
+  expect(mobileGeometry.exitRect.width).toBeGreaterThanOrEqual(44);
+  expect(mobileGeometry.exitRect.height).toBeGreaterThanOrEqual(44);
+  expect(mobileGeometry.exitRect.x).toBeGreaterThanOrEqual(0);
+  expect(mobileGeometry.exitRect.x + mobileGeometry.exitRect.width).toBeLessThanOrEqual(390);
+  expect(mobileGeometry.gateRect.x).toBeGreaterThanOrEqual(100);
+  expect(mobileGeometry.gateRect.x + mobileGeometry.gateRect.width).toBeLessThanOrEqual(390);
+  expect(mobileGeometry.gateRect.y).toBeGreaterThan(400);
+  expect(mobileGeometry.gateRect.y + mobileGeometry.gateRect.height).toBeLessThanOrEqual(844);
   await page.screenshot({
     fullPage: false,
     path: testInfo.outputPath('reaction-test-large-lights-mobile.png'),
@@ -629,6 +662,17 @@ test('Reaction Test waits until the voice ends, then uses a random hold and larg
   for (let index = 1; index < cueEvents.length; index += 1) {
     expect(cueEvents[index].at - cueEvents[index - 1].at).toBeGreaterThanOrEqual(100);
   }
+
+  await reactionView.locator('.reaction-race-surface').click({ position: { x: 280, y: 420 } });
+  const prBadge = reactionView.locator('.reaction-pr-badge');
+  await expect(prBadge).toHaveClass(/is-new-record/);
+  await expect(prBadge).toContainText('NEW PR');
+  await expect(prBadge).not.toContainText('2.00 sec');
+  expect(await prBadge.evaluate((element) => getComputedStyle(element).animationName)).toBe('reaction-pr-flash');
+
+  await reactionView.getByRole('button', { name: 'Exit Reaction Test' }).click();
+  await expect(page.locator('.platform-shell')).not.toHaveClass(/reaction-fullscreen/);
+  await expect(page.locator('.side-nav')).toBeVisible();
 });
 
 test('first-run profile flow opens the TrackLab dashboard', async ({ page }, testInfo) => {

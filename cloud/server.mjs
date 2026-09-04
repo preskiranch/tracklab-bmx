@@ -7700,12 +7700,7 @@ async function loadClubTabletRoster(device) {
       );
       const ownerRecords = sanitizePersonalRecords(rider.personalRecords);
       const claimedRecords = sanitizePersonalRecords(claimedUserData?.accountProfile?.personalRecords);
-      const recordCandidates = [ownerRecords, claimedRecords]
-        .filter(Boolean)
-        .sort((left, right) => (
-          (right.getPulledMaxWatts ?? 0) - (left.getPulledMaxWatts ?? 0)
-        ));
-      const personalRecords = recordCandidates[0] ?? null;
+      const personalRecords = mergePersonalRecordValues(ownerRecords, claimedRecords);
       const watchConnect = claimedProfile ? watchByRiderId.get(rider.id) : null;
       return {
         studioRiderId: sanitizeText(rider.id, '', 160),
@@ -9749,13 +9744,15 @@ function saveMergedUserData(profileKey, patch) {
 }
 
 const getPulledPersonalRecordMaxWatts = 5_000;
+const reactionTestPersonalRecordMaxMs = 60_000;
 
 function sanitizePersonalRecords(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const watts = Number(value.getPulledMaxWatts);
-  if (!Number.isFinite(watts)) return null;
   const roundedWatts = Math.round(watts);
-  if (roundedWatts <= 0 || roundedWatts > getPulledPersonalRecordMaxWatts) return null;
+  const validWatts = Number.isFinite(watts)
+    && roundedWatts > 0
+    && roundedWatts <= getPulledPersonalRecordMaxWatts;
   const source = value.getPulledMaxWattsSource === 'recorded' || value.getPulledMaxWattsSource === 'manual'
     ? value.getPulledMaxWattsSource
     : null;
@@ -9763,10 +9760,27 @@ function sanitizePersonalRecords(value) {
   const updatedAt = Number.isFinite(updatedAtValue) && updatedAtValue > 0
     ? Math.round(updatedAtValue)
     : null;
+  const reactionTestBestValue = Number(value.reactionTestBestMs);
+  const reactionTestBestMs = Number.isFinite(reactionTestBestValue)
+    && reactionTestBestValue > 0
+    && reactionTestBestValue <= reactionTestPersonalRecordMaxMs
+    ? Math.round(reactionTestBestValue * 1_000) / 1_000
+    : null;
+  const reactionUpdatedAtValue = Number(value.reactionTestBestUpdatedAt);
+  const reactionTestBestUpdatedAt = Number.isFinite(reactionUpdatedAtValue) && reactionUpdatedAtValue > 0
+    ? Math.round(reactionUpdatedAtValue)
+    : null;
+  if (!validWatts && reactionTestBestMs == null) return null;
   return {
-    getPulledMaxWatts: roundedWatts,
-    ...(source ? { getPulledMaxWattsSource: source } : {}),
-    ...(updatedAt ? { getPulledMaxWattsUpdatedAt: updatedAt } : {}),
+    ...(validWatts ? {
+      getPulledMaxWatts: roundedWatts,
+      ...(source ? { getPulledMaxWattsSource: source } : {}),
+      ...(updatedAt ? { getPulledMaxWattsUpdatedAt: updatedAt } : {}),
+    } : {}),
+    ...(reactionTestBestMs == null ? {} : {
+      reactionTestBestMs,
+      ...(reactionTestBestUpdatedAt ? { reactionTestBestUpdatedAt } : {}),
+    }),
   };
 }
 
@@ -9775,11 +9789,40 @@ function mergePersonalRecordValues(currentValue, incomingValue) {
   if (incomingValue === null) return null;
   const incoming = sanitizePersonalRecords(incomingValue);
   if (!incoming) return current;
-  if (!current || incoming.getPulledMaxWatts > current.getPulledMaxWatts) return incoming;
-  if (incoming.getPulledMaxWatts < current.getPulledMaxWatts) return current;
-  const currentUpdatedAt = Number(current.getPulledMaxWattsUpdatedAt) || 0;
-  const incomingUpdatedAt = Number(incoming.getPulledMaxWattsUpdatedAt) || 0;
-  return incomingUpdatedAt >= currentUpdatedAt ? incoming : current;
+  if (!current) return incoming;
+
+  const merged = {};
+  const currentWatts = Number(current.getPulledMaxWatts) || 0;
+  const incomingWatts = Number(incoming.getPulledMaxWatts) || 0;
+  const wattsWinner = incomingWatts > currentWatts
+    || (incomingWatts === currentWatts
+      && (Number(incoming.getPulledMaxWattsUpdatedAt) || 0) >= (Number(current.getPulledMaxWattsUpdatedAt) || 0))
+    ? incoming
+    : current;
+  if (wattsWinner.getPulledMaxWatts) {
+    merged.getPulledMaxWatts = wattsWinner.getPulledMaxWatts;
+    if (wattsWinner.getPulledMaxWattsSource) {
+      merged.getPulledMaxWattsSource = wattsWinner.getPulledMaxWattsSource;
+    }
+    if (wattsWinner.getPulledMaxWattsUpdatedAt) {
+      merged.getPulledMaxWattsUpdatedAt = wattsWinner.getPulledMaxWattsUpdatedAt;
+    }
+  }
+
+  const currentReaction = Number(current.reactionTestBestMs) || Number.POSITIVE_INFINITY;
+  const incomingReaction = Number(incoming.reactionTestBestMs) || Number.POSITIVE_INFINITY;
+  const reactionWinner = incomingReaction < currentReaction
+    || (incomingReaction === currentReaction
+      && (Number(incoming.reactionTestBestUpdatedAt) || 0) >= (Number(current.reactionTestBestUpdatedAt) || 0))
+    ? incoming
+    : current;
+  if (Number.isFinite(Number(reactionWinner.reactionTestBestMs))) {
+    merged.reactionTestBestMs = reactionWinner.reactionTestBestMs;
+    if (reactionWinner.reactionTestBestUpdatedAt) {
+      merged.reactionTestBestUpdatedAt = reactionWinner.reactionTestBestUpdatedAt;
+    }
+  }
+  return Object.keys(merged).length > 0 ? merged : null;
 }
 
 /** Preserve max-watts records when an older client sends a full roster/photo patch. */
@@ -9899,6 +9942,70 @@ function persistRecordedGetPulledPersonalBest({ profileKey, studioRiderId = null
           getPulledMaxWatts: peakWatts,
           getPulledMaxWattsSource: 'recorded',
           getPulledMaxWattsUpdatedAt: now,
+        },
+        updatedAt: Math.max(Number(currentProfile.updatedAt) || 0, now),
+      },
+    };
+  }).then(() => true).catch(() => false);
+}
+
+function getRecordedReactionTestPersonalBestMs(session) {
+  const reactionTest = session?.details?.reactionTest;
+  if (
+    !reactionTest
+    || typeof reactionTest !== 'object'
+    || reactionTest.valid !== true
+    || reactionTest.falseStart === true
+  ) return null;
+  return sanitizePersonalRecords({ reactionTestBestMs: reactionTest.reactionTimeMs })?.reactionTestBestMs ?? null;
+}
+
+/** Promote only faster valid Reaction Test results for an account or studio rider. */
+function persistRecordedReactionTestPersonalBest({ profileKey, studioRiderId = null, sessions = [] }) {
+  if (!profileKey || !Array.isArray(sessions)) return Promise.resolve(false);
+  const bestMs = sessions.reduce((best, session) => {
+    const candidate = getRecordedReactionTestPersonalBestMs(session);
+    return candidate == null ? best : Math.min(best, candidate);
+  }, Number.POSITIVE_INFINITY);
+  if (!Number.isFinite(bestMs)) return Promise.resolve(false);
+  const now = Date.now();
+  return saveMergedUserData(profileKey, async (current) => {
+    const data = current ?? {};
+    const currentRiders = Array.isArray(data.studioRiders) ? data.studioRiders : [];
+    if (studioRiderId) {
+      const index = currentRiders.findIndex((rider) => rider?.id === studioRiderId);
+      if (index < 0) return null;
+      const rider = currentRiders[index];
+      const currentRecords = sanitizePersonalRecords(rider.personalRecords);
+      if (currentRecords?.reactionTestBestMs != null && currentRecords.reactionTestBestMs <= bestMs) return null;
+      const nextRecords = {
+        ...(currentRecords ?? {}),
+        reactionTestBestMs: bestMs,
+        reactionTestBestUpdatedAt: now,
+      };
+      const nextRiders = currentRiders.map((candidate, candidateIndex) => (
+        candidateIndex === index
+          ? { ...candidate, personalRecords: nextRecords, updatedAt: Math.max(
+            Number(candidate.updatedAt) || 0,
+            now,
+          ) }
+          : candidate
+      ));
+      return { studioRiders: nextRiders };
+    }
+    const currentProfile = data.accountProfile && typeof data.accountProfile === 'object'
+      ? data.accountProfile
+      : {};
+    const currentRecords = sanitizePersonalRecords(currentProfile.personalRecords);
+    if (currentRecords?.reactionTestBestMs != null && currentRecords.reactionTestBestMs <= bestMs) return null;
+    const photoUrl = sanitizeRiderPhotoDataUrl(currentProfile.photoUrl);
+    return {
+      accountProfile: {
+        ...(photoUrl ? { photoUrl } : {}),
+        personalRecords: {
+          ...(currentRecords ?? {}),
+          reactionTestBestMs: bestMs,
+          reactionTestBestUpdatedAt: now,
         },
         updatedAt: Math.max(Number(currentProfile.updatedAt) || 0, now),
       },
@@ -18696,6 +18803,15 @@ async function handleClubGroupTrainingHistoryApi(request, response, requestUrl) 
           studioRiderId: storedSession._studioRiderId,
           sessions: [storedSession],
         }),
+        persistRecordedReactionTestPersonalBest({
+          profileKey: storedSession._profileKey,
+          sessions: [storedSession],
+        }),
+        persistRecordedReactionTestPersonalBest({
+          profileKey,
+          studioRiderId: storedSession._studioRiderId,
+          sessions: [storedSession],
+        }),
       ]));
     }
     writeJson(response, saved.status === 'saved' ? 201 : 200, {
@@ -23206,6 +23322,15 @@ async function serveStatic(request, response) {
         studioRiderId: tabletSession.studioRiderId,
         sessions: [saved],
       }),
+      ...(identity.member.status === 'claimed' ? [persistRecordedReactionTestPersonalBest({
+        profileKey: identity.profileKey,
+        sessions: [saved],
+      })] : []),
+      persistRecordedReactionTestPersonalBest({
+        profileKey: tabletSession.ownerProfileKey,
+        studioRiderId: tabletSession.studioRiderId,
+        sessions: [saved],
+      }),
     ]);
     writeJson(response, existing ? 200 : 201, {
       session: publicTrainingSession(
@@ -24418,6 +24543,15 @@ async function serveStatic(request, response) {
           sessions: [saved],
         }),
         ...(clubMembership?.ownerProfileKey ? [persistRecordedGetPulledPersonalBest({
+          profileKey: clubMembership.ownerProfileKey,
+          studioRiderId: clubMembership.studioRiderId,
+          sessions: [saved],
+        })] : []),
+        persistRecordedReactionTestPersonalBest({
+          profileKey,
+          sessions: [saved],
+        }),
+        ...(clubMembership?.ownerProfileKey ? [persistRecordedReactionTestPersonalBest({
           profileKey: clubMembership.ownerProfileKey,
           studioRiderId: clubMembership.studioRiderId,
           sessions: [saved],

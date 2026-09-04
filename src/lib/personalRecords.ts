@@ -1,6 +1,7 @@
 import type { GhostLap, PersonalRecords, PlayerId, PlayerSlot } from '../types';
 
 export const getPulledMaxWattsLimit = 5_000;
+export const reactionTestBestMsLimit = 60_000;
 
 export type PreviousPersonalBestTimes = Partial<Record<PlayerId, number>>;
 
@@ -25,7 +26,13 @@ function normalizedPositiveInteger(value: unknown, maximum: number) {
   return rounded > 0 && rounded <= maximum ? rounded : null;
 }
 
-/** Keep the private max-watts record small, numeric, and safe to sync. */
+function normalizedPositiveMilliseconds(value: unknown, maximum: number) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0 || number > maximum) return null;
+  return Math.round(number * 1_000) / 1_000;
+}
+
+/** Keep private athlete records small, numeric, and safe to sync. */
 export function normalizePersonalRecords(value: unknown): PersonalRecords | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const candidate = value as Partial<PersonalRecords>;
@@ -37,11 +44,25 @@ export function normalizePersonalRecords(value: unknown): PersonalRecords | unde
   const source = candidate.getPulledMaxWattsSource === 'recorded' || candidate.getPulledMaxWattsSource === 'manual'
     ? candidate.getPulledMaxWattsSource
     : undefined;
-  if (watts == null) return undefined;
+  const reactionTestBestMs = normalizedPositiveMilliseconds(
+    candidate.reactionTestBestMs,
+    reactionTestBestMsLimit,
+  );
+  const reactionUpdatedAtValue = Number(candidate.reactionTestBestUpdatedAt);
+  const reactionTestBestUpdatedAt = Number.isFinite(reactionUpdatedAtValue) && reactionUpdatedAtValue > 0
+    ? Math.round(reactionUpdatedAtValue)
+    : undefined;
+  if (watts == null && reactionTestBestMs == null) return undefined;
   return {
-    getPulledMaxWatts: watts,
-    ...(source ? { getPulledMaxWattsSource: source } : {}),
-    ...(updatedAt ? { getPulledMaxWattsUpdatedAt: updatedAt } : {}),
+    ...(watts == null ? {} : {
+      getPulledMaxWatts: watts,
+      ...(source ? { getPulledMaxWattsSource: source } : {}),
+      ...(updatedAt ? { getPulledMaxWattsUpdatedAt: updatedAt } : {}),
+    }),
+    ...(reactionTestBestMs == null ? {} : {
+      reactionTestBestMs,
+      ...(reactionTestBestUpdatedAt ? { reactionTestBestUpdatedAt } : {}),
+    }),
   };
 }
 
@@ -49,10 +70,26 @@ export function getPulledMaxWatts(records: PersonalRecords | null | undefined) {
   return normalizedPositiveInteger(records?.getPulledMaxWatts, getPulledMaxWattsLimit);
 }
 
-export function setManualGetPulledPersonalRecord(value: number | null, now = Date.now()): PersonalRecords | undefined {
+export function setManualGetPulledPersonalRecord(
+  value: number | null,
+  now = Date.now(),
+  records?: PersonalRecords | null,
+): PersonalRecords | undefined {
+  const current = normalizePersonalRecords(records);
+  if (value == null) {
+    if (!current) return undefined;
+    const {
+      getPulledMaxWatts: _getPulledMaxWatts,
+      getPulledMaxWattsSource: _getPulledMaxWattsSource,
+      getPulledMaxWattsUpdatedAt: _getPulledMaxWattsUpdatedAt,
+      ...remaining
+    } = current;
+    return normalizePersonalRecords(remaining);
+  }
   const watts = normalizedPositiveInteger(value, getPulledMaxWattsLimit);
-  if (watts == null) return undefined;
+  if (watts == null) return current;
   return {
+    ...(current ?? {}),
     getPulledMaxWatts: watts,
     getPulledMaxWattsSource: 'manual',
     getPulledMaxWattsUpdatedAt: Math.max(1, Math.round(now)),
@@ -74,6 +111,27 @@ export function recordGetPulledPersonalBest(
     getPulledMaxWatts: watts,
     getPulledMaxWattsSource: 'recorded',
     getPulledMaxWattsUpdatedAt: Math.max(1, Math.round(now)),
+  };
+}
+
+export function reactionTestPersonalBest(records: PersonalRecords | null | undefined) {
+  return normalizedPositiveMilliseconds(records?.reactionTestBestMs, reactionTestBestMsLimit);
+}
+
+/** Only a valid recorded reaction that is faster than the benchmark may lower it. */
+export function recordReactionTestPersonalBest(
+  records: PersonalRecords | null | undefined,
+  reactionTimeMs: number,
+  now = Date.now(),
+): PersonalRecords | undefined {
+  const milliseconds = normalizedPositiveMilliseconds(reactionTimeMs, reactionTestBestMsLimit);
+  const current = normalizePersonalRecords(records);
+  if (milliseconds == null) return current;
+  if (current?.reactionTestBestMs != null && milliseconds >= current.reactionTestBestMs) return current;
+  return {
+    ...(current ?? {}),
+    reactionTestBestMs: milliseconds,
+    reactionTestBestUpdatedAt: Math.max(1, Math.round(now)),
   };
 }
 

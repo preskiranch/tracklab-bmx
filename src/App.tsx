@@ -184,6 +184,7 @@ import {
   personalRecordAchievements,
   previousPersonalBestTimes,
   recordGetPulledPersonalBest,
+  recordReactionTestPersonalBest,
   setManualGetPulledPersonalRecord,
   type PreviousPersonalBestTimes,
 } from './lib/personalRecords';
@@ -2081,6 +2082,7 @@ export default function App() {
       ? 'club-tablet'
       : initialTrack.countryCode === 'CUSTOM' ? 'straight-sprint' : 'race',
   );
+  const reactionReturnModeRef = useRef<AppMode>('race');
   const lastRaceWasSprintRef = useRef(false);
   const raceWorkspaceActive = appMode === 'race' || appMode === 'straight-sprint';
   if (raceWorkspaceActive) {
@@ -5304,14 +5306,14 @@ export default function App() {
   }, [raceViewFullscreen]);
 
   useLayoutEffect(() => {
-    const fullscreenActive = raceViewFullscreen || exploreRideFullscreen || utilityFullscreen;
+    const fullscreenActive = raceViewFullscreen || exploreRideFullscreen || utilityFullscreen || reactionTestMode;
     document.documentElement.classList.toggle('tracklab-race-active', fullscreenActive);
     document.body.classList.toggle('tracklab-race-active', fullscreenActive);
     return () => {
       document.documentElement.classList.remove('tracklab-race-active');
       document.body.classList.remove('tracklab-race-active');
     };
-  }, [exploreRideFullscreen, raceViewFullscreen, utilityFullscreen]);
+  }, [exploreRideFullscreen, raceViewFullscreen, reactionTestMode, utilityFullscreen]);
 
   const cancelStartGateSequence = useCallback((preserveCompletedResults = false) => {
     startGateSequenceIdRef.current += 1;
@@ -7674,14 +7676,92 @@ export default function App() {
     return undefined;
   };
 
+  const promoteReactionTestPersonalBest = useCallback((
+    riderId: string,
+    reactionTimeMs: number,
+    now: number,
+  ) => {
+    const accountRiderId = authUser ? `account:${authUser.id}` : null;
+    const currentRecords = riderId === accountRiderId
+      ? accountProfile.personalRecords
+      : activeProfileStudioRiders.find((rider) => rider.id === riderId)?.personalRecords
+        ?? clubTabletRoster?.athletes.find((athlete) => athlete.studioRiderId === riderId)?.personalRecords;
+    const nextRecords = recordReactionTestPersonalBest(currentRecords, reactionTimeMs, now);
+    if (
+      !nextRecords?.reactionTestBestMs
+      || nextRecords.reactionTestBestMs === currentRecords?.reactionTestBestMs
+    ) return;
+
+    if (riderId === accountRiderId && authUser) {
+      const nextProfile: AccountProfile = {
+        ...accountProfile,
+        personalRecords: nextRecords,
+        updatedAt: now,
+      };
+      setAccountProfile(nextProfile);
+      if (cloudProfileKey) {
+        void queueCloudUserDataPatch(cloudProfileKey, { accountProfile: nextProfile })
+          .then(() => {
+            setCloudUserDataStatus('online');
+            setCloudUserDataMessage('Your Reaction Test personal best is saved across devices.');
+          })
+          .catch((error: Error) => {
+            setCloudUserDataStatus('offline');
+            setCloudUserDataMessage(`Could not save your Reaction Test personal best. ${error.message}`);
+          });
+      }
+      return;
+    }
+
+    if (clubTabletSessionActive && clubTabletRoster) {
+      setClubTabletRoster((current) => current ? {
+        ...current,
+        athletes: current.athletes.map((athlete) => (
+          athlete.studioRiderId === riderId
+            ? { ...athlete, personalRecords: recordReactionTestPersonalBest(athlete.personalRecords, reactionTimeMs, now) }
+            : athlete
+        )),
+      } : current);
+      return;
+    }
+
+    if (!canManageActiveStudioRiders) return;
+    setStudioRiders((current) => mergeStudioRiders(current.map((rider) => (
+      rider.id === riderId
+        ? {
+          ...rider,
+          personalRecords: recordReactionTestPersonalBest(rider.personalRecords, reactionTimeMs, now),
+          updatedAt: now,
+        }
+        : rider
+    ))));
+  }, [
+    accountProfile,
+    activeProfileStudioRiders,
+    authUser,
+    canManageActiveStudioRiders,
+    cloudProfileKey,
+    clubTabletRoster,
+    clubTabletSessionActive,
+  ]);
+
   const handleReactionTestResult = useCallback((result: ReactionTestResult) => {
     // Reaction Test stays free and does not require a Wattbike, a room, or a
     // purchase. Signed-in riders still receive the same private session
     // history durability as the rest of TrackLab's training tools.
-    if (!authUser) return;
+    const reactionRider = clubTabletRider ?? accountRider;
+    if (!authUser || !reactionRider) return;
+
+    if (result.valid && result.reactionTimeMs != null) {
+      promoteReactionTestPersonalBest(
+        reactionRider.id,
+        result.reactionTimeMs,
+        result.recordedAtEpoch,
+      );
+    }
 
     const startedAt = result.startedAtEpoch ?? result.recordedAtEpoch;
-    const riderId = `account:${authUser.id}`;
+    const riderId = reactionRider.id;
     return import('./lib/trainingHistory').then(({ saveTrainingSession }) => saveTrainingSession({
       id: result.id,
       activityType: 'bmx-race',
@@ -7696,7 +7776,7 @@ export default function App() {
         summaries: [{
           playerId: 1,
           riderId,
-          riderName: authUser.name,
+          riderName: reactionRider.name,
           rank: result.valid ? 1 : undefined,
           finishTimeMs: result.reactionTimeMs ?? undefined,
           distanceMeters: 0,
@@ -7720,9 +7800,10 @@ export default function App() {
     })).then(() => {
       setTrainingHistoryRevision((revision) => revision + 1);
     });
-  }, [authUser]);
+  }, [accountRider, authUser, clubTabletRider, promoteReactionTestPersonalBest]);
 
   const openReactionTest = () => {
+    if (appMode !== 'reaction-test') reactionReturnModeRef.current = appMode;
     clearStartGateSequence();
     setMappingMode(false);
     setMappingFullscreen(false);
@@ -7731,6 +7812,10 @@ export default function App() {
     resetRace();
     releaseRaceFullscreen();
     setAppMode('reaction-test');
+  };
+
+  const closeReactionTest = () => {
+    setAppMode(reactionReturnModeRef.current === 'reaction-test' ? 'race' : reactionReturnModeRef.current);
   };
 
   const openBmxRaceIntervals = () => {
@@ -8979,11 +9064,9 @@ export default function App() {
       ? accountProfile.personalRecords
       : activeProfileStudioRiders.find((rider) => rider.id === riderId)?.personalRecords
         ?? clubTabletRoster?.athletes.find((athlete) => athlete.studioRiderId === riderId)?.personalRecords;
-    const nextRecords = watts == null
-      ? undefined
-      : source === 'recorded'
-        ? recordGetPulledPersonalBest(currentRecords, watts, now)
-        : setManualGetPulledPersonalRecord(watts, now);
+    const nextRecords = watts == null || source === 'manual'
+      ? setManualGetPulledPersonalRecord(watts, now, currentRecords)
+      : recordGetPulledPersonalBest(currentRecords, watts, now);
     if (watts != null && !nextRecords) return;
     if (riderId === accountRiderId && authUser) {
       const nextProfile: AccountProfile = {
@@ -12595,7 +12678,7 @@ export default function App() {
 
   return (
     <div
-      className={`platform-shell${raceViewFullscreen ? ' race-fullscreen' : ''}${mappingFullscreen ? ' map-fullscreen' : ''}${exploreRideFullscreen ? ' explore-fullscreen' : ''}${utilityFullscreen ? ' utility-fullscreen' : ''}`}
+      className={`platform-shell${raceViewFullscreen ? ' race-fullscreen' : ''}${mappingFullscreen ? ' map-fullscreen' : ''}${exploreRideFullscreen ? ' explore-fullscreen' : ''}${utilityFullscreen ? ' utility-fullscreen' : ''}${reactionTestMode ? ' reaction-fullscreen' : ''}`}
       data-club-live-activity-screen={clubLiveActivityScreenVisible ? 'visible' : undefined}
       ref={raceShellRef}
     >
@@ -13439,7 +13522,7 @@ export default function App() {
               <Timer size={20} />
               <span>
                 <strong>Reaction Test</strong>
-                <small>Free BMX start-cadence reaction practice</small>
+                <small>UCI start-cadence reaction practice</small>
               </span>
             </div>
           ) : (
@@ -13706,7 +13789,11 @@ export default function App() {
           analyticsPanel
         ) : reactionTestMode ? (
           <Suspense fallback={lazyLoadingFallback}>
-            <ReactionTestView onResult={handleReactionTestResult} />
+            <ReactionTestView
+              onExit={closeReactionTest}
+              onResult={handleReactionTestResult}
+              personalBestMs={(clubTabletRider ?? accountRider)?.personalRecords?.reactionTestBestMs ?? null}
+            />
           </Suspense>
         ) : appMode === 'club-monitor' && clubOwnerActive ? (
           <Suspense fallback={lazyLoadingFallback}>
