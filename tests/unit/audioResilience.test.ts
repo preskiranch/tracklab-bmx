@@ -453,6 +453,86 @@ describe('race audio resilience', () => {
     expect(StalledAudio.instances).toHaveLength(0);
   });
 
+  it('returns the confirmed monotonic onset used by a running Web Audio tone', async () => {
+    const oscillatorStarts: number[] = [];
+    vi.stubGlobal('performance', { now: () => 321.875 });
+    class ConfirmedGateAudioContext {
+      currentTime = 7;
+      destination = {};
+      state = 'running';
+
+      createGain() {
+        return {
+          connect() {},
+          gain: {
+            exponentialRampToValueAtTime() {},
+            setValueAtTime() {},
+          },
+        };
+      }
+
+      createOscillator() {
+        return {
+          connect() {},
+          frequency: { setValueAtTime() {} },
+          start(at: number) {
+            oscillatorStarts.push(at);
+          },
+          stop() {},
+          type: 'sine',
+        };
+      }
+
+      resume() {
+        return Promise.resolve();
+      }
+    }
+    vi.stubGlobal('window', {
+      AudioContext: ConfirmedGateAudioContext,
+      webkitAudioContext: undefined,
+      clearTimeout: globalThis.clearTimeout,
+      setTimeout: globalThis.setTimeout,
+      speechSynthesis: undefined,
+    });
+    const { playStartGateToneConfirmed } = await import('../../src/lib/audioCues');
+
+    await expect(playStartGateToneConfirmed('uci-red')).resolves.toEqual({
+      kind: 'uci-red',
+      source: 'web-audio',
+      startedAtMonotonic: 321.875,
+    });
+    expect(oscillatorStarts).toEqual([7]);
+    expect(StalledAudio.instances).toHaveLength(0);
+  });
+
+  it('waits for delayed media playback before confirming the tone onset', async () => {
+    let monotonicTimestamp = 100;
+    vi.stubGlobal('performance', { now: () => monotonicTimestamp });
+    StalledAudio.onPlay = (audio) => {
+      window.setTimeout(() => {
+        monotonicTimestamp = 184.5;
+        audio.dispatchEvent(new Event('playing'));
+      }, 85);
+    };
+    const { playStartGateToneConfirmed } = await import('../../src/lib/audioCues');
+    let resolved = false;
+    const onset = playStartGateToneConfirmed('uci-red').then((result) => {
+      resolved = true;
+      return result;
+    });
+
+    await vi.advanceTimersByTimeAsync(84);
+    expect(resolved).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(onset).resolves.toEqual({
+      kind: 'uci-red',
+      source: 'media-element',
+      startedAtMonotonic: 184.5,
+    });
+    expect(StalledAudio.instances[0]).toMatchObject({ playCount: 1, paused: false });
+  });
+
   it('keeps Web Audio active through staging and releases it after the race', async () => {
     StalledAudio.stallPlayback = false;
     const oscillatorStops: number[] = [];

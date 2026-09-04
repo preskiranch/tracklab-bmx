@@ -526,7 +526,7 @@ test('signed-in root launch opens Community home without creating an activity UR
   await expect.poll(() => new URL(page.url()).searchParams.has('track')).toBe(false);
 });
 
-test('Reaction Test is a full-screen activity with UCI timing, responsive lights, and a durable PR card', async ({ page }, testInfo) => {
+test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI timing, and a durable PR card', async ({ page }, testInfo) => {
   const now = Date.now();
   const authUser = {
     id: 'reaction-test-rider',
@@ -586,61 +586,191 @@ test('Reaction Test is a full-screen activity with UCI timing, responsive lights
   await page.goto('/');
   await page.getByRole('button', { name: 'Open App', exact: true }).click();
   await page.getByRole('button', { name: 'Reaction Test', exact: true }).click();
-  const reactionView = page.getByLabel('BMX Reaction Test');
+  const reactionView = page.getByLabel('Reaction Test', { exact: true });
   await expect(reactionView).toBeVisible();
   await expect(page.locator('.platform-shell')).toHaveClass(/reaction-fullscreen/);
   await expect(page.locator('.sidebar')).toBeHidden();
   await expect(page.locator('.platform-topbar')).toBeHidden();
+  await expect(reactionView.getByText('Free BMX start skill drill', { exact: true })).toHaveCount(0);
   await expect(reactionView.getByText('Free BMX skill drill')).toHaveCount(0);
   await expect(reactionView.getByText('SIDE VIEW · BARREL SAFETY GATE')).toHaveCount(0);
+  await expect(reactionView.locator('.reaction-status')).toHaveCount(0);
+  await expect(reactionView.locator('.reaction-live-status')).toHaveText(/Press start/);
+  expect(await reactionView.locator('.reaction-live-status').evaluate((element) => {
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return {
+      clipped: style.clip === 'rect(0px, 0px, 0px, 0px)',
+      height: rect.height,
+      overflow: style.overflow,
+      width: rect.width,
+    };
+  })).toEqual({ clipped: true, height: 1, overflow: 'hidden', width: 1 });
   await expect(reactionView.getByText('PR · 2.00 sec')).toBeVisible();
 
   const desktopBulbWidth = await reactionView.locator('.reaction-light-bulb').first().evaluate(
     (element) => element.getBoundingClientRect().width,
   );
   expect(desktopBulbWidth).toBeGreaterThanOrEqual(50);
+  const sceneStack = reactionView.locator('.reaction-scene-stack');
+  const sceneFrame = sceneStack.locator('.reaction-scene-frame');
+  const sceneBackground = sceneFrame.locator('.reaction-scene-background');
+  const gateLayer = sceneFrame.locator('.reaction-gate-layer');
+  const gateSource = gateLayer.locator('.reaction-gate-selected-source');
+  await expect(sceneStack).toBeVisible();
+  await expect(sceneFrame.locator('.reaction-scene-image')).toHaveCount(0);
+  await expect(sceneFrame.locator('.reaction-scene-mid-drop')).toHaveCount(0);
+  await expect(sceneFrame.locator('.reaction-scene-dropped')).toHaveCount(0);
+  await expect.poll(() => sceneBackground.evaluate((image) => {
+    const frame = image as HTMLImageElement;
+    return { complete: frame.complete, height: frame.naturalHeight, width: frame.naturalWidth };
+  })).toEqual({ complete: true, height: 941, width: 1672 });
+  await expect(gateLayer).toHaveAttribute('data-gate-motion', 'single-rigid-source');
+  await expect(gateSource).toHaveAttribute('width', '1672');
+  await expect(gateSource).toHaveAttribute('height', '941');
+  await expect.poll(() => gateSource.evaluate((image) => ({
+    complete: (image as HTMLImageElement).complete,
+    height: (image as HTMLImageElement).naturalHeight,
+    width: (image as HTMLImageElement).naturalWidth,
+  }))).toEqual({ complete: true, height: 941, width: 1672 });
+  expect(await gateSource.evaluate(async (image) => {
+    const response = await fetch((image as HTMLImageElement).currentSrc);
+    const bytes = await response.arrayBuffer();
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  })).toBe('b58ebc802a1c1b0c56c9c572376e176d767e96a88105ed6f58cd779f370224c3');
+  await expect.poll(() => gateLayer.getAttribute('data-gate-progress')).toBe('0.000');
+  await expect(sceneStack).toHaveAttribute('data-gate-state', 'upright');
 
-  await page.setViewportSize({ width: 390, height: 844 });
-  const mobileGeometry = await reactionView.evaluate((element) => ({
-    bulbWidth: element.querySelector<HTMLElement>('.reaction-light-bulb')?.getBoundingClientRect().width ?? 0,
-    rect: element.getBoundingClientRect().toJSON(),
-    surfaceRect: element.querySelector<HTMLElement>('.reaction-race-surface')?.getBoundingClientRect().toJSON(),
-    exitRect: element.querySelector<HTMLElement>('.reaction-exit-action')?.getBoundingClientRect().toJSON(),
-    gateRect: element.querySelector<HTMLElement>('.reaction-gate-stage')?.getBoundingClientRect().toJSON(),
-    documentFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-    documentHeightFits: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
+  const immutableBackground = await sceneBackground.evaluate((image) => ({
+    src: (image as HTMLImageElement).currentSrc,
+    transform: getComputedStyle(image).transform,
   }));
-  expect(mobileGeometry.bulbWidth).toBeGreaterThanOrEqual(38);
-  expect(mobileGeometry.documentFits).toBe(true);
-  expect(mobileGeometry.documentHeightFits).toBe(true);
-  expect(mobileGeometry.rect).toMatchObject({ x: 0, y: 0, width: 390, height: 844 });
-  expect(mobileGeometry.surfaceRect).toMatchObject({ x: 0, y: 0, width: 390, height: 844 });
-  expect(mobileGeometry.exitRect.width).toBeGreaterThanOrEqual(44);
-  expect(mobileGeometry.exitRect.height).toBeGreaterThanOrEqual(44);
-  expect(mobileGeometry.exitRect.x).toBeGreaterThanOrEqual(0);
-  expect(mobileGeometry.exitRect.x + mobileGeometry.exitRect.width).toBeLessThanOrEqual(390);
-  expect(mobileGeometry.gateRect.x).toBeGreaterThanOrEqual(100);
-  expect(mobileGeometry.gateRect.x + mobileGeometry.gateRect.width).toBeLessThanOrEqual(390);
-  expect(mobileGeometry.gateRect.y).toBeGreaterThan(400);
-  expect(mobileGeometry.gateRect.y + mobileGeometry.gateRect.height).toBeLessThanOrEqual(844);
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath('reaction-test-upright-desktop.png'),
+  });
+
+  for (const viewport of [
+    { label: 'compact iPhone', width: 320, height: 568 },
+    { label: 'current iPhone', width: 390, height: 844 },
+    { label: 'large iPhone', width: 430, height: 932 },
+    { label: 'iPhone landscape', width: 844, height: 390 },
+    { label: 'iPad Air', width: 820, height: 1180 },
+  ]) {
+    await test.step(`fills the ${viewport.label} screen without app chrome`, async () => {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      const geometry = await reactionView.evaluate((element) => {
+        const rectFor = (selector: string) => (
+          element.querySelector<HTMLElement>(selector)?.getBoundingClientRect().toJSON()
+        );
+        const overlaps = (first: DOMRect | undefined, second: DOMRect | undefined) => Boolean(
+          first
+          && second
+          && first.left < second.right
+          && first.right > second.left
+          && first.top < second.bottom
+          && first.bottom > second.top
+        );
+        const title = element.querySelector<HTMLElement>('.reaction-title')?.getBoundingClientRect();
+        const exit = element.querySelector<HTMLElement>('.reaction-exit-action')?.getBoundingClientRect();
+        const tree = element.querySelector<HTMLElement>('.reaction-tree')?.getBoundingClientRect();
+        const panel = element.querySelector<HTMLElement>('.reaction-bottom-panel')?.getBoundingClientRect();
+        const resultStack = element.querySelector<HTMLElement>('.reaction-result-stack')?.getBoundingClientRect();
+        const primaryAction = element.querySelector<HTMLElement>('.reaction-primary-action')?.getBoundingClientRect();
+        const scene = element.querySelector<HTMLElement>('.reaction-scene-frame')?.getBoundingClientRect();
+        const background = element.querySelector<HTMLImageElement>('.reaction-scene-background');
+        const gateLayer = element.querySelector<HTMLElement>('.reaction-gate-layer');
+        const gateSource = element.querySelector<HTMLImageElement>('.reaction-gate-selected-source');
+        return {
+          bulbWidth: element.querySelector<HTMLElement>('.reaction-light-bulb')?.getBoundingClientRect().width ?? 0,
+          rect: element.getBoundingClientRect().toJSON(),
+          surfaceRect: rectFor('.reaction-race-surface'),
+          sceneRect: scene?.toJSON(),
+          background: background ? {
+            naturalHeight: background.naturalHeight,
+            naturalWidth: background.naturalWidth,
+            objectFit: getComputedStyle(background).objectFit,
+            rect: background.getBoundingClientRect().toJSON(),
+          } : null,
+          gateSource: gateSource ? {
+            naturalHeight: gateSource.naturalHeight,
+            naturalWidth: gateSource.naturalWidth,
+            layerRect: gateLayer?.getBoundingClientRect().toJSON(),
+          } : null,
+          titleRect: rectFor('.reaction-title'),
+          exitRect: rectFor('.reaction-exit-action'),
+          treeRect: rectFor('.reaction-tree'),
+          panelRect: rectFor('.reaction-bottom-panel'),
+          controlsOverlap: {
+            resultAndAction: overlaps(resultStack, primaryAction),
+            titleAndExit: overlaps(title, exit),
+            titleAndTree: overlaps(title, tree),
+            treeAndPanel: overlaps(tree, panel),
+          },
+          documentFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+          documentHeightFits: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
+        };
+      });
+      expect(geometry.bulbWidth).toBeGreaterThanOrEqual(
+        viewport.height <= 480 || viewport.width <= 320 ? 32 : 38,
+      );
+      expect(geometry.documentFits).toBe(true);
+      expect(geometry.documentHeightFits).toBe(true);
+      expect(geometry.rect).toMatchObject({ x: 0, y: 0, width: viewport.width, height: viewport.height });
+      expect(geometry.surfaceRect).toMatchObject({ x: 0, y: 0, width: viewport.width, height: viewport.height });
+      expect(geometry.sceneRect?.width).toBeGreaterThan(0);
+      expect(geometry.sceneRect?.height).toBeGreaterThan(0);
+      expect(Number(geometry.sceneRect?.width) / Number(geometry.sceneRect?.height)).toBeCloseTo(1672 / 941, 2);
+      expect(geometry.sceneRect?.x).toBeGreaterThanOrEqual(0);
+      expect(geometry.sceneRect?.y).toBeGreaterThanOrEqual(0);
+      expect(Number(geometry.sceneRect?.x) + Number(geometry.sceneRect?.width)).toBeLessThanOrEqual(viewport.width);
+      expect(Number(geometry.sceneRect?.y) + Number(geometry.sceneRect?.height)).toBeLessThanOrEqual(viewport.height);
+      expect(geometry.background).toMatchObject({ naturalHeight: 941, naturalWidth: 1672 });
+      expect(geometry.background?.rect).toEqual(geometry.sceneRect);
+      expect(Number(geometry.background?.rect.width) / Number(geometry.background?.rect.height)).toBeCloseTo(1672 / 941, 2);
+      expect(geometry.gateSource).toMatchObject({ naturalHeight: 941, naturalWidth: 1672 });
+      expect(geometry.gateSource?.layerRect).toEqual(geometry.sceneRect);
+      for (const rect of [geometry.titleRect, geometry.exitRect, geometry.treeRect, geometry.panelRect]) {
+        expect(rect?.x).toBeGreaterThanOrEqual(0);
+        expect(rect?.y).toBeGreaterThanOrEqual(0);
+        expect(Number(rect?.x) + Number(rect?.width)).toBeLessThanOrEqual(viewport.width);
+        expect(Number(rect?.y) + Number(rect?.height)).toBeLessThanOrEqual(viewport.height);
+      }
+      expect(geometry.exitRect?.width).toBeGreaterThanOrEqual(44);
+      expect(geometry.exitRect?.height).toBeGreaterThanOrEqual(44);
+      expect(Number(geometry.titleRect?.x) + Number(geometry.titleRect?.width)).toBeLessThanOrEqual(Number(geometry.exitRect?.x));
+      expect(geometry.controlsOverlap).toEqual({
+        resultAndAction: false,
+        titleAndExit: false,
+        titleAndTree: false,
+        treeAndPanel: false,
+      });
+      await expect(page.locator('.sidebar')).toBeHidden();
+      await expect(page.locator('.platform-topbar')).toBeHidden();
+    });
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({
     fullPage: false,
     path: testInfo.outputPath('reaction-test-large-lights-mobile.png'),
   });
 
   await reactionView.getByRole('button', { name: 'Start Reaction Test' }).click();
-  await expect(reactionView.getByText(/Listen for the UCI cadence/)).toBeVisible();
-  await page.waitForTimeout(5_550);
+  await expect(reactionView.locator('.reaction-live-status')).toHaveText(/Listen for the UCI cadence/);
+  // Stay comfortably before the earliest legal first cue (5,620 ms voice +
+  // 100 ms random hold). A tighter margin is flaky on a busy WebKit/CI loop.
+  await page.waitForTimeout(5_000);
   expect(await page.evaluate(() => (
     window as typeof window & { __reactionTestToneEvents?: unknown[] }
   ).__reactionTestToneEvents?.length ?? 0)).toBe(0);
   await expect(reactionView.locator('.reaction-light.current')).toHaveCount(0);
-  await expect(reactionView.locator('.reaction-gate.is-dropping')).toHaveCount(0);
+  await expect(sceneStack).toHaveAttribute('data-gate-state', 'upright');
   await expect.poll(
     () => page.evaluate(() => (
       window as typeof window & { __reactionTestToneEvents?: Array<{ kind: string }> }
     ).__reactionTestToneEvents?.map(({ kind }) => kind) ?? []),
-    { timeout: 900 },
+    { timeout: 1_500 },
   ).toContain('uci-red');
   await expect.poll(
     () => page.evaluate(() => (
@@ -662,6 +792,7 @@ test('Reaction Test is a full-screen activity with UCI timing, responsive lights
   for (let index = 1; index < cueEvents.length; index += 1) {
     expect(cueEvents[index].at - cueEvents[index - 1].at).toBeGreaterThanOrEqual(100);
   }
+  await expect(sceneStack).not.toHaveAttribute('data-gate-state', 'upright');
 
   await reactionView.locator('.reaction-race-surface').click({ position: { x: 280, y: 420 } });
   const prBadge = reactionView.locator('.reaction-pr-badge');
@@ -669,6 +800,111 @@ test('Reaction Test is a full-screen activity with UCI timing, responsive lights
   await expect(prBadge).toContainText('NEW PR');
   await expect(prBadge).not.toContainText('2.00 sec');
   expect(await prBadge.evaluate((element) => getComputedStyle(element).animationName)).toBe('reaction-pr-flash');
+  const stoppedLight = reactionView.locator('[data-reaction-stage="green"]');
+  await expect(stoppedLight.locator('.reaction-light-stop-marker')).toBeVisible();
+  await expect(stoppedLight.locator('.reaction-light-stop-marker')).toHaveAttribute(
+    'aria-label',
+    'Reaction recorded at the green light',
+  );
+  await expect(reactionView.locator('.reaction-light-stop-marker')).toHaveCount(1);
+  await expect(sceneStack).toHaveAttribute('data-gate-state', 'settled', { timeout: 1_500 });
+  await expect(gateLayer).toHaveAttribute('data-gate-progress', '1.000');
+  const flushQuad = (await gateLayer.getAttribute('data-gate-flush-quad'))
+    ?.split(' ')
+    .map((pair) => {
+      const [x, y] = pair.split(',').map(Number);
+      return { x, y };
+    }) ?? [];
+  expect(flushQuad).toHaveLength(4);
+  // Both the released edge and the fixed hinge edge remain between the two
+  // painted white lane boundaries in the 1672 × 941 scene master. The upper
+  // stripe follows the measured inner edge of the actual painted line.
+  const upperBoundaryY = (x: number) => 150.7 + (0.37044 * x);
+  const lowerBoundaryY = (x: number) => 879 + ((x - 1147) * ((941 - 879) / (1490 - 1147)));
+  const paintedLineClearance = 10;
+  for (const point of flushQuad.slice(0, 2)) {
+    expect(point.y).toBeGreaterThanOrEqual(upperBoundaryY(point.x) + paintedLineClearance);
+    expect(point.y).toBeLessThanOrEqual(lowerBoundaryY(point.x) - paintedLineClearance);
+  }
+  const turns = flushQuad.map((point, index) => {
+    const next = flushQuad[(index + 1) % flushQuad.length];
+    const afterNext = flushQuad[(index + 2) % flushQuad.length];
+    return ((next.x - point.x) * (afterNext.y - next.y))
+      - ((next.y - point.y) * (afterNext.x - next.x));
+  });
+  expect(turns.every((turn) => turn > 0) || turns.every((turn) => turn < 0)).toBe(true);
+  expect(await gateLayer.locator('.reaction-gate-canvas').evaluate(
+    (element) => getComputedStyle(element).filter,
+  )).toBe('none');
+  expect(Math.hypot(flushQuad[0].x - flushQuad[3].x, flushQuad[0].y - flushQuad[3].y)).toBeGreaterThan(30);
+  expect(Math.hypot(flushQuad[1].x - flushQuad[2].x, flushQuad[1].y - flushQuad[2].y)).toBeGreaterThan(150);
+  const gateCanvas = gateLayer.locator('.reaction-gate-canvas');
+  await expect(gateCanvas).toHaveAttribute('width', '1672');
+  await expect(gateCanvas).toHaveAttribute('height', '941');
+  const rasterBounds = await gateCanvas.evaluate((element) => {
+    const canvas = element as HTMLCanvasElement;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    const serializedQuad = canvas.closest<HTMLElement>('.reaction-gate-layer')?.dataset.gateFlushQuad ?? '';
+    const quad = serializedQuad.split(' ').map((pair) => {
+      const [x, y] = pair.split(',').map(Number);
+      return { x, y };
+    });
+    if (!context || quad.length !== 4) return null;
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    let minX = canvas.width;
+    let minY = canvas.height;
+    let maxX = -1;
+    let maxY = -1;
+    let outsideQuad = 0;
+    let outsidePaintedLines = 0;
+    for (let y = 0; y < canvas.height; y += 1) {
+      for (let x = 0; x < canvas.width; x += 1) {
+        const alpha = pixels[((y * canvas.width) + x) * 4 + 3];
+        if (alpha === 0) continue;
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+        const sample = { x: x + 0.5, y: y + 0.5 };
+        const inside = quad.every((point, index) => {
+          const next = quad[(index + 1) % quad.length];
+          const edgeX = next.x - point.x;
+          const edgeY = next.y - point.y;
+          const cross = (edgeX * (sample.y - point.y)) - (edgeY * (sample.x - point.x));
+          // One source pixel of tolerance covers canvas edge antialiasing.
+          return cross >= -Math.hypot(edgeX, edgeY);
+        });
+        if (!inside) outsideQuad += 1;
+        if (sample.y < (150.7 + (0.37044 * sample.x)) - 2
+          || sample.y > (879 + ((sample.x - 1147) * ((941 - 879) / (1490 - 1147)))) + 2) {
+          outsidePaintedLines += 1;
+        }
+      }
+    }
+    return { maxX, maxY, minX, minY, outsidePaintedLines, outsideQuad };
+  });
+  expect(rasterBounds).not.toBeNull();
+  expect(rasterBounds?.outsideQuad).toBe(0);
+  expect(rasterBounds?.outsidePaintedLines).toBe(0);
+  expect(rasterBounds?.minX).toBeGreaterThanOrEqual(Math.floor(Math.min(...flushQuad.map(({ x }) => x))) - 1);
+  expect(rasterBounds?.minY).toBeGreaterThanOrEqual(Math.floor(Math.min(...flushQuad.map(({ y }) => y))) - 1);
+  expect(rasterBounds?.maxX).toBeLessThanOrEqual(Math.ceil(Math.max(...flushQuad.map(({ x }) => x))) + 1);
+  expect(rasterBounds?.maxY).toBeLessThanOrEqual(Math.ceil(Math.max(...flushQuad.map(({ y }) => y))) + 1);
+  const settledBackground = await sceneBackground.evaluate((image) => ({
+    src: (image as HTMLImageElement).currentSrc,
+    transform: getComputedStyle(image).transform,
+  }));
+  expect(settledBackground).toEqual(immutableBackground);
+  await expect(reactionView.getByRole('button', { name: 'Try Again' })).toBeVisible();
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath('reaction-test-stopped-light-mobile.png'),
+  });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath('reaction-test-flat-desktop.png'),
+  });
 
   await reactionView.getByRole('button', { name: 'Exit Reaction Test' }).click();
   await expect(page.locator('.platform-shell')).not.toHaveClass(/reaction-fullscreen/);
@@ -4889,6 +5125,9 @@ test('pedal-zone mapping can temporarily use 3D while normal views stay satellit
   await page.getByRole('button', { name: 'Edit map' }).click();
 
   const mappingPanel = page.locator('.mapping-section');
+  const savedRaceView = mappingPanel.getByLabel('Saved race view');
+  await savedRaceView.getByRole('button', { name: 'Satellite', exact: true }).click();
+  await expect(savedRaceView.getByRole('button', { name: 'Satellite', exact: true })).toHaveClass(/selected/);
   const adjustPoints = mappingPanel.getByRole('button', { name: 'Adjust points', exact: true });
   await expect(adjustPoints).toBeVisible();
   await adjustPoints.click();
@@ -4936,6 +5175,22 @@ test('advanced connector prompts racer accounts to open the Mac connector', asyn
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ user: authUser }),
+    });
+  });
+
+  // A developer may have the real TrackLab connector running locally while
+  // executing Playwright. Keep this prompt test deterministic by redirecting
+  // only loopback connector sockets to a deliberately closed port.
+  await page.addInitScript(() => {
+    const NativeWebSocket = window.WebSocket;
+    window.WebSocket = new Proxy(NativeWebSocket, {
+      construct(Target, args: ConstructorParameters<typeof WebSocket>) {
+        const requestedUrl = String(args[0]);
+        const url = /^(?:ws:\/\/)(?:127\.0\.0\.1|localhost):(?:19787|8787)(?:\/|$)/.test(requestedUrl)
+          ? 'ws://127.0.0.1:1/tracklab-test-offline'
+          : requestedUrl;
+        return Reflect.construct(Target, [url, args[1]].filter((value) => value !== undefined));
+      },
     });
   });
 

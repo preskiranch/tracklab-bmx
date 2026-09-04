@@ -1,7 +1,7 @@
-import { Flag, RotateCcw, Timer, Trophy, X } from 'lucide-react';
+import { Check, Flag, RotateCcw, Timer, Trophy, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  playStartGateTone,
+  playStartGateToneConfirmed,
   playUciRandomStartVoice,
   primeAudioCues,
   stopStartGateAudio,
@@ -20,6 +20,7 @@ import {
   type ReactionTestStage,
 } from '../lib/reactionTest';
 import { uciStartToneIntervalMs } from '../lib/uciStartGate';
+import { ReactionGateLayer, REACTION_GATE_DROP_MS } from './ReactionGateLayer';
 import './ReactionTestView.css';
 
 type ReactionTestRunState = 'ready' | 'arming' | 'waiting' | 'running' | 'finished';
@@ -138,20 +139,34 @@ export function ReactionTestView({ onResult, personalBestMs = null, onExit }: Re
   }, [onResult]);
 
   const scheduleCadence = useCallback((plan: ReactionTestCadencePlan, generation: number) => {
-    const runCue = (index: number) => {
-      if (generation !== generationRef.current || runStateRef.current === 'finished') return;
+    const runCue = async (index: number) => {
+      const cadenceWasStopped = () => (
+        generation !== generationRef.current || runStateRef.current === 'finished'
+      );
+      if (cadenceWasStopped()) return;
       const cue = plan.cues[index];
       if (!cue) return;
 
-      // This one event is the authority for all actions at a given cue.
-      // No CSS transition, requestAnimationFrame, or delayed state update is
-      // allowed to write the timer or gate timestamp.
-      const event = fireReactionTestCue(cue, monotonicNow);
+      // Confirm audible onset before changing any timing-sensitive state.
+      // The tone result is the one authority for the light, reaction timer,
+      // gate release and the cadence interval that follows this cue.
+      const toneOnset = await playStartGateToneConfirmed(cue.tone);
+      if (cadenceWasStopped()) return;
+      if (toneOnset.startedAtMonotonic == null) {
+        clearTimers();
+        stopStartGateAudio();
+        setActiveStage('idle');
+        setNotice('Audio could not start. Press Start Reaction Test to try again.');
+        setRunStateSafely('ready');
+        return;
+      }
+      const event = fireReactionTestCue(cue, () => toneOnset.startedAtMonotonic!);
       cueEventsRef.current.push(event);
       setActiveStage(event.stage);
       if (event.startsTimer) {
         timerStartedAtRef.current = event.firedAt;
-        timerStartedAtEpochRef.current = Date.now();
+        timerStartedAtEpochRef.current = Date.now()
+          - Math.max(0, monotonicNow() - event.firedAt);
         setRunStateSafely('running');
         setNotice('Tap anywhere on the race surface now.');
       }
@@ -160,20 +175,22 @@ export function ReactionTestView({ onResult, personalBestMs = null, onExit }: Re
         setNotice(resultCapturedRef.current
           ? 'Gate released. Your result is locked in.'
           : 'GREEN — tap now for a late reaction.');
+        // The rigid gate layer reports its real animation completion. This fallback is
+        // only for backgrounded WKWebViews where requestAnimationFrame can be
+        // suspended before the final paint callback runs.
         const settledTimeout = window.setTimeout(() => {
           if (generation === generationRef.current) setGateSettled(true);
-        }, 450);
+        }, REACTION_GATE_DROP_MS + 180);
         timeoutsRef.current.push(settledTimeout);
       }
-      playStartGateTone(event.tone);
 
       // Match Race Intervals: start each following cue from the cue that
-      // actually fired. Four independent absolute timers can collapse into a
-      // burst when a busy map or WKWebView stalls the main thread.
+      // audibly started. Four independent absolute timers can collapse into
+      // a burst when a busy map or WKWebView stalls the main thread.
       if (index < plan.cues.length - 1) {
         const nextTimeout = window.setTimeout(
-          () => runCue(index + 1),
-          uciStartToneIntervalMs,
+          () => void runCue(index + 1),
+          Math.max(0, event.firedAt + uciStartToneIntervalMs - monotonicNow()),
         );
         timeoutsRef.current.push(nextTimeout);
       }
@@ -182,11 +199,11 @@ export function ReactionTestView({ onResult, personalBestMs = null, onExit }: Re
     const firstCue = plan.cues[0];
     if (!firstCue) return;
     const firstTimeout = window.setTimeout(
-      () => runCue(0),
+      () => void runCue(0),
       Math.max(0, firstCue.at - monotonicNow()),
     );
     timeoutsRef.current.push(firstTimeout);
-  }, [setRunStateSafely]);
+  }, [clearTimers, setRunStateSafely]);
 
   const startAttempt = useCallback(async () => {
     if (runStateRef.current !== 'ready') return;
@@ -282,6 +299,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, onExit }: Re
 
   const startButtonDisabled = runState !== 'ready';
   const retryAvailable = result != null && (result.falseStart || gateSettled);
+  const handleGateSettled = useCallback(() => setGateSettled(true), []);
   const historicalLightIndex = activeStage === 'red'
     ? 0
     : activeStage === 'yellow-1'
@@ -291,7 +309,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, onExit }: Re
         : activeStage === 'green' ? 3 : -1;
 
   return (
-    <section className="reaction-test-view" aria-label="BMX Reaction Test">
+    <section className="reaction-test-view" aria-label="Reaction Test">
       <div
         className={`reaction-race-surface ${runState !== 'ready' && runState !== 'finished' ? 'is-reacting' : ''}`}
         role="button"
@@ -316,51 +334,55 @@ export function ReactionTestView({ onResult, personalBestMs = null, onExit }: Re
             <X aria-hidden="true" size={20} />
           </button>
         )}
-        <img
-          className="reaction-scene-image"
-          src="/assets/reaction-test-start-hill-side-close.png"
-          alt="Side profile of a BMX start hill and race course"
-        />
+        <div
+          className="reaction-scene-stack"
+          data-gate-state={gateSettled ? 'settled' : gateReleased ? 'dropping' : 'upright'}
+          aria-label={gateReleased ? 'Full-width starting gate released' : 'Full-width starting gate upright and locked'}
+        >
+          <div className="reaction-scene-frame">
+            <img
+              className="reaction-scene-background"
+              src="/assets/reaction-test-eight-lane-base.png"
+              alt="Side view of an eight-lane starting hill with a fixed metal deck and a gate recess in the dirt"
+              draggable={false}
+            />
+            <ReactionGateLayer released={gateReleased} onSettled={handleGateSettled} />
+          </div>
+        </div>
         <div className="reaction-scene-vignette" aria-hidden="true" />
 
         <header className="reaction-hud">
           <div className="reaction-title">
             <strong><Timer size={19} /> Reaction Test</strong>
           </div>
-          <div className="reaction-status" aria-live="polite">{notice}</div>
         </header>
+        <p className="reaction-live-status sr-only" role="status" aria-live="polite">{notice}</p>
 
         <div className="reaction-tree" aria-label={`Starting tree: ${activeStage === 'idle' ? 'ready' : activeStage}`}>
           {[
-            { stage: 'red' as const, label: 'RED', color: 'red' },
-            { stage: 'yellow-1' as const, label: 'YELLOW', color: 'yellow' },
-            { stage: 'yellow-2' as const, label: 'YELLOW', color: 'yellow' },
-            { stage: 'green' as const, label: 'GREEN', color: 'green' },
+            { stage: 'red' as const, label: 'RED', resultLabel: 'red', color: 'red' },
+            { stage: 'yellow-1' as const, label: 'YELLOW', resultLabel: 'first yellow', color: 'yellow' },
+            { stage: 'yellow-2' as const, label: 'YELLOW', resultLabel: 'second yellow', color: 'yellow' },
+            { stage: 'green' as const, label: 'GREEN', resultLabel: 'green', color: 'green' },
           ].map((light, index) => (
             <div
               className={`reaction-light reaction-light-${light.color} ${historicalLightIndex >= index ? 'lit' : ''} ${activeStage === light.stage ? 'current' : ''}`}
+              data-reaction-stage={light.stage}
               key={light.stage}
             >
               <span className="reaction-light-bulb" />
               <small>{light.label}</small>
+              {result?.stage === light.stage && (
+                <span
+                  className="reaction-light-stop-marker"
+                  aria-label={`Reaction recorded at the ${light.resultLabel} light`}
+                  title="Reaction recorded here"
+                >
+                  <Check aria-hidden="true" size={17} strokeWidth={4} />
+                </span>
+              )}
             </div>
           ))}
-        </div>
-
-        <div className="reaction-gate-stage" aria-label={gateReleased ? 'Starting gate released' : 'Starting gate upright and locked'}>
-          <div className={`reaction-gate ${gateReleased ? 'is-dropping' : ''}`}>
-            <span className="reaction-gate-actuator" />
-            <span className="reaction-gate-leaf-motion">
-              <img
-                className="reaction-gate-leaf"
-                src="/assets/reaction-test-barrel-gate.png"
-                alt=""
-                aria-hidden="true"
-                draggable={false}
-              />
-            </span>
-            <span className="reaction-gate-hinge" />
-          </div>
         </div>
 
         <div className="reaction-bottom-panel">

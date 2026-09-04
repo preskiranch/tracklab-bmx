@@ -1,6 +1,9 @@
 .reaction-test-view {
   width: 100%;
   height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .reaction-race-surface {
@@ -21,18 +24,85 @@
   outline-offset: 4px;
 }
 
-.reaction-scene-image,
+.reaction-scene-stack,
 .reaction-scene-vignette {
   position: absolute;
   inset: 0;
-  z-index: -2;
   width: 100%;
   height: 100%;
 }
 
-.reaction-scene-image {
-  object-fit: cover;
-  object-position: center 48%;
+.reaction-scene-stack {
+  z-index: -2;
+  overflow: hidden;
+  background: #07110d;
+}
+
+.reaction-scene-stack::before {
+  position: absolute;
+  inset: -6%;
+  content: '';
+  background: url('/assets/reaction-test-eight-lane-base.png') center / cover no-repeat;
+  filter: blur(20px) saturate(.78) brightness(.58);
+  opacity: .78;
+  transform: scale(1.06);
+}
+
+.reaction-scene-frame {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100vw, 177.6833vh);
+  width: max(100vw, 177.6833dvh);
+  aspect-ratio: 1672 / 941;
+  overflow: hidden;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 44px rgb(0 0 0 / 46%);
+}
+
+.reaction-scene-background,
+.reaction-gate-layer {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+}
+
+.reaction-scene-background {
+  z-index: 0;
+  object-fit: fill;
+  object-position: center;
+}
+
+.reaction-gate-layer {
+  z-index: 1;
+  overflow: hidden;
+}
+
+.reaction-gate-coordinate-space {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1672px;
+  height: 941px;
+  transform-origin: 0 0;
+}
+
+.reaction-gate-canvas,
+.reaction-gate-selected-source {
+  position: absolute;
+  inset: 0;
+  width: 1672px;
+  height: 941px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.reaction-gate-selected-source {
+  opacity: 0;
 }
 
 .reaction-scene-vignette {
@@ -51,7 +121,6 @@
 }
 
 .reaction-title,
-.reaction-status,
 .reaction-tree,
 .reaction-bottom-panel {
   backdrop-filter: blur(10px);
@@ -101,24 +170,13 @@
   outline-offset: 3px;
 }
 
-.reaction-status {
-  max-width: 34rem;
-  padding: 12px 15px;
-  border: 1px solid rgb(226 255 223 / 24%);
-  border-radius: 14px;
-  background: rgb(1 12 8 / 72%);
-  color: #e8f2e5;
-  font-size: .87rem;
-  line-height: 1.4;
-}
-
 .reaction-tree {
   position: absolute;
   top: clamp(7.5rem, 14vw, 10rem);
   left: clamp(18px, 5vw, 74px);
   display: grid;
   gap: 11px;
-  width: clamp(152px, 17vw, 204px);
+  width: clamp(184px, 18vw, 216px);
   padding: 16px;
   border: 2px solid #1c2821;
   border-radius: 18px;
@@ -128,7 +186,7 @@
 
 .reaction-light {
   display: grid;
-  grid-template-columns: 56px 1fr;
+  grid-template-columns: 56px minmax(0, 1fr) 27px;
   align-items: center;
   gap: 10px;
   color: #9ca6a0;
@@ -136,6 +194,8 @@
   font-weight: 900;
   letter-spacing: .08em;
 }
+
+.reaction-light small { white-space: nowrap; }
 
 .reaction-light-bulb {
   width: 52px;
@@ -151,84 +211,16 @@
 .reaction-light-green.lit .reaction-light-bulb { background: #3df158; box-shadow: 0 0 24px #39ee5b, inset 0 0 0 2px #d6ffe0; }
 .reaction-light.current { color: #fff; transform: translateX(2px); }
 
-.reaction-gate-stage {
-  position: absolute;
-  bottom: 16%;
-  left: 38%;
-  width: min(36vw, 510px);
-  height: min(35vw, 350px);
-  pointer-events: none;
-}
-
-.reaction-gate {
-  position: absolute;
-  bottom: 0;
-  left: 7%;
-  width: 84%;
-  height: 86%;
-}
-
-.reaction-gate-leaf-motion {
-  position: absolute;
-  bottom: -9%;
-  left: 0;
-  z-index: 2;
-  width: auto;
-  height: 100%;
-  transform: rotate(0deg);
-  transform-origin: 58% 90%;
-  filter: drop-shadow(0 10px 10px rgb(0 0 0 / 48%));
-  will-change: transform;
-  user-select: none;
-}
-
-.reaction-gate-leaf {
-  display: block;
-  width: auto;
-  height: 100%;
-  transform: scaleX(-1);
-  clip-path: inset(0 0 7% 0);
-  user-select: none;
-}
-
-.reaction-gate.is-dropping .reaction-gate-leaf-motion {
-  animation: reaction-gate-drop 430ms cubic-bezier(.12, .64, .22, 1) forwards;
-}
-
-.reaction-gate-hinge {
-  position: absolute;
-  bottom: -1%;
-  left: 22%;
-  z-index: 4;
-  width: clamp(23px, 3.4vw, 45px);
+.reaction-light-stop-marker {
+  display: grid;
+  place-items: center;
+  width: 27px;
   aspect-ratio: 1;
-  border: clamp(3px, .35vw, 5px) solid #313a35;
+  border: 2px solid #14240d;
   border-radius: 50%;
-  background: radial-gradient(circle at 38% 34%, #f4f8f4 0 8%, #9ca7a0 10% 30%, #465149 32% 57%, #111713 59% 100%);
-  box-shadow: 0 5px 8px rgb(0 0 0 / 54%), inset 0 0 0 2px rgb(255 255 255 / 28%);
-}
-
-.reaction-gate-actuator {
-  position: absolute;
-  bottom: 1%;
-  left: 5%;
-  z-index: 0;
-  width: 29%;
-  height: clamp(9px, 1vw, 14px);
-  transform: rotate(-12deg);
-  transform-origin: right center;
-  border: 2px solid #252d29;
-  border-radius: 999px;
-  background: linear-gradient(180deg, #d8e0db, #667169 48%, #252d29 52% 100%);
-  box-shadow: 0 3px 5px rgb(0 0 0 / 42%);
-}
-
-@keyframes reaction-gate-drop {
-  0% { transform: rotate(0deg) translateY(0); }
-  12% { transform: rotate(3deg) translateY(0); }
-  52% { transform: rotate(51deg) translateY(1px); }
-  86% { transform: rotate(103deg) translateY(3px); }
-  100% { transform: rotate(114deg) translateY(3px); }
+  background: #d7ff34;
+  color: #14240d;
+  box-shadow: 0 0 0 2px rgb(255 255 255 / 76%), 0 0 18px rgb(215 255 52 / 82%);
 }
 
 .reaction-bottom-panel {
@@ -344,11 +336,10 @@
     gap: 10px;
     padding: max(14px, calc(env(safe-area-inset-top) + 10px)) max(72px, calc(env(safe-area-inset-right) + 62px)) 14px max(14px, env(safe-area-inset-left));
   }
-  .reaction-status { max-width: none; font-size: .76rem; }
-  .reaction-tree { top: 8.5rem; left: 14px; width: 132px; padding: 10px; gap: 7px; }
-  .reaction-light { grid-template-columns: 41px 1fr; gap: 7px; font-size: .55rem; }
+  .reaction-tree { top: 5.75rem; left: 14px; width: 148px; padding: 10px; gap: 7px; }
+  .reaction-light { grid-template-columns: 41px minmax(0, 1fr) 23px; gap: 7px; font-size: .55rem; }
   .reaction-light-bulb { width: 39px; border-width: 2px; }
-  .reaction-gate-stage { bottom: 21%; left: 30%; width: 48vw; height: 44vw; }
+  .reaction-light-stop-marker { width: 23px; border-width: 1px; }
   .reaction-bottom-panel {
     right: max(14px, env(safe-area-inset-right));
     bottom: max(14px, env(safe-area-inset-bottom));
@@ -360,8 +351,45 @@
   .reaction-primary-action { width: 100%; }
 }
 
+@media (max-width: 720px) and (max-height: 700px) {
+  .reaction-title { padding: 9px 11px; }
+  .reaction-title strong { font-size: 1rem; }
+  .reaction-tree { top: 4.55rem; width: 132px; padding: 8px; gap: 5px; }
+  .reaction-light { grid-template-columns: 35px minmax(0, 1fr) 21px; gap: 5px; }
+  .reaction-light-bulb { width: 33px; }
+  .reaction-light-stop-marker { width: 21px; }
+  .reaction-bottom-panel { gap: 8px; padding: 10px; }
+  .reaction-result-stack { gap: 5px; }
+  .reaction-pr-badge { padding: 5px 8px; }
+  .reaction-primary-action { min-height: 46px; padding-block: 9px; }
+}
+
+@media (max-height: 480px) {
+  .reaction-hud {
+    padding: max(10px, env(safe-area-inset-top)) max(66px, calc(env(safe-area-inset-right) + 58px)) 10px max(12px, env(safe-area-inset-left));
+  }
+  .reaction-title { padding: 8px 10px; }
+  .reaction-title strong { font-size: .95rem; }
+  .reaction-exit-action { top: max(10px, env(safe-area-inset-top)); right: max(10px, env(safe-area-inset-right)); width: 44px; height: 44px; }
+  .reaction-tree { top: 4.45rem; left: max(12px, env(safe-area-inset-left)); width: 138px; padding: 8px; gap: 4px; }
+  .reaction-light { grid-template-columns: 34px minmax(0, 1fr) 20px; gap: 5px; font-size: .5rem; }
+  .reaction-light-bulb { width: 32px; border-width: 2px; }
+  .reaction-light-stop-marker { width: 20px; border-width: 1px; }
+  .reaction-bottom-panel { right: max(10px, env(safe-area-inset-right)); bottom: max(10px, env(safe-area-inset-bottom)); left: max(10px, env(safe-area-inset-left)); gap: 10px; padding: 9px 12px; }
+  .reaction-result-stack { gap: 4px; }
+  .reaction-result-card small { display: none; }
+  .reaction-pr-badge { padding: 4px 8px; font-size: .68rem; }
+  .reaction-primary-action { min-height: 44px; padding: 8px 14px; }
+}
+
+@media (pointer: coarse), (max-width: 900px), (max-height: 700px) {
+  .reaction-scene-frame {
+    width: min(100vw, 177.6833vh);
+    width: min(100vw, 177.6833dvh);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .reaction-gate.is-dropping .reaction-gate-leaf-motion { animation-duration: 1ms; }
   .reaction-pr-badge.is-new-record { animation: none; }
   .reaction-light.current { transform: none; }
 }

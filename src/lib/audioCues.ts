@@ -20,6 +20,7 @@ let activeStartGateBufferSource: AudioBufferSourceNode | null = null;
 let activeStartGateBufferNodes: AudioNode[] = [];
 let startGateAudioGeneration = 0;
 let startGateToneGeneration = 0;
+let cancelPendingStartGateToneConfirmation: (() => void) | null = null;
 let startGateToneAudioPool: HTMLAudioElement[] = [];
 let startGateToneAudioIndex = 0;
 let startGateToneMediaPrimed = false;
@@ -154,7 +155,17 @@ export function bmxEventAmbienceProfile(index: number): BmxEventAmbienceProfile 
 }
 
 type UciVoiceStartSource = 'audio' | 'fallback' | 'cancelled';
-type StartGateToneKind = 'tick' | 'gate' | 'uci-red' | 'uci-green';
+export type StartGateToneKind = 'tick' | 'gate' | 'uci-red' | 'uci-green';
+
+export type StartGateToneOnsetResult = Readonly<{
+  kind: StartGateToneKind;
+  /**
+   * Confirmed playback onset on the browser's monotonic clock. A null value
+   * means playback was cancelled or neither audio path could be started.
+   */
+  startedAtMonotonic: number | null;
+  source: 'web-audio' | 'media-element' | 'web-audio-retry' | 'cancelled' | 'unavailable';
+}>;
 
 export type UciVoiceStartResult = {
   startedAt: number;
@@ -979,10 +990,13 @@ export function playZoneCue(kind: 'start' | 'stop') {
   oscillator.stop(now + (kind === 'start' ? 0.18 : 0.26));
 }
 
-function playStartGateToneWithWebAudio(kind: StartGateToneKind) {
+function playStartGateToneWithWebAudio(
+  kind: StartGateToneKind,
+  source: 'web-audio' | 'web-audio-retry' = 'web-audio',
+): StartGateToneOnsetResult | null {
   const context = getAudioContext();
   if (!context || context.state !== 'running') {
-    return false;
+    return null;
   }
 
   try {
@@ -1006,30 +1020,62 @@ function playStartGateToneWithWebAudio(kind: StartGateToneKind) {
 
     oscillator.connect(gain);
     gain.connect(context.destination);
+    // Capture the monotonic timestamp immediately beside the Web Audio start.
+    // This is the authoritative logical onset used by latency-sensitive UI;
+    // animation frames and React rendering are deliberately not the clock.
+    const startedAtMonotonic = monotonicAudioNow();
     oscillator.start(now);
     oscillator.stop(now + durationSeconds + 0.002);
-    return true;
+    return { kind, startedAtMonotonic, source };
   } catch {
-    return false;
+    return null;
   }
 }
 
-export function playStartGateTone(kind: StartGateToneKind) {
-  const toneGeneration = ++startGateToneGeneration;
-  const toneWasCancelled = () => toneGeneration !== startGateToneGeneration;
+function announceStartGateToneOnset(result: StartGateToneOnsetResult) {
+  if (result.startedAtMonotonic == null) return result;
   if (typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
     window.dispatchEvent(new CustomEvent('tracklab-start-gate-tone', {
-      detail: { kind, at: Date.now() },
+      detail: {
+        kind: result.kind,
+        at: Date.now(),
+        atMonotonic: result.startedAtMonotonic,
+        source: result.source,
+      },
     }));
   }
-  if (kind === 'uci-red') {
+  if (result.kind === 'uci-red') {
     setBmxEventAmbienceGateDucked(true);
-  } else if (kind === 'uci-green') {
+  } else if (result.kind === 'uci-green') {
     scheduleRaceAmbienceGateDuckRelease((uciGreenToneDurationSeconds * 1_000) + 80);
   }
+  return result;
+}
+
+/**
+ * Starts one gate tone and resolves only when an audio path confirms onset.
+ * Reaction Test awaits this result so its light, timer, gate and next cadence
+ * interval all share the audible tone's monotonic timestamp.
+ */
+export function playStartGateToneConfirmed(
+  kind: StartGateToneKind,
+  confirmationTimeoutMs = 1_500,
+): Promise<StartGateToneOnsetResult> {
+  cancelPendingStartGateToneConfirmation?.();
+  cancelPendingStartGateToneConfirmation = null;
+  const toneGeneration = ++startGateToneGeneration;
+  const toneWasCancelled = () => toneGeneration !== startGateToneGeneration;
+  const terminalResult = (
+    source: 'cancelled' | 'unavailable',
+  ): StartGateToneOnsetResult => ({ kind, startedAtMonotonic: null, source });
+
+  // Duck before requesting red so a running crowd bed cannot mask the onset.
+  // Green's timed release begins only after its onset is confirmed below.
+  if (kind === 'uci-red') setBmxEventAmbienceGateDucked(true);
   const context = resumeAudioContext();
-  if (playStartGateToneWithWebAudio(kind)) {
-    return;
+  const webAudioResult = playStartGateToneWithWebAudio(kind);
+  if (webAudioResult) {
+    return Promise.resolve(announceStartGateToneOnset(webAudioResult));
   }
 
   const audioIndex = startGateToneAudioIndex % 4;
@@ -1043,27 +1089,110 @@ export function playStartGateTone(kind: StartGateToneKind) {
   audio.currentTime = 0;
   audio.setAttribute('data-tracklab-start-gate-tone', kind);
   audio.load();
-  void settleWithin(
-    audio.play().then(() => true).catch(() => false),
-    500,
-    false,
-  ).then((started) => {
-    if (toneWasCancelled()) {
+
+  return new Promise<StartGateToneOnsetResult>((resolve) => {
+    let settled = false;
+    let retryStarted = false;
+    let retryTimeoutId: number | null = null;
+    let terminalTimeoutId: number | null = null;
+
+    const cleanup = () => {
+      if (retryTimeoutId != null) window.clearTimeout(retryTimeoutId);
+      if (terminalTimeoutId != null) window.clearTimeout(terminalTimeoutId);
+      audio.removeEventListener('playing', handlePlaying);
+      if (cancelPendingStartGateToneConfirmation === cancelPending) {
+        cancelPendingStartGateToneConfirmation = null;
+      }
+    };
+    const finish = (result: StartGateToneOnsetResult) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(result.startedAtMonotonic == null
+        ? result
+        : announceStartGateToneOnset(result));
+    };
+    const cancelPending = () => {
       audio.pause();
-      audio.currentTime = 0;
-      return;
+      try {
+        audio.currentTime = 0;
+      } catch {
+        // Some media elements reject seeking before metadata is available.
+      }
+      finish(terminalResult('cancelled'));
+    };
+    const confirmMediaOnset = () => {
+      if (toneWasCancelled()) {
+        cancelPending();
+        return;
+      }
+      finish({
+        kind,
+        startedAtMonotonic: monotonicAudioNow(),
+        source: 'media-element',
+      });
+    };
+    function handlePlaying() {
+      confirmMediaOnset();
     }
-    if (started || !context || context.state === 'closed') {
-      return;
-    }
-    void context.resume()
-      .then(() => {
-        if (!toneWasCancelled()) {
-          playStartGateToneWithWebAudio(kind);
+    const retryWithWebAudio = async () => {
+      if (settled || retryStarted || toneWasCancelled()) {
+        if (toneWasCancelled()) cancelPending();
+        return;
+      }
+      retryStarted = true;
+      if (!context || context.state === 'closed') return;
+      if (context.state !== 'running') {
+        await settleWithin(context.resume(), 700, undefined);
+      }
+      if (settled || toneWasCancelled()) {
+        if (toneWasCancelled()) cancelPending();
+        return;
+      }
+      const retryResult = playStartGateToneWithWebAudio(kind, 'web-audio-retry');
+      if (!retryResult) return;
+      audio.pause();
+      try {
+        audio.currentTime = 0;
+      } catch {
+        // The confirmed Web Audio path does not depend on media seeking.
+      }
+      finish(retryResult);
+    };
+
+    cancelPendingStartGateToneConfirmation = cancelPending;
+    audio.addEventListener('playing', handlePlaying, { once: true });
+    void audio.play()
+      // The play() promise is specified to resolve once playback has begun.
+      // Some test doubles and older WebViews omit `playing`, so either signal
+      // confirms the same media onset and the first one wins.
+      .then(confirmMediaOnset)
+      .catch(() => retryWithWebAudio());
+    if (!settled) {
+      retryTimeoutId = window.setTimeout(() => {
+        void retryWithWebAudio();
+      }, 500);
+      terminalTimeoutId = window.setTimeout(() => {
+        if (settled) return;
+        if (toneWasCancelled()) {
+          cancelPending();
+          return;
         }
-      })
-      .catch(() => undefined);
+        audio.pause();
+        try {
+          audio.currentTime = 0;
+        } catch {
+          // The failure result remains valid without a successful seek.
+        }
+        finish(terminalResult('unavailable'));
+      }, Math.max(501, confirmationTimeoutMs));
+    }
   });
+}
+
+/** Existing fire-and-forget API retained for every non-timing caller. */
+export function playStartGateTone(kind: StartGateToneKind) {
+  void playStartGateToneConfirmed(kind);
 }
 
 export function stopStartGateAudio() {
@@ -1072,6 +1201,8 @@ export function stopStartGateAudio() {
   // must not revive the cadence after a red/green phase or explicit cancel.
   startGateAudioGeneration += 1;
   startGateToneGeneration += 1;
+  cancelPendingStartGateToneConfirmation?.();
+  cancelPendingStartGateToneConfirmation = null;
 
   if (activeStartGateBufferSource) {
     try {

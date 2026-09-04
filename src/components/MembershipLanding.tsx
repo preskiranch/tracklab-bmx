@@ -270,7 +270,7 @@ export function MembershipLanding({
     { label: 'Race Intervals', detail: 'Mapped BMX racing', icon: Activity, action: onOpenRaceIntervals },
     { label: 'Straight Sprint', detail: 'Custom sprint locations', icon: Route, action: onOpenStraightSprint },
     { label: 'Get Pulled', detail: 'Power and cadence pulls', icon: Gauge, action: onOpenGetPulled },
-    { label: 'Reaction Test', detail: 'Free BMX start skill drill', icon: Timer, action: onOpenReactionTest },
+    { label: 'Reaction Test', detail: '', icon: Timer, action: onOpenReactionTest },
     { label: 'Explore the World', detail: 'Ride routes worldwide', icon: Compass, action: onOpenExplore },
   ];
 
@@ -352,7 +352,7 @@ export function MembershipLanding({
           <section className="membership-hub-intro">
             <span className="membership-pill"><Globe2 size={15} /> Global BMX community</span>
             <h2>Discover globally. Train when you are ready.</h2>
-            <p>Track and bike-shop directories are free to explore. Free accounts also get the BMX Reaction Test; Wattbike activities and saved training results are available when your account is ready.</p>
+            <p>Track and bike-shop directories are free to explore. Free accounts also get the Reaction Test; Wattbike activities and saved training results are available when your account is ready.</p>
             <div className="membership-hub-status" aria-label="TrackLab account status">
               <span><strong>{membership.tier === 'racer' ? membership.bikeSeats : 'Free'}</strong> {membership.tier === 'racer' ? 'bike seats' : 'directory access'}</span>
             </div>
@@ -379,7 +379,7 @@ export function MembershipLanding({
               <div className="section-heading"><div><span className="eyebrow">Signed-in tools</span><h2>Start training or a skill drill</h2></div><Bike size={20} /></div>
               <div className="membership-training-grid">
                 {trainingActions.map(({ label, detail, icon: Icon, action }) => (
-                  <button key={label} type="button" onClick={() => enterFromLocator(action)}><Icon size={19} /><span><strong>{label}</strong><small>{detail}</small></span></button>
+                  <button key={label} type="button" onClick={() => enterFromLocator(action)}><Icon size={19} /><span><strong>{label}</strong>{detail && <small>{detail}</small>}</span></button>
                 ))}
               </div>
             </section>
@@ -415,7 +415,7 @@ export function MembershipLanding({
           <p className="panel-helper">Your account, connected bike, club access, and saved activity settings carry into the training workspace.</p>
           <div className="membership-training-grid">
             {trainingActions.map(({ label, detail, icon: Icon, action }) => (
-              <button key={label} type="button" onClick={() => enterFromLocator(action)}><Icon size={20} /><span><strong>{label}</strong><small>{detail}</small></span></button>
+              <button key={label} type="button" onClick={() => enterFromLocator(action)}><Icon size={20} /><span><strong>{label}</strong>{detail && <small>{detail}</small>}</span></button>
             ))}
           </div>
         </section>
@@ -437,7 +437,7 @@ export function MembershipLanding({
           <h2>{profileComplete ? 'Account ready' : creatingAccount ? 'Create your free TrackLab account' : 'Sign in to TrackLab'}</h2>
           <p>
             Every rider signs in before using account features. Free accounts can explore the public BMX track and
-            mapped bike shop directories and run the BMX Reaction Test; racer accounts can connect Wattbikes and join private multiplayer races.
+            mapped bike shop directories and run the Reaction Test; racer accounts can connect Wattbikes and join private multiplayer races.
           </p>
           {shopClaimPrompt && !profileComplete && <p className="shop-claim-account-prompt" role="status">{shopClaimPrompt}</p>}
         </div>
@@ -530,12 +530,12 @@ export function MembershipLanding({
           <span className="eyebrow">Free account</span>
           <h3>Free membership</h3>
           <p>
-            Explore the public BMX track and mapped bike shop directories, run the BMX Reaction Test, save favorites, and build your community profile without a paid bike seat.
+            Explore the public BMX track and mapped bike shop directories, run the Reaction Test, save favorites, and build your community profile without a paid bike seat.
           </p>
           <ul>
             <li>Public track directory</li>
             <li>Mapped bike shop directory</li>
-            <li>Free BMX Reaction Test</li>
+            <li>Free Reaction Test</li>
             <li>Community profile</li>
             <li>Saved track favorites</li>
           </ul>
