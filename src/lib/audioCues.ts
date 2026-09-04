@@ -152,8 +152,20 @@ type StartGateToneKind = 'tick' | 'gate' | 'uci-red' | 'uci-green';
 
 export type UciVoiceStartResult = {
   startedAt: number;
+  /**
+   * Same start event expressed on the browser's monotonic clock. Consumers
+   * that measure an in-session response should use this rather than Date.now,
+   * which can jump if the system clock is adjusted during a cadence.
+   */
+  startedAtMonotonic: number;
   source: UciVoiceStartSource;
 };
+
+function monotonicAudioNow() {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now();
+}
 
 function settleWithin<T>(promise: Promise<T>, timeoutMs: number, fallback: T) {
   return new Promise<T>((resolve) => {
@@ -1088,6 +1100,7 @@ export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoi
   const playbackWasCancelled = () => playbackGeneration !== startGateAudioGeneration;
   const cancelledResult = (): UciVoiceStartResult => ({
     startedAt: Date.now(),
+    startedAtMonotonic: monotonicAudioNow(),
     source: 'cancelled',
   });
   const audio = getStartGateAudio();
@@ -1137,7 +1150,11 @@ export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoi
     };
 
     function handleAudioStarted() {
-      finish({ startedAt: Date.now(), source: 'audio' });
+      finish({
+        startedAt: Date.now(),
+        startedAtMonotonic: monotonicAudioNow(),
+        source: 'audio',
+      });
     }
 
     audio.addEventListener('playing', handleAudioStarted, { once: true });
@@ -1145,7 +1162,11 @@ export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoi
 
     void audio.play()
       .then(() => {
-        finish({ startedAt: Date.now(), source: 'audio' });
+        finish({
+          startedAt: Date.now(),
+          startedAtMonotonic: monotonicAudioNow(),
+          source: 'audio',
+        });
       })
       .catch(() => finish(null));
   });
@@ -1190,6 +1211,7 @@ export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoi
       activeStartGateBufferSource = source;
       activeStartGateBufferNodes = mix.nodes;
       const startedAt = Date.now();
+      const startedAtMonotonic = monotonicAudioNow();
       if (playbackWasCancelled()) {
         activeStartGateBufferSource = null;
         activeStartGateBufferNodes = [];
@@ -1198,7 +1220,7 @@ export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoi
         return cancelledResult();
       }
       source.start();
-      return { startedAt, source: 'audio' };
+      return { startedAt, startedAtMonotonic, source: 'audio' };
     }
   }
 
@@ -1206,5 +1228,9 @@ export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoi
     return cancelledResult();
   }
   playStartGateTone('tick');
-  return { startedAt: Date.now(), source: 'fallback' };
+  return {
+    startedAt: Date.now(),
+    startedAtMonotonic: monotonicAudioNow(),
+    source: 'fallback',
+  };
 }

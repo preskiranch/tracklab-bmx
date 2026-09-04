@@ -24,6 +24,7 @@ import {
   Settings,
   Store,
   TabletSmartphone,
+  Timer,
   Usb,
   UserCircle,
   UserPlus,
@@ -73,6 +74,7 @@ import {
 } from './lib/bikeRaceAudio';
 import { safeSetLocalStorage } from './lib/browserStorage';
 import { shouldOpenCommunityHomeOnLaunch } from './lib/startupLanding';
+import type { ReactionTestResult } from './lib/reactionTest';
 import { resolveHeartRateResultsMetricState } from './lib/heartRateMetric';
 import { isTrackLabNativeShell, trackLabServiceOrigin } from './lib/serviceOrigins';
 import {
@@ -431,6 +433,9 @@ const AnalyticsPanel = lazy(loadAnalyticsPanel);
 const loadClubOwnerUtilityMode = () => import('./components/ClubOwnerUtilityMode')
   .then((module) => ({ default: module.ClubOwnerUtilityMode }));
 const ClubOwnerUtilityMode = lazy(loadClubOwnerUtilityMode);
+const ReactionTestView = lazy(() => import('./components/ReactionTestView').then((module) => ({
+  default: module.ReactionTestView,
+})));
 const loadMonitorView = () => import('./components/MonitorView')
   .then((module) => ({ default: module.MonitorView }));
 const MonitorView = lazy(loadMonitorView);
@@ -2107,6 +2112,7 @@ export default function App() {
   }
   const resultsMode = appMode === 'results';
   const settingsMode = appMode === 'settings';
+  const reactionTestMode = appMode === 'reaction-test';
   const raceWorkspaceMode = appMode === 'straight-sprint'
     || (resultsMode && lastRaceWasSprintRef.current) ? 'straight-sprint' : 'race';
   const [membership, setMembership] = useState<MembershipState>(() => initialMembershipRef.current ?? createMembership('visitor'));
@@ -7692,6 +7698,65 @@ export default function App() {
     return undefined;
   };
 
+  const handleReactionTestResult = useCallback((result: ReactionTestResult) => {
+    // Reaction Test stays free and does not require a Wattbike, a room, or a
+    // purchase. Signed-in riders still receive the same private session
+    // history durability as the rest of TrackLab's training tools.
+    if (!authUser) return;
+
+    const startedAt = result.startedAtEpoch ?? result.recordedAtEpoch;
+    const riderId = `account:${authUser.id}`;
+    return import('./lib/trainingHistory').then(({ saveTrainingSession }) => saveTrainingSession({
+      id: result.id,
+      activityType: 'bmx-race',
+      title: result.falseStart
+        ? 'Reaction Test · False start'
+        : `Reaction Test · ${result.rating.toUpperCase()}`,
+      startedAt,
+      endedAt: result.recordedAtEpoch,
+      durationMs: result.reactionTimeMs ?? 0,
+      distanceMeters: 0,
+      details: {
+        summaries: [{
+          playerId: 1,
+          riderId,
+          riderName: authUser.name,
+          rank: result.valid ? 1 : undefined,
+          finishTimeMs: result.reactionTimeMs ?? undefined,
+          distanceMeters: 0,
+          sampleCount: 0,
+        }],
+        reactionTimesByPlayer: result.valid && result.reactionTimeMs != null
+          ? { 1: result.reactionTimeMs }
+          : {},
+        reactionTest: {
+          version: 1,
+          reactionTimeMs: result.reactionTimeMs,
+          rating: result.rating,
+          stage: result.stage,
+          valid: result.valid,
+          late: result.late,
+          falseStart: result.falseStart,
+          cadenceDelayMs: result.cadenceDelayMs,
+          recordedAt: result.recordedAtEpoch,
+        },
+      },
+    })).then(() => {
+      setTrainingHistoryRevision((revision) => revision + 1);
+    });
+  }, [authUser]);
+
+  const openReactionTest = () => {
+    clearStartGateSequence();
+    setMappingMode(false);
+    setMappingFullscreen(false);
+    setDemoRaceStartedAt(null);
+    setDemoSignalsStopped(false);
+    resetRace();
+    releaseRaceFullscreen();
+    setAppMode('reaction-test');
+  };
+
   const openBmxRaceIntervals = () => {
     setMappingMode(false);
     setAppMode('race');
@@ -12498,6 +12563,10 @@ export default function App() {
             setShowMembershipLanding(false);
             openGetPulled();
           }}
+          onOpenReactionTest={() => {
+            setShowMembershipLanding(false);
+            openReactionTest();
+          }}
           onOpenExplore={() => {
             setShowMembershipLanding(false);
             setMappingMode(false);
@@ -13146,6 +13215,14 @@ export default function App() {
             BMX Race Intervals
           </button>
           <button
+            className={reactionTestMode ? 'selected' : ''}
+            type="button"
+            onClick={openReactionTest}
+          >
+            <Timer size={17} />
+            Reaction Test
+          </button>
+          <button
             className={appMode === 'explore' ? 'selected' : ''}
             type="button"
             onClick={() => {
@@ -13379,6 +13456,14 @@ export default function App() {
               <span>
                 <strong>Get Pulled</strong>
                 <small>Timed Wattbike sled pulls at Preski Ranch</small>
+              </span>
+            </div>
+          ) : reactionTestMode ? (
+            <div className="explore-topbar-heading">
+              <Timer size={20} />
+              <span>
+                <strong>Reaction Test</strong>
+                <small>Free BMX start-cadence reaction practice</small>
               </span>
             </div>
           ) : (
@@ -13643,6 +13728,10 @@ export default function App() {
           </Suspense>
         ) : resultsMode ? (
           analyticsPanel
+        ) : reactionTestMode ? (
+          <Suspense fallback={lazyLoadingFallback}>
+            <ReactionTestView onResult={handleReactionTestResult} />
+          </Suspense>
         ) : appMode === 'club-monitor' && clubOwnerActive ? (
           <Suspense fallback={lazyLoadingFallback}>
             <ClubLiveMonitor
