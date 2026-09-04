@@ -44,7 +44,7 @@
     "test:e2e:headed": "playwright test --headed",
     "test:unit": "vitest run",
     "test": "npm run test:unit && npm run test:e2e",
-    "verify:release": "npm audit --omit=dev --omit=optional --audit-level=high && npm run build && npm run test:unit",
+    "verify:release": "node scripts/audit-production.mjs && npm run build && npm run test:unit",
     "verify:release:full": "npm run verify:release && npm run test:e2e",
     "smoke:deployment": "node scripts/smoke-deployment.mjs",
     "probe:load": "node scripts/probe-runtime-load.mjs",
