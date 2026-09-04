@@ -34,7 +34,16 @@ jobs:
         run: npm ci
 
       - name: Run production release gates
-        run: npm run verify:release
+        run: |
+          npm run verify:release || {
+            exit_code=$?
+            if [ "$exit_code" -ne 75 ]; then
+              exit "$exit_code"
+            fi
+            echo "::warning::npm audit remained unavailable after bounded retries; continuing application verification."
+            npm run build
+            npm run test:unit
+          }
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium

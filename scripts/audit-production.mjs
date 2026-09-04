@@ -25,9 +25,14 @@ for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
   }
 
   const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}\n${result.error?.code ?? ''}\n${result.error?.message ?? ''}`;
-  const mayRetry = attempt < maximumAttempts && transientAuditFailure.test(output);
-  if (!mayRetry) {
+  const isTransientFailure = transientAuditFailure.test(output);
+  if (!isTransientFailure) {
     process.exit(result.status ?? 1);
+  }
+
+  if (attempt === maximumAttempts) {
+    console.warn('npm audit service remained unavailable after all retries; returning temporary-service exit code 75.');
+    process.exit(75);
   }
 
   const delayMs = attempt * 10_000;
