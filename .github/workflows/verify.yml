@@ -17,7 +17,9 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The serialized browser race suite includes real cadence and finish timing.
+    # Leave enough room for one CI retry without cancelling the remaining checks.
+    timeout-minutes: 35
     steps:
       - name: Check out source
         uses: actions/checkout@v4
