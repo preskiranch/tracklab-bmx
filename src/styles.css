@@ -2407,6 +2407,7 @@ input:focus {
 .dashboard-primary-column,
 .dashboard-secondary-column {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   gap: 14px;
   align-content: start;
@@ -3609,8 +3610,14 @@ input:focus {
 
 .straight-sprint-air-picker > div {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 6px;
+}
+
+.straight-sprint-air-picker button {
+  min-width: 0;
 }
 
 .straight-sprint-air-picker button.selected {

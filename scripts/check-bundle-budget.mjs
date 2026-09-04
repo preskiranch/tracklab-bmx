@@ -19,11 +19,12 @@ const budgets = {
   // compressed budgets remain tightly capped. The iPhone portrait containment
   // and nested Watch tile rules add about 1 KB raw / 100 bytes Brotli. The
   // public app-hub shell and pre-race ghost picker add another tightly scoped
-  // 1.75 KB raw / 150 bytes Brotli while keeping both directories public.
+  // 1.75 KB raw / 150 bytes Brotli while keeping both directories public. The
+  // fixed-width race rail containment adds under 250 raw / 50 Brotli bytes.
   javascriptRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_RAW_BYTES', 621_000),
   javascriptBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_BR_BYTES', 175_000),
-  cssRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_RAW_BYTES', 137_000),
-  cssBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_BR_BYTES', 20_400),
+  cssRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_RAW_BYTES', 137_250),
+  cssBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_BR_BYTES', 20_450),
   initialBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_INITIAL_BR_BYTES', 195_000),
 };
 
