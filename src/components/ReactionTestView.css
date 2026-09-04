@@ -102,9 +102,9 @@
   top: clamp(7.5rem, 14vw, 10rem);
   left: clamp(18px, 5vw, 74px);
   display: grid;
-  gap: 8px;
-  width: clamp(94px, 12vw, 132px);
-  padding: 12px;
+  gap: 11px;
+  width: clamp(152px, 17vw, 204px);
+  padding: 16px;
   border: 2px solid #1c2821;
   border-radius: 18px;
   background: linear-gradient(150deg, rgb(34 44 39 / 96%), rgb(3 8 6 / 94%));
@@ -113,17 +113,17 @@
 
 .reaction-light {
   display: grid;
-  grid-template-columns: 34px 1fr;
+  grid-template-columns: 56px 1fr;
   align-items: center;
-  gap: 7px;
+  gap: 10px;
   color: #9ca6a0;
-  font-size: .58rem;
+  font-size: .7rem;
   font-weight: 900;
   letter-spacing: .08em;
 }
 
 .reaction-light-bulb {
-  width: 32px;
+  width: 52px;
   aspect-ratio: 1;
   border: 3px solid #0a0e0b;
   border-radius: 50%;
@@ -326,9 +326,9 @@
   .reaction-race-surface { min-height: calc(100dvh - 7rem); border-radius: 14px; }
   .reaction-hud { display: grid; gap: 10px; padding: 14px; }
   .reaction-status { max-width: none; font-size: .76rem; }
-  .reaction-tree { top: 8.5rem; left: 14px; width: 94px; padding: 8px; gap: 5px; }
-  .reaction-light { grid-template-columns: 25px 1fr; font-size: .48rem; }
-  .reaction-light-bulb { width: 23px; border-width: 2px; }
+  .reaction-tree { top: 8.5rem; left: 14px; width: 132px; padding: 10px; gap: 7px; }
+  .reaction-light { grid-template-columns: 41px 1fr; gap: 7px; font-size: .55rem; }
+  .reaction-light-bulb { width: 39px; border-width: 2px; }
   .reaction-gate-stage { bottom: 15%; left: 37%; width: 46vw; height: 42vw; }
   .reaction-bottom-panel { display: grid; gap: 11px; padding: 13px; }
   .reaction-primary-action { width: 100%; }

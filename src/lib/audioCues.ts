@@ -87,7 +87,13 @@ export const raceAudioMixProfile = Object.freeze({
   gateToneVolume: 0.58,
   tickToneVolume: 0.34,
 });
-export const uciVoiceWatchGateOffsetMs = 5300;
+/**
+ * The UCI words and prescribed automatic pause total 5.30 seconds. The
+ * bundled recording also has about 0.32 seconds of leading silence, so the
+ * final word ends at 5.62 seconds on this file's playback clock. The random
+ * hold must begin after that point or short draws overlap "watch the gate".
+ */
+export const uciVoiceWatchGateOffsetMs = 5_620;
 
 export function bmxEventAmbienceLayerVolumes(
   volume: number,

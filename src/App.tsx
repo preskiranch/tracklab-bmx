@@ -212,8 +212,7 @@ import {
   liveRaceStagingSeconds,
 } from './lib/raceStartSequence';
 import {
-  uciRandomDelayMaxMs,
-  uciRandomDelayMinMs,
+  createUciRandomDelayMs,
   uciStartToneIntervalMs,
 } from './lib/uciStartGate';
 import {
@@ -589,29 +588,6 @@ function releaseBrowserFullscreen() {
   } catch {
     // Ignore browser-level fullscreen refusal so race reset/cancel can continue.
   }
-}
-
-function randomIntegerInclusive(minimum: number, maximum: number) {
-  const min = Math.ceil(minimum);
-  const max = Math.floor(maximum);
-  if (max <= min) {
-    return min;
-  }
-
-  const range = max - min + 1;
-  const cryptoApi = window.crypto;
-  if (cryptoApi?.getRandomValues) {
-    const maxUnbiased = Math.floor(0x100000000 / range) * range;
-    const value = new Uint32Array(1);
-
-    do {
-      cryptoApi.getRandomValues(value);
-    } while (value[0] >= maxUnbiased);
-
-    return min + (value[0] % range);
-  }
-
-  return min + Math.floor(Math.random() * range);
 }
 
 function createDraftTrackSplit(index: number): DraftTrackSplit {
@@ -9538,7 +9514,7 @@ export default function App() {
     cadenceStartedAtRef.current = voiceStart.startedAt;
     // Coach-led Club Events use the separate immutable server timeline below.
     // This path remains deliberately local/random for manual races.
-    const randomDelayMs = randomIntegerInclusive(uciRandomDelayMinMs, uciRandomDelayMaxMs);
+    const randomDelayMs = createUciRandomDelayMs();
     const firstToneAtMs = uciVoiceWatchGateOffsetMs + randomDelayMs;
     const scheduleVoiceStep = (voiceOffsetMs: number, action: () => void) => {
       const elapsedSinceVoiceStartMs = Date.now() - voiceStart.startedAt;

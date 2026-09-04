@@ -526,6 +526,111 @@ test('signed-in root launch opens Community home without creating an activity UR
   await expect.poll(() => new URL(page.url()).searchParams.has('track')).toBe(false);
 });
 
+test('Reaction Test waits until the voice ends, then uses a random hold and large responsive lights', async ({ page }, testInfo) => {
+  const now = Date.now();
+  const authUser = {
+    id: 'reaction-test-rider',
+    profileKey: 'user:reaction-test-rider',
+    email: 'reaction-test@tracklab.test',
+    name: 'Reaction Test Rider',
+    admin: false,
+    membership: { tier: 'spectator', bikeSeats: 1, updatedAt: now },
+  };
+  await page.addInitScript(() => {
+    const original = Crypto.prototype.getRandomValues;
+    const timingWindow = window as typeof window & {
+      __reactionTestToneEvents?: Array<{ kind: string; at: number }>;
+    };
+    timingWindow.__reactionTestToneEvents = [];
+    window.addEventListener('tracklab-start-gate-tone', (event) => {
+      const kind = (event as CustomEvent<{ kind?: string }>).detail?.kind;
+      if (!kind?.startsWith('uci-')) return;
+      timingWindow.__reactionTestToneEvents?.push({ kind, at: performance.now() });
+    });
+    Crypto.prototype.getRandomValues = function (array) {
+      if (array instanceof Uint32Array && array.length === 1) {
+        array[0] = 0;
+        return array;
+      }
+      return original.call(this, array);
+    };
+  });
+  await page.route('**/api/auth/me', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ user: authUser }),
+  }));
+  await page.route('**/api/user-data*', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      trackMappings: {},
+      customRoutes: [],
+      bikeProfiles: [],
+      studioRiders: [],
+      accountProfile: { updatedAt: now },
+    }),
+  }));
+  await page.route('https://maps.googleapis.com/**', (route) => route.abort());
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Open App', exact: true }).click();
+  await page.getByRole('button', { name: 'Reaction Test', exact: true }).click();
+  const reactionView = page.getByLabel('BMX Reaction Test');
+  await expect(reactionView).toBeVisible();
+
+  const desktopBulbWidth = await reactionView.locator('.reaction-light-bulb').first().evaluate(
+    (element) => element.getBoundingClientRect().width,
+  );
+  expect(desktopBulbWidth).toBeGreaterThanOrEqual(50);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await reactionView.scrollIntoViewIfNeeded();
+  const mobileGeometry = await reactionView.evaluate((element) => ({
+    bulbWidth: element.querySelector<HTMLElement>('.reaction-light-bulb')?.getBoundingClientRect().width ?? 0,
+    documentFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+  }));
+  expect(mobileGeometry.bulbWidth).toBeGreaterThanOrEqual(38);
+  expect(mobileGeometry.documentFits).toBe(true);
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath('reaction-test-large-lights-mobile.png'),
+  });
+
+  await reactionView.getByRole('button', { name: 'Start Reaction Test' }).click();
+  await expect(reactionView.getByText(/Listen for the UCI cadence/)).toBeVisible();
+  await page.waitForTimeout(5_550);
+  expect(await page.evaluate(() => (
+    window as typeof window & { __reactionTestToneEvents?: unknown[] }
+  ).__reactionTestToneEvents?.length ?? 0)).toBe(0);
+  await expect(reactionView.locator('.reaction-light.current')).toHaveCount(0);
+  await expect(reactionView.locator('.reaction-gate.is-dropping')).toHaveCount(0);
+  await expect.poll(
+    () => page.evaluate(() => (
+      window as typeof window & { __reactionTestToneEvents?: Array<{ kind: string }> }
+    ).__reactionTestToneEvents?.map(({ kind }) => kind) ?? []),
+    { timeout: 900 },
+  ).toContain('uci-red');
+  await expect.poll(
+    () => page.evaluate(() => (
+      window as typeof window & { __reactionTestToneEvents?: unknown[] }
+    ).__reactionTestToneEvents?.length ?? 0),
+    { timeout: 2_000 },
+  ).toBe(4);
+  const cueEvents = await page.evaluate(() => (
+    window as typeof window & {
+      __reactionTestToneEvents?: Array<{ kind: string; at: number }>;
+    }
+  ).__reactionTestToneEvents ?? []);
+  expect(cueEvents.map(({ kind }) => kind)).toEqual([
+    'uci-red',
+    'uci-red',
+    'uci-red',
+    'uci-green',
+  ]);
+  for (let index = 1; index < cueEvents.length; index += 1) {
+    expect(cueEvents[index].at - cueEvents[index - 1].at).toBeGreaterThanOrEqual(100);
+  }
+});
+
 test('first-run profile flow opens the TrackLab dashboard', async ({ page }, testInfo) => {
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];

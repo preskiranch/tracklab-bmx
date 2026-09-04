@@ -1,4 +1,5 @@
 import {
+  createUciRandomDelayMs,
   uciRandomDelayMaxMs,
   uciRandomDelayMinMs,
   uciStartToneIntervalMs,
@@ -54,9 +55,8 @@ export type ReactionTestResult = Readonly<{
  * The value is generated only once per attempt and becomes the authority for
  * every visual and audio cue in that attempt.
  */
-export function createReactionTestCadenceDelay(random = Math.random) {
-  const range = uciRandomDelayMaxMs - uciRandomDelayMinMs + 1;
-  return uciRandomDelayMinMs + Math.floor(Math.max(0, Math.min(0.999999999, random())) * range);
+export function createReactionTestCadenceDelay(random?: () => number) {
+  return createUciRandomDelayMs(random);
 }
 
 /**
@@ -130,6 +130,52 @@ export function fireReactionTestCue(
   now: () => number,
 ): ReactionTestCueEvent {
   return Object.freeze({ ...cue, firedAt: now() });
+}
+
+/**
+ * PointerEvent.timeStamp normally uses the performance clock, but older WebKit
+ * builds may report Unix time. Translate either representation onto the same
+ * monotonic clock used by the cadence and never replace an earlier physical
+ * touch with the later React-handler time.
+ */
+export function normalizeReactionInputTimestamp(
+  eventTimestamp: number | null | undefined,
+  handlerTimestamp: number,
+  performanceTimeOrigin?: number,
+) {
+  if (!Number.isFinite(eventTimestamp) || Number(eventTimestamp) <= 0) {
+    return handlerTimestamp;
+  }
+
+  const rawTimestamp = Number(eventTimestamp);
+  const candidates = [rawTimestamp];
+  if (Number.isFinite(performanceTimeOrigin)) {
+    candidates.push(rawTimestamp - Number(performanceTimeOrigin));
+  }
+  const closest = candidates.reduce((best, candidate) => (
+    Math.abs(candidate - handlerTimestamp) < Math.abs(best - handlerTimestamp)
+      ? candidate
+      : best
+  ));
+
+  if (!Number.isFinite(closest) || closest < 0 || closest > handlerTimestamp + 1_000) {
+    return handlerTimestamp;
+  }
+  return Math.min(closest, handlerTimestamp);
+}
+
+/** Score against cue timestamps that actually fired, not a render or handler. */
+export function reactionStageAtTimestamp(
+  cueEvents: readonly ReactionTestCueEvent[],
+  recordedAt: number,
+): ReactionTestStage | 'too-early' {
+  let latest: ReactionTestCueEvent | null = null;
+  for (const event of cueEvents) {
+    if (event.firedAt <= recordedAt && (latest == null || event.firedAt >= latest.firedAt)) {
+      latest = event;
+    }
+  }
+  return latest == null ? 'too-early' : latest.stage;
 }
 
 export function reactionRatingForStage(stage: ReactionTestStage): ReactionTestRating | null {

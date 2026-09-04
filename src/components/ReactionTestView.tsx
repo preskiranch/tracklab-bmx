@@ -12,10 +12,14 @@ import {
   createReactionTestResult,
   fireReactionTestCue,
   formatReactionTime,
+  normalizeReactionInputTimestamp,
+  reactionStageAtTimestamp,
   type ReactionTestCadencePlan,
+  type ReactionTestCueEvent,
   type ReactionTestResult,
   type ReactionTestStage,
 } from '../lib/reactionTest';
+import { uciStartToneIntervalMs } from '../lib/uciStartGate';
 import './ReactionTestView.css';
 
 type ReactionTestRunState = 'ready' | 'arming' | 'waiting' | 'running' | 'finished';
@@ -53,7 +57,7 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
 
   const generationRef = useRef(0);
   const timeoutsRef = useRef<number[]>([]);
-  const activeStageRef = useRef<ReactionTestStage>('idle');
+  const cueEventsRef = useRef<ReactionTestCueEvent[]>([]);
   const timerStartedAtRef = useRef<number | null>(null);
   const timerStartedAtEpochRef = useRef<number | null>(null);
   const cadencePlanRef = useRef<ReactionTestCadencePlan | null>(null);
@@ -74,7 +78,7 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
     generationRef.current += 1;
     clearTimers();
     stopStartGateAudio();
-    activeStageRef.current = 'idle';
+    cueEventsRef.current = [];
     timerStartedAtRef.current = null;
     timerStartedAtEpochRef.current = null;
     cadencePlanRef.current = null;
@@ -89,6 +93,13 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
 
   useEffect(() => resetAttempt, [resetAttempt]);
 
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
   const saveResult = useCallback((nextResult: ReactionTestResult) => {
     if (resultCapturedRef.current) return;
     resultCapturedRef.current = true;
@@ -99,37 +110,54 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
   }, [onResult]);
 
   const scheduleCadence = useCallback((plan: ReactionTestCadencePlan, generation: number) => {
-    plan.cues.forEach((cue) => {
-      const delayMs = Math.max(0, cue.at - monotonicNow());
-      const timeoutId = window.setTimeout(() => {
-        if (generation !== generationRef.current || runStateRef.current === 'finished') return;
+    const runCue = (index: number) => {
+      if (generation !== generationRef.current || runStateRef.current === 'finished') return;
+      const cue = plan.cues[index];
+      if (!cue) return;
 
-        // This one event is the authority for all actions at a given cue.
-        // No CSS transition, requestAnimationFrame, or delayed state update is
-        // allowed to write the timer or gate timestamp.
-        const event = fireReactionTestCue(cue, monotonicNow);
-        activeStageRef.current = event.stage;
-        setActiveStage(event.stage);
-        if (event.startsTimer) {
-          timerStartedAtRef.current = event.firedAt;
-          timerStartedAtEpochRef.current = Date.now();
-          setRunStateSafely('running');
-          setNotice('Tap anywhere on the race surface now.');
-        }
-        if (event.releasesGate) {
-          setGateReleased(true);
-          setNotice(resultCapturedRef.current
-            ? 'Gate released. Your result is locked in.'
-            : 'GREEN — tap now for a late reaction.');
-          const settledTimeout = window.setTimeout(() => {
-            if (generation === generationRef.current) setGateSettled(true);
-          }, 560);
-          timeoutsRef.current.push(settledTimeout);
-        }
-        playStartGateTone(event.tone);
-      }, delayMs);
-      timeoutsRef.current.push(timeoutId);
-    });
+      // This one event is the authority for all actions at a given cue.
+      // No CSS transition, requestAnimationFrame, or delayed state update is
+      // allowed to write the timer or gate timestamp.
+      const event = fireReactionTestCue(cue, monotonicNow);
+      cueEventsRef.current.push(event);
+      setActiveStage(event.stage);
+      if (event.startsTimer) {
+        timerStartedAtRef.current = event.firedAt;
+        timerStartedAtEpochRef.current = Date.now();
+        setRunStateSafely('running');
+        setNotice('Tap anywhere on the race surface now.');
+      }
+      if (event.releasesGate) {
+        setGateReleased(true);
+        setNotice(resultCapturedRef.current
+          ? 'Gate released. Your result is locked in.'
+          : 'GREEN — tap now for a late reaction.');
+        const settledTimeout = window.setTimeout(() => {
+          if (generation === generationRef.current) setGateSettled(true);
+        }, 560);
+        timeoutsRef.current.push(settledTimeout);
+      }
+      playStartGateTone(event.tone);
+
+      // Match Race Intervals: start each following cue from the cue that
+      // actually fired. Four independent absolute timers can collapse into a
+      // burst when a busy map or WKWebView stalls the main thread.
+      if (index < plan.cues.length - 1) {
+        const nextTimeout = window.setTimeout(
+          () => runCue(index + 1),
+          uciStartToneIntervalMs,
+        );
+        timeoutsRef.current.push(nextTimeout);
+      }
+    };
+
+    const firstCue = plan.cues[0];
+    if (!firstCue) return;
+    const firstTimeout = window.setTimeout(
+      () => runCue(0),
+      Math.max(0, firstCue.at - monotonicNow()),
+    );
+    timeoutsRef.current.push(firstTimeout);
   }, [setRunStateSafely]);
 
   const startAttempt = useCallback(async () => {
@@ -138,7 +166,7 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
     generationRef.current += 1;
     const generation = generationRef.current;
     resultCapturedRef.current = false;
-    activeStageRef.current = 'idle';
+    cueEventsRef.current = [];
     timerStartedAtRef.current = null;
     timerStartedAtEpochRef.current = null;
     cadencePlanRef.current = null;
@@ -171,7 +199,7 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
     scheduleCadence(plan, generation);
   }, [scheduleCadence, setRunStateSafely]);
 
-  const captureReaction = useCallback((source?: EventTarget | null) => {
+  const captureReaction = useCallback((source?: EventTarget | null, eventTimestamp?: number) => {
     // The start/retry controls sit inside the generous reaction surface. They
     // are controls, not rider reactions, even though capture listeners run
     // before a button can stop its bubbling pointer event.
@@ -179,12 +207,18 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
     const currentRunState = runStateRef.current;
     if (currentRunState === 'ready' || currentRunState === 'finished' || resultCapturedRef.current) return;
 
-    const now = monotonicNow();
-    const recordedAtEpoch = Date.now();
+    const handlerTimestamp = monotonicNow();
+    const recordedAt = normalizeReactionInputTimestamp(
+      eventTimestamp,
+      handlerTimestamp,
+      typeof performance !== 'undefined' ? performance.timeOrigin : undefined,
+    );
+    const recordedAtEpoch = Date.now() - Math.max(0, handlerTimestamp - recordedAt);
     const plan = cadencePlanRef.current;
     const timerStartedAt = timerStartedAtRef.current;
+    const reactionStage = reactionStageAtTimestamp(cueEventsRef.current, recordedAt);
 
-    if (timerStartedAt == null || activeStageRef.current === 'idle') {
+    if (timerStartedAt == null || reactionStage === 'too-early') {
       // Invalidate an in-flight voice preload as well as any cues that may
       // have been queued immediately before this false start.
       generationRef.current += 1;
@@ -192,7 +226,7 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
         id: `reaction-test-${Date.now()}-${generationRef.current}`,
         timerStartedAt: null,
         timerStartedAtEpoch: null,
-        recordedAt: now,
+        recordedAt,
         recordedAtEpoch,
         stage: 'too-early',
         cadenceDelayMs: plan?.cadenceDelayMs ?? null,
@@ -209,9 +243,9 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
       id: `reaction-test-${Date.now()}-${generationRef.current}`,
       timerStartedAt,
       timerStartedAtEpoch: timerStartedAtEpochRef.current,
-      recordedAt: now,
+      recordedAt,
       recordedAtEpoch,
-      stage: activeStageRef.current,
+      stage: reactionStage,
       cadenceDelayMs: plan?.cadenceDelayMs ?? null,
     });
     saveResult(nextResult);
@@ -234,11 +268,11 @@ export function ReactionTestView({ onResult }: ReactionTestViewProps) {
         className={`reaction-race-surface ${runState !== 'ready' && runState !== 'finished' ? 'is-reacting' : ''}`}
         role="button"
         tabIndex={0}
-        onPointerDownCapture={(event) => captureReaction(event.target)}
+        onPointerDownCapture={(event) => captureReaction(event.target, event.timeStamp)}
         onKeyDown={(event) => {
           if (event.key === ' ' || event.key === 'Enter') {
             event.preventDefault();
-            captureReaction(event.target);
+            captureReaction(event.target, event.timeStamp);
           }
         }}
         aria-label="Reaction area. Tap anywhere after the first red light to record your reaction."
