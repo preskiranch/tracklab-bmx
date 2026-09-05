@@ -1,68 +1,32 @@
 import { useCallback, useEffect, useRef } from 'react';
+import {
+  projectReactionGateQuad,
+  projectReactionGateWorldPoint,
+  projectReactionGateWorldPointHomogeneous,
+  reactionGateWorldQuad,
+  REACTION_GATE_FLUSH_QUAD,
+  REACTION_GATE_SOURCE_QUAD,
+  REACTION_GATE_WORLD_WIDTH,
+  type ReactionGatePoint,
+  type ReactionGateWorldPoint,
+} from '../lib/reactionGateGeometry';
+
+export {
+  projectReactionGateQuad,
+  REACTION_GATE_FLUSH_QUAD,
+  REACTION_GATE_SOURCE_QUAD,
+  reactionGateWorldQuad,
+} from '../lib/reactionGateGeometry';
 
 const SCENE_WIDTH = 1672;
 const SCENE_HEIGHT = 941;
 export const REACTION_GATE_DROP_MS = 260;
 
-type Point = { x: number; y: number };
-type Quad = [Point, Point, Point, Point];
-
-// Corners of the exact gate the user selected, clockwise from its far/top
-// corner. The fixed hinge is the final two points and never moves.
-export const REACTION_GATE_SOURCE_QUAD: Quad = [
-  // The far side is trimmed at the upper painted lane boundary. This keeps
-  // scenery from the approved full-resolution plate out of the moving layer.
-  { x: 929, y: 459 },
-  { x: 1174, y: 671 },
-  { x: 1147, y: 879 },
-  { x: 928, y: 500 },
-];
-
-export const REACTION_GATE_FLUSH_QUAD: Quad = [
-  // The released edge lands inside the narrow dirt recess. The painted lane
-  // boundaries remain outside this footprint while the hinge edge stays
-  // registered to the fixed metal platform.
-  { x: 970, y: 535 },
-  { x: 1305, y: 886 },
-  REACTION_GATE_SOURCE_QUAD[2],
-  REACTION_GATE_SOURCE_QUAD[3],
-];
-
-function add(first: Point, second: Point): Point {
-  return { x: first.x + second.x, y: first.y + second.y };
-}
-
-function subtract(first: Point, second: Point): Point {
-  return { x: first.x - second.x, y: first.y - second.y };
-}
-
-function rotateGate(progress: number): Quad {
-  const angle = Math.min(1, Math.max(0, progress)) * (Math.PI / 2);
-  const cosine = Math.cos(angle);
-  const sine = Math.sin(angle);
-  const farHinge = REACTION_GATE_SOURCE_QUAD[3];
-  const nearHinge = REACTION_GATE_SOURCE_QUAD[2];
-  const uprightFar = subtract(REACTION_GATE_SOURCE_QUAD[0], farHinge);
-  const uprightNear = subtract(REACTION_GATE_SOURCE_QUAD[1], nearHinge);
-  const flushFar = subtract(REACTION_GATE_FLUSH_QUAD[0], farHinge);
-  const flushNear = subtract(REACTION_GATE_FLUSH_QUAD[1], nearHinge);
-  const projected = (upright: Point, flush: Point) => ({
-    x: (upright.x * cosine) + (flush.x * sine),
-    y: (upright.y * cosine) + (flush.y * sine),
-  });
-  return [
-    add(farHinge, projected(uprightFar, flushFar)),
-    add(nearHinge, projected(uprightNear, flushNear)),
-    nearHinge,
-    farHinge,
-  ];
-}
-
 function drawTexturedTriangle(
   context: CanvasRenderingContext2D,
   source: HTMLImageElement,
-  sourcePoints: [Point, Point, Point],
-  destinationPoints: [Point, Point, Point],
+  sourcePoints: [ReactionGatePoint, ReactionGatePoint, ReactionGatePoint],
+  destinationPoints: [ReactionGatePoint, ReactionGatePoint, ReactionGatePoint],
 ) {
   const [sourceOrigin, sourceX, sourceY] = sourcePoints;
   const [destinationOrigin, destinationX, destinationY] = destinationPoints;
@@ -100,20 +64,25 @@ function drawTexturedTriangle(
   context.restore();
 }
 
-function drawGate(
+function gateWorldPoint(acrossRatio: number, depthRatio: number, progress: number): ReactionGateWorldPoint {
+  const angle = Math.min(1, Math.max(0, progress)) * (Math.PI / 2);
+  return {
+    across: acrossRatio * REACTION_GATE_WORLD_WIDTH,
+    upright: depthRatio * Math.cos(angle),
+    downhill: depthRatio * Math.sin(angle),
+  };
+}
+
+function drawGateFallback(
   context: CanvasRenderingContext2D,
   source: HTMLImageElement,
-  destination: Quad,
+  progress: number,
 ) {
   context.clearRect(0, 0, SCENE_WIDTH, SCENE_HEIGHT);
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = 'high';
 
-  // A projective CSS matrix can become numerically unstable while a gate is
-  // almost edge-on and produce a long triangular spike. The two affine
-  // triangles below share the gate's physical diagonal, so every transformed
-  // sample is finite and the leaf remains one continuous, untwisted piece
-  // throughout the drop.
+  const destination = projectReactionGateQuad(progress);
   context.save();
   context.beginPath();
   context.moveTo(destination[0].x, destination[0].y);
@@ -122,19 +91,202 @@ function drawGate(
   context.lineTo(destination[3].x, destination[3].y);
   context.closePath();
   context.clip();
-  drawTexturedTriangle(
-    context,
-    source,
-    [REACTION_GATE_SOURCE_QUAD[0], REACTION_GATE_SOURCE_QUAD[1], REACTION_GATE_SOURCE_QUAD[2]],
-    [destination[0], destination[1], destination[2]],
-  );
-  drawTexturedTriangle(
-    context,
-    source,
-    [REACTION_GATE_SOURCE_QUAD[0], REACTION_GATE_SOURCE_QUAD[2], REACTION_GATE_SOURCE_QUAD[3]],
-    [destination[0], destination[2], destination[3]],
-  );
+
+  // WebGL is available in every supported WKWebView. This subdivided fallback
+  // retains the same projective world model for defensive browser coverage.
+  // No endpoint is interpolated independently, so the leaf cannot twist.
+  const acrossSteps = 16;
+  const depthSteps = 6;
+  for (let acrossIndex = 0; acrossIndex < acrossSteps; acrossIndex += 1) {
+    for (let depthIndex = 0; depthIndex < depthSteps; depthIndex += 1) {
+      const across0 = acrossIndex / acrossSteps;
+      const across1 = (acrossIndex + 1) / acrossSteps;
+      const depth0 = depthIndex / depthSteps;
+      const depth1 = (depthIndex + 1) / depthSteps;
+      const world00 = gateWorldPoint(across0, depth0, progress);
+      const world10 = gateWorldPoint(across1, depth0, progress);
+      const world11 = gateWorldPoint(across1, depth1, progress);
+      const world01 = gateWorldPoint(across0, depth1, progress);
+      const source00 = projectReactionGateWorldPoint(gateWorldPoint(across0, depth0, 0));
+      const source10 = projectReactionGateWorldPoint(gateWorldPoint(across1, depth0, 0));
+      const source11 = projectReactionGateWorldPoint(gateWorldPoint(across1, depth1, 0));
+      const source01 = projectReactionGateWorldPoint(gateWorldPoint(across0, depth1, 0));
+      const destination00 = projectReactionGateWorldPoint(world00);
+      const destination10 = projectReactionGateWorldPoint(world10);
+      const destination11 = projectReactionGateWorldPoint(world11);
+      const destination01 = projectReactionGateWorldPoint(world01);
+      drawTexturedTriangle(
+        context,
+        source,
+        [source00, source10, source11],
+        [destination00, destination10, destination11],
+      );
+      drawTexturedTriangle(
+        context,
+        source,
+        [source00, source11, source01],
+        [destination00, destination11, destination01],
+      );
+    }
+  }
   context.restore();
+}
+
+type GateProjectionRenderer = {
+  buffer: WebGLBuffer;
+  destinationLocation: number;
+  gl: WebGLRenderingContext;
+  program: WebGLProgram;
+  sourceLocation: number;
+  sourceSizeLocation: WebGLUniformLocation;
+  texture: WebGLTexture;
+  textureSource: string | null;
+};
+
+function createShader(gl: WebGLRenderingContext, type: number, source: string) {
+  const shader = gl.createShader(type);
+  if (!shader) throw new Error('Unable to allocate Reaction Test gate shader.');
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    const message = gl.getShaderInfoLog(shader) ?? 'Unknown shader error';
+    gl.deleteShader(shader);
+    throw new Error(message);
+  }
+  return shader;
+}
+
+function createGateProjectionRenderer(canvas: HTMLCanvasElement): GateProjectionRenderer | null {
+  const gl = canvas.getContext('webgl', {
+    alpha: true,
+    antialias: true,
+    premultipliedAlpha: true,
+    preserveDrawingBuffer: true,
+  });
+  if (!gl) return null;
+
+  try {
+    const vertexShader = createShader(gl, gl.VERTEX_SHADER, `
+      attribute vec3 a_destination;
+      attribute vec3 a_source;
+      varying highp vec3 v_source;
+      void main() {
+        float clipX = ((2.0 * a_destination.x) / ${SCENE_WIDTH.toFixed(1)}) - a_destination.z;
+        float clipY = a_destination.z - ((2.0 * a_destination.y) / ${SCENE_HEIGHT.toFixed(1)});
+        gl_Position = vec4(clipX, clipY, 0.0, a_destination.z);
+        v_source = a_source;
+      }
+    `);
+    const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, `
+      precision highp float;
+      varying highp vec3 v_source;
+      uniform sampler2D u_texture;
+      uniform vec2 u_source_size;
+      void main() {
+        vec2 sourcePixel = v_source.xy / v_source.z;
+        vec2 uv = vec2(sourcePixel.x / u_source_size.x, 1.0 - (sourcePixel.y / u_source_size.y));
+        gl_FragColor = texture2D(u_texture, uv);
+      }
+    `);
+    const program = gl.createProgram();
+    if (!program) throw new Error('Unable to allocate Reaction Test gate program.');
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    gl.deleteShader(vertexShader);
+    gl.deleteShader(fragmentShader);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      throw new Error(gl.getProgramInfoLog(program) ?? 'Unable to link Reaction Test gate program.');
+    }
+    const buffer = gl.createBuffer();
+    const texture = gl.createTexture();
+    const sourceSizeLocation = gl.getUniformLocation(program, 'u_source_size');
+    if (!buffer || !texture || !sourceSizeLocation) {
+      throw new Error('Unable to allocate Reaction Test gate projection resources.');
+    }
+    const destinationLocation = gl.getAttribLocation(program, 'a_destination');
+    const sourceLocation = gl.getAttribLocation(program, 'a_source');
+    if (destinationLocation < 0 || sourceLocation < 0) {
+      throw new Error('Reaction Test gate projection attributes are unavailable.');
+    }
+    return {
+      buffer,
+      destinationLocation,
+      gl,
+      program,
+      sourceLocation,
+      sourceSizeLocation,
+      texture,
+      textureSource: null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function drawGateProjectively(
+  renderer: GateProjectionRenderer,
+  source: HTMLImageElement,
+  progress: number,
+) {
+  const { gl } = renderer;
+  if (gl.isContextLost()) return false;
+  // Do not let an unrelated, already-consumed WebGL error misclassify this
+  // frame. Bound the drain defensively so a broken driver cannot spin here.
+  for (let errorIndex = 0; errorIndex < 8; errorIndex += 1) {
+    if (gl.getError() === gl.NO_ERROR) break;
+  }
+  const sourceWorld = reactionGateWorldQuad(0);
+  const destinationWorld = reactionGateWorldQuad(progress);
+  const indices = [0, 1, 2, 0, 2, 3];
+  const vertices = new Float32Array(indices.flatMap((index) => {
+    const destination = projectReactionGateWorldPointHomogeneous(destinationWorld[index]);
+    const sourceProjection = projectReactionGateWorldPointHomogeneous(sourceWorld[index]);
+    return [
+      destination.x,
+      destination.y,
+      destination.w,
+      sourceProjection.x,
+      sourceProjection.y,
+      sourceProjection.w,
+    ];
+  }));
+
+  gl.viewport(0, 0, SCENE_WIDTH, SCENE_HEIGHT);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.disable(gl.BLEND);
+  gl.disable(gl.CULL_FACE);
+  gl.disable(gl.DEPTH_TEST);
+  gl.useProgram(renderer.program);
+  gl.bindBuffer(gl.ARRAY_BUFFER, renderer.buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(renderer.destinationLocation);
+  gl.vertexAttribPointer(renderer.destinationLocation, 3, gl.FLOAT, false, 24, 0);
+  gl.enableVertexAttribArray(renderer.sourceLocation);
+  gl.vertexAttribPointer(renderer.sourceLocation, 3, gl.FLOAT, false, 24, 12);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, renderer.texture);
+  if (renderer.textureSource !== source.currentSrc) {
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    if (gl.getError() !== gl.NO_ERROR) return false;
+    renderer.textureSource = source.currentSrc;
+  }
+  gl.uniform2f(renderer.sourceSizeLocation, source.naturalWidth, source.naturalHeight);
+  gl.drawArrays(gl.TRIANGLES, 0, indices.length);
+  return gl.getError() === gl.NO_ERROR;
+}
+
+function disposeGateProjectionRenderer(renderer: GateProjectionRenderer) {
+  const { gl } = renderer;
+  gl.deleteBuffer(renderer.buffer);
+  gl.deleteTexture(renderer.texture);
+  gl.deleteProgram(renderer.program);
 }
 
 export type ReactionGateLayerProps = {
@@ -146,7 +298,9 @@ export function ReactionGateLayer({ released, onSettled }: ReactionGateLayerProp
   const layerRef = useRef<HTMLDivElement | null>(null);
   const coordinateSpaceRef = useRef<HTMLDivElement | null>(null);
   const gateCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const gateFallbackCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const gateSourceRef = useRef<HTMLImageElement | null>(null);
+  const projectionRendererRef = useRef<GateProjectionRenderer | null | undefined>(undefined);
   const progressRef = useRef(0);
   const animationFrameRef = useRef<number | null>(null);
   const onSettledRef = useRef(onSettled);
@@ -168,19 +322,89 @@ export function ReactionGateLayer({ released, onSettled }: ReactionGateLayerProp
     return () => observer.disconnect();
   }, []);
 
-  const paint = useCallback((progress: number) => {
-    const gate = gateCanvasRef.current;
+  useEffect(() => () => {
+    if (projectionRendererRef.current && !projectionRendererRef.current.gl.isContextLost()) {
+      disposeGateProjectionRenderer(projectionRendererRef.current);
+    }
+    projectionRendererRef.current = undefined;
+  }, []);
+
+  const paintFallback = useCallback((progress: number, rendererName: string) => {
+    const primaryCanvas = gateCanvasRef.current;
+    const fallbackCanvas = gateFallbackCanvasRef.current;
     const source = gateSourceRef.current;
     const layer = layerRef.current;
-    if (!gate || !source || !layer) return;
+    if (!primaryCanvas || !fallbackCanvas || !source || !layer) return false;
+    const context = fallbackCanvas.getContext('2d');
+    if (!context) return false;
+    drawGateFallback(context, source, progress);
+    primaryCanvas.style.visibility = 'hidden';
+    fallbackCanvas.style.visibility = 'visible';
+    layer.dataset.gateRenderer = rendererName;
+    return true;
+  }, []);
+
+  const paint = useCallback((progress: number) => {
+    const gate = gateCanvasRef.current;
+    const fallbackCanvas = gateFallbackCanvasRef.current;
+    const source = gateSourceRef.current;
+    const layer = layerRef.current;
+    if (!gate || !fallbackCanvas || !source || !layer) return;
     const normalized = Math.min(1, Math.max(0, progress));
     progressRef.current = normalized;
     if (source.complete && source.naturalWidth > 0) {
-      const context = gate.getContext('2d');
-      if (context) drawGate(context, source, rotateGate(normalized));
+      if (projectionRendererRef.current === undefined) {
+        // Acquire WebGL before any 2D context. Rendering the projective plane
+        // directly avoids a full-canvas GPU readback on every animation frame.
+        projectionRendererRef.current = createGateProjectionRenderer(gate);
+      }
+      const renderer = projectionRendererRef.current;
+      if (renderer) {
+        if (drawGateProjectively(renderer, source, normalized)) {
+          gate.style.visibility = 'visible';
+          fallbackCanvas.style.visibility = 'hidden';
+          layer.dataset.gateRenderer = 'projective-single-plane';
+        } else {
+          paintFallback(
+            normalized,
+            renderer.gl.isContextLost()
+              ? 'projective-context-fallback'
+              : 'projective-runtime-fallback',
+          );
+          if (!renderer.gl.isContextLost()) {
+            disposeGateProjectionRenderer(renderer);
+            projectionRendererRef.current = null;
+          }
+        }
+      } else {
+        paintFallback(normalized, 'projective-mesh-fallback');
+      }
     }
     layer.dataset.gateProgress = normalized.toFixed(3);
-  }, []);
+  }, [paintFallback]);
+
+  useEffect(() => {
+    const canvas = gateCanvasRef.current;
+    const layer = layerRef.current;
+    if (!canvas || !layer) return undefined;
+    const handleContextLost = (event: Event) => {
+      event.preventDefault();
+      paintFallback(progressRef.current, 'projective-context-fallback');
+    };
+    const handleContextRestored = () => {
+      // WebGL invalidates every pre-loss resource. Deleting those stale
+      // handles after restoration itself raises INVALID_OPERATION, so discard
+      // the old renderer and build clean resources on the restored context.
+      projectionRendererRef.current = undefined;
+      paint(progressRef.current);
+    };
+    canvas.addEventListener('webglcontextlost', handleContextLost);
+    canvas.addEventListener('webglcontextrestored', handleContextRestored);
+    return () => {
+      canvas.removeEventListener('webglcontextlost', handleContextLost);
+      canvas.removeEventListener('webglcontextrestored', handleContextRestored);
+    };
+  }, [paint, paintFallback]);
 
   useEffect(() => {
     if (animationFrameRef.current != null) {
@@ -225,6 +449,7 @@ export function ReactionGateLayer({ released, onSettled }: ReactionGateLayerProp
       className="reaction-gate-layer"
       data-gate-flush-quad={REACTION_GATE_FLUSH_QUAD.map(({ x, y }) => `${x},${y}`).join(' ')}
       data-gate-motion="single-rigid-source"
+      data-gate-projection="fixed-hinge-world-rotation"
       data-gate-progress="0.000"
       ref={layerRef}
     >
@@ -233,6 +458,12 @@ export function ReactionGateLayer({ released, onSettled }: ReactionGateLayerProp
           className="reaction-gate-canvas"
           height={SCENE_HEIGHT}
           ref={gateCanvasRef}
+          width={SCENE_WIDTH}
+        />
+        <canvas
+          className="reaction-gate-fallback-canvas"
+          height={SCENE_HEIGHT}
+          ref={gateFallbackCanvasRef}
           width={SCENE_WIDTH}
         />
         <img

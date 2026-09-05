@@ -92,6 +92,7 @@
 }
 
 .reaction-gate-canvas,
+.reaction-gate-fallback-canvas,
 .reaction-gate-selected-source {
   position: absolute;
   inset: 0;
@@ -99,6 +100,10 @@
   height: 941px;
   pointer-events: none;
   user-select: none;
+}
+
+.reaction-gate-fallback-canvas {
+  visibility: hidden;
 }
 
 .reaction-gate-selected-source {

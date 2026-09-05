@@ -616,6 +616,8 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
   const sceneFrame = sceneStack.locator('.reaction-scene-frame');
   const sceneBackground = sceneFrame.locator('.reaction-scene-background');
   const gateLayer = sceneFrame.locator('.reaction-gate-layer');
+  const gateCanvas = gateLayer.locator('.reaction-gate-canvas');
+  const gateFallbackCanvas = gateLayer.locator('.reaction-gate-fallback-canvas');
   const gateSource = gateLayer.locator('.reaction-gate-selected-source');
   await expect(sceneStack).toBeVisible();
   await expect(sceneFrame.locator('.reaction-scene-image')).toHaveCount(0);
@@ -650,6 +652,43 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
     fullPage: false,
     path: testInfo.outputPath('reaction-test-upright-desktop.png'),
   });
+
+  const supportsForcedContextLoss = await gateCanvas.evaluate((element) => {
+    const canvas = element as HTMLCanvasElement & {
+      __tracklabTestContextLoss?: { loseContext: () => void; restoreContext: () => void };
+    };
+    const gl = canvas.getContext('webgl');
+    const extension = gl?.getExtension('WEBGL_lose_context');
+    if (!extension) return false;
+    canvas.__tracklabTestContextLoss = extension;
+    extension.loseContext();
+    return true;
+  });
+  if (supportsForcedContextLoss) {
+    await expect(gateLayer).toHaveAttribute('data-gate-renderer', 'projective-context-fallback');
+    await expect(gateCanvas).toHaveCSS('visibility', 'hidden');
+    await expect(gateFallbackCanvas).toHaveCSS('visibility', 'visible');
+    expect(await gateFallbackCanvas.evaluate((element) => {
+      const canvas = element as HTMLCanvasElement;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      if (!context) return 0;
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let pixelCount = 0;
+      for (let index = 3; index < pixels.length; index += 4) {
+        if (pixels[index] > 0) pixelCount += 1;
+      }
+      return pixelCount;
+    })).toBeGreaterThan(1_000);
+    await gateCanvas.evaluate((element) => {
+      const canvas = element as HTMLCanvasElement & {
+        __tracklabTestContextLoss?: { restoreContext: () => void };
+      };
+      canvas.__tracklabTestContextLoss?.restoreContext();
+    });
+    await expect(gateLayer).toHaveAttribute('data-gate-renderer', 'projective-single-plane');
+    await expect(gateCanvas).toHaveCSS('visibility', 'visible');
+    await expect(gateFallbackCanvas).toHaveCSS('visibility', 'hidden');
+  }
 
   for (const viewport of [
     { label: 'compact iPhone', width: 320, height: 568 },
@@ -809,6 +848,8 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
   await expect(reactionView.locator('.reaction-light-stop-marker')).toHaveCount(1);
   await expect(sceneStack).toHaveAttribute('data-gate-state', 'settled', { timeout: 1_500 });
   await expect(gateLayer).toHaveAttribute('data-gate-progress', '1.000');
+  await expect(gateLayer).toHaveAttribute('data-gate-projection', 'fixed-hinge-world-rotation');
+  await expect(gateLayer).toHaveAttribute('data-gate-renderer', 'projective-single-plane');
   const flushQuad = (await gateLayer.getAttribute('data-gate-flush-quad'))
     ?.split(' ')
     .map((pair) => {
@@ -838,29 +879,43 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
   )).toBe('none');
   expect(Math.hypot(flushQuad[0].x - flushQuad[3].x, flushQuad[0].y - flushQuad[3].y)).toBeGreaterThan(30);
   expect(Math.hypot(flushQuad[1].x - flushQuad[2].x, flushQuad[1].y - flushQuad[2].y)).toBeGreaterThan(150);
-  const gateCanvas = gateLayer.locator('.reaction-gate-canvas');
   await expect(gateCanvas).toHaveAttribute('width', '1672');
   await expect(gateCanvas).toHaveAttribute('height', '941');
-  const rasterBounds = await gateCanvas.evaluate((element) => {
-    const canvas = element as HTMLCanvasElement;
-    const context = canvas.getContext('2d', { willReadFrequently: true });
+  const rasterBounds = await gateLayer.evaluate((element) => {
+    const renderer = (element as HTMLElement).dataset.gateRenderer;
+    const canvas = element.querySelector<HTMLCanvasElement>(
+      renderer === 'projective-single-plane'
+        ? '.reaction-gate-canvas'
+        : '.reaction-gate-fallback-canvas',
+    );
+    // The production path owns this canvas with WebGL, while the defensive
+    // fallback owns it with 2D canvas. Snapshot either renderer into a fresh
+    // 2D surface instead of trying to acquire a second, incompatible context.
+    if (!canvas) return null;
+    const snapshot = document.createElement('canvas');
+    snapshot.width = canvas.width;
+    snapshot.height = canvas.height;
+    const context = snapshot.getContext('2d', { willReadFrequently: true });
     const serializedQuad = canvas.closest<HTMLElement>('.reaction-gate-layer')?.dataset.gateFlushQuad ?? '';
     const quad = serializedQuad.split(' ').map((pair) => {
       const [x, y] = pair.split(',').map(Number);
       return { x, y };
     });
     if (!context || quad.length !== 4) return null;
-    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    context.drawImage(canvas, 0, 0);
+    const pixels = context.getImageData(0, 0, snapshot.width, snapshot.height).data;
     let minX = canvas.width;
     let minY = canvas.height;
     let maxX = -1;
     let maxY = -1;
     let outsideQuad = 0;
     let outsidePaintedLines = 0;
+    let pixelCount = 0;
     for (let y = 0; y < canvas.height; y += 1) {
       for (let x = 0; x < canvas.width; x += 1) {
         const alpha = pixels[((y * canvas.width) + x) * 4 + 3];
         if (alpha === 0) continue;
+        pixelCount += 1;
         minX = Math.min(minX, x);
         minY = Math.min(minY, y);
         maxX = Math.max(maxX, x);
@@ -881,9 +936,12 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
         }
       }
     }
-    return { maxX, maxY, minX, minY, outsidePaintedLines, outsideQuad };
+    return { maxX, maxY, minX, minY, outsidePaintedLines, outsideQuad, pixelCount };
   });
   expect(rasterBounds).not.toBeNull();
+  expect(rasterBounds?.pixelCount).toBeGreaterThan(5_000);
+  expect(rasterBounds?.maxX).toBeGreaterThan(rasterBounds?.minX ?? Number.POSITIVE_INFINITY);
+  expect(rasterBounds?.maxY).toBeGreaterThan(rasterBounds?.minY ?? Number.POSITIVE_INFINITY);
   expect(rasterBounds?.outsideQuad).toBe(0);
   expect(rasterBounds?.outsidePaintedLines).toBe(0);
   expect(rasterBounds?.minX).toBeGreaterThanOrEqual(Math.floor(Math.min(...flushQuad.map(({ x }) => x))) - 1);
@@ -4345,6 +4403,7 @@ test('track map save waits for account sync and shared publication', async ({ pa
       }),
     });
   });
+  await mockPublishedPedalZoneTrack(page);
 
   await page.goto('/?track=black-mountain-bmx');
   await page.getByRole('button', { name: 'Open App' }).click();
