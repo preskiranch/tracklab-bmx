@@ -98,23 +98,14 @@
   transform-origin: 0 0;
 }
 
-.reaction-gate-canvas,
-.reaction-gate-fallback-canvas,
-.reaction-gate-selected-source {
+.reaction-gate-svg {
   position: absolute;
   inset: 0;
   width: 1672px;
   height: 941px;
   pointer-events: none;
   user-select: none;
-}
-
-.reaction-gate-fallback-canvas {
-  visibility: hidden;
-}
-
-.reaction-gate-selected-source {
-  opacity: 0;
+  display: block;
 }
 
 .reaction-scene-vignette {

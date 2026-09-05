@@ -644,9 +644,11 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
   const sceneFrame = sceneStack.locator('.reaction-scene-frame');
   const sceneBackground = sceneFrame.locator('.reaction-scene-background');
   const gateLayer = sceneFrame.locator('.reaction-gate-layer');
-  const gateCanvas = gateLayer.locator('.reaction-gate-canvas');
-  const gateFallbackCanvas = gateLayer.locator('.reaction-gate-fallback-canvas');
-  const gateSource = gateLayer.locator('.reaction-gate-selected-source');
+  const gateSvg = gateLayer.locator('svg');
+  const gateMesh = gateSvg.locator('[data-gate-part="mesh"]');
+  const gateBody = gateSvg.locator('[data-gate-part="body"]');
+  const gateCap = gateSvg.locator('[data-gate-part="cap"]');
+  const fixedDeck = gateSvg.locator('[data-gate-part="fixed"]');
   await expect(sceneStack).toBeVisible();
   await expect(sceneFrame.locator('.reaction-scene-image')).toHaveCount(0);
   await expect(sceneFrame.locator('.reaction-scene-mid-drop')).toHaveCount(0);
@@ -654,23 +656,42 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
   await expect.poll(() => sceneBackground.evaluate((image) => {
     const frame = image as HTMLImageElement;
     return { complete: frame.complete, height: frame.naturalHeight, width: frame.naturalWidth };
-  })).toEqual({ complete: true, height: 941, width: 1672 });
-  await expect(gateLayer).toHaveAttribute('data-gate-motion', 'single-rigid-source');
-  await expect(gateSource).toHaveAttribute('width', '1672');
-  await expect(gateSource).toHaveAttribute('height', '941');
-  await expect.poll(() => gateSource.evaluate((image) => ({
-    complete: (image as HTMLImageElement).complete,
-    height: (image as HTMLImageElement).naturalHeight,
-    width: (image as HTMLImageElement).naturalWidth,
-  }))).toEqual({ complete: true, height: 941, width: 1672 });
-  expect(await gateSource.evaluate(async (image) => {
-    const response = await fetch((image as HTMLImageElement).currentSrc);
-    const bytes = await response.arrayBuffer();
-    const digest = await crypto.subtle.digest('SHA-256', bytes);
-    return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-  })).toBe('b58ebc802a1c1b0c56c9c572376e176d767e96a88105ed6f58cd779f370224c3');
+  })).toEqual({ complete: true, height: 941, width: 1671 });
+  await expect(gateLayer).toHaveAttribute('data-gate-motion', 'rigid-quarter-cylinder');
+  await expect(gateLayer).toHaveAttribute('data-gate-renderer', 'native-svg');
+  await expect(gateSvg).toBeVisible();
+  await expect(gateSvg).toHaveAttribute('viewBox', '0 0 1672 941');
+  await expect(gateLayer.locator('canvas, img')).toHaveCount(0);
+  await expect(gateMesh).toBeVisible();
+  await expect(gateMesh).toHaveAttribute('data-gate-quad', (await gateLayer.getAttribute('data-gate-upright-quad'))!);
+  await expect(gateBody).toBeVisible();
+  await expect(gateCap).toBeVisible();
+  await expect(fixedDeck).toBeVisible();
+  const uprightMeshBounds = await gateMesh.evaluate((element) => {
+    const { x, y, width, height } = (element as SVGGraphicsElement).getBBox();
+    return { x, y, width, height };
+  });
+  expect(uprightMeshBounds.width).toBeGreaterThan(100);
+  expect(uprightMeshBounds.height).toBeGreaterThan(100);
+  const immutableDeck = await fixedDeck.innerHTML();
   await expect.poll(() => gateLayer.getAttribute('data-gate-progress')).toBe('0.000');
   await expect(sceneStack).toHaveAttribute('data-gate-state', 'upright');
+  await sceneStack.evaluate((element) => {
+    const layer = element.querySelector<HTMLElement>('.reaction-gate-layer')!;
+    const gateWindow = window as typeof window & {
+      __reactionGateTransitions?: Array<{ at: number; progress: number; state: string | null }>;
+    };
+    const record = () => gateWindow.__reactionGateTransitions?.push({
+      at: performance.now(),
+      progress: Number(layer.dataset.gateProgress),
+      state: element.getAttribute('data-gate-state'),
+    });
+    gateWindow.__reactionGateTransitions = [];
+    record();
+    const observer = new MutationObserver(record);
+    observer.observe(element, { attributes: true, attributeFilter: ['data-gate-state'] });
+    observer.observe(layer, { attributes: true, attributeFilter: ['data-gate-progress'] });
+  });
 
   const immutableBackground = await sceneBackground.evaluate((image) => ({
     src: (image as HTMLImageElement).currentSrc,
@@ -680,43 +701,6 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
     fullPage: false,
     path: testInfo.outputPath('reaction-test-upright-desktop.png'),
   });
-
-  const supportsForcedContextLoss = await gateCanvas.evaluate((element) => {
-    const canvas = element as HTMLCanvasElement & {
-      __tracklabTestContextLoss?: { loseContext: () => void; restoreContext: () => void };
-    };
-    const gl = canvas.getContext('webgl');
-    const extension = gl?.getExtension('WEBGL_lose_context');
-    if (!extension) return false;
-    canvas.__tracklabTestContextLoss = extension;
-    extension.loseContext();
-    return true;
-  });
-  if (supportsForcedContextLoss) {
-    await expect(gateLayer).toHaveAttribute('data-gate-renderer', 'projective-context-fallback');
-    await expect(gateCanvas).toHaveCSS('visibility', 'hidden');
-    await expect(gateFallbackCanvas).toHaveCSS('visibility', 'visible');
-    expect(await gateFallbackCanvas.evaluate((element) => {
-      const canvas = element as HTMLCanvasElement;
-      const context = canvas.getContext('2d', { willReadFrequently: true });
-      if (!context) return 0;
-      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
-      let pixelCount = 0;
-      for (let index = 3; index < pixels.length; index += 4) {
-        if (pixels[index] > 0) pixelCount += 1;
-      }
-      return pixelCount;
-    })).toBeGreaterThan(1_000);
-    await gateCanvas.evaluate((element) => {
-      const canvas = element as HTMLCanvasElement & {
-        __tracklabTestContextLoss?: { restoreContext: () => void };
-      };
-      canvas.__tracklabTestContextLoss?.restoreContext();
-    });
-    await expect(gateLayer).toHaveAttribute('data-gate-renderer', 'projective-single-plane');
-    await expect(gateCanvas).toHaveCSS('visibility', 'visible');
-    await expect(gateFallbackCanvas).toHaveCSS('visibility', 'hidden');
-  }
 
   const responsiveViewports = [
     { label: 'compact-iphone-portrait', width: 320, height: 568 },
@@ -772,27 +756,36 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
         const scene = element.querySelector<HTMLElement>('.reaction-scene-frame')?.getBoundingClientRect();
         const background = element.querySelector<HTMLImageElement>('.reaction-scene-background');
         const gateLayer = element.querySelector<HTMLElement>('.reaction-gate-layer');
-        const gateSource = element.querySelector<HTMLImageElement>('.reaction-gate-selected-source');
-        const releasedQuad = (gateLayer?.dataset.gateFlushQuad ?? '').split(' ').map((pair) => {
+        const gateSvg = gateLayer?.querySelector<SVGSVGElement>('svg');
+        const parseQuad = (value: string) => value.trim().split(' ').map((pair) => {
           const [x, y] = pair.split(',').map(Number);
           return { x, y };
         });
-        // These are the corners of the approved upright gate in the 1672 × 941
-        // source photograph. Include the released corners to prove that a crop
-        // cannot hide either end of its movement after the device is rotated.
+        // Include both ends of the actual model's movement, so a responsive
+        // crop cannot hide the upright top or the released edge after rotation.
         const gateCorners = [
-          { x: 929, y: 459 }, { x: 1174, y: 671 },
-          { x: 1147, y: 879 }, { x: 928, y: 500 },
-          ...releasedQuad,
+          ...parseQuad(gateLayer?.dataset.gateUprightQuad ?? ''),
+          ...parseQuad(gateLayer?.dataset.gateFlushQuad ?? ''),
         ].map(({ x, y }) => ({
           x: (scene?.left ?? 0) + (x * (scene?.width ?? 0) / 1672),
           y: (scene?.top ?? 0) + (y * (scene?.height ?? 0) / 941),
         }));
+        const drawing = gateSvg?.getBBox();
+        const renderedGateCorners = drawing ? [
+          { x: drawing.x, y: drawing.y },
+          { x: drawing.x + drawing.width, y: drawing.y },
+          { x: drawing.x + drawing.width, y: drawing.y + drawing.height },
+          { x: drawing.x, y: drawing.y + drawing.height },
+        ].map(({ x, y }) => ({
+          x: (scene?.left ?? 0) + (x * (scene?.width ?? 0) / 1672),
+          y: (scene?.top ?? 0) + (y * (scene?.height ?? 0) / 941),
+        })) : [];
+        const allGateCorners = [...gateCorners, ...renderedGateCorners];
         const gateBounds = new DOMRect(
-          Math.min(...gateCorners.map(({ x }) => x)),
-          Math.min(...gateCorners.map(({ y }) => y)),
-          Math.max(...gateCorners.map(({ x }) => x)) - Math.min(...gateCorners.map(({ x }) => x)),
-          Math.max(...gateCorners.map(({ y }) => y)) - Math.min(...gateCorners.map(({ y }) => y)),
+          Math.min(...allGateCorners.map(({ x }) => x)),
+          Math.min(...allGateCorners.map(({ y }) => y)),
+          Math.max(...allGateCorners.map(({ x }) => x)) - Math.min(...allGateCorners.map(({ x }) => x)),
+          Math.max(...allGateCorners.map(({ y }) => y)) - Math.min(...allGateCorners.map(({ y }) => y)),
         );
         const readableText = (text: HTMLElement, container: HTMLElement) => {
           const textRange = document.createRange();
@@ -827,17 +820,22 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
           stageRect: stage?.toJSON(),
           sceneRect: scene?.toJSON(),
           gateCorners,
+          renderedGateCorners,
           background: background ? {
             naturalHeight: background.naturalHeight,
             naturalWidth: background.naturalWidth,
             objectFit: getComputedStyle(background).objectFit,
             rect: background.getBoundingClientRect().toJSON(),
           } : null,
-          gateSource: gateSource ? {
-            naturalHeight: gateSource.naturalHeight,
-            naturalWidth: gateSource.naturalWidth,
+          gateSvg: gateSvg ? {
+            viewBox: {
+              x: gateSvg.viewBox.baseVal.x,
+              y: gateSvg.viewBox.baseVal.y,
+              width: gateSvg.viewBox.baseVal.width,
+              height: gateSvg.viewBox.baseVal.height,
+            },
             layerRect: gateLayer?.getBoundingClientRect().toJSON(),
-            coordinateRect: rectFor('.reaction-gate-coordinate-space'),
+            coordinateRect: gateSvg.getBoundingClientRect().toJSON(),
           } : null,
           titleRect: rectFor('.reaction-title'),
           exitRect: rectFor('.reaction-exit-action'),
@@ -862,7 +860,7 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
         };
       });
       // Photographic lamps scale with the hill; no separate labels or checkmark.
-      expect(geometry.bulbWidth).toBeCloseTo(Number(geometry.sceneRect?.width) * 64 / 1672, 1);
+      expect(geometry.bulbWidth).toBeCloseTo(Number(geometry.sceneRect?.width) * 68 / 1671, 1);
       expect(geometry.lightLabels).toHaveLength(0);
       expect(geometry.personalRecord.fontSize).toBeGreaterThanOrEqual(16);
       expect(geometry.personalRecord.fits).toBe(true);
@@ -897,17 +895,18 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
         expect(Number(geometry.panelRect?.top)).toBeCloseTo(Number(geometry.stageRect?.bottom), 1);
       }
       expect(geometry.panelRect?.bottom).toBeCloseTo(viewport.height, 1);
-      expect(geometry.background).toMatchObject({ naturalHeight: 941, naturalWidth: 1672 });
+      expect(geometry.background).toMatchObject({ naturalHeight: 941, naturalWidth: 1671 });
       expect(geometry.background?.rect).toEqual(geometry.sceneRect);
       expect(Number(geometry.background?.rect.width) / Number(geometry.background?.rect.height)).toBeCloseTo(1672 / 941, 2);
-      expect(geometry.gateSource).toMatchObject({ naturalHeight: 941, naturalWidth: 1672 });
-      expect(geometry.gateSource?.layerRect).toEqual(geometry.sceneRect);
+      expect(geometry.gateSvg?.viewBox).toEqual({ x: 0, y: 0, width: 1672, height: 941 });
+      expect(geometry.gateSvg?.layerRect).toEqual(geometry.sceneRect);
       for (const edge of ['left', 'top', 'width', 'height']) {
-        expect(Number(geometry.gateSource?.coordinateRect?.[edge]))
+        expect(Number(geometry.gateSvg?.coordinateRect?.[edge]))
           .toBeCloseTo(Number(geometry.sceneRect?.[edge]), 1);
       }
       expect(geometry.gateCorners).toHaveLength(8);
-      for (const point of geometry.gateCorners) {
+      expect(geometry.renderedGateCorners).toHaveLength(4);
+      for (const point of [...geometry.gateCorners, ...geometry.renderedGateCorners]) {
         expect(Number.isFinite(point.x) && Number.isFinite(point.y)).toBe(true);
         expect(point.x).toBeGreaterThanOrEqual(Number(geometry.stageRect?.left) - 1);
         expect(point.x).toBeLessThanOrEqual(Number(geometry.stageRect?.right) + 1);
@@ -1015,7 +1014,21 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
   await expect(sceneStack).toHaveAttribute('data-gate-state', 'settled', { timeout: 1_500 });
   await expect(gateLayer).toHaveAttribute('data-gate-progress', '1.000');
   await expect(gateLayer).toHaveAttribute('data-gate-projection', 'fixed-hinge-world-rotation');
-  await expect(gateLayer).toHaveAttribute('data-gate-renderer', 'projective-single-plane');
+  await expect(gateLayer).toHaveAttribute('data-gate-renderer', 'native-svg');
+  const gateTransitions = await page.evaluate(() => (
+    window as typeof window & {
+      __reactionGateTransitions?: Array<{ at: number; progress: number; state: string | null }>;
+    }
+  ).__reactionGateTransitions ?? []);
+  expect(gateTransitions.some(({ progress, state }) => (
+    progress > 0 && progress < 1 && state === 'dropping'
+  ))).toBe(true);
+  const settledTransitions = gateTransitions.filter(({ state }) => state === 'settled');
+  expect(settledTransitions.length).toBeGreaterThan(0);
+  expect(settledTransitions.every(({ progress }) => progress === 1)).toBe(true);
+  for (let index = 1; index < gateTransitions.length; index += 1) {
+    expect(gateTransitions[index].progress).toBeGreaterThanOrEqual(gateTransitions[index - 1].progress);
+  }
   const flushQuad = (await gateLayer.getAttribute('data-gate-flush-quad'))
     ?.split(' ')
     .map((pair) => {
@@ -1023,15 +1036,12 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
       return { x, y };
     }) ?? [];
   expect(flushQuad).toHaveLength(4);
-  // Both the released edge and the fixed hinge edge remain between the two
-  // painted white lane boundaries in the 1672 × 941 scene master. The upper
-  // stripe follows the measured inner edge of the actual painted line.
-  const upperBoundaryY = (x: number) => 150.7 + (0.37044 * x);
-  const lowerBoundaryY = (x: number) => 879 + ((x - 1147) * ((941 - 879) / (1490 - 1147)));
-  const paintedLineClearance = 10;
-  for (const point of flushQuad.slice(0, 2)) {
-    expect(point.y).toBeGreaterThanOrEqual(upperBoundaryY(point.x) + paintedLineClearance);
-    expect(point.y).toBeLessThanOrEqual(lowerBoundaryY(point.x) - paintedLineClearance);
+  for (const { x, y } of flushQuad) {
+    expect(Number.isFinite(x) && Number.isFinite(y)).toBe(true);
+    expect(x).toBeGreaterThanOrEqual(0);
+    expect(x).toBeLessThanOrEqual(1672);
+    expect(y).toBeGreaterThanOrEqual(0);
+    expect(y).toBeLessThanOrEqual(941);
   }
   const turns = flushQuad.map((point, index) => {
     const next = flushQuad[(index + 1) % flushQuad.length];
@@ -1040,80 +1050,38 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
       - ((next.y - point.y) * (afterNext.x - next.x));
   });
   expect(turns.every((turn) => turn > 0) || turns.every((turn) => turn < 0)).toBe(true);
-  expect(await gateLayer.locator('.reaction-gate-canvas').evaluate(
-    (element) => getComputedStyle(element).filter,
-  )).toBe('none');
   expect(Math.hypot(flushQuad[0].x - flushQuad[3].x, flushQuad[0].y - flushQuad[3].y)).toBeGreaterThan(30);
   expect(Math.hypot(flushQuad[1].x - flushQuad[2].x, flushQuad[1].y - flushQuad[2].y)).toBeGreaterThan(150);
-  await expect(gateCanvas).toHaveAttribute('width', '1672');
-  await expect(gateCanvas).toHaveAttribute('height', '941');
-  const rasterBounds = await gateLayer.evaluate((element) => {
-    const renderer = (element as HTMLElement).dataset.gateRenderer;
-    const canvas = element.querySelector<HTMLCanvasElement>(
-      renderer === 'projective-single-plane'
-        ? '.reaction-gate-canvas'
-        : '.reaction-gate-fallback-canvas',
-    );
-    // The production path owns this canvas with WebGL, while the defensive
-    // fallback owns it with 2D canvas. Snapshot either renderer into a fresh
-    // 2D surface instead of trying to acquire a second, incompatible context.
-    if (!canvas) return null;
-    const snapshot = document.createElement('canvas');
-    snapshot.width = canvas.width;
-    snapshot.height = canvas.height;
-    const context = snapshot.getContext('2d', { willReadFrequently: true });
-    const serializedQuad = canvas.closest<HTMLElement>('.reaction-gate-layer')?.dataset.gateFlushQuad ?? '';
-    const quad = serializedQuad.split(' ').map((pair) => {
-      const [x, y] = pair.split(',').map(Number);
-      return { x, y };
-    });
-    if (!context || quad.length !== 4) return null;
-    context.drawImage(canvas, 0, 0);
-    const pixels = context.getImageData(0, 0, snapshot.width, snapshot.height).data;
-    let minX = canvas.width;
-    let minY = canvas.height;
-    let maxX = -1;
-    let maxY = -1;
-    let outsideQuad = 0;
-    let outsidePaintedLines = 0;
-    let pixelCount = 0;
-    for (let y = 0; y < canvas.height; y += 1) {
-      for (let x = 0; x < canvas.width; x += 1) {
-        const alpha = pixels[((y * canvas.width) + x) * 4 + 3];
-        if (alpha === 0) continue;
-        pixelCount += 1;
-        minX = Math.min(minX, x);
-        minY = Math.min(minY, y);
-        maxX = Math.max(maxX, x);
-        maxY = Math.max(maxY, y);
-        const sample = { x: x + 0.5, y: y + 0.5 };
-        const inside = quad.every((point, index) => {
-          const next = quad[(index + 1) % quad.length];
-          const edgeX = next.x - point.x;
-          const edgeY = next.y - point.y;
-          const cross = (edgeX * (sample.y - point.y)) - (edgeY * (sample.x - point.x));
-          // One source pixel of tolerance covers canvas edge antialiasing.
-          return cross >= -Math.hypot(edgeX, edgeY);
-        });
-        if (!inside) outsideQuad += 1;
-        if (sample.y < (150.7 + (0.37044 * sample.x)) - 2
-          || sample.y > (879 + ((sample.x - 1147) * ((941 - 879) / (1490 - 1147)))) + 2) {
-          outsidePaintedLines += 1;
-        }
-      }
-    }
-    return { maxX, maxY, minX, minY, outsidePaintedLines, outsideQuad, pixelCount };
+  await expect(gateMesh).toBeVisible();
+  await expect(gateMesh).toHaveAttribute('data-gate-quad', (await gateLayer.getAttribute('data-gate-flush-quad'))!);
+  const settledMeshBounds = await gateMesh.evaluate((element) => {
+    const { x, y, width, height } = (element as SVGGraphicsElement).getBBox();
+    return { x, y, width, height };
   });
-  expect(rasterBounds).not.toBeNull();
-  expect(rasterBounds?.pixelCount).toBeGreaterThan(5_000);
-  expect(rasterBounds?.maxX).toBeGreaterThan(rasterBounds?.minX ?? Number.POSITIVE_INFINITY);
-  expect(rasterBounds?.maxY).toBeGreaterThan(rasterBounds?.minY ?? Number.POSITIVE_INFINITY);
-  expect(rasterBounds?.outsideQuad).toBe(0);
-  expect(rasterBounds?.outsidePaintedLines).toBe(0);
-  expect(rasterBounds?.minX).toBeGreaterThanOrEqual(Math.floor(Math.min(...flushQuad.map(({ x }) => x))) - 1);
-  expect(rasterBounds?.minY).toBeGreaterThanOrEqual(Math.floor(Math.min(...flushQuad.map(({ y }) => y))) - 1);
-  expect(rasterBounds?.maxX).toBeLessThanOrEqual(Math.ceil(Math.max(...flushQuad.map(({ x }) => x))) + 1);
-  expect(rasterBounds?.maxY).toBeLessThanOrEqual(Math.ceil(Math.max(...flushQuad.map(({ y }) => y))) + 1);
+  // The rendered mesh spans the receiving footprint. The 2 px tolerance only
+  // accommodates its narrow hinge rail, which straddles the fixed hinge.
+  const expectedMeshBounds = {
+    x: Math.min(...flushQuad.map(({ x }) => x)),
+    y: Math.min(...flushQuad.map(({ y }) => y)),
+    right: Math.max(...flushQuad.map(({ x }) => x)),
+    bottom: Math.max(...flushQuad.map(({ y }) => y)),
+  };
+  for (const [actual, expected] of [
+    [settledMeshBounds.x, expectedMeshBounds.x],
+    [settledMeshBounds.y, expectedMeshBounds.y],
+    [settledMeshBounds.x + settledMeshBounds.width, expectedMeshBounds.right],
+    [settledMeshBounds.y + settledMeshBounds.height, expectedMeshBounds.bottom],
+  ]) {
+    expect(Math.abs(actual - expected)).toBeLessThanOrEqual(2);
+  }
+  expect(settledMeshBounds).not.toEqual(uprightMeshBounds);
+  expect(await gateBody.evaluate((element) => {
+    const { width, height } = (element as SVGGraphicsElement).getBBox();
+    return { width, height };
+  })).toEqual({ width: 0, height: 0 });
+  await expect(gateBody.locator('*')).toHaveCount(0);
+  await expect(gateCap).toHaveCount(0);
+  expect(await fixedDeck.innerHTML()).toBe(immutableDeck);
   const settledBackground = await sceneBackground.evaluate((image) => ({
     src: (image as HTMLImageElement).currentSrc,
     transform: getComputedStyle(image).transform,

@@ -1,98 +1,81 @@
 export type ReactionGatePoint = { x: number; y: number };
-export type ReactionGateQuad = [
-  ReactionGatePoint,
-  ReactionGatePoint,
-  ReactionGatePoint,
-  ReactionGatePoint,
-];
-
-export type ReactionGateWorldPoint = {
-  across: number;
-  downhill: number;
-  upright: number;
-};
-
-export type ReactionGateHomogeneousPoint = {
-  w: number;
-  x: number;
-  y: number;
-};
+export type ReactionGateQuad = [ReactionGatePoint, ReactionGatePoint, ReactionGatePoint, ReactionGatePoint];
+export type ReactionGateWorldPoint = { across: number; downhill: number; upright: number };
+export type ReactionGateHomogeneousPoint = { w: number; x: number; y: number };
 
 export const REACTION_GATE_WORLD_WIDTH = 8;
+export const REACTION_GATE_RADIUS = 1;
+export const REACTION_GATE_FRONT_STRIP_DEPTH = 0.12;
+const HALF_PI = Math.PI / 2;
+const EPSILON = 1e-9;
 
-// The source crop is the exact gate leaf in the approved master artwork,
-// clockwise from the far/top corner. The final two points form the hinge.
-export const REACTION_GATE_SOURCE_QUAD: ReactionGateQuad = [
-  { x: 929, y: 459 },
-  { x: 1174, y: 671 },
-  { x: 1147, y: 879 },
-  { x: 928, y: 500 },
-];
-
-// A calibrated projective camera for the approved photograph. The gate is a
-// unit-depth rectangle spanning eight lane units in world space. Animation is
-// performed in that world space, then projected once as a single plane.
-//
-// At zero degrees the first three columns reproduce SOURCE_QUAD exactly. The
-// downhill column puts the released leaf inside both painted lane boundaries
-// with a deliberate raster/antialiasing margin.
-const REACTION_GATE_CAMERA = {
-  origin: { x: 928, y: 500, w: 1 },
-  across: {
-    x: -720.4497389038853 / REACTION_GATE_WORLD_WIDTH,
-    y: -340.9444816883116 / REACTION_GATE_WORLD_WIDTH,
-    w: -0.8190494672221796 / REACTION_GATE_WORLD_WIDTH,
-  },
-  upright: {
-    x: -13.733804954024862,
-    y: -48.27967327656608,
-    w: -0.015859854632961974,
-  },
-  downhill: {
-    x: 135.1132,
-    y: 75.9432,
-    w: 0.0826,
-  },
-} as const;
-
-function clampProgress(progress: number) {
-  return Math.min(1, Math.max(0, progress));
+export function clampReactionGateProgress(progress: number) {
+  return Number.isNaN(progress) ? 0 : Math.min(1, Math.max(0, progress));
 }
 
+/** Across is zero at the near end and eight at the far end for every surface. */
+export function rotateReactionGateWorldPoint(
+  point: ReactionGateWorldPoint,
+  progress: number,
+): ReactionGateWorldPoint {
+  const angle = clampReactionGateProgress(progress) * HALF_PI;
+  const cosine = Math.cos(angle);
+  const sine = Math.sin(angle);
+  const upright = (point.upright * cosine) - (point.downhill * sine);
+  return {
+    across: point.across,
+    downhill: (point.downhill * cosine) + (point.upright * sine),
+    upright: Math.abs(upright) < EPSILON ? 0 : upright,
+  };
+}
+
+export function reactionGateWorldPoint(across: number, radius: number, progress: number) {
+  return rotateReactionGateWorldPoint({ across, downhill: 0, upright: radius }, progress);
+}
+
+/** Clockwise from the far free corner; the final two corners form the fixed hinge. */
 export function reactionGateWorldQuad(progress: number): [
-  ReactionGateWorldPoint,
-  ReactionGateWorldPoint,
-  ReactionGateWorldPoint,
-  ReactionGateWorldPoint,
+  ReactionGateWorldPoint, ReactionGateWorldPoint, ReactionGateWorldPoint, ReactionGateWorldPoint,
 ] {
-  const angle = clampProgress(progress) * (Math.PI / 2);
-  const upright = Math.cos(angle);
-  const downhill = Math.sin(angle);
   return [
-    { across: 0, upright, downhill },
-    { across: REACTION_GATE_WORLD_WIDTH, upright, downhill },
-    { across: REACTION_GATE_WORLD_WIDTH, upright: 0, downhill: 0 },
-    { across: 0, upright: 0, downhill: 0 },
+    reactionGateWorldPoint(REACTION_GATE_WORLD_WIDTH, REACTION_GATE_RADIUS, progress),
+    reactionGateWorldPoint(0, REACTION_GATE_RADIUS, progress),
+    reactionGateWorldPoint(0, 0, progress),
+    reactionGateWorldPoint(REACTION_GATE_WORLD_WIDTH, 0, progress),
   ];
 }
 
-export function projectReactionGateWorldPointHomogeneous(
-  point: ReactionGateWorldPoint,
-): ReactionGateHomogeneousPoint {
-  const { origin, across, upright, downhill } = REACTION_GATE_CAMERA;
+/**
+ * The barrel is a quarter cylinder, sharing the mesh's radius. Intersect its
+ * rotated section with upright >= 0 before projection; the receiver conceals
+ * the rest. Its width and both end planes remain unchanged during the drop.
+ */
+export function reactionGateBodyArc(progress: number, across = 0, segments = 64): ReactionGateWorldPoint[] {
+  const normalized = clampReactionGateProgress(progress);
+  if (normalized === 1) return [];
+  const angle = normalized * HALF_PI;
+  const steps = Math.max(1, Math.floor(segments));
+  return Array.from({ length: steps + 1 }, (_, index) => {
+    const theta = angle + ((HALF_PI - angle) * index / steps);
+    return {
+      across,
+      downhill: REACTION_GATE_RADIUS * Math.sin(theta),
+      upright: index === steps ? 0 : REACTION_GATE_RADIUS * Math.cos(theta),
+    };
+  });
+}
+
+export function reactionGateBodySection(progress: number, across = 0, segments = 64): ReactionGateWorldPoint[] {
+  const arc = reactionGateBodyArc(progress, across, segments);
+  return arc.length ? [{ across, downhill: 0, upright: 0 }, ...arc] : [];
+}
+
+/** One shared camera aligns the entire assembly with the approved pad/hill seam. */
+export function projectReactionGateWorldPointHomogeneous(point: ReactionGateWorldPoint): ReactionGateHomogeneousPoint {
   return {
-    x: origin.x
-      + (point.across * across.x)
-      + (point.upright * upright.x)
-      + (point.downhill * downhill.x),
-    y: origin.y
-      + (point.across * across.y)
-      + (point.upright * upright.y)
-      + (point.downhill * downhill.y),
-    w: origin.w
-      + (point.across * across.w)
-      + (point.upright * upright.w)
-      + (point.downhill * downhill.w),
+    w: 1 + (0.32 * point.across),
+    x: 949 + (255.175 * point.across) + (225 * point.downhill) + (55 * point.upright),
+    y: 801 + (106.355 * point.across) + (55 * point.downhill) - (217 * point.upright),
   };
 }
 
@@ -108,4 +91,7 @@ export function projectReactionGateQuad(progress: number): ReactionGateQuad {
   return reactionGateWorldQuad(progress).map(projectReactionGateWorldPoint) as ReactionGateQuad;
 }
 
+// Legacy names remain available to callers; these now describe the native
+// geometry, rather than a hand-selected crop in an obsolete source image.
+export const REACTION_GATE_SOURCE_QUAD = projectReactionGateQuad(0);
 export const REACTION_GATE_FLUSH_QUAD = projectReactionGateQuad(1);

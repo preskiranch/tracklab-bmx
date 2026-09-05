@@ -489,7 +489,7 @@ for (const [cueNumber, stoppedStage] of ['red', 'yellow-1', 'yellow-2', 'green']
     }, cueNumber);
     await page.setViewportSize({ width: 1180, height: 820 });
     const view = await openReactionTest(page);
-    await expect(view.locator('.reaction-scene-background')).toHaveJSProperty('naturalWidth', 1672);
+    await expect(view.locator('.reaction-scene-background')).toHaveJSProperty('naturalWidth', 1671);
     await expect(view.locator('[data-lamp-state="dim"]')).toHaveCount(4);
     await view.getByRole('button', { name: 'Start Reaction Test', exact: true }).click();
     await expect(view.locator(`[data-reaction-stage="${stoppedStage}"]`)).toHaveAttribute('data-lamp-state', 'stopped');

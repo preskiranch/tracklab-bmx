@@ -102,7 +102,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
       Object.assign(frame.style, {
         width: `${frameWidth}px`,
         height: `${frameHeight}px`,
-        left: `${portrait ? (width - visibleWidth * scale) / 2 - cropLeft * scale : width - frameWidth}px`,
+        left: `${portrait ? (width - visibleWidth * scale) / 2 - cropLeft * scale : (width - frameWidth) / 2}px`,
         top: `${headerSpace + (photoHeight - frameHeight) / 2}px`,
       });
     };
@@ -408,8 +408,8 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
             <div className="reaction-scene-frame" ref={sceneFrameRef}>
               <img
                 className="reaction-scene-background"
-                src="/assets/reaction-test-hill-tree.png"
-                alt="BMX starting hill with a four-lamp metal signal tree on the platform beside the starting gate"
+                src="/assets/reaction-test-bmx-scene.jpg"
+                alt="BMX starting hill with a four-lamp signal tree, starting platform, trackside spectators and canopies"
                 draggable={false}
               />
               <ReactionGateLayer released={gateReleased} onSettled={handleGateSettled} />
