@@ -639,7 +639,7 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
   const desktopBulbWidth = await reactionView.locator('.reaction-light-bulb').first().evaluate(
     (element) => element.getBoundingClientRect().width,
   );
-  expect(desktopBulbWidth).toBeGreaterThanOrEqual(50);
+  expect(desktopBulbWidth).toBeGreaterThan(20);
   const sceneStack = reactionView.locator('.reaction-scene-stack');
   const sceneFrame = sceneStack.locator('.reaction-scene-frame');
   const sceneBackground = sceneFrame.locator('.reaction-scene-background');
@@ -861,14 +861,9 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
           documentHeightFits: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
         };
       });
-      expect(geometry.bulbWidth).toBeGreaterThanOrEqual(
-        viewport.height <= 480 || viewport.width <= 320 ? 32 : 38,
-      );
-      expect(geometry.lightLabels).toHaveLength(4);
-      for (const label of geometry.lightLabels) {
-        expect(label.fontSize).toBeGreaterThanOrEqual(14);
-        expect(label).toMatchObject({ fits: true, clearsBulb: true, clearsMarker: true });
-      }
+      // Photographic lamps scale with the hill; no separate labels or checkmark.
+      expect(geometry.bulbWidth).toBeCloseTo(Number(geometry.sceneRect?.width) * 64 / 1672, 1);
+      expect(geometry.lightLabels).toHaveLength(0);
       expect(geometry.personalRecord.fontSize).toBeGreaterThanOrEqual(16);
       expect(geometry.personalRecord.fits).toBe(true);
       expect(geometry.documentFits).toBe(true);
@@ -887,12 +882,9 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
       expect(geometry.stageRect?.y).toBeCloseTo(0, 1);
       expect.soft(Number(geometry.stageRect?.width) * Number(geometry.stageRect?.height))
         .toBeGreaterThan(viewport.width * viewport.height * 0.5);
-      // The source frame must cover the entire photo area. Constraining it to
-      // fit inside the portrait viewport caused the original letterboxing.
-      expect(geometry.sceneRect?.left).toBeLessThanOrEqual(Number(geometry.stageRect?.left) + 1);
-      expect(geometry.sceneRect?.top).toBeLessThanOrEqual(Number(geometry.stageRect?.top) + 1);
-      expect(geometry.sceneRect?.right).toBeGreaterThanOrEqual(Number(geometry.stageRect?.right) - 1);
-      expect(geometry.sceneRect?.bottom).toBeGreaterThanOrEqual(Number(geometry.stageRect?.bottom) - 1);
+      // Fit the physical tree and gate together; portrait may letterbox.
+      expect(geometry.sceneRect?.top).toBeGreaterThanOrEqual(Number(geometry.stageRect?.top) - 1);
+      expect(geometry.sceneRect?.bottom).toBeLessThanOrEqual(Number(geometry.stageRect?.bottom) + 1);
       if (viewport.width >= 1100 && viewport.width / viewport.height >= 2.7) {
         // Very wide displays reserve a right-hand control rail so a shallow
         // photo crop cannot cut off the far end of the upright gate.
@@ -1016,12 +1008,10 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
   await expect(prBadge).not.toContainText('2.00 sec');
   expect(await prBadge.evaluate((element) => getComputedStyle(element).animationName)).toBe('reaction-pr-flash');
   const stoppedLight = reactionView.locator('[data-reaction-stage="green"]');
-  await expect(stoppedLight.locator('.reaction-light-stop-marker')).toBeVisible();
-  await expect(stoppedLight.locator('.reaction-light-stop-marker')).toHaveAttribute(
-    'aria-label',
-    'Reaction recorded at the green light',
-  );
-  await expect(reactionView.locator('.reaction-light-stop-marker')).toHaveCount(1);
+  await expect(stoppedLight).toHaveAttribute('data-lamp-state', 'stopped');
+  await expect(stoppedLight).toHaveAttribute('aria-label', 'green light, reaction recorded here');
+  await expect(reactionView.locator('.reaction-light-stop-marker')).toHaveCount(0);
+  await expect(reactionView.locator('[data-lamp-state="dim"]')).toHaveCount(3);
   await expect(sceneStack).toHaveAttribute('data-gate-state', 'settled', { timeout: 1_500 });
   await expect(gateLayer).toHaveAttribute('data-gate-progress', '1.000');
   await expect(gateLayer).toHaveAttribute('data-gate-projection', 'fixed-hinge-world-rotation');

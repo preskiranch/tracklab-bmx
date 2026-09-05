@@ -1,0 +1,15 @@
+/* The tree lives in photo coordinates, so resizing cannot detach it from the hill. */
+.reaction-tree {
+  position: absolute;
+  left: 21.5311%;
+  top: 4.2508%;
+  width: 12.8589%;
+  height: 71.2009%;
+  z-index: 3;
+  pointer-events: none;
+}
+.reaction-light { position: absolute; border-radius: 50%; }
+.reaction-light-bulb { display: block; width: 100%; height: 100%; border-radius: inherit; background-repeat: no-repeat; filter: brightness(.09) saturate(.65); }
+.reaction-light.is-lit .reaction-light-bulb { filter: brightness(1); }
+.reaction-light.is-stopped { box-shadow: 0 0 10px 3px var(--lamp-glow), 0 0 22px 6px var(--lamp-glow); }
+.reaction-light.is-stopped .reaction-light-bulb { filter: brightness(1.65) saturate(1.2); }

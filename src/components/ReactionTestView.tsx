@@ -1,4 +1,4 @@
-import { Check, Flag, RotateCcw, Timer, Trophy, X } from 'lucide-react';
+import { Flag, RotateCcw, Timer, Trophy, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   playStartGateToneConfirmed,
@@ -24,6 +24,7 @@ import { ReactionGateLayer, REACTION_GATE_DROP_MS } from './ReactionGateLayer';
 import { ReactionLeaderboard } from './ReactionLeaderboard';
 import { flushReactionPersonalBest, localReactionPersonalBest, type ReactionRecordOwner } from '../lib/reactionTestCloud';
 import './ReactionTestView.css';
+import { ReactionTree } from './ReactionTree';
 
 type ReactionTestRunState = 'ready' | 'arming' | 'waiting' | 'running' | 'finished';
 
@@ -87,18 +88,22 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
     const frameScene = () => {
       const { width, height } = stage.getBoundingClientRect();
       if (!width || !height) return;
-      // Fill the actual photo area, including after the result card changes size.
-      // One uniform transform keeps the original photograph and rigid gate
-      // registered. The downhill edge stays visible above the reserved footer.
-      const scale = Math.max(width / 1672, height / 941);
+      // Keep the approved tree and the entire gate together in the photo.
+      // Portrait screens letterbox instead of cropping the reaction signal away.
+      const portrait = width < height;
+      const visibleWidth = portrait ? 1080 : 1672;
+      const cropLeft = portrait ? 300 : 0;
+      const titleBottom = stage.querySelector('.reaction-hud')?.getBoundingClientRect().bottom ?? 0;
+      const headerSpace = Math.max(0, titleBottom - stage.getBoundingClientRect().top) + 10;
+      const photoHeight = Math.max(1, height - headerSpace);
+      const scale = Math.min(width / visibleWidth, photoHeight / 941);
       const frameWidth = 1672 * scale;
       const frameHeight = 941 * scale;
-      const left = Math.max(width - frameWidth, Math.min(0, width / 2 - 1100 * scale));
       Object.assign(frame.style, {
         width: `${frameWidth}px`,
         height: `${frameHeight}px`,
-        left: `${left}px`,
-        top: `${height - frameHeight}px`,
+        left: `${portrait ? (width - visibleWidth * scale) / 2 - cropLeft * scale : width - frameWidth}px`,
+        top: `${headerSpace + (photoHeight - frameHeight) / 2}px`,
       });
     };
     frameScene();
@@ -365,13 +370,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
   const startButtonDisabled = runState !== 'ready';
   const retryAvailable = result != null && (result.falseStart || gateSettled);
   const handleGateSettled = useCallback(() => setGateSettled(true), []);
-  const historicalLightIndex = activeStage === 'red'
-    ? 0
-    : activeStage === 'yellow-1'
-      ? 1
-      : activeStage === 'yellow-2'
-        ? 2
-        : activeStage === 'green' ? 3 : -1;
+
 
   return (
     <section className="reaction-test-view" aria-label="Reaction Test">
@@ -409,11 +408,12 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
             <div className="reaction-scene-frame" ref={sceneFrameRef}>
               <img
                 className="reaction-scene-background"
-                src="/assets/reaction-test-eight-lane-base.png"
-                alt="Side view of an eight-lane starting hill with a fixed metal deck and a gate recess in the dirt"
+                src="/assets/reaction-test-hill-tree.png"
+                alt="BMX starting hill with a four-lamp metal signal tree on the platform beside the starting gate"
                 draggable={false}
               />
               <ReactionGateLayer released={gateReleased} onSettled={handleGateSettled} />
+              <ReactionTree activeStage={activeStage} stoppedStage={result?.stage ?? null} />
             </div>
           </div>
           <div className="reaction-scene-vignette" aria-hidden="true" />
@@ -425,32 +425,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
           </header>
           <p className="reaction-live-status sr-only" role="status" aria-live="polite">{notice}</p>
 
-          <div className="reaction-tree" aria-label={`Starting tree: ${activeStage === 'idle' ? 'ready' : activeStage}`}>
-            {[
-              { stage: 'red' as const, label: 'RED', resultLabel: 'red', color: 'red' },
-              { stage: 'yellow-1' as const, label: 'YELLOW', resultLabel: 'first yellow', color: 'yellow' },
-              { stage: 'yellow-2' as const, label: 'YELLOW', resultLabel: 'second yellow', color: 'yellow' },
-              { stage: 'green' as const, label: 'GREEN', resultLabel: 'green', color: 'green' },
-            ].map((light, index) => (
-              <div
-                className={`reaction-light reaction-light-${light.color} ${historicalLightIndex >= index ? 'lit' : ''} ${activeStage === light.stage ? 'current' : ''}`}
-                data-reaction-stage={light.stage}
-                key={light.stage}
-              >
-                <span className="reaction-light-bulb" />
-                <small>{light.label}</small>
-                {result?.stage === light.stage && (
-                  <span
-                    className="reaction-light-stop-marker"
-                    aria-label={`Reaction recorded at the ${light.resultLabel} light`}
-                    title="Reaction recorded here"
-                  >
-                    <Check aria-hidden="true" size={17} strokeWidth={4} />
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
+
 
         </div>
         <div className="reaction-bottom-panel">

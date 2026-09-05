@@ -474,3 +474,37 @@ test('leaderboard controls do not interrupt an active reaction attempt', async (
   expect(mock.resultWrites).toEqual([]);
   expect(mock.trainingWrites).toEqual([]);
 });
+
+for (const [cueNumber, stoppedStage] of ['red', 'yellow-1', 'yellow-2', 'green'].entries()) {
+  test(`photo tree retains the ${stoppedStage} lamp after the gate drops`, async ({ page }, testInfo) => {
+    await mockReactionAccount(page);
+    await preparePredictableCadence(page);
+    await page.addInitScript((targetCue) => {
+      let cues = 0;
+      window.addEventListener('tracklab-start-gate-tone', () => {
+        if (cues++ === targetCue) window.setTimeout(() => {
+          document.querySelector('.reaction-race-surface')?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+        }, 30);
+      });
+    }, cueNumber);
+    await page.setViewportSize({ width: 1180, height: 820 });
+    const view = await openReactionTest(page);
+    await expect(view.locator('.reaction-scene-background')).toHaveJSProperty('naturalWidth', 1672);
+    await expect(view.locator('[data-lamp-state="dim"]')).toHaveCount(4);
+    await view.getByRole('button', { name: 'Start Reaction Test', exact: true }).click();
+    await expect(view.locator(`[data-reaction-stage="${stoppedStage}"]`)).toHaveAttribute('data-lamp-state', 'stopped');
+    await expect(view.getByRole('button', { name: 'Try Again', exact: true })).toBeVisible();
+    await expect(view.locator('[data-lamp-state="stopped"]')).toHaveCount(1);
+    await expect(view.locator('[data-lamp-state="dim"]')).toHaveCount(3);
+    await expect(view.locator('.reaction-light-stop-marker')).toHaveCount(0);
+    await expect(view.locator(`[data-reaction-stage="${stoppedStage}"] .reaction-light-bulb`)).toHaveCSS('filter', 'brightness(1.65) saturate(1.2)');
+    await page.screenshot({ path: testInfo.outputPath(`tree-${stoppedStage}-tablet.png`) });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect.poll(() => view.locator('.reaction-tree').evaluate(el => {
+      const r=el.getBoundingClientRect();return r.left>=0 && r.top>=0 && r.right<=innerWidth && r.bottom<=innerHeight;
+    })).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`tree-${stoppedStage}-phone.png`) });
+    await view.getByRole('button', { name: 'Try Again', exact: true }).click();
+    await expect(view.locator('[data-lamp-state="dim"]')).toHaveCount(4);
+  });
+}
