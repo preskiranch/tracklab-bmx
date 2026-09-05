@@ -3,13 +3,13 @@
   gap: 14px;
   margin-bottom: 20px;
   padding: clamp(17px, 2.2vw, 24px);
-  border: 2px solid #6ed234;
+  border: 2px solid #b1b1b1;
   border-radius: 20px;
   background:
-    radial-gradient(circle at 92% 10%, rgba(142, 239, 66, 0.18), transparent 35%),
-    #132019;
-  color: #f6fbf3;
-  box-shadow: 0 16px 44px rgba(22, 55, 20, 0.18);
+    radial-gradient(circle at 92% 10%, rgba(206, 206, 206, 0.18), transparent 35%),
+    #1d1d1d;
+  color: #f9f9f9;
+  box-shadow: 0 16px 44px rgba(45, 45, 45, 0.18);
 }
 
 .club-tablet-event-card > header {
@@ -25,21 +25,21 @@
   height: 48px;
   place-items: center;
   border-radius: 14px;
-  background: #80e83d;
-  color: #10210b;
+  background: #c6c6c6;
+  color: #1c1c1c;
 }
 
-.club-tablet-event-card .eyebrow { color: #a8f27a; }
+.club-tablet-event-card .eyebrow { color: #dadada; }
 .club-tablet-event-card h3 { margin: 3px 0; font-size: clamp(21px, 2.2vw, 30px); }
-.club-tablet-event-card header p { color: #cad6c6; }
+.club-tablet-event-card header p { color: #d2d2d2; }
 .club-tablet-event-seat-count {
   display: inline-flex;
   align-items: center;
   gap: 7px;
   padding: 8px 11px;
-  border: 1px solid #476041;
+  border: 1px solid #585858;
   border-radius: 999px;
-  color: #e5efdf;
+  color: #ececec;
   font-weight: 900;
 }
 
@@ -56,25 +56,25 @@
   align-items: center;
   gap: 8px;
   padding: 9px 10px;
-  border: 1px solid #3a4f36;
+  border: 1px solid #494949;
   border-radius: 11px;
-  background: #1c2b20;
-  color: #dce8d7;
+  background: #272727;
+  color: #e4e4e4;
 }
 
-.club-tablet-event-slots > span.this-tablet { border-color: #87e74d; background: #243a26; }
-.club-tablet-event-slots > span.stale { border-color: #e8a65f; }
+.club-tablet-event-slots > span.this-tablet { border-color: #c7c7c7; background: #343434; }
+.club-tablet-event-slots > span.stale { border-color: #afafaf; }
 .club-tablet-event-slots b {
   display: grid;
   width: 23px;
   height: 23px;
   place-items: center;
   border-radius: 7px;
-  background: #0e1711;
-  color: #8eef42;
+  background: #151515;
+  color: #cecece;
 }
 .club-tablet-event-slots small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.club-tablet-event-slots svg { color: #8eef42; }
+.club-tablet-event-slots svg { color: #cecece; }
 
 .club-tablet-event-join {
   display: grid;
@@ -89,11 +89,11 @@
   gap: 2px;
   min-width: 0;
   padding: 10px 12px;
-  border: 1px solid #41563c;
+  border: 1px solid #505050;
   border-radius: 11px;
   background: rgba(255, 255, 255, 0.04);
 }
-.club-tablet-event-join span { color: #aebda9; font-size: 11px; font-weight: 850; letter-spacing: 0.08em; text-transform: uppercase; }
+.club-tablet-event-join span { color: #b8b8b8; font-size: 11px; font-weight: 850; letter-spacing: 0.08em; text-transform: uppercase; }
 .club-tablet-event-join strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .club-tablet-event-join > button,
 .club-tablet-event-ready button,
@@ -106,8 +106,8 @@
   padding: 0 16px;
   border: 0;
   border-radius: 11px;
-  background: #82e941;
-  color: #10210b;
+  background: #c7c7c7;
+  color: #1c1c1c;
   font-weight: 950;
 }
 .club-tablet-event-join > button:disabled { opacity: 0.48; }
@@ -122,15 +122,15 @@
   gap: 11px;
   padding: 12px;
   border-radius: 12px;
-  background: #223a24;
+  background: #333333;
 }
-.club-tablet-event-countdown { background: #82e941; color: #10210b; }
-.club-tablet-event-warning { background: #4c321e; }
+.club-tablet-event-countdown { background: #c7c7c7; color: #1c1c1c; }
+.club-tablet-event-warning { background: #363636; }
 .club-tablet-event-note { grid-template-columns: auto minmax(0, 1fr); }
 .club-tablet-event-ready > svg,
 .club-tablet-event-warning > svg,
-.club-tablet-event-note > svg { color: #91ee59; }
-.club-tablet-event-countdown > svg { color: #17330c; }
+.club-tablet-event-note > svg { color: #cfcfcf; }
+.club-tablet-event-countdown > svg { color: #2a2a2a; }
 .club-tablet-event-ready strong,
 .club-tablet-event-ready small,
 .club-tablet-event-countdown strong,
@@ -141,38 +141,38 @@
 .club-tablet-event-note small { display: block; }
 .club-tablet-event-ready small,
 .club-tablet-event-warning small,
-.club-tablet-event-note small { margin-top: 3px; color: #c1cfbc; }
-.club-tablet-event-countdown small { margin-top: 3px; color: #264519; }
+.club-tablet-event-note small { margin-top: 3px; color: #cbcbcb; }
+.club-tablet-event-countdown small { margin-top: 3px; color: #3b3b3b; }
 .club-tablet-event-ready button,
-.club-tablet-event-warning button { min-height: 42px; background: #fff; }
+.club-tablet-event-warning button { min-height: 42px; background: #ffffff; }
 
 .club-tablet-event-error,
 .club-tablet-event-message {
   padding: 9px 11px;
   border-radius: 10px;
-  background: #552b27;
-  color: #ffd8d3 !important;
+  background: #343434;
+  color: #e0e0e0 !important;
   font-weight: 800;
 }
-.club-tablet-event-message { background: #38452f; color: #ecf6e7 !important; }
+.club-tablet-event-message { background: #414141; color: #f3f3f3 !important; }
 .club-tablet-event-card > footer {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #aebda9;
+  color: #b8b8b8;
   font-size: 12px;
 }
-.club-tablet-event-card.unavailable { border-color: #e8a65f; }
+.club-tablet-event-card.unavailable { border-color: #afafaf; }
 .club-tablet-event-unavailable {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 11px;
 }
-.club-tablet-event-unavailable > svg { color: #f0ad62; }
+.club-tablet-event-unavailable > svg { color: #b6b6b6; }
 .club-tablet-event-unavailable strong,
 .club-tablet-event-unavailable small { display: block; }
-.club-tablet-event-unavailable small { margin-top: 3px; color: #d9c7b3; }
+.club-tablet-event-unavailable small { margin-top: 3px; color: #c9c9c9; }
 .club-tablet-event-spin { animation: club-tablet-event-spin 1s linear infinite; }
 @keyframes club-tablet-event-spin { to { transform: rotate(360deg); } }
 

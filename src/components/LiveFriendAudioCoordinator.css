@@ -8,26 +8,26 @@
 }
 
 .live-friend-audio-card {
-  background: #fff;
-  border: 1px solid #b8c9b2;
+  background: #ffffff;
+  border: 1px solid #c4c4c4;
   border-radius: 14px;
-  box-shadow: 0 18px 42px rgb(16 24 40 / 22%);
-  color: #182230;
+  box-shadow: 0 18px 42px rgb(23 23 23 / 22%);
+  color: #212121;
   display: grid;
   gap: 11px;
   padding: 14px;
   pointer-events: auto;
 }
 
-.live-friend-audio-card.active { border-color: #75c84b; box-shadow: 0 18px 42px rgb(38 98 13 / 20%); }
+.live-friend-audio-card.active { border-color: #adadad; box-shadow: 0 18px 42px rgb(79 79 79 / 20%); }
 .live-friend-audio-card.compact-card { padding-right: 44px; position: relative; }
 .live-friend-audio-heading { align-items: center; display: grid; gap: 11px; grid-template-columns: auto minmax(0, 1fr); }
 .live-friend-audio-heading > span:last-child { display: grid; gap: 2px; min-width: 0; }
-.live-friend-audio-heading small { color: #527441; font-size: 11px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
-.live-friend-audio-heading strong { color: #101828; line-height: 1.25; }
-.live-friend-audio-heading span span { color: #667085; font-size: 12px; line-height: 1.35; }
+.live-friend-audio-heading small { color: #696969; font-size: 11px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.live-friend-audio-heading strong { color: #171717; line-height: 1.25; }
+.live-friend-audio-heading span span { color: #6f6f6f; font-size: 12px; line-height: 1.35; }
 .live-friend-audio-heading.compact { grid-template-columns: 24px minmax(0, 1fr); }
-.live-friend-audio-heading.compact > svg { color: #54a92c; }
+.live-friend-audio-heading.compact > svg { color: #8e8e8e; }
 .live-friend-audio-avatar { display: inline-flex; }
 .live-friend-audio-avatar .rider-avatar { flex: 0 0 48px; height: 48px; width: 48px; }
 
@@ -36,10 +36,10 @@
 .live-friend-audio-retry,
 .live-friend-audio-dismiss {
   align-items: center;
-  background: #fff;
-  border: 1px solid #cdd6cb;
+  background: #ffffff;
+  border: 1px solid #d3d3d3;
   border-radius: 9px;
-  color: #344054;
+  color: #3f3f3f;
   display: inline-flex;
   font: inherit;
   font-size: 13px;
@@ -49,16 +49,16 @@
   min-height: 44px;
   padding: 8px 11px;
 }
-.live-friend-audio-actions button.primary { background: #7ade36; border-color: #62bd29; color: #13250b; }
+.live-friend-audio-actions button.primary { background: #bdbdbd; border-color: #9f9f9f; color: #1f1f1f; }
 .live-friend-audio-actions button:disabled,
 .live-friend-audio-retry:disabled { cursor: default; opacity: .58; }
 .live-friend-audio-actions button:focus-visible,
 .live-friend-audio-retry:focus-visible,
-.live-friend-audio-dismiss:focus-visible { outline: 3px solid rgb(70 136 255 / 45%); outline-offset: 2px; }
+.live-friend-audio-dismiss:focus-visible { outline: 3px solid rgb(131 131 131 / 45%); outline-offset: 2px; }
 
-.live-friend-audio-expiry { color: #667085; font-size: 11px; font-weight: 750; text-align: right; }
-.live-friend-audio-status { color: #667085; font-size: 11px; line-height: 1.4; margin: 0; }
-.live-friend-audio-status.error { color: #b42318; }
+.live-friend-audio-expiry { color: #6f6f6f; font-size: 11px; font-weight: 750; text-align: right; }
+.live-friend-audio-status { color: #6f6f6f; font-size: 11px; line-height: 1.4; margin: 0; }
+.live-friend-audio-status.error { color: #414141; }
 .live-friend-audio-retry { justify-self: start; }
 .live-friend-audio-dismiss { min-width: 44px; padding: 8px; position: absolute; right: 7px; top: 7px; }
 .live-friend-audio-spin { animation: live-friend-audio-spin .9s linear infinite; }

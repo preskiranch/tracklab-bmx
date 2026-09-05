@@ -200,7 +200,7 @@
 }
 .explore-heart-rate {
   align-items: center;
-  color: #a74459;
+  color: #5b5b5b;
   display: inline-flex !important;
   font-weight: 850;
   gap: 5px;
@@ -208,5 +208,5 @@
 
 .explore-heart-rate.missing,
 .explore-heart-rate.stale {
-  color: #7a807b;
+  color: #7e7e7e;
 }

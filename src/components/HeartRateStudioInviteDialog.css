@@ -1,7 +1,7 @@
 .heart-rate-studio-invite-backdrop {
   align-items: center;
   backdrop-filter: blur(6px);
-  background: rgba(8, 14, 23, .72);
+  background: rgba(13, 13, 13, .72);
   display: flex;
   inset: 0;
   justify-content: center;
@@ -11,11 +11,11 @@
 }
 
 .heart-rate-studio-invite-dialog {
-  background: #fff;
+  background: #ffffff;
   border: 1px solid rgba(255, 255, 255, .16);
   border-radius: 17px;
   box-shadow: 0 28px 90px rgba(0, 0, 0, .4);
-  color: #101828;
+  color: #171717;
   display: grid;
   gap: 15px;
   max-height: calc(100dvh - 36px);
@@ -39,8 +39,8 @@
 
 .heart-rate-studio-invite-dialog > header > button {
   align-items: center;
-  background: #f5f6f7;
-  border: 1px solid #d9dde3;
+  background: #f6f6f6;
+  border: 1px solid #dddddd;
   border-radius: 10px;
   display: inline-flex;
   height: 44px;
@@ -50,9 +50,9 @@
 
 .heart-rate-studio-invite-icon {
   align-items: center;
-  background: #fff0f3;
+  background: #f3f3f3;
   border-radius: 11px;
-  color: #a72b48;
+  color: #474747;
   display: inline-flex;
   height: 44px;
   justify-content: center;
@@ -68,7 +68,7 @@
 
 .heart-rate-studio-invite-dialog button:focus-visible,
 .heart-rate-studio-invite-consent input:focus-visible {
-  outline: 3px solid #245f96;
+  outline: 3px solid #565656;
   outline-offset: 2px;
 }
 
@@ -79,10 +79,10 @@
 
 .heart-rate-studio-invite-dialog button.primary {
   align-items: center;
-  background: #a72b48;
-  border: 1px solid #a72b48;
+  background: #474747;
+  border: 1px solid #474747;
   border-radius: 10px;
-  color: #fff;
+  color: #ffffff;
   display: inline-flex;
   gap: 8px;
   justify-content: center;
@@ -94,8 +94,8 @@
 .heart-rate-studio-auth,
 .heart-rate-studio-error,
 .heart-rate-studio-loading {
-  background: #f8fafc;
-  border: 1px solid #d9e1ea;
+  background: #fafafa;
+  border: 1px solid #e0e0e0;
   border-radius: 13px;
   padding: 15px;
 }
@@ -108,13 +108,13 @@
 }
 
 .heart-rate-studio-handoff > svg {
-  color: #245f96;
+  color: #565656;
 }
 
 .heart-rate-studio-handoff p,
 .heart-rate-studio-auth p,
 .heart-rate-studio-error p {
-  color: #526275;
+  color: #606060;
   font-size: 13px;
   line-height: 1.5;
   margin: 5px 0 0;
@@ -131,8 +131,8 @@
 }
 
 .heart-rate-studio-error {
-  background: #fff8f6;
-  border-color: #f3c5bc;
+  background: #f9f9f9;
+  border-color: #cecece;
 }
 
 .heart-rate-studio-error > div {
@@ -142,8 +142,8 @@
 }
 
 .heart-rate-studio-error > div > button:not(.primary) {
-  background: #fff;
-  border: 1px solid #d9c6c2;
+  background: #ffffff;
+  border: 1px solid #cacaca;
   border-radius: 10px;
   min-height: 46px;
   padding: 10px 15px;
@@ -151,14 +151,14 @@
 
 .heart-rate-studio-loading {
   align-items: center;
-  color: #425466;
+  color: #515151;
   display: flex;
   font-weight: 750;
   gap: 10px;
 }
 
 .heart-rate-studio-preview {
-  border: 1px solid #dce3ea;
+  border: 1px solid #e2e2e2;
   border-radius: 13px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -174,15 +174,15 @@
 }
 
 .heart-rate-studio-preview > div:nth-child(even) {
-  border-left: 1px solid #e5e9ee;
+  border-left: 1px solid #e9e9e9;
 }
 
 .heart-rate-studio-preview > div:nth-child(n + 3) {
-  border-top: 1px solid #e5e9ee;
+  border-top: 1px solid #e9e9e9;
 }
 
 .heart-rate-studio-preview dt {
-  color: #667085;
+  color: #6f6f6f;
   font-size: 10px;
   font-weight: 900;
   letter-spacing: .08em;
@@ -196,8 +196,8 @@
 }
 
 .heart-rate-studio-invite-consent {
-  background: #f7fbff;
-  border: 1px solid #cbddeb;
+  background: #fafafa;
+  border: 1px solid #dadada;
   border-radius: 13px;
   display: grid;
   gap: 11px;
@@ -206,14 +206,14 @@
 }
 
 .heart-rate-studio-invite-consent legend {
-  color: #183753;
+  color: #323232;
   font-size: 13px;
   font-weight: 900;
   padding: 0 5px;
 }
 
 .heart-rate-studio-invite-consent > p {
-  color: #53677b;
+  color: #646464;
   font-size: 12px;
   line-height: 1.45;
   margin: 0;
@@ -228,7 +228,7 @@
 }
 
 .heart-rate-studio-invite-consent input {
-  accent-color: #a72b48;
+  accent-color: #474747;
   flex: 0 0 auto;
   height: 22px;
   margin: 2px 0 0;
@@ -241,7 +241,7 @@
 }
 
 .heart-rate-studio-invite-consent label small {
-  color: #66798a;
+  color: #767676;
   line-height: 1.4;
 }
 
@@ -251,10 +251,10 @@
 
 .heart-rate-studio-privacy {
   align-items: flex-start;
-  background: #fff6f7;
-  border: 1px solid #f2d0d8;
+  background: #f8f8f8;
+  border: 1px solid #d8d8d8;
   border-radius: 12px;
-  color: #7a273c;
+  color: #3a3a3a;
   display: flex;
   gap: 9px;
   padding: 11px 13px;
@@ -273,7 +273,7 @@
 }
 
 .heart-rate-studio-message {
-  color: #425466;
+  color: #515151;
   text-align: center;
 }
 
@@ -306,7 +306,7 @@
   }
 
   .heart-rate-studio-preview > div:nth-child(n + 2) {
-    border-top: 1px solid #e5e9ee;
+    border-top: 1px solid #e9e9e9;
   }
 
   .heart-rate-studio-error > div > button {

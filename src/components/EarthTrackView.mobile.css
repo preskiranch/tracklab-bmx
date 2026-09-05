@@ -44,8 +44,8 @@
 }
 
 .race-top-left-controls .race-force-start-overlay {
-  border-color: rgba(216, 255, 62, 0.88);
-  background: rgba(35, 76, 23, 0.94);
+  border-color: rgba(233, 233, 233, 0.88);
+  background: rgba(63, 63, 63, 0.94);
 }
 
 .race-top-left-controls .race-sprint-info-overlay {
@@ -182,11 +182,11 @@
 }
 
 .race-rider-overlay-publish-status.saved {
-  color: #d8ff3e;
+  color: #e9e9e9;
 }
 
 .race-rider-overlay-publish-status.error {
-  color: #ffd2a8;
+  color: #d9d9d9;
 }
 
 .race-rider-overlay.editor-preview .race-rider-overlay-resize {

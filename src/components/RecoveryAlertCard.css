@@ -3,17 +3,17 @@
   min-width: 0;
   margin: 0 0 14px;
   padding: 14px;
-  border: 1px solid #d8dee5;
+  border: 1px solid #dddddd;
   border-radius: 14px;
-  background: #fff;
-  box-shadow: 0 8px 24px rgba(20, 31, 45, .06);
-  color: #101828;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(30, 30, 30, .06);
+  color: #171717;
   box-sizing: border-box;
 }
 
 .recovery-alert-card.is-ready {
-  border-color: #8ed16c;
-  background: linear-gradient(135deg, #f7fff2, #fff);
+  border-color: #bbbbbb;
+  background: linear-gradient(135deg, #fcfcfc, #ffffff);
 }
 
 .recovery-alert-heading,
@@ -51,7 +51,7 @@
 
 .recovery-alert-heading small,
 .recovery-alert-status small {
-  color: #667085;
+  color: #6f6f6f;
   font-size: 14px;
   line-height: 1.4;
   font-weight: 650;
@@ -64,16 +64,16 @@
   height: 38px;
   place-items: center;
   border-radius: 11px;
-  background: #ecf8e7;
-  color: #32791c;
+  background: #f4f4f4;
+  color: #636363;
 }
 
 .recovery-alert-mode-badge {
   margin-left: auto;
   padding: 6px 10px;
   border-radius: 999px;
-  background: #eef2f6;
-  color: #344054;
+  background: #f1f1f1;
+  color: #3f3f3f;
   font-size: 12px;
   line-height: 1;
   text-transform: uppercase;
@@ -81,8 +81,8 @@
 }
 
 .recovery-alert-mode-badge:not(.mode-off) {
-  background: #eaf8e4;
-  color: #286416;
+  background: #f4f4f4;
+  color: #525252;
 }
 
 .recovery-alert-setup,
@@ -91,7 +91,7 @@
   gap: 12px;
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid #e6e9ed;
+  border-top: 1px solid #e9e9e9;
 }
 
 .recovery-alert-mode-options {
@@ -106,10 +106,10 @@
 .recovery-alert-minute-controls button {
   min-width: 0;
   min-height: 44px;
-  border: 1px solid #cfd6de;
+  border: 1px solid #d5d5d5;
   border-radius: 10px;
-  background: #f8fafb;
-  color: #253142;
+  background: #fafafa;
+  color: #303030;
   font: inherit;
   font-size: 14px;
   font-weight: 850;
@@ -125,10 +125,10 @@
 }
 
 .recovery-alert-mode-options button.selected {
-  border-color: #76b95b;
-  background: #edf9e8;
-  color: #235f13;
-  box-shadow: inset 0 0 0 1px #76b95b;
+  border-color: #a4a4a4;
+  background: #f5f5f5;
+  color: #4d4d4d;
+  box-shadow: inset 0 0 0 1px #a4a4a4;
 }
 
 .recovery-alert-mode-options button:focus-visible,
@@ -137,7 +137,7 @@
 .recovery-alert-minute-controls button:focus-visible,
 .recovery-alert-fields input:focus-visible,
 .recovery-alert-fields select:focus-visible {
-  outline: 3px solid rgba(62, 137, 35, .28);
+  outline: 3px solid rgba(114, 114, 114, .28);
   outline-offset: 2px;
 }
 
@@ -152,7 +152,7 @@
   display: grid;
   min-width: 0;
   gap: 6px;
-  color: #475467;
+  color: #535353;
   font-size: 13px;
   font-weight: 850;
 }
@@ -178,10 +178,10 @@
   min-width: 0;
   min-height: 44px;
   padding: 9px 11px;
-  border: 1px solid #cfd6de;
+  border: 1px solid #d5d5d5;
   border-radius: 9px;
-  background: #fff;
-  color: #101828;
+  background: #ffffff;
+  color: #171717;
   box-sizing: border-box;
   font: inherit;
   font-size: 16px;
@@ -199,7 +199,7 @@
 .recovery-alert-input-unit b {
   position: absolute;
   right: 12px;
-  color: #667085;
+  color: #6f6f6f;
   font-size: 12px;
 }
 
@@ -211,8 +211,8 @@
   margin: 0;
   padding: 10px;
   border-radius: 9px;
-  background: #f5f7fa;
-  color: #475467;
+  background: #f7f7f7;
+  color: #535353;
   font-size: 14px;
   line-height: 1.4;
   font-weight: 650;
@@ -233,16 +233,16 @@
   gap: 6px;
   align-items: center;
   margin: 0;
-  color: #667085;
+  color: #6f6f6f;
   font-size: 13px;
   font-weight: 700;
 }
 
 .recovery-alert-save-row button.primary,
 .recovery-alert-actions button:first-child {
-  border-color: #1e2b3b;
-  background: #111827;
-  color: #fff;
+  border-color: #292929;
+  background: #181818;
+  color: #ffffff;
 }
 
 .recovery-alert-mode-options button:disabled,
@@ -265,11 +265,11 @@
 
 .recovery-alert-status > svg {
   flex: 0 0 auto;
-  color: #438b29;
+  color: #757575;
 }
 
 .recovery-alert-confidence {
-  color: #397327 !important;
+  color: #616161 !important;
 }
 
 .recovery-alert-actions {
@@ -289,7 +289,7 @@
 .recovery-alert-actions button.quiet {
   border-color: transparent;
   background: transparent;
-  color: #667085;
+  color: #6f6f6f;
 }
 
 .recovery-alert-upgrade-note,
@@ -303,13 +303,13 @@
 }
 
 .recovery-alert-upgrade-note {
-  background: #fff7e6;
-  color: #765214;
+  background: #f7f7f7;
+  color: #555555;
 }
 
 .recovery-alert-message {
-  background: #eef6ff;
-  color: #245b8d;
+  background: #f5f5f5;
+  color: #535353;
 }
 
 .race-fullscreen .recovery-alert-card:not(.has-active),
@@ -328,10 +328,10 @@
   margin: 0;
   padding: 10px 14px;
   transform: translateX(-50%);
-  border-color: rgba(142, 209, 108, .8);
-  background: rgba(10, 18, 29, .94);
+  border-color: rgba(187, 187, 187, .8);
+  background: rgba(17, 17, 17, .94);
   box-shadow: 0 10px 30px rgba(0, 0, 0, .32);
-  color: #fff;
+  color: #ffffff;
   pointer-events: none;
 }
 
@@ -357,13 +357,13 @@
 .race-fullscreen .recovery-alert-card.has-active .recovery-alert-status,
 .utility-fullscreen .recovery-alert-card.has-active .recovery-alert-status {
   justify-content: center;
-  color: #fff;
+  color: #ffffff;
   text-align: center;
 }
 
 .race-fullscreen .recovery-alert-card.has-active .recovery-alert-status small,
 .utility-fullscreen .recovery-alert-card.has-active .recovery-alert-status small {
-  color: #d9e3eb;
+  color: #e1e1e1;
 }
 
 @media (max-width: 720px) {

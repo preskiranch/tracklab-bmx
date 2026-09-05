@@ -14,7 +14,7 @@
 
 .monitor-secondary .monitor-heart-rate.live svg,
 .monitor-secondary .monitor-heart-rate.live span {
-  color: #d92d50;
+  color: #545454;
 }
 
 .monitor-history-status {
@@ -24,18 +24,18 @@
 
 .monitor-history-status.authorizing,
 .monitor-history-status.saving {
-  background: rgba(245, 177, 55, 0.16);
-  color: #8a5a00;
+  background: rgba(183, 183, 183, 0.16);
+  color: #5e5e5e;
 }
 
 .monitor-history-status.saved {
-  background: rgba(72, 199, 116, 0.18);
-  color: #176a33;
+  background: rgba(166, 166, 166, 0.18);
+  color: #545454;
 }
 
 .monitor-history-status.error {
-  background: rgba(227, 70, 70, 0.16);
-  color: #9d2525;
+  background: rgba(103, 103, 103, 0.16);
+  color: #3f3f3f;
 }
 
 .monitor-card-actions {
@@ -53,10 +53,10 @@
   gap: 5px;
   min-height: 27px;
   padding: 4px 8px;
-  border: 1px solid rgba(217, 45, 80, 0.3);
+  border: 1px solid rgba(84, 84, 84, 0.3);
   border-radius: 999px;
-  background: rgba(255, 233, 238, 0.9);
-  color: #a41f42;
+  background: rgba(238, 238, 238, 0.9);
+  color: #3e3e3e;
   font: inherit;
   font-size: 9px;
   font-weight: 800;
@@ -67,21 +67,21 @@
 .monitor-watch-button.waiting-athlete,
 .monitor-watch-button.waiting-watch,
 .monitor-watch-button.inviting {
-  border-color: rgba(170, 111, 0, 0.35);
-  background: rgba(255, 243, 214, 0.94);
-  color: #795000;
+  border-color: rgba(116, 116, 116, 0.35);
+  background: rgba(243, 243, 243, 0.94);
+  color: #535353;
 }
 
 .monitor-watch-button.watch-ready {
-  border-color: rgba(32, 137, 64, 0.36);
-  background: rgba(227, 248, 232, 0.95);
-  color: #176a33;
+  border-color: rgba(109, 109, 109, 0.36);
+  background: rgba(242, 242, 242, 0.95);
+  color: #545454;
 }
 
 .monitor-watch-button.error {
-  border-color: rgba(157, 37, 37, 0.35);
-  background: rgba(255, 231, 231, 0.95);
-  color: #962828;
+  border-color: rgba(63, 63, 63, 0.35);
+  background: rgba(236, 236, 236, 0.95);
+  color: #3f3f3f;
 }
 
 .monitor-watch-button:disabled {
@@ -96,7 +96,7 @@
   display: grid;
   place-items: center;
   padding: max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
-  background: rgba(5, 12, 17, 0.72);
+  background: rgba(11, 11, 11, 0.72);
   backdrop-filter: blur(7px);
 }
 
@@ -116,10 +116,10 @@
   z-index: 2;
   min-height: 30px;
   padding: 5px 9px;
-  border: 1px solid #c8d2d9;
+  border: 1px solid #d0d0d0;
   border-radius: 999px;
-  background: #fff;
-  color: #1d2933;
+  background: #ffffff;
+  color: #272727;
   font: inherit;
   font-size: 10px;
   font-weight: 800;

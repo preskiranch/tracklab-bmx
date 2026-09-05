@@ -14,10 +14,10 @@
 .athlete-personal-records,
 .club-connect-panel,
 .training-calendar {
-  border: 1px solid #dce3e8;
+  border: 1px solid #e2e2e2;
   border-radius: 16px;
-  background: #fff;
-  box-shadow: 0 10px 28px rgb(15 23 42 / 5%);
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgb(23 23 23 / 5%);
 }
 
 .account-profile-hero {
@@ -48,13 +48,13 @@
 .account-profile-identity p,
 .account-profile-photo-note {
   margin: 0;
-  color: #667085;
+  color: #6f6f6f;
 }
 
 .account-profile-photo-note {
   grid-column: 1 / -1;
   padding-top: 12px;
-  border-top: 1px solid #edf0f2;
+  border-top: 1px solid #f0f0f0;
 }
 
 .personal-record-editor {
@@ -62,40 +62,40 @@
   gap: 8px;
   grid-column: 1 / -1;
   padding: 12px;
-  border: 1px solid #cfe7c2;
+  border: 1px solid #dfdfdf;
   border-radius: 12px;
-  background: #f6fcef;
+  background: #fafafa;
 }
 .personal-record-editor-heading,
 .personal-record-editor-controls { display: flex; align-items: center; gap: 8px; }
-.personal-record-editor-heading { color: #2f6e17; }
+.personal-record-editor-heading { color: #5a5a5a; }
 .personal-record-editor-heading > svg { flex: 0 0 auto; }
 .personal-record-editor-heading span { display: grid; gap: 2px; }
 .personal-record-editor-heading small,
-.personal-record-editor-message { color: #667085; font-size: 11px; }
+.personal-record-editor-message { color: #6f6f6f; font-size: 11px; }
 .personal-record-editor-controls input {
   min-width: 0;
   width: 150px;
   min-height: 38px;
   padding: 7px 9px;
-  border: 1px solid #cdd6dc;
+  border: 1px solid #d5d5d5;
   border-radius: 8px;
-  background: #fff;
-  color: #17202e;
+  background: #ffffff;
+  color: #1f1f1f;
   font: inherit;
 }
 .personal-record-editor-controls button {
   min-height: 38px;
   padding: 7px 10px;
-  border: 1px solid #a9c99b;
+  border: 1px solid #bfbfbf;
   border-radius: 8px;
-  background: #fff;
-  color: #244c17;
+  background: #ffffff;
+  color: #404040;
   font: inherit;
   font-size: 12px;
   font-weight: 850;
 }
-.personal-record-editor-controls button[type='submit'] { background: #7ade36; border-color: #69bd39; color: #102108; }
+.personal-record-editor-controls button[type='submit'] { background: #bdbdbd; border-color: #a2a2a2; color: #1c1c1c; }
 .personal-record-editor-message { margin: 0; }
 
 .athlete-personal-records {
@@ -105,9 +105,9 @@
   padding: 20px;
 }
 .athlete-personal-records h2 { margin: 0; }
-.athlete-personal-records header p { margin: 4px 0 0; color: #667085; }
+.athlete-personal-records header p { margin: 4px 0 0; color: #6f6f6f; }
 .athlete-personal-record-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.athlete-personal-record-picker label { display: grid; gap: 6px; min-width: 0; color: #344054; font-size: 13px; font-weight: 800; }
+.athlete-personal-record-picker label { display: grid; gap: 6px; min-width: 0; color: #3f3f3f; font-size: 13px; font-weight: 800; }
 .athlete-personal-record-picker input,
 .athlete-personal-record-picker select {
   box-sizing: border-box;
@@ -115,21 +115,21 @@
   min-width: 0;
   min-height: 44px;
   padding: 9px 11px;
-  border: 1px solid #cdd6dc;
+  border: 1px solid #d5d5d5;
   border-radius: 9px;
-  background: #fff;
-  color: #17202e;
+  background: #ffffff;
+  color: #1f1f1f;
   font: inherit;
   font-size: 16px;
 }
 .athlete-personal-record-picker input:focus,
-.athlete-personal-record-picker select:focus { border-color: #66b83b; outline: 3px solid rgb(122 222 54 / 20%); }
-.athlete-personal-record-picker select:disabled { color: #667085; background: #f3f5f7; }
+.athlete-personal-record-picker select:focus { border-color: #9e9e9e; outline: 3px solid rgb(189 189 189 / 20%); }
+.athlete-personal-record-picker select:disabled { color: #6f6f6f; background: #f5f5f5; }
 .athlete-personal-record-detail { display: grid; gap: 12px; min-width: 0; }
 .athlete-personal-record-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .athlete-personal-record-identity .rider-avatar { width: 42px; height: 42px; flex: 0 0 42px; }
 .athlete-personal-record-identity strong { min-width: 0; overflow-wrap: anywhere; }
-.athlete-personal-record-empty { margin: 0; color: #667085; font-size: 13px; }
+.athlete-personal-record-empty { margin: 0; color: #6f6f6f; font-size: 13px; }
 
 .account-deletion-panel {
   display: grid;
@@ -153,7 +153,7 @@
 }
 
 .account-deletion-summary h2 { margin: 2px 0 0; }
-.account-deletion-summary p { margin: 4px 0 0; color: #667085; }
+.account-deletion-summary p { margin: 4px 0 0; color: #6f6f6f; }
 .account-deletion-summary-actions { justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 
 .account-manage-subscription,
@@ -163,25 +163,25 @@
   gap: 6px;
   min-height: 42px;
   padding: 8px 12px;
-  border: 1px solid #cbd5dc;
+  border: 1px solid #d3d3d3;
   border-radius: 9px;
-  background: #fff;
-  color: #17202e;
+  background: #ffffff;
+  color: #1f1f1f;
   font: inherit;
   font-weight: 800;
   text-decoration: none;
 }
 
-.account-delete-open { border-color: #f0b6b2; color: #b42318; }
+.account-delete-open { border-color: #c2c2c2; color: #414141; }
 
 .account-delete-confirmation {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 13px;
   padding: 16px;
-  border: 1px solid #f0b6b2;
+  border: 1px solid #c2c2c2;
   border-radius: 12px;
-  background: #fff7f6;
+  background: #f9f9f9;
 }
 
 .account-delete-confirmation[hidden] { display: none; }
@@ -190,21 +190,21 @@
 .account-delete-acknowledgement,
 .account-delete-actions,
 .account-deletion-message { grid-column: 1 / -1; }
-.account-delete-warning { align-items: flex-start; gap: 10px; color: #7a271a; }
+.account-delete-warning { align-items: flex-start; gap: 10px; color: #383838; }
 .account-delete-warning > svg { flex: 0 0 auto; }
-.account-delete-warning p { margin: 4px 0 0; color: #912018; }
-.account-delete-subscription-warning { margin: 0; padding: 11px; border-radius: 8px; background: #ffebe9; color: #7a271a; }
-.account-delete-confirmation > label:not(.account-delete-acknowledgement) { display: grid; gap: 6px; color: #344054; font-size: 13px; font-weight: 850; }
+.account-delete-warning p { margin: 4px 0 0; color: #373737; }
+.account-delete-subscription-warning { margin: 0; padding: 11px; border-radius: 8px; background: #efefef; color: #383838; }
+.account-delete-confirmation > label:not(.account-delete-acknowledgement) { display: grid; gap: 6px; color: #3f3f3f; font-size: 13px; font-weight: 850; }
 .account-delete-confirmation input[type='text'],
-.account-delete-confirmation input[type='password'] { min-width: 0; min-height: 44px; padding: 9px 11px; border: 1px solid #cdd6dc; border-radius: 9px; background: #fff; color: #17202e; font: inherit; }
-.account-delete-confirmation input:focus { border-color: #c4322a; outline: 3px solid rgb(196 50 42 / 16%); }
-.account-delete-acknowledgement { display: flex; align-items: flex-start; gap: 9px; color: #7a271a; font-size: 13px; font-weight: 750; }
-.account-delete-acknowledgement input { width: 20px; height: 20px; flex: 0 0 20px; margin: 0; accent-color: #b42318; }
+.account-delete-confirmation input[type='password'] { min-width: 0; min-height: 44px; padding: 9px 11px; border: 1px solid #d5d5d5; border-radius: 9px; background: #ffffff; color: #1f1f1f; font: inherit; }
+.account-delete-confirmation input:focus { border-color: #505050; outline: 3px solid rgb(80 80 80 / 16%); }
+.account-delete-acknowledgement { display: flex; align-items: flex-start; gap: 9px; color: #383838; font-size: 13px; font-weight: 750; }
+.account-delete-acknowledgement input { width: 20px; height: 20px; flex: 0 0 20px; margin: 0; accent-color: #414141; }
 .account-delete-actions { justify-content: flex-end; gap: 8px; }
-.account-delete-actions button.danger { border-color: #b42318; background: #b42318; color: #fff; }
+.account-delete-actions button.danger { border-color: #414141; background: #414141; color: #ffffff; }
 .account-delete-actions button:disabled { opacity: 0.48; cursor: not-allowed; }
-.account-deletion-message { margin: 0; color: #52606d; font-size: 13px; }
-.account-deletion-message.error { color: #b42318; }
+.account-deletion-message { margin: 0; color: #5e5e5e; font-size: 13px; }
+.account-deletion-message.error { color: #414141; }
 
 .club-connect-panel {
   display: grid;
@@ -226,19 +226,19 @@
 .club-owner-intro { justify-content: space-between; gap: 18px; }
 .club-connect-title { gap: 11px; }
 .club-connect-title h2 { margin: 2px 0 0; }
-.club-connect-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px; color: #2d6810; background: #eafbdd; }
-.club-connect-security { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 999px; color: #27620d; background: #effbe7; font-weight: 850; }
+.club-connect-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px; color: #555555; background: #f5f5f5; }
+.club-connect-security { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 999px; color: #4f4f4f; background: #f7f7f7; font-weight: 850; }
 
 .club-athlete-access {
   justify-content: space-between;
   gap: 16px;
   padding: 14px;
-  border: 1px solid #a9df86;
+  border: 1px solid #cdcdcd;
   border-radius: 12px;
-  background: #f5fdef;
+  background: #fafafa;
 }
 .club-athlete-access p,
-.club-owner-intro p { margin: 3px 0 0; color: #667085; }
+.club-owner-intro p { margin: 3px 0 0; color: #6f6f6f; }
 .club-profile-complete,
 .club-roster-actions button {
   display: inline-flex;
@@ -247,42 +247,42 @@
   gap: 6px;
   min-height: 36px;
   padding: 7px 11px;
-  border: 1px solid #cad3da;
+  border: 1px solid #d2d2d2;
   border-radius: 8px;
-  background: #fff;
-  color: #17202e;
+  background: #ffffff;
+  color: #1f1f1f;
   font-weight: 800;
 }
 .club-profile-complete,
-.club-roster-actions button.primary { border-color: #69bd39; background: #7ade36; color: #102108; }
-.club-roster-actions button.danger { color: #b42318; }
-.club-athlete-access > svg { color: #5cbb25; flex: 0 0 auto; }
+.club-roster-actions button.primary { border-color: #a2a2a2; background: #bdbdbd; color: #1c1c1c; }
+.club-roster-actions button.danger { color: #414141; }
+.club-athlete-access > svg { color: #9c9c9c; flex: 0 0 auto; }
 .club-athlete-access > div { flex: 1; }
-.club-athlete-access > span { padding: 6px 9px; border-radius: 999px; background: #18304b; color: #fff; font-size: 12px; font-weight: 900; }
+.club-athlete-access > span { padding: 6px 9px; border-radius: 999px; background: #2d2d2d; color: #ffffff; font-size: 12px; font-weight: 900; }
 
 .club-owner-roster { display: grid; gap: 10px; padding-top: 2px; }
-.club-owner-intro small { max-width: 310px; color: #667085; text-align: right; }
+.club-owner-intro small { max-width: 310px; color: #6f6f6f; text-align: right; }
 .club-roster-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.club-roster-list article { gap: 10px; min-width: 0; padding: 10px; border: 1px solid #e0e6ea; border-radius: 11px; background: #fafcfd; }
+.club-roster-list article { gap: 10px; min-width: 0; padding: 10px; border: 1px solid #e5e5e5; border-radius: 11px; background: #fcfcfc; }
 .club-roster-list .rider-avatar { width: 42px; height: 42px; flex: 0 0 42px; }
 .club-roster-name { display: grid; min-width: 0; flex: 1; }
 .club-roster-name strong { overflow-wrap: anywhere; }
-.club-roster-name small { color: #667085; }
+.club-roster-name small { color: #6f6f6f; }
 .club-roster-actions { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-.club-connect-message { margin: 0; padding: 10px; border-radius: 8px; background: #f3f5f7; color: #52606d; }
-.club-connect-message.error { color: #b42318; background: #fff1f0; }
+.club-connect-message { margin: 0; padding: 10px; border-radius: 8px; background: #f5f5f5; color: #5e5e5e; }
+.club-connect-message.error { color: #414141; background: #f4f4f4; }
 
-.club-profile-setup { display: grid; gap: 14px; padding: 16px; border: 1px solid #a9df86; border-radius: 14px; background: #f5fdef; }
-.club-profile-setup-copy p { margin: 4px 0 0; color: #667085; }
-.club-profile-setup-form { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 18px; padding: 14px; border: 1px solid #d8e7cf; border-radius: 12px; background: #fff; }
+.club-profile-setup { display: grid; gap: 14px; padding: 16px; border: 1px solid #cdcdcd; border-radius: 14px; background: #fafafa; }
+.club-profile-setup-copy p { margin: 4px 0 0; color: #6f6f6f; }
+.club-profile-setup-form { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 18px; padding: 14px; border: 1px solid #e2e2e2; border-radius: 12px; background: #ffffff; }
 .club-profile-setup-form .rider-photo-editor { min-width: 132px; }
 .club-profile-setup-form .rider-avatar { width: 76px; height: 76px; font-size: 22px; }
 .club-profile-fields { display: grid; grid-template-columns: 1fr 0.8fr; gap: 10px; }
-.club-profile-fields label { display: grid; gap: 5px; color: #344054; font-size: 12px; font-weight: 850; }
-.club-profile-fields label span small { color: #667085; font-weight: 650; }
-.club-profile-fields input { min-width: 0; min-height: 42px; padding: 9px 11px; border: 1px solid #cdd6dc; border-radius: 9px; background: #fff; color: #17202e; font: inherit; font-size: 15px; }
-.club-profile-fields input:focus { border-color: #66b83b; outline: 3px solid rgb(122 222 54 / 20%); }
-.club-profile-fields p { grid-column: 1 / -1; margin: 2px 0 0; color: #667085; font-size: 12px; }
+.club-profile-fields label { display: grid; gap: 5px; color: #3f3f3f; font-size: 12px; font-weight: 850; }
+.club-profile-fields label span small { color: #6f6f6f; font-weight: 650; }
+.club-profile-fields input { min-width: 0; min-height: 42px; padding: 9px 11px; border: 1px solid #d5d5d5; border-radius: 9px; background: #ffffff; color: #1f1f1f; font: inherit; font-size: 15px; }
+.club-profile-fields input:focus { border-color: #9e9e9e; outline: 3px solid rgb(189 189 189 / 20%); }
+.club-profile-fields p { grid-column: 1 / -1; margin: 2px 0 0; color: #6f6f6f; font-size: 12px; }
 .club-profile-complete { justify-self: end; }
 
 .account-profile-summary {
@@ -297,15 +297,15 @@
   gap: 12px;
   min-height: 76px;
   padding: 13px 15px;
-  border: 1px solid #dce3e8;
+  border: 1px solid #e2e2e2;
   border-radius: 13px;
-  background: #f8fafb;
+  background: #fafafa;
 }
 
-.account-profile-summary article > svg { color: #5cbb25; }
+.account-profile-summary article > svg { color: #9c9c9c; }
 .account-profile-summary span { display: grid; gap: 2px; }
 .account-profile-summary b { font-size: 21px; }
-.account-profile-summary small { color: #667085; }
+.account-profile-summary small { color: #6f6f6f; }
 
 .account-training-layout {
   display: grid;
@@ -337,7 +337,7 @@
 
 .training-calendar > header { justify-content: space-between; }
 .training-calendar > header > div:first-child span { display: grid; }
-.training-calendar > header small { color: #667085; }
+.training-calendar > header small { color: #6f6f6f; }
 .training-calendar-controls button,
 .training-session-downloads button {
   display: inline-flex;
@@ -345,10 +345,10 @@
   justify-content: center;
   gap: 5px;
   min-height: 34px;
-  border: 1px solid #d8dee4;
+  border: 1px solid #dddddd;
   border-radius: 8px;
-  background: #fff;
-  color: #111827;
+  background: #ffffff;
+  color: #181818;
 }
 
 .training-calendar-weekdays,
@@ -359,19 +359,19 @@
 }
 
 .training-calendar-weekdays { margin: 18px 0 7px; }
-.training-calendar-weekdays span { text-align: center; color: #667085; font-size: 11px; font-weight: 800; }
+.training-calendar-weekdays span { text-align: center; color: #6f6f6f; font-size: 11px; font-weight: 800; }
 .training-calendar-grid button,
 .training-calendar-empty { aspect-ratio: 1; min-height: 42px; }
 .training-calendar-grid button {
   position: relative;
   display: grid;
   place-items: center;
-  border: 1px solid #e3e8ec;
+  border: 1px solid #e7e7e7;
   border-radius: 10px;
-  background: #fff;
+  background: #ffffff;
 }
-.training-calendar-grid button.has-sessions { border-color: #9edc78; background: #f3fcec; }
-.training-calendar-grid button.selected { outline: 3px solid #182334; outline-offset: 1px; }
+.training-calendar-grid button.has-sessions { border-color: #c8c8c8; background: #f9f9f9; }
+.training-calendar-grid button.selected { outline: 3px solid #222222; outline-offset: 1px; }
 .training-calendar-grid button span {
   position: absolute;
   right: 4px;
@@ -379,27 +379,27 @@
   min-width: 17px;
   padding: 1px 4px;
   border-radius: 999px;
-  background: #7ade36;
-  color: #102108;
+  background: #bdbdbd;
+  color: #1c1c1c;
   font-size: 10px;
   font-weight: 900;
 }
 
-.training-history-message { margin: 14px 0 0; color: #667085; }
-.training-history-message.error { color: #b42318; }
+.training-history-message { margin: 14px 0 0; color: #6f6f6f; }
+.training-history-message.error { color: #414141; }
 .training-session-detail-content { display: grid; gap: 10px; min-width: 0; }
-.training-session-downloads { display: flex; align-items: center; justify-content: flex-end; gap: 7px; flex-wrap: wrap; padding: 10px; border: 1px solid #dce3e8; border-radius: 10px; background: #fff; }
-.training-session-downloads span { flex: 1 1 240px; color: #667085; font-size: 11px; }
+.training-session-downloads { display: flex; align-items: center; justify-content: flex-end; gap: 7px; flex-wrap: wrap; padding: 10px; border: 1px solid #e2e2e2; border-radius: 10px; background: #ffffff; }
+.training-session-downloads span { flex: 1 1 240px; color: #6f6f6f; font-size: 11px; }
 .training-session-downloads button { min-height: 44px; padding: 7px 10px; }
-.training-spreadsheet-export-status { margin: -6px 0 0; color: #52606d; font-size: 12px; }
+.training-spreadsheet-export-status { margin: -6px 0 0; color: #5e5e5e; font-size: 12px; }
 .private-heart-rate-history {
   display: grid;
   gap: 9px;
   margin-top: 8px;
   padding: 10px;
-  border: 1px solid #d9c9ff;
+  border: 1px solid #d0d0d0;
   border-radius: 10px;
-  background: #faf8ff;
+  background: #f9f9f9;
 }
 .private-heart-rate-history > header,
 .private-heart-rate-title,
@@ -410,51 +410,51 @@
   align-items: center;
 }
 .private-heart-rate-history > header { justify-content: space-between; gap: 8px; }
-.private-heart-rate-title { gap: 6px; color: #43217b; font-size: 12px; font-weight: 900; }
-.private-heart-rate-owner { justify-content: flex-end; gap: 4px; color: #315b20; font-size: 10px; font-weight: 850; text-align: right; }
+.private-heart-rate-title { gap: 6px; color: #2f2f2f; font-size: 12px; font-weight: 900; }
+.private-heart-rate-owner { justify-content: flex-end; gap: 4px; color: #4e4e4e; font-size: 10px; font-weight: 850; text-align: right; }
 .private-heart-rate-owner > svg { flex: 0 0 auto; }
-.private-heart-rate-message { margin: 0; color: #667085; font-size: 12px; }
+.private-heart-rate-message { margin: 0; color: #6f6f6f; font-size: 12px; }
 .private-heart-rate-history > .private-heart-rate-message,
 .private-heart-rate-stream .private-heart-rate-message { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.private-heart-rate-message.error { justify-content: space-between; gap: 8px; color: #b42318; }
+.private-heart-rate-message.error { justify-content: space-between; gap: 8px; color: #414141; }
 .private-heart-rate-message button {
   flex: 0 0 auto;
   gap: 4px;
   min-height: 28px;
   padding: 4px 7px;
-  border: 1px solid #cab8ed;
+  border: 1px solid #c0c0c0;
   border-radius: 7px;
-  background: #fff;
-  color: #43217b;
+  background: #ffffff;
+  color: #2f2f2f;
   font: inherit;
   font-weight: 800;
 }
 .private-heart-rate-streams,
 .private-heart-rate-stream { display: grid; gap: 8px; }
-.private-heart-rate-stream + .private-heart-rate-stream { padding-top: 8px; border-top: 1px solid #e8def9; }
-.private-heart-rate-segment { color: #667085; font-size: 11px; }
+.private-heart-rate-stream + .private-heart-rate-stream { padding-top: 8px; border-top: 1px solid #e2e2e2; }
+.private-heart-rate-segment { color: #6f6f6f; font-size: 11px; }
 .private-heart-rate-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 0; }
-.private-heart-rate-metrics > div { display: grid; gap: 1px; padding: 7px; border-radius: 7px; background: #fff; }
+.private-heart-rate-metrics > div { display: grid; gap: 1px; padding: 7px; border-radius: 7px; background: #ffffff; }
 .private-heart-rate-metrics > div.coverage { grid-column: 1 / -1; }
-.private-heart-rate-metrics dt { color: #667085; font-size: 10px; font-weight: 750; }
-.private-heart-rate-metrics dd { margin: 0; color: #1f2937; font-size: 12px; font-weight: 900; }
+.private-heart-rate-metrics dt { color: #6f6f6f; font-size: 10px; font-weight: 750; }
+.private-heart-rate-metrics dd { margin: 0; color: #282828; font-size: 12px; font-weight: 900; }
 .private-heart-rate-zones { display: grid; gap: 6px; }
-.private-heart-rate-zones > strong { color: #43217b; font-size: 11px; }
+.private-heart-rate-zones > strong { color: #2f2f2f; font-size: 11px; }
 .private-heart-rate-zones article {
   display: grid;
   grid-template-columns: minmax(110px, 0.8fr) minmax(150px, 1fr);
   gap: 3px 10px;
   padding: 7px;
-  border: 1px solid #ebe4f8;
+  border: 1px solid #e7e7e7;
   border-radius: 7px;
-  background: #fff;
+  background: #ffffff;
 }
 .private-heart-rate-zones article > div { display: grid; grid-row: 1 / span 2; }
 .private-heart-rate-zones article span,
-.private-heart-rate-zones article small { color: #667085; font-size: 11px; }
-.private-heart-rate-zones article > span { color: #344054; font-weight: 800; }
-.private-heart-rate-separation { color: #667085; font-size: 10px; }
-.account-history-sync-note { color: #667085; text-align: right; }
+.private-heart-rate-zones article small { color: #6f6f6f; font-size: 11px; }
+.private-heart-rate-zones article > span { color: #3f3f3f; font-weight: 800; }
+.private-heart-rate-separation { color: #6f6f6f; font-size: 10px; }
+.account-history-sync-note { color: #6f6f6f; text-align: right; }
 
 @media (max-width: 980px) {
   .account-profile-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -1,7 +1,7 @@
 .native-offline-page {
   align-items: center;
-  background: radial-gradient(circle at 50% 20%, #17351f 0, #0b1510 34%, #05080c 72%);
-  color: #f7fbf8;
+  background: radial-gradient(circle at 50% 20%, #2d2d2d 0, #131313 34%, #080808 72%);
+  color: #fafafa;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -19,7 +19,7 @@
 }
 
 .native-offline-page p {
-  color: #c4d1c8;
+  color: #cecece;
   font-size: 17px;
   line-height: 1.5;
   margin: 0 auto 24px;
@@ -28,8 +28,8 @@
 
 .native-offline-page button,
 .native-offline-mark {
-  background: #84ff31;
-  color: #071008;
+  background: #d6d6d6;
+  color: #0e0e0e;
   font-weight: 900;
 }
 

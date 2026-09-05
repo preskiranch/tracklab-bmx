@@ -5,13 +5,13 @@
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   background: #ffffff;
-  color: #182331;
+  color: #222222;
   font: inherit;
 }
 
 .explore-route-builder select:disabled {
-  color: #82909c;
-  background: #f3f5f6;
+  color: #8e8e8e;
+  background: #f5f5f5;
 }
 
 .explore-smart-route,
@@ -19,16 +19,16 @@
   display: grid;
   gap: 9px;
   padding: 11px;
-  border: 1px solid #b9dca8;
+  border: 1px solid #d1d1d1;
   border-radius: 10px;
-  background: linear-gradient(145deg, #f4ffef, #f8fbfc);
+  background: linear-gradient(145deg, #fcfcfc, #fafafa);
 }
 
 .explore-smart-route > div {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #285317;
+  color: #464646;
 }
 
 .explore-smart-route > div span {
@@ -37,7 +37,7 @@
 
 .explore-smart-route > div small,
 .explore-smart-route-result p {
-  color: #647668;
+  color: #717171;
   font-size: 10px;
   line-height: 1.4;
 }
@@ -50,7 +50,7 @@
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   background: #ffffff;
-  color: #182331;
+  color: #222222;
   font: inherit;
   line-height: 1.45;
 }
@@ -61,10 +61,10 @@
   justify-content: center;
   gap: 7px;
   min-height: 40px;
-  border: 1px solid #5ac52e;
+  border: 1px solid #a3a3a3;
   border-radius: 8px;
-  background: #67d837;
-  color: #123407;
+  background: #b4b4b4;
+  color: #2a2a2a;
   font-size: 11px;
   font-weight: 900;
 }
@@ -79,7 +79,7 @@
 }
 
 .explore-smart-route-result > div > span {
-  color: #526358;
+  color: #5f5f5f;
   font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.07em;
@@ -90,7 +90,7 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  color: #245b92;
+  color: #535353;
   font-size: 10px;
   font-weight: 800;
   text-decoration: none;
@@ -100,7 +100,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #82909c;
+  color: #8e8e8e;
   font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.08em;
@@ -116,9 +116,9 @@
 }
 
 .explore-route-builder .explore-map-route-button {
-  border-color: #9bc987;
-  background: #f1faed;
-  color: #245414;
+  border-color: #bababa;
+  background: #f7f7f7;
+  color: #454545;
 }
 
 .explore-map-picker-layer {
@@ -128,7 +128,7 @@
   display: grid;
   place-items: center;
   padding: 18px;
-  background: rgba(4, 9, 15, 0.76);
+  background: rgba(8, 8, 8, 0.76);
   backdrop-filter: blur(8px);
 }
 
@@ -141,7 +141,7 @@
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 18px;
-  background: #f7f9fa;
+  background: #f9f9f9;
   box-shadow: 0 30px 90px rgba(0, 0, 0, 0.5);
 }
 
@@ -151,7 +151,7 @@
   justify-content: space-between;
   gap: 18px;
   padding: 18px 20px;
-  background: #101823;
+  background: #171717;
   color: #ffffff;
 }
 
@@ -161,7 +161,7 @@
 }
 
 .explore-map-picker > header p {
-  color: #bbc7d2;
+  color: #c5c5c5;
   font-size: 11px;
 }
 
@@ -195,20 +195,20 @@
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   background: #ffffff;
-  color: #354454;
+  color: #424242;
   font-size: 11px;
   font-weight: 900;
 }
 
 .explore-map-picker-mode button.selected {
-  border-color: #73cc48;
-  background: #dfffcf;
-  color: #17380b;
+  border-color: #b0b0b0;
+  background: #f5f5f5;
+  color: #2e2e2e;
 }
 
 .explore-map-picker-mode > span {
   margin-left: auto;
-  color: #5f6d79;
+  color: #6b6b6b;
   font-size: 11px;
   font-weight: 750;
 }
@@ -216,7 +216,7 @@
 .explore-map-picker-canvas {
   width: 100%;
   min-height: 340px;
-  background: #172432;
+  background: #222222;
 }
 
 .explore-map-picker-status {
@@ -226,14 +226,14 @@
   translate: -50% -50%;
   padding: 11px 14px;
   border-radius: 9px;
-  background: rgba(11, 20, 30, 0.9);
+  background: rgba(19, 19, 19, 0.9);
   color: #ffffff;
   font-size: 12px;
   font-weight: 850;
 }
 
 .explore-map-picker-status.error {
-  background: #962e25;
+  background: #434343;
 }
 
 .explore-map-picker-points {
@@ -253,15 +253,15 @@
   padding: 9px 11px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: #f7f9fa;
+  background: #f9f9f9;
 }
 
 .explore-map-picker-points > div:first-child svg {
-  color: #54b92c;
+  color: #999999;
 }
 
 .explore-map-picker-points > div:last-child svg {
-  color: #172331;
+  color: #212121;
 }
 
 .explore-map-picker-points span {
@@ -270,7 +270,7 @@
 }
 
 .explore-map-picker-points small {
-  color: #73808b;
+  color: #7e7e7e;
   font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.07em;
@@ -279,7 +279,7 @@
 
 .explore-map-picker-points strong {
   overflow: hidden;
-  color: #182331;
+  color: #222222;
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -291,7 +291,7 @@
   gap: 8px;
   padding: 12px 14px;
   border-top: 1px solid var(--line);
-  background: #f2f5f6;
+  background: #f4f4f4;
 }
 
 .explore-map-picker > footer button {
@@ -304,15 +304,15 @@
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   background: #ffffff;
-  color: #223141;
+  color: #2f2f2f;
   font-size: 11px;
   font-weight: 900;
 }
 
 .explore-map-picker > footer button.primary {
-  border-color: #5ac52e;
-  background: linear-gradient(135deg, #77e541, #57ce2b);
-  color: #0c2b05;
+  border-color: #a3a3a3;
+  background: linear-gradient(135deg, #c2c2c2, #a9a9a9);
+  color: #222222;
 }
 
 .explore-map-picker > footer button:disabled {

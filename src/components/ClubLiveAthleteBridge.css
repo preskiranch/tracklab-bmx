@@ -8,11 +8,11 @@
   gap: 7px;
   max-width: min(260px, calc(100vw - 20px));
   padding: 7px 10px;
-  border: 1px solid rgb(121 255 54 / 65%);
+  border: 1px solid rgb(212 212 212 / 65%);
   border-radius: 999px;
-  background: rgb(5 17 12 / 88%);
+  background: rgb(14 14 14 / 88%);
   box-shadow: 0 4px 18px rgb(0 0 0 / 25%);
-  color: #f7fff3;
+  color: #fcfcfc;
   font-size: clamp(11px, 1.25vw, 13px);
   font-weight: 800;
   line-height: 1.2;
@@ -25,6 +25,6 @@
   height: 8px;
   flex: 0 0 auto;
   border-radius: 50%;
-  background: #79ff36;
-  box-shadow: 0 0 0 3px rgb(121 255 54 / 18%);
+  background: #d4d4d4;
+  box-shadow: 0 0 0 3px rgb(212 212 212 / 18%);
 }

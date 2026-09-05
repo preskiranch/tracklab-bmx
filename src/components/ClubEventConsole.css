@@ -3,10 +3,10 @@
   gap: 16px;
   margin-bottom: 22px;
   padding: clamp(18px, 2.2vw, 28px);
-  border: 1px solid #cdd9c7;
+  border: 1px solid #d5d5d5;
   border-radius: 22px;
-  background: #fff;
-  box-shadow: 0 16px 42px rgba(35, 55, 31, 0.09);
+  background: #ffffff;
+  box-shadow: 0 16px 42px rgba(49, 49, 49, 0.09);
 }
 
 .club-event-console-header,
@@ -18,16 +18,16 @@
   gap: 14px;
 }
 
-.club-event-console-header h3 { margin: 4px 0 0; color: #1d2b1a; font-size: clamp(19px, 2vw, 27px); }
-.club-event-console-header .eyebrow { display: inline-flex; align-items: center; gap: 6px; color: #438625; }
+.club-event-console-header h3 { margin: 4px 0 0; color: #272727; font-size: clamp(19px, 2vw, 27px); }
+.club-event-console-header .eyebrow { display: inline-flex; align-items: center; gap: 6px; color: #717171; }
 
 .club-event-mode-switch {
   display: flex;
   gap: 5px;
   padding: 5px;
-  border: 1px solid #d4ded0;
+  border: 1px solid #dbdbdb;
   border-radius: 14px;
-  background: #f1f5ef;
+  background: #f4f4f4;
 }
 
 .club-event-mode-switch button,
@@ -44,8 +44,8 @@
   font-weight: 900;
 }
 
-.club-event-mode-switch button { background: transparent; color: #576354; }
-.club-event-mode-switch button.selected { background: #172118; color: #fff; box-shadow: 0 5px 14px rgba(23, 33, 24, 0.18); }
+.club-event-mode-switch button { background: transparent; color: #5f5f5f; }
+.club-event-mode-switch button.selected { background: #1e1e1e; color: #ffffff; box-shadow: 0 5px 14px rgba(30, 30, 30, 0.18); }
 .club-event-mode-switch button:disabled { opacity: 0.62; }
 
 .club-event-independent {
@@ -53,14 +53,14 @@
   align-items: flex-start;
   gap: 12px;
   padding: 15px;
-  border: 1px solid #bfe1b0;
+  border: 1px solid #d6d6d6;
   border-radius: 15px;
-  background: #f1faed;
-  color: #2e6e19;
+  background: #f7f7f7;
+  color: #5a5a5a;
 }
 
-.club-event-independent strong { display: block; color: #24481a; }
-.club-event-independent p { margin: 4px 0 0; color: #52664c; }
+.club-event-independent strong { display: block; color: #3d3d3d; }
+.club-event-independent p { margin: 4px 0 0; color: #606060; }
 
 .club-event-builder {
   display: grid;
@@ -68,7 +68,7 @@
   gap: 12px;
   padding: 16px;
   border-radius: 16px;
-  background: #f4f7f2;
+  background: #f6f6f6;
 }
 
 .club-event-builder-intro {
@@ -78,20 +78,20 @@
   padding-bottom: 2px;
 }
 
-.club-event-builder-intro strong { color: #243220; font-size: 15px; }
-.club-event-builder-intro span { color: #63705f; font-size: 12px; line-height: 1.45; }
+.club-event-builder-intro strong { color: #2e2e2e; font-size: 15px; }
+.club-event-builder-intro span { color: #6c6c6c; font-size: 12px; line-height: 1.45; }
 
 .club-event-builder label { display: grid; min-width: 0; gap: 6px; }
-.club-event-builder label > span { color: #586454; font-size: 11px; font-weight: 900; text-transform: uppercase; }
+.club-event-builder label > span { color: #606060; font-size: 11px; font-weight: 900; text-transform: uppercase; }
 .club-event-builder input,
 .club-event-builder select {
   width: 100%;
   min-height: 44px;
   padding: 9px 11px;
-  border: 1px solid #cbd6c6;
+  border: 1px solid #d3d3d3;
   border-radius: 10px;
-  background: #fff;
-  color: #1f2a1d;
+  background: #ffffff;
+  color: #272727;
 }
 
 .club-event-builder-wide { grid-column: span 2; }
@@ -113,10 +113,10 @@
   align-items: center;
   gap: 8px;
   padding: 9px 10px;
-  border: 1px solid #d7e0d3;
+  border: 1px solid #dddddd;
   border-radius: 10px;
-  background: #fff;
-  color: #4d5a49;
+  background: #ffffff;
+  color: #565656;
   font-size: 11px;
   font-weight: 800;
 }
@@ -128,21 +128,21 @@
   flex: 0 0 auto;
   place-items: center;
   border-radius: 7px;
-  background: #172118;
-  color: #7ade36;
+  background: #1e1e1e;
+  color: #bdbdbd;
 }
 
 .club-event-race-view {
   display: grid;
   gap: 7px;
   padding: 11px;
-  border: 1px solid #cbd6c6;
+  border: 1px solid #d3d3d3;
   border-radius: 11px;
-  background: #fff;
+  background: #ffffff;
 }
 
 .club-event-race-view > span {
-  color: #586454;
+  color: #606060;
   font-size: 11px;
   font-weight: 900;
   text-transform: uppercase;
@@ -161,64 +161,64 @@
   justify-content: center;
   gap: 6px;
   padding: 7px 9px;
-  border: 1px solid #d0dacb;
+  border: 1px solid #d7d7d7;
   border-radius: 9px;
-  background: #f5f8f3;
-  color: #53604f;
+  background: #f7f7f7;
+  color: #5c5c5c;
   font: inherit;
   font-size: 11px;
   font-weight: 900;
 }
 
 .club-event-race-view button.selected {
-  border-color: #68bc3e;
-  background: #e2f8d6;
-  color: #254f16;
-  box-shadow: inset 0 0 0 1px #91d66d;
+  border-color: #a1a1a1;
+  background: #f1f1f1;
+  color: #424242;
+  box-shadow: inset 0 0 0 1px #c0c0c0;
 }
 
-.club-event-race-view small { color: #687464; font-size: 10px; line-height: 1.35; }
+.club-event-race-view small { color: #707070; font-size: 10px; line-height: 1.35; }
 
-.club-event-primary { border-color: #65bc35 !important; background: #7ade36 !important; color: #16220f !important; }
-.club-event-primary:disabled { border-color: #d5ddd1 !important; background: #e4e9e1 !important; color: #828c7e !important; }
+.club-event-primary { border-color: #a0a0a0 !important; background: #bdbdbd !important; color: #1e1e1e !important; }
+.club-event-primary:disabled { border-color: #dadada !important; background: #e7e7e7 !important; color: #898989 !important; }
 
 .club-event-lobby {
   display: grid;
   gap: 14px;
   padding: 16px;
-  border: 1px solid #c9d8c2;
+  border: 1px solid #d3d3d3;
   border-radius: 17px;
-  background: linear-gradient(145deg, #f7fbf5, #eef6e9);
+  background: linear-gradient(145deg, #fafafa, #f3f3f3);
 }
 
-.club-event-lobby.active { border-color: #72c549; background: linear-gradient(145deg, #f0faeb, #e3f5d9); }
-.club-event-icon { display: grid; width: 44px; height: 44px; flex: 0 0 auto; place-items: center; border-radius: 13px; background: #172118; color: #7ade36; }
+.club-event-lobby.active { border-color: #aaaaaa; background: linear-gradient(145deg, #f7f7f7, #efefef); }
+.club-event-icon { display: grid; width: 44px; height: 44px; flex: 0 0 auto; place-items: center; border-radius: 13px; background: #1e1e1e; color: #bdbdbd; }
 .club-event-lobby-title > div { min-width: 0; margin-right: auto; }
-.club-event-lobby-title > div > span { color: #4e8c30; font-size: 11px; font-weight: 900; text-transform: uppercase; }
+.club-event-lobby-title > div > span { color: #787878; font-size: 11px; font-weight: 900; text-transform: uppercase; }
 .club-event-lobby-title h4 { margin: 2px 0; font-size: 20px; }
-.club-event-lobby-title p { margin: 0; color: #5e6b59; font-size: 12px; }
-.club-event-lobby-title > strong { flex: 0 0 auto; padding: 7px 10px; border-radius: 999px; background: #fff; color: #397b20; font-size: 12px; }
+.club-event-lobby-title p { margin: 0; color: #676767; font-size: 12px; }
+.club-event-lobby-title > strong { flex: 0 0 auto; padding: 7px 10px; border-radius: 999px; background: #ffffff; color: #666666; font-size: 12px; }
 
 .club-event-seats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
-.club-event-seat { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; padding: 11px; border: 1px solid #d4ddd0; border-radius: 12px; background: #fff; }
-.club-event-seat > b { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 8px; background: #e7eee3; color: #344331; }
+.club-event-seat { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; padding: 11px; border: 1px solid #dadada; border-radius: 12px; background: #ffffff; }
+.club-event-seat > b { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 8px; background: #ececec; color: #3f3f3f; }
 .club-event-seat strong,
 .club-event-seat small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .club-event-seat strong { font-size: 12px; }
-.club-event-seat small { margin-top: 2px; color: #707b6c; font-size: 10px; }
-.club-event-seat > span { display: inline-flex; grid-column: 1 / -1; align-items: center; gap: 4px; color: #7a8476; font-size: 10px; font-weight: 900; }
+.club-event-seat small { margin-top: 2px; color: #787878; font-size: 10px; }
+.club-event-seat > span { display: inline-flex; grid-column: 1 / -1; align-items: center; gap: 4px; color: #818181; font-size: 10px; font-weight: 900; }
 .club-event-seat.ready,
-.club-event-seat.active { border-color: #8ed16a; box-shadow: inset 0 3px #70d13a; }
+.club-event-seat.active { border-color: #bbbbbb; box-shadow: inset 0 3px #b1b1b1; }
 .club-event-seat.ready > span,
-.club-event-seat.active > span { color: #367c1e; }
-.club-event-seat.stale { border-color: #e5bf7a; background: #fff9ee; }
+.club-event-seat.active > span { color: #666666; }
+.club-event-seat.stale { border-color: #c2c2c2; background: #f9f9f9; }
 
 .club-event-lobby-actions { justify-content: flex-end; }
-.club-event-lobby-actions button:not(.club-event-primary) { border-color: #d1dad0; background: #fff; color: #4c5849; }
+.club-event-lobby-actions button:not(.club-event-primary) { border-color: #d7d7d7; background: #ffffff; color: #545454; }
 .club-event-start-action { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
-.club-event-start-action p { max-width: 330px; margin: 0; color: #9a5b1a; font-size: 11px; font-weight: 800; line-height: 1.35; text-align: right; }
-.club-event-start-action p.ready { color: #397b20; }
-.club-event-message { margin: 0; color: #566252; font-size: 13px; }
+.club-event-start-action p { max-width: 330px; margin: 0; color: #646464; font-size: 11px; font-weight: 800; line-height: 1.35; text-align: right; }
+.club-event-start-action p.ready { color: #666666; }
+.club-event-message { margin: 0; color: #5e5e5e; font-size: 13px; }
 
 @media (max-width: 900px) {
   .club-event-console-header { align-items: flex-start; flex-direction: column; }

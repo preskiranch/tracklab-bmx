@@ -1,35 +1,35 @@
 .reaction-record-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.reaction-leaderboard-trigger { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #506246; border-radius: 999px; background: #142218; color: #edffd7; padding: 7px 10px; font-size: .75rem; font-weight: 750; cursor: pointer; }
+.reaction-leaderboard-trigger { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #5c5c5c; border-radius: 999px; background: #1e1e1e; color: #f8f8f8; padding: 7px 10px; font-size: .75rem; font-weight: 750; cursor: pointer; }
 .reaction-leaderboard-trigger:disabled { opacity: .45; cursor: default; }
-.reaction-leaderboard-dialog { box-sizing: border-box; width: min(620px, calc(100vw - max(16px, var(--reaction-safe-left), var(--reaction-safe-right)) - max(16px, var(--reaction-safe-left), var(--reaction-safe-right)))); max-height: calc(100dvh - var(--reaction-safe-top) - var(--reaction-safe-bottom) - 32px); padding: 0; border: 1px solid #526b49; border-radius: 20px; background: #08160f; color: #f3faef; overflow: hidden; cursor: auto; user-select: text; }
+.reaction-leaderboard-dialog { box-sizing: border-box; width: min(620px, calc(100vw - max(16px, var(--reaction-safe-left), var(--reaction-safe-right)) - max(16px, var(--reaction-safe-left), var(--reaction-safe-right)))); max-height: calc(100dvh - var(--reaction-safe-top) - var(--reaction-safe-bottom) - 32px); padding: 0; border: 1px solid #636363; border-radius: 12px; overflow: hidden; cursor: auto; user-select: text; color-scheme: light; background: #fff; color: #171717; border-color: #d4d4d4; box-shadow: 0 24px 80px rgb(0 0 0 / 28%); }
 .reaction-leaderboard-dialog[open] { display: flex; flex-direction: column; }
-.reaction-leaderboard-dialog::backdrop { background: rgb(0 8 4 / 80%); }
-.reaction-leaderboard-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 20px; border-bottom: 1px solid #30432a; flex: 0 0 auto; }
-.reaction-leaderboard-eyebrow { color: #cfff38; font-size: .65rem; font-weight: 850; letter-spacing: .12em; }
-.reaction-leaderboard-dialog h2 { font-size: 1.3rem; margin: 4px 0 0; }
-.reaction-leaderboard-close { flex: 0 0 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; border: 1px solid #506246; color: white; background: #1b2a20; cursor: pointer; }
+.reaction-leaderboard-dialog::backdrop { background: rgb(6 6 6 / 80%); }
+.reaction-leaderboard-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 20px; border-bottom: 1px solid #3d3d3d; flex: 0 0 auto; background: #fff; border-color: #e5e5e5; }
+.reaction-leaderboard-eyebrow { font-size: .65rem; font-weight: 700; letter-spacing: .08em; color: #737373; }
+.reaction-leaderboard-dialog h2 { font-size: 1.3rem; margin: 4px 0 0; font-weight: 650; letter-spacing: -.025em; }
+.reaction-leaderboard-close { flex: 0 0 42px; height: 42px; display: grid; place-items: center; border: 1px solid #5c5c5c; cursor: pointer; background: #fafafa; border-color: #d4d4d4; color: #171717; border-radius: 8px; }
 .reaction-leaderboard-scroll { padding: 18px 20px 22px; overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
 .reaction-leaderboard-toolbar { display: flex; align-items: center; gap: 16px; justify-content: space-between; margin-bottom: 16px; }
-.reaction-leaderboard-dialog p { color: #bdcdbd; font-size: .85rem; line-height: 1.45; margin: 0; }
-.reaction-leaderboard-toolbar label { display: grid; gap: 4px; color: #bdcdbd; font-size: .75rem; flex: 0 0 105px; }
-.reaction-leaderboard-dialog select, .reaction-leaderboard-dialog input { box-sizing: border-box; border: 1px solid #61745a; border-radius: 8px; background: #14231a; color: white; min-height: 44px; padding: 8px 10px; font: inherit; }
+.reaction-leaderboard-dialog p { color: #c8c8c8; font-size: .85rem; line-height: 1.45; margin: 0; }
+.reaction-leaderboard-toolbar label { display: grid; gap: 4px; color: #c8c8c8; font-size: .75rem; flex: 0 0 105px; }
+.reaction-leaderboard-dialog select, .reaction-leaderboard-dialog input { box-sizing: border-box; border: 1px solid #6e6e6e; border-radius: 8px; min-height: 44px; padding: 8px 10px; font: inherit; background: #fff; color: #171717; border-color: #a3a3a3; }
 .reaction-leaderboard-dialog input { font-size: 16px; }
 .reaction-leaderboard-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
-.reaction-leaderboard-table th, .reaction-leaderboard-table td { padding: 12px 8px; border-bottom: 1px solid #293d2b; text-align: left; }
-.reaction-leaderboard-table thead th { font-size: .7rem; color: #a4b99d; text-transform: uppercase; }
+.reaction-leaderboard-table th, .reaction-leaderboard-table td { padding: 12px 8px; border-bottom: 1px solid #373737; text-align: left; border-color: #e5e5e5; }
+.reaction-leaderboard-table thead th { font-size: .7rem; text-transform: uppercase; color: #525252; font-weight: 600; letter-spacing: .04em; }
 .reaction-leaderboard-table th:nth-child(2) { overflow-wrap: anywhere; }
 .reaction-leaderboard-table td:last-child, .reaction-leaderboard-table th:last-child { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.reaction-leaderboard-table .is-you { background: #203513; color: #e2ff9f; }
+.reaction-leaderboard-table .is-you { background: #f0f0f0; color: #171717; }
 .reaction-leaderboard-empty { padding: 24px 8px; }
-.reaction-leaderboard-participation { margin-top: 22px; padding: 16px; background: #112217; border: 1px solid #344b2d; border-radius: 12px; }
+.reaction-leaderboard-participation { margin-top: 22px; padding: 16px; border: 1px solid #444444; background: #fafafa; border-color: #e5e5e5; border-radius: 8px; }
 .reaction-leaderboard-participation h3 { margin: 0 0 6px; font-size: 1rem; }
 .reaction-leaderboard-participation p + p { margin-top: 8px; }
-.reaction-leaderboard-participation small { color: #a8bca4; font-size: .72rem; }
+.reaction-leaderboard-participation small { font-size: .72rem; color: #525252; line-height: 1.5; }
 .reaction-leaderboard-form-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
-.reaction-leaderboard-form-actions button { padding: 10px 14px; min-height: 44px; border: 1px solid #5c773a; border-radius: 9px; background: #d0ff39; color: #142400; font-weight: 800; cursor: pointer; }
-.reaction-leaderboard-form-actions button + button { background: transparent; color: #e5f3dd; }
+.reaction-leaderboard-form-actions button { padding: 10px 14px; min-height: 44px; border: 1px solid #6d6d6d; font-weight: 650; cursor: pointer; background: #171717; color: #fff; border-color: #171717; border-radius: 8px; }
+.reaction-leaderboard-form-actions button + button { background: #fff; color: #171717; border-color: #d4d4d4; }
 .reaction-leaderboard-form-actions button:disabled { opacity: .5; cursor: default; }
-.reaction-leaderboard-dialog .reaction-leaderboard-error { color: #ffb9a8; margin: 12px 0; }
+.reaction-leaderboard-dialog .reaction-leaderboard-error { margin: 12px 0; color: #171717; font-weight: 600; }
 .reaction-leaderboard-error button { color: inherit; background: transparent; text-decoration: underline; border: 0; cursor: pointer; }
 @media (max-width: 420px) { .reaction-leaderboard-dialog > header { padding: 14px; } .reaction-leaderboard-dialog h2 { font-size: 1.1rem; } .reaction-leaderboard-scroll { padding: 14px; } .reaction-leaderboard-participation { padding: 12px; } }
 @media (max-height: 480px) { .reaction-leaderboard-trigger { padding: 4px 8px; font-size: .68rem; } }
@@ -39,3 +39,7 @@
   .reaction-leaderboard-trigger > span { display: none; }
   .reaction-leaderboard-trigger svg { width: 20px; height: 20px; }
 }
+
+/* Neutral SaaS dialog: clear table hierarchy and readable account controls. */
+.reaction-leaderboard-dialog p, .reaction-leaderboard-toolbar label { color: #525252; }
+.reaction-leaderboard-dialog :is(button, select, input):focus-visible { outline: 2px solid #171717; outline-offset: 3px; }

@@ -1,10 +1,10 @@
 .heart-rate-metric {
   align-items: center;
-  background: linear-gradient(145deg, rgba(85, 20, 35, .96), rgba(27, 12, 19, .96));
-  border: 1px solid rgba(255, 104, 132, .46);
+  background: linear-gradient(145deg, rgba(35, 35, 35, .96), rgba(16, 16, 16, .96));
+  border: 1px solid rgba(138, 138, 138, .46);
   border-radius: 12px;
   box-sizing: border-box;
-  color: #fff;
+  color: #ffffff;
   display: inline-flex;
   gap: 9px;
   min-height: 54px;
@@ -13,7 +13,7 @@
 }
 
 .heart-rate-metric > svg {
-  color: #ff5d7a;
+  color: #828282;
   flex: 0 0 auto;
 }
 
@@ -45,7 +45,7 @@
 
 .heart-rate-metric.missing,
 .heart-rate-metric.stale {
-  background: rgba(18, 21, 25, .92);
+  background: rgba(21, 21, 21, .92);
   border-color: rgba(255, 255, 255, .16);
 }
 
@@ -73,7 +73,7 @@
 
 .race-rider-overlay-heart-rate {
   align-items: center;
-  color: #ff6f87 !important;
+  color: #8f8f8f !important;
   display: inline-flex !important;
   font-size: .75em !important;
   font-weight: 900;

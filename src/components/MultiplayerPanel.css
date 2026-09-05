@@ -5,7 +5,7 @@
 
 .room-safety-row {
   align-items: center;
-  background: #f8fafb;
+  background: #fafafa;
   border: 1px solid var(--line);
   border-radius: 7px;
   display: flex;
@@ -32,7 +32,7 @@
 
 .room-safety-row button {
   align-items: center;
-  background: #fff;
+  background: #ffffff;
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--ink);
@@ -45,6 +45,6 @@
 }
 
 .room-safety-row button.danger {
-  border-color: #e5a4a4;
-  color: #9f1d1d;
+  border-color: #b2b2b2;
+  color: #393939;
 }

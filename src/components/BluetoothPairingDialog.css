@@ -5,7 +5,7 @@
   display: grid;
   place-items: center;
   padding: 18px;
-  background: rgba(8, 14, 23, 0.68);
+  background: rgba(13, 13, 13, 0.68);
   backdrop-filter: blur(5px);
 }
 
@@ -37,7 +37,7 @@
 
 .bluetooth-pairing-explainer {
   margin: 0;
-  color: #4b5a6b;
+  color: #585858;
   font-size: 13px;
   line-height: 1.5;
 }
@@ -48,14 +48,14 @@
   gap: 9px;
   align-items: center;
   padding: 11px 12px;
-  border: 1px solid #b8e296;
+  border: 1px solid #d4d4d4;
   border-radius: 9px;
-  background: #f2fbe9;
-  color: #264713;
+  background: #f8f8f8;
+  color: #3c3c3c;
 }
 
 .bluetooth-pairing-progress span {
-  color: #506344;
+  color: #5d5d5d;
   font-size: 12px;
   line-height: 1.35;
 }
@@ -73,21 +73,21 @@
   align-items: center;
   min-height: 68px;
   padding: 10px;
-  border: 1px dashed #c8d0d9;
+  border: 1px dashed #cfcfcf;
   border-radius: 9px;
-  background: #f7f9fb;
+  background: #f9f9f9;
 }
 
 .bluetooth-pairing-slots article.saved {
   border-style: solid;
-  border-color: #aacff7;
-  background: #f1f7ff;
+  border-color: #cacaca;
+  background: #f6f6f6;
 }
 
 .bluetooth-pairing-slots article.connected {
   border-style: solid;
-  border-color: #83ce52;
-  background: #f3fcec;
+  border-color: #b5b5b5;
+  background: #f9f9f9;
 }
 
 .bluetooth-pairing-slots article > div {
@@ -102,7 +102,7 @@
 }
 
 .bluetooth-pairing-slots small {
-  color: #647286;
+  color: #707070;
   font-size: 11px;
   line-height: 1.25;
 }
@@ -114,7 +114,7 @@
   width: 30px;
   height: 30px;
   border-radius: 8px;
-  background: #101827;
+  background: #171717;
   color: #ffffff;
   font-weight: 950;
 }
@@ -130,7 +130,7 @@
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #ffffff;
-  color: #111827;
+  color: #181818;
   font-weight: 900;
 }
 
