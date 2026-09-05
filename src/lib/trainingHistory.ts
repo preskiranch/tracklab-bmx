@@ -164,6 +164,9 @@ function normalizeActivityType(value: unknown): TrainingActivityType {
 }
 
 function normalizeTrainingSession(value: Partial<TrainingSession>): TrainingSession | null {
+  // Older builds logged practice attempts as BMX races. Keep these out of
+  // training views and exports while retaining the rider's separate PR.
+  if (isReactionTestSession(value)) return null;
   const id = typeof value.id === 'string' ? value.id.trim() : '';
   const startedAt = Number(value.startedAt);
   const endedAt = Number(value.endedAt);
@@ -193,6 +196,11 @@ function normalizeTrainingSession(value: Partial<TrainingSession>): TrainingSess
     createdAt: Number(value.createdAt) || startedAt,
     updatedAt: Number(value.updatedAt) || endedAt,
   };
+}
+
+export function isReactionTestSession(session: Partial<TrainingSession>) {
+  return Boolean(session.details?.reactionTest)
+    || /^Reaction Test(?:\s*[·:—-]|$)/iu.test(session.title ?? '');
 }
 
 export async function loadTrainingHistory(from?: number, to?: number): Promise<TrainingHistoryResponse> {

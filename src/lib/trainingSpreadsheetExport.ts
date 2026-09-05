@@ -4,7 +4,7 @@ import type {
   SheetData,
 } from 'write-excel-file/browser';
 import type { TrainingSession } from '../types';
-import { trainingSessionZoneResults } from './trainingHistory';
+import { isReactionTestSession, trainingSessionZoneResults } from './trainingHistory';
 import {
   buildTrainingPowerRepMatrix,
   buildTrainingResultRows,
@@ -180,7 +180,7 @@ export function trainingSessionSpreadsheetResults(session: TrainingSession): Rid
 }
 
 function sortedSessions(sessions: readonly TrainingSession[]) {
-  return [...sessions].sort((left, right) => (
+  return sessions.filter((session) => !isReactionTestSession(session)).sort((left, right) => (
     left.startedAt - right.startedAt || left.id.localeCompare(right.id)
   ));
 }

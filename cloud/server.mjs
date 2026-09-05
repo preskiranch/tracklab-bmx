@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
 import * as persistence from './persistence.mjs';
+import { isReactionTestSession, measuredReactionTestBestMs, reactionLeaderboardDisplayName } from './reactionTest.mjs';
 import { cloudTelemetry } from './telemetry.mjs';
 import { planClubLiveExploreClusters } from './clubLiveExploreClusters.mjs';
 import {
@@ -7859,6 +7860,9 @@ async function stopClubTabletSession(session, { capacityReason = '' } = {}) {
   if (clubTabletSessionTokenHashByDeviceId.get(session.deviceId) === session.tokenHash) {
     clubTabletSessionTokenHashByDeviceId.delete(session.deviceId);
   }
+  const recordingDeadlineWrite = persistence.updateClubTabletResultRecordingDeadline(
+    session.tokenHash, Math.min(Date.now(), session.expiresAt, session.maxExpiresAt), { ended: true },
+  );
   for (const [ticketHash, ticket] of clubTabletWsTicketsByHash.entries()) {
     if (ticket.sessionTokenHash !== session.tokenHash) continue;
     if (ticket._expiryTimer) clearTimeout(ticket._expiryTimer);
@@ -7894,11 +7898,15 @@ async function stopClubTabletSession(session, { capacityReason = '' } = {}) {
       holderId: session.tokenHash,
     });
   }
-  return queueClubEventParticipantRelease({
+  const participantRelease = await queueClubEventParticipantRelease({
     clubId: session.clubId,
     deviceId: session.deviceId,
     sessionTokenHash: session.tokenHash,
   });
+  if (!await recordingDeadlineWrite) {
+    throw new HttpRequestError(503, 'Completed-result recording deadline storage is temporarily unavailable.');
+  }
+  return participantRelease;
 }
 
 function scheduleClubTabletSessionExpiry(session) {
@@ -7981,7 +7989,11 @@ async function loadClubTabletSessionByHash(sessionTokenHash, { renew = false } =
   session.wattbikeCapacityAllocationKey = session.wattbikeCapacityAllocationKey
     || clubTabletWattbikeAllocationKey(session.deviceId);
   if (renew) {
-    session.expiresAt = Math.min(session.maxExpiresAt, now + clubTabletSessionIdleTtlMs);
+    const renewedExpiresAt = Math.min(session.maxExpiresAt, now + clubTabletSessionIdleTtlMs);
+    if (!await persistence.updateClubTabletResultRecordingDeadline(session.tokenHash, renewedExpiresAt)) {
+      throw new HttpRequestError(503, 'Completed-result recording deadline storage is temporarily unavailable.');
+    }
+    session.expiresAt = renewedExpiresAt;
     for (const client of clients.values()) {
       if (client.clubTabletSessionTokenHash === session.tokenHash && client.clubLiveAccess) {
         client.clubLiveAccess.expiresAt = session.expiresAt;
@@ -8069,6 +8081,8 @@ async function loadClubTabletResultArtifactSessionFromRequest(request) {
     expiresAt: authorization.expiresAt,
     _artifactOutbox: true,
     _artifactMember: authorization.member,
+    _artifactRecordingExpiresAt: authorization.recordingExpiresAt,
+    _artifactRecordingProfileKey: authorization.recordingAthleteProfileKey,
   };
 }
 
@@ -9950,14 +9964,7 @@ function persistRecordedGetPulledPersonalBest({ profileKey, studioRiderId = null
 }
 
 function getRecordedReactionTestPersonalBestMs(session) {
-  const reactionTest = session?.details?.reactionTest;
-  if (
-    !reactionTest
-    || typeof reactionTest !== 'object'
-    || reactionTest.valid !== true
-    || reactionTest.falseStart === true
-  ) return null;
-  return sanitizePersonalRecords({ reactionTestBestMs: reactionTest.reactionTimeMs })?.reactionTestBestMs ?? null;
+  return measuredReactionTestBestMs(session?.details?.reactionTest, { legacy: true });
 }
 
 /** Promote only faster valid Reaction Test results for an account or studio rider. */
@@ -10010,7 +10017,77 @@ function persistRecordedReactionTestPersonalBest({ profileKey, studioRiderId = n
         updatedAt: Math.max(Number(currentProfile.updatedAt) || 0, now),
       },
     };
-  }).then(() => true).catch(() => false);
+  }).then((saved) => Boolean(saved)).catch(() => false);
+}
+
+async function reactionTestRequestAccess(request, response, { allowResultArtifact = false } = {}) {
+  const resultToken = requestClubTabletResultToken(request);
+  if (resultToken && !allowResultArtifact) {
+    writeJson(response, 403, { error: 'Completed-result credentials can only save a finished Reaction Test.' });
+    return null;
+  }
+  if (requestClubTabletSessionToken(request) || resultToken) {
+    // Explicit completion credentials are authoritative, including while a
+    // newer athlete is active on the same tablet.
+    const tabletSession = resultToken
+      ? await loadClubTabletResultArtifactSessionFromRequest(request)
+      : await loadClubTabletSessionFromRequest(request);
+    const identity = tabletSession && await clubTabletMemberAndProfile(tabletSession);
+    if (!identity || (tabletSession._artifactOutbox
+      && (tabletSession._artifactRecordingProfileKey || null) !== (identity.member.athleteProfileKey || null))) {
+      writeJson(response, 401, { error: 'This club tablet athlete session expired or ended.' });
+      return null;
+    }
+    return { tabletSession, identity };
+  }
+  const authSession = await requireAuthSession(request, response);
+  return authSession ? { authSession } : null;
+}
+
+async function reactionTestResponse(access) {
+  const tablet = access.tabletSession;
+  const profileKey = tablet ? tablet.ownerProfileKey : authProfileKey(access.authSession.user);
+  const [measured, data, claimedData, claimedMeasured] = await Promise.all([
+    persistence.loadReactionTestBest(profileKey.slice(5), tablet?.studioRiderId || ''),
+    persistence.loadUserData(profileKey),
+    tablet && access.identity.member.status === 'claimed'
+      ? persistence.loadUserData(access.identity.profileKey) : null,
+    tablet && access.identity.member.status === 'claimed'
+      ? persistence.loadReactionTestBest(access.identity.profileKey.slice(5)) : null,
+  ]);
+  const records = tablet
+    ? data?.studioRiders?.find((rider) => rider.id === tablet.studioRiderId)?.personalRecords
+    : data?.accountProfile?.personalRecords;
+  const bests = [measured.personalBestMs, claimedMeasured?.personalBestMs,
+    sanitizePersonalRecords(records)?.reactionTestBestMs,
+    sanitizePersonalRecords(claimedData?.accountProfile?.personalRecords)?.reactionTestBestMs]
+    .filter((best) => typeof best === 'number' && Number.isFinite(best) && best > 0);
+  return {
+    personalBestMs: bests.length ? Math.min(...bests) : null,
+    leaderboard: tablet ? { joined: false, displayName: '' } : measured.leaderboard,
+    canJoinLeaderboard: !tablet,
+  };
+}
+
+async function saveReactionTestForAccess(access, result, { legacy = false } = {}) {
+  const bestMs = measuredReactionTestBestMs(result, { legacy });
+  if (bestMs == null) return;
+  const targets = access.tabletSession ? [
+    { profileKey: access.tabletSession.ownerProfileKey, studioRiderId: access.tabletSession.studioRiderId },
+    ...(access.identity.member.status === 'claimed' ? [{ profileKey: access.identity.profileKey }] : []),
+  ] : [{ profileKey: authProfileKey(access.authSession.user) }];
+  // Older training payloads lack the original timing fields. Keep their PRs
+  // private; only complete measured results can enter the ranking store.
+  const measuredMs = measuredReactionTestBestMs(result);
+  for (const target of targets) {
+    if (measuredMs != null) await persistence.saveReactionTestBest(
+      target.profileKey.slice(5), measuredMs, target.studioRiderId || '',
+    );
+    const saved = await persistRecordedReactionTestPersonalBest({
+      ...target, sessions: [{ details: { reactionTest: result } }],
+    });
+    if (!saved) throw new Error('Reaction Test personal record storage is temporarily unavailable.');
+  }
 }
 
 function sanitizeTrackPoint(value) {
@@ -22804,6 +22881,7 @@ async function serveStatic(request, response) {
           bikeDeviceId,
           sessionTokenHash,
           expiresAt: resultUploadExpiresAt,
+          recordingExpiresAt: tabletSession.expiresAt,
           now,
         });
         if (resultAuthorization.status !== 'created') {
@@ -23263,6 +23341,19 @@ async function serveStatic(request, response) {
       return;
     }
     const trainingSession = sanitizeTrainingSession(payload?.session);
+    if (trainingSession && isReactionTestSession(trainingSession)) {
+      const identity = await clubTabletMemberAndProfile(tabletSession);
+      if (!identity) {
+        writeJson(response, 403, { error: 'This athlete is no longer in the enrolled tablet club.' });
+        return;
+      }
+      await saveReactionTestForAccess({ tabletSession, identity }, trainingSession.details?.reactionTest, { legacy: true });
+      writeJson(response, 201, {
+        session: publicTrainingSession(trainingSession), replayed: false,
+        heartRate: { status: 'not-applicable' }, persistence: persistence.persistenceEnabled(),
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
     const scopedSession = trainingSession && scopeTrainingSessionToClubTabletAthlete(
       trainingSession,
       tabletSession,
@@ -24396,6 +24487,85 @@ async function serveStatic(request, response) {
     return;
   }
 
+  if (requestUrl.pathname === '/api/reaction-test/leaderboard' && request.method === 'GET') {
+    const requestedLimit = Number(requestUrl.searchParams.get('limit') || 5);
+    if (![5, 10, 25, 50].includes(requestedLimit)) {
+      writeJson(response, 400, { error: 'Choose a leaderboard limit of 5, 10, 25, or 50.' });
+      return;
+    }
+    // A shared tablet can read the public board, but never inherits an owner's
+    // identity from an ambient browser cookie.
+    const authSession = request.headers['x-tracklab-club-tablet-session']
+      ? null : await currentAuthSession(request);
+    const expectedAccountId = requestUrl.searchParams.get('expectedAccountId');
+    const viewerId = expectedAccountId == null || expectedAccountId === authSession?.user?.id
+      ? authSession?.user?.id || '' : '';
+    const entries = await persistence.loadReactionTestLeaderboard(viewerId, requestedLimit);
+    writeJson(response, 200, { entries }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (['/api/reaction-test', '/api/reaction-test/result', '/api/reaction-test/leaderboard'].includes(requestUrl.pathname)) {
+    const savingResult = requestUrl.pathname === '/api/reaction-test/result' && request.method === 'POST';
+    const access = await reactionTestRequestAccess(request, response, { allowResultArtifact: savingResult });
+    if (!access) return;
+    if (requestUrl.pathname === '/api/reaction-test' && request.method === 'GET') {
+      if (access.authSession && requestUrl.searchParams.has('expectedAccountId')
+        && requestUrl.searchParams.get('expectedAccountId') !== access.authSession.user.id) {
+        writeJson(response, 409, { error: 'This Reaction Test belongs to another signed-in account.' }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      writeJson(response, 200, await reactionTestResponse(access), { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (requestUrl.pathname === '/api/reaction-test/result' && request.method === 'POST') {
+      const payload = await readJsonBody(request, 12_000);
+      if (access.authSession && Object.hasOwn(payload ?? {}, 'expectedAccountId')
+        && payload.expectedAccountId !== access.authSession.user.id) {
+        writeJson(response, 409, { error: 'This Reaction Test belongs to another signed-in account.' });
+        return;
+      }
+      if (measuredReactionTestBestMs(payload?.result) == null) {
+        writeJson(response, 400, { error: 'A valid measured Reaction Test result is required.' });
+        return;
+      }
+      const recordingDeadline = access.tabletSession?._artifactOutbox
+        ? access.tabletSession._artifactRecordingExpiresAt : access.tabletSession?.expiresAt;
+      if (access.tabletSession && (!Number.isFinite(recordingDeadline)
+        || payload.result.recordedAtEpoch > recordingDeadline)) {
+        writeJson(response, 400, { error: 'This Reaction Test was recorded after the original tablet athlete session ended.' });
+        return;
+      }
+      await saveReactionTestForAccess(access, payload.result);
+      writeJson(response, 200, await reactionTestResponse(access), { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (requestUrl.pathname === '/api/reaction-test/leaderboard' && request.method === 'PATCH') {
+      if (access.tabletSession) {
+        writeJson(response, 403, { error: 'Leaderboard settings are available from your personal account.' });
+        return;
+      }
+      const payload = await readJsonBody(request, 4_000);
+      if (Object.hasOwn(payload ?? {}, 'expectedAccountId')
+        && payload.expectedAccountId !== access.authSession.user.id) {
+        writeJson(response, 409, { error: 'These leaderboard settings belong to another signed-in account.' }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      const displayName = reactionLeaderboardDisplayName(payload?.displayName);
+      if (typeof payload?.joined !== 'boolean' || (payload.joined && !displayName)) {
+        writeJson(response, 400, { error: 'Choose whether to join and a public display name of 2–32 characters without email addresses.' });
+        return;
+      }
+      await persistence.saveReactionTestLeaderboardSettings(access.authSession.user.id, {
+        joined: payload.joined, displayName: displayName || '',
+      });
+      writeJson(response, 200, await reactionTestResponse(access), { 'Cache-Control': 'no-store' });
+      return;
+    }
+    writeJson(response, 405, { error: 'Method not allowed' });
+    return;
+  }
+
   if (requestUrl.pathname === '/api/training-sessions/stream') {
     const session = await requireAuthSession(request, response);
     if (!session) return;
@@ -24500,6 +24670,20 @@ async function serveStatic(request, response) {
           _studioRiderId: membership.studioRiderId,
           _clubRiderName: membership.riderName,
         };
+      }
+      if (isReactionTestSession(trainingSession)) {
+        await saveReactionTestForAccess({ authSession: session }, trainingSession.details?.reactionTest, { legacy: true });
+        if (clubMembership?.ownerProfileKey) await persistRecordedReactionTestPersonalBest({
+          profileKey: clubMembership.ownerProfileKey,
+          studioRiderId: clubMembership.studioRiderId,
+          sessions: [trainingSession],
+        });
+        writeJson(response, 201, {
+          session: publicTrainingSession({ ...trainingSession, ...clubAttribution }, requestedClubId ? 'athlete' : undefined),
+          heartRate: { status: 'not-applicable' },
+          persistence: persistence.persistenceEnabled(),
+        });
+        return;
       }
       const existing = await persistence.loadTrainingSessionById(profileKey, trainingSession.id);
       if (existing && requestedClubId && (

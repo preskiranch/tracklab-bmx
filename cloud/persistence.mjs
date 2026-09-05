@@ -2,6 +2,7 @@ import pg from 'pg';
 import { createHash, randomUUID } from 'node:crypto';
 import { runDatabaseMigrations } from './migrations.mjs';
 import { cloudTelemetry } from './telemetry.mjs';
+import { isReactionTestSession } from './reactionTest.mjs';
 import { appleAppAccountTokenLineageHash } from './appleBilling.mjs';
 import {
   maximumAcceptedTrainingSpeedKph,
@@ -69,6 +70,7 @@ const memoryTrackBriefings = new Map();
 const memoryLocalRaceResults = new Map();
 const memoryGhostLaps = new Map();
 const memoryTrainingSessions = new Map();
+const memoryReactionTestBests = new Map();
 const memoryHeartRateStudioInvitations = new Map();
 const memoryHeartRateStudioInvitationIdByCodeHash = new Map();
 const memoryHeartRatePairings = new Map();
@@ -1295,6 +1297,7 @@ async function deleteMemoryAuthUserAccount(userId) {
     );
     deleteMemoryEntries(memoryMap3DLoadEvents, (event) => event.userId === userId);
     memoryUserDataByGuestKey.delete(profileKey);
+    deleteMemoryEntries(memoryReactionTestBests, (record) => record.userId === userId);
     deleteMemoryEntries(memoryLocalRaceResults, (result) => result.guestKey === profileKey);
     deleteMemoryEntries(memoryGhostLaps, (ghost) => ghost.ownerKey === profileKey);
     deleteMemoryEntries(memoryTrainingSessions, (session, key) => (
@@ -1352,7 +1355,8 @@ async function deleteMemoryAuthUserAccount(userId) {
       clubMemberKey(membership.clubId, membership.studioRiderId)
     )));
     deleteMemoryEntries(memoryClubTabletResultAuthorizationsByTokenHash, (authorization) => (
-      externalMembershipKeys.has(clubMemberKey(authorization.clubId, authorization.studioRiderId))
+      authorization.recordingAthleteProfileKey === profileKey
+      || externalMembershipKeys.has(clubMemberKey(authorization.clubId, authorization.studioRiderId))
     ));
     for (const participants of memoryClubEventParticipantsByEventId.values()) {
       for (const [deviceId, participant] of participants.entries()) {
@@ -1607,10 +1611,12 @@ async function deletePostgresAuthUserAccount(userId) {
     );
     await client.query(
       `DELETE FROM ${schema}.club_tablet_result_authorizations AS authorizations
-       USING ${schema}.club_members AS members
-       WHERE authorizations.club_id = members.club_id
-         AND authorizations.studio_rider_id = members.studio_rider_id
-         AND members.athlete_profile_key = $1`,
+       WHERE authorizations.recording_athlete_profile_key = $1 OR EXISTS (
+         SELECT 1 FROM ${schema}.club_members AS members
+         WHERE authorizations.club_id = members.club_id
+           AND authorizations.studio_rider_id = members.studio_rider_id
+           AND members.athlete_profile_key = $1
+       )`,
       [profileKey],
     );
     await client.query(
@@ -3520,6 +3526,107 @@ function enrichMemoryClubTrainingSession(session) {
     ...(club?.name ? { _clubName: club.name } : {}),
     ...(member?.riderName ? { _clubRiderName: member.riderName } : {}),
   };
+}
+
+function reactionTestRecord(row) {
+  return {
+    personalBestMs: row?.best_ms == null ? null : Number(row.best_ms),
+    leaderboard: { joined: row?.leaderboard_joined === true, displayName: row?.display_name || '' },
+  };
+}
+
+function requireReactionTestStorage(result) {
+  if (!result) throw new Error('Reaction Test storage is temporarily unavailable.');
+  return result;
+}
+
+export async function loadReactionTestBest(userId, studioRiderId = '') {
+  if (!pool) {
+    if (databaseConfigured) requireReactionTestStorage(null);
+    const record = memoryReactionTestBests.get(JSON.stringify([userId, studioRiderId]));
+    return reactionTestRecord(record);
+  }
+  const result = requireReactionTestStorage(await query(
+    `SELECT best_ms, leaderboard_joined, display_name FROM ${schema}.reaction_test_bests
+     WHERE user_id = $1 AND studio_rider_id = $2`, [userId, studioRiderId],
+  ));
+  return reactionTestRecord(result.rows[0]);
+}
+
+/** Atomic minimum is independent of editable account-profile records. */
+export async function saveReactionTestBest(userId, bestMs, studioRiderId = '') {
+  if (typeof bestMs !== 'number' || !Number.isFinite(bestMs) || bestMs <= 0 || bestMs > 60_000) {
+    throw new TypeError('A valid measured Reaction Test time is required.');
+  }
+  if (!pool) {
+    if (databaseConfigured) requireReactionTestStorage(null);
+    if (!memoryAuthUsersById.has(userId) || memoryErasedAuthUserIdHashes.has(erasedAuthUserIdHash(userId))) {
+      throw new Error('Reaction Test account is unavailable.');
+    }
+    const key = JSON.stringify([userId, studioRiderId]);
+    const previous = memoryReactionTestBests.get(key);
+    const record = {
+      userId, studioRiderId, leaderboard_joined: false, display_name: '', ...previous,
+      best_ms: previous?.best_ms == null ? bestMs : Math.min(previous.best_ms, bestMs),
+    };
+    memoryReactionTestBests.set(key, record);
+    return reactionTestRecord(record);
+  }
+  const result = requireReactionTestStorage(await query(
+    `INSERT INTO ${schema}.reaction_test_bests (user_id, studio_rider_id, best_ms)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (user_id, studio_rider_id) DO UPDATE SET
+       best_ms = LEAST(reaction_test_bests.best_ms, EXCLUDED.best_ms), updated_at = now()
+     RETURNING best_ms, leaderboard_joined, display_name`, [userId, studioRiderId, bestMs],
+  ));
+  return reactionTestRecord(result.rows[0]);
+}
+
+export async function saveReactionTestLeaderboardSettings(userId, { joined, displayName }) {
+  if (!pool) {
+    if (databaseConfigured) requireReactionTestStorage(null);
+    if (!memoryAuthUsersById.has(userId) || memoryErasedAuthUserIdHashes.has(erasedAuthUserIdHash(userId))) {
+      throw new Error('Reaction Test account is unavailable.');
+    }
+    const key = JSON.stringify([userId, '']);
+    const record = { userId, studioRiderId: '', ...memoryReactionTestBests.get(key),
+      leaderboard_joined: joined, display_name: joined ? displayName : '' };
+    memoryReactionTestBests.set(key, record);
+    return reactionTestRecord(record);
+  }
+  const result = requireReactionTestStorage(await query(
+    `INSERT INTO ${schema}.reaction_test_bests (user_id, leaderboard_joined, display_name)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (user_id, studio_rider_id) DO UPDATE SET
+       leaderboard_joined = EXCLUDED.leaderboard_joined,
+       display_name = EXCLUDED.display_name, updated_at = now()
+     RETURNING best_ms, leaderboard_joined, display_name`, [userId, joined, joined ? displayName : ''],
+  ));
+  return reactionTestRecord(result.rows[0]);
+}
+
+export async function loadReactionTestLeaderboard(userId = '', limit = 5) {
+  const safeLimit = [5, 10, 25, 50].includes(limit) ? limit : 5;
+  let rows;
+  if (!pool) {
+    if (databaseConfigured) requireReactionTestStorage(null);
+    rows = [...memoryReactionTestBests.values()]
+      .filter((row) => row.studioRiderId === '' && row.leaderboard_joined && row.best_ms != null)
+      .sort((left, right) => left.best_ms - right.best_ms || left.userId.localeCompare(right.userId))
+      .slice(0, safeLimit)
+      .map((row) => ({ ...row, user_id: row.userId }));
+  } else {
+    const result = requireReactionTestStorage(await query(
+      `SELECT user_id, best_ms, display_name FROM ${schema}.reaction_test_bests
+       WHERE leaderboard_joined AND studio_rider_id = '' AND best_ms IS NOT NULL
+       ORDER BY best_ms, user_id LIMIT $1`, [safeLimit],
+    ));
+    rows = result.rows;
+  }
+  return rows.map((row, index) => ({
+    rank: index + 1, displayName: row.display_name, reactionTimeMs: Number(row.best_ms),
+    isYou: Boolean(userId) && row.user_id === userId,
+  }));
 }
 
 export async function saveTrainingSession(profileKey, session) {
@@ -11163,6 +11270,7 @@ export async function loadTrainingSessions(profileKey, { from = 0, to = Date.now
         key.startsWith(`${profileKey}:`)
         && session.startedAt >= from
         && session.startedAt <= to
+        && !isReactionTestSession(session)
         && storedBikeMetricsAreAccepted(session.details)
       ))
       .map(([, session]) => cloneJson(trainingSessionWithPrivateHealthRemoved(
@@ -11187,6 +11295,9 @@ export async function loadTrainingSessions(profileKey, { from = 0, to = Date.now
          WHERE sessions.profile_key = $1
            AND sessions.started_at >= to_timestamp($2 / 1000.0)
            AND sessions.started_at <= to_timestamp($3 / 1000.0)
+           AND NOT (sessions.details ? 'reactionTest')
+           AND sessions.title !~* '^Reaction Test([[:space:]·:]|$)'
+           AND sessions.id !~* '^reaction-test[:_-]'
            AND ${acceptedRecordedBikeMetricsSql('sessions.details')}
          ORDER BY sessions.started_at DESC LIMIT $4`,
         [profileKey, from, to, safeLimit],
@@ -11227,6 +11338,7 @@ export async function loadTrainingSessions(profileKey, { from = 0, to = Date.now
     if (!byId.has(session.id)) byId.set(session.id, session);
   });
   return [...byId.values()]
+    .filter((session) => !isReactionTestSession(session))
     .sort((left, right) => right.startedAt - left.startedAt)
     .slice(0, safeLimit);
 }
@@ -11242,6 +11354,7 @@ export async function loadClubTrainingSessions(ownerProfileKey, { from = 0, to =
         && session._profileKey !== ownerProfileKey
         && session.startedAt >= from
         && session.startedAt <= to
+        && !isReactionTestSession(session)
         && storedBikeMetricsAreAccepted(session.details)
       ))
       .map((session) => cloneJson(trainingSessionWithPrivateHealthRemoved(
@@ -11260,6 +11373,9 @@ export async function loadClubTrainingSessions(ownerProfileKey, { from = 0, to =
        AND sessions.profile_key <> $1
        AND sessions.started_at >= to_timestamp($2 / 1000.0)
        AND sessions.started_at <= to_timestamp($3 / 1000.0)
+       AND NOT (sessions.details ? 'reactionTest')
+       AND sessions.title !~* '^Reaction Test([[:space:]·:]|$)'
+       AND sessions.id !~* '^reaction-test[:_-]'
        AND ${acceptedRecordedBikeMetricsSql('sessions.details')}
      ORDER BY sessions.started_at DESC LIMIT $4`,
     [ownerProfileKey, from, to, safeLimit],
@@ -11784,6 +11900,8 @@ function clubTabletResultAuthorizationFromRow(row) {
     bikeDeviceId: row.bike_device_id,
     sessionTokenHash: row.session_token_hash,
     expiresAt: new Date(row.expires_at).getTime(),
+    recordingExpiresAt: row.recording_expires_at ? new Date(row.recording_expires_at).getTime() : null,
+    recordingAthleteProfileKey: row.recording_athlete_profile_key || null,
     member: {
       clubId: row.club_id,
       studioRiderId: row.studio_rider_id,
@@ -11805,6 +11923,7 @@ export async function createClubTabletResultAuthorization({
   bikeDeviceId,
   sessionTokenHash,
   expiresAt,
+  recordingExpiresAt = null,
   now = Date.now(),
 }) {
   if (!pool) {
@@ -11831,6 +11950,9 @@ export async function createClubTabletResultAuthorization({
       bikeDeviceId,
       sessionTokenHash,
       expiresAt,
+      recordingExpiresAt,
+      recordingEndedAt: null,
+      recordingAthleteProfileKey: member.athleteProfileKey || null,
       createdAt: now,
       member: cloneJson(member, member),
     };
@@ -11840,10 +11962,10 @@ export async function createClubTabletResultAuthorization({
   const result = await query(
     `INSERT INTO ${schema}.club_tablet_result_authorizations (
        token_hash, device_id, club_id, studio_rider_id, rider_name,
-       bike_device_id, session_token_hash, expires_at, created_at
+       bike_device_id, session_token_hash, expires_at, created_at, recording_expires_at, recording_athlete_profile_key
      )
      SELECT $1, devices.id, devices.club_id, members.studio_rider_id, $5,
-       $6, $7, to_timestamp($8 / 1000.0), to_timestamp($9 / 1000.0)
+       $6, $7, to_timestamp($8 / 1000.0), to_timestamp($9 / 1000.0), to_timestamp($10 / 1000.0), members.athlete_profile_key
      FROM ${schema}.club_tablet_devices AS devices
      JOIN ${schema}.club_members AS members
        ON members.club_id = devices.club_id AND members.studio_rider_id = $4
@@ -11860,6 +11982,7 @@ export async function createClubTabletResultAuthorization({
       sessionTokenHash,
       expiresAt,
       now,
+      recordingExpiresAt,
     ],
   );
   if (!result) return { status: 'unavailable', authorization: null };
@@ -11920,6 +12043,32 @@ export async function loadClubTabletResultAuthorization({
   return authorization
     ? { status: 'authorized', authorization }
     : { status: 'unauthorized', authorization: null };
+}
+
+/** The upload grace period never extends the athlete's recording window. */
+export async function updateClubTabletResultRecordingDeadline(sessionTokenHash, recordingExpiresAt, { ended = false } = {}) {
+  if (!pool) {
+    if (databaseConfigured) return false;
+    const authorization = [...memoryClubTabletResultAuthorizationsByTokenHash.values()]
+      .find((candidate) => candidate.sessionTokenHash === sessionTokenHash);
+    if (!authorization) return true;
+    if (ended) {
+      authorization.recordingExpiresAt = Math.min(authorization.recordingExpiresAt ?? recordingExpiresAt, recordingExpiresAt);
+      authorization.recordingEndedAt = authorization.recordingEndedAt ?? recordingExpiresAt;
+    } else if (authorization.recordingEndedAt == null) {
+      authorization.recordingExpiresAt = Math.max(authorization.recordingExpiresAt ?? 0, recordingExpiresAt);
+    }
+    return true;
+  }
+  return Boolean(await query(
+    `UPDATE ${schema}.club_tablet_result_authorizations
+     SET recording_expires_at = CASE
+       WHEN $3 THEN LEAST(recording_expires_at, to_timestamp($2 / 1000.0))
+       WHEN recording_ended_at IS NULL THEN GREATEST(recording_expires_at, to_timestamp($2 / 1000.0))
+       ELSE recording_expires_at END,
+       recording_ended_at = CASE WHEN $3 THEN COALESCE(recording_ended_at, to_timestamp($2 / 1000.0)) ELSE recording_ended_at END
+     WHERE session_token_hash = $1`, [sessionTokenHash, recordingExpiresAt, ended],
+  ));
 }
 
 export async function revokeClubTabletDevice(ownerProfileKey, deviceId) {

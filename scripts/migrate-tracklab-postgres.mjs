@@ -7,6 +7,7 @@ const schema = 'tracklab';
 const tables = [
   'profiles',
   'auth_users',
+  'reaction_test_bests',
   'auth_sessions',
   'billing_checkouts',
   'apple_iap_lineage_token_bindings',

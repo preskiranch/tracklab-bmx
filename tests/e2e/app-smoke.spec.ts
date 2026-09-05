@@ -527,7 +527,11 @@ test('signed-in root launch opens Community home without creating an activity UR
 });
 
 test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI timing, and a durable PR card', async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
   const now = Date.now();
+  const reactionResults: Array<{ reactionTimeMs: number | null; valid: boolean; falseStart: boolean }> = [];
+  const trainingWrites: string[] = [];
+  let savedPersonalBestMs = 2_000;
   const authUser = {
     id: 'reaction-test-rider',
     profileKey: 'user:reaction-test-rider',
@@ -572,14 +576,36 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
       },
     }),
   }));
-  await page.route('**/api/training-sessions', async (route) => {
-    const requestBody = route.request().postDataJSON() as { session?: Record<string, unknown> };
-    const session = requestBody.session ?? {};
+  await page.route(/\/api\/reaction-test(?:\?.*)?$/, (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      personalBestMs: savedPersonalBestMs,
+      leaderboard: { joined: false, displayName: '' },
+      canJoinLeaderboard: true,
+    }),
+  }));
+  await page.route('**/api/reaction-test/result', async (route) => {
+    const requestBody = route.request().postDataJSON() as {
+      result: typeof reactionResults[number];
+      expectedAccountId: string;
+    };
+    expect(requestBody.expectedAccountId).toBe(authUser.id);
+    reactionResults.push(requestBody.result);
+    if (requestBody.result.valid && requestBody.result.reactionTimeMs != null) {
+      savedPersonalBestMs = Math.min(savedPersonalBestMs, requestBody.result.reactionTimeMs);
+    }
     await route.fulfill({
-      status: 201,
       contentType: 'application/json',
-      body: JSON.stringify({ session: { ...session, source: 'live', createdAt: now, updatedAt: now } }),
+      body: JSON.stringify({
+        personalBestMs: savedPersonalBestMs,
+        leaderboard: { joined: false, displayName: '' },
+        canJoinLeaderboard: true,
+      }),
     });
+  });
+  await page.route('**/api/training-sessions*', (route) => {
+    if (route.request().method() === 'POST') trainingWrites.push(route.request().postData() ?? '');
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ sessions: [] }) });
   });
   await page.route('https://maps.googleapis.com/**', (route) => route.abort());
 
@@ -941,6 +967,10 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
   await expect(sceneStack).not.toHaveAttribute('data-gate-state', 'upright');
 
   await reactionView.locator('.reaction-race-surface').click({ position: { x: 280, y: 420 } });
+  await expect.poll(() => reactionResults.length).toBe(1);
+  expect(reactionResults[0]).toMatchObject({ valid: true, falseStart: false });
+  expect(reactionResults[0].reactionTimeMs).toBeGreaterThan(0);
+  expect(trainingWrites).toEqual([]);
   const prBadge = reactionView.locator('.reaction-pr-badge');
   await expect(prBadge).toHaveClass(/is-new-record/);
   await expect(prBadge).toContainText('NEW PR');
@@ -1082,9 +1112,24 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
     path: testInfo.outputPath('reaction-test-flat-desktop.png'),
   });
 
+  const durablePr = savedPersonalBestMs;
+  await reactionView.getByRole('button', { name: 'Try Again' }).click();
+  await reactionView.getByRole('button', { name: 'Start Reaction Test' }).click();
+  await reactionView.locator('.reaction-race-surface').click({ position: { x: 500, y: 300 } });
+  await expect(reactionView.getByText('TOO EARLY / FALSE START', { exact: true })).toBeVisible();
+  await expect(reactionView.locator('.reaction-result-card')).not.toContainText(/saved.*history|saved as invalid/i);
+  await expect(reactionView.getByRole('button', { name: 'Try Again' })).toBeVisible();
+  expect(reactionResults).toHaveLength(1);
+  expect(savedPersonalBestMs).toBe(durablePr);
+  expect(trainingWrites).toEqual([]);
+
   await reactionView.getByRole('button', { name: 'Exit Reaction Test' }).click();
   await expect(page.locator('.platform-shell')).not.toHaveClass(/reaction-fullscreen/);
   await expect(page.locator('.side-nav')).toBeVisible();
+  await page.getByRole('button', { name: 'Reaction Test', exact: true }).click();
+  await expect(reactionView.getByText(`PR · ${(durablePr / 1_000).toFixed(2)} sec`, { exact: true })).toBeVisible();
+  expect(reactionResults).toHaveLength(1);
+  expect(trainingWrites).toEqual([]);
 });
 
 test('first-run profile flow opens the TrackLab dashboard', async ({ page }, testInfo) => {

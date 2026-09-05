@@ -1,11 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEmptyCloudUserData, readCloudUserData } from '../../src/lib/cloudUserData';
+import { createEmptyCloudUserData, patchCloudUserData, readCloudUserData } from '../../src/lib/cloudUserData';
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe('cloud user data unit preferences', () => {
+  it('keeps small preference saves alive on navigation without exceeding the upload budget for photos', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response('{}')));
+    vi.stubGlobal('fetch', fetchMock);
+    await patchCloudUserData('user:units', { unitPreferences: { speedUnit: 'mph', distanceUnit: 'ft', updatedAt: 123 } });
+    await patchCloudUserData('user:units', { accountProfile: { photoUrl: 'x'.repeat(65_536), updatedAt: 123 } });
+    expect(fetchMock.mock.calls[0][1].keepalive).toBe(true);
+    expect(fetchMock.mock.calls[1][1].keepalive).toBe(false);
+  });
   it('normalizes unit preferences returned by the cloud and rejects malformed snapshots', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({

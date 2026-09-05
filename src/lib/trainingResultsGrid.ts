@@ -1,5 +1,6 @@
 import type { TrainingActivityType, TrainingSession } from '../types';
 import {
+  isReactionTestSession,
   sanitizeRecordedBikeMetrics,
   trainingSessionRaceSummaries,
   trainingSessionReactionTimes,
@@ -312,7 +313,8 @@ function exploreRows(session: TrainingSession, sessionOrdinal: number, activityO
 }
 
 export function buildTrainingResultRows(sessions: readonly TrainingSession[]): TrainingResultRow[] {
-  const ordered = [...sessions].sort((left, right) => left.startedAt - right.startedAt || left.id.localeCompare(right.id));
+  const ordered = sessions.filter((session) => !isReactionTestSession(session))
+    .sort((left, right) => left.startedAt - right.startedAt || left.id.localeCompare(right.id));
   const activityCounts = new Map<TrainingActivityType, number>();
   return ordered.flatMap((session, index) => {
     const activityOrdinal = (activityCounts.get(session.activityType) ?? 0) + 1;

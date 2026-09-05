@@ -78,13 +78,17 @@ export async function readCloudUserData(profileKey: string): Promise<CloudUserDa
 }
 
 export async function patchCloudUserData(profileKey: string, patch: CloudUserDataPatch): Promise<CloudUserData> {
+  const body = JSON.stringify(patch);
   const response = await fetch(userDataUrl(profileKey), {
     method: 'PATCH',
+    // Small preference saves may be flushed as the page closes. Photos/maps
+    // can exceed the browser's keepalive budget, so they use normal requests.
+    keepalive: new TextEncoder().encode(body).byteLength <= 60_000,
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(patch),
+    body,
   });
 
   if (!response.ok) {

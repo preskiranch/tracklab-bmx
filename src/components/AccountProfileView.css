@@ -11,6 +11,7 @@
 
 .account-profile-hero,
 .account-deletion-panel,
+.athlete-personal-records,
 .club-connect-panel,
 .training-calendar {
   border: 1px solid #dce3e8;
@@ -96,6 +97,39 @@
 }
 .personal-record-editor-controls button[type='submit'] { background: #7ade36; border-color: #69bd39; color: #102108; }
 .personal-record-editor-message { margin: 0; }
+
+.athlete-personal-records {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 20px;
+}
+.athlete-personal-records h2 { margin: 0; }
+.athlete-personal-records header p { margin: 4px 0 0; color: #667085; }
+.athlete-personal-record-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.athlete-personal-record-picker label { display: grid; gap: 6px; min-width: 0; color: #344054; font-size: 13px; font-weight: 800; }
+.athlete-personal-record-picker input,
+.athlete-personal-record-picker select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 9px 11px;
+  border: 1px solid #cdd6dc;
+  border-radius: 9px;
+  background: #fff;
+  color: #17202e;
+  font: inherit;
+  font-size: 16px;
+}
+.athlete-personal-record-picker input:focus,
+.athlete-personal-record-picker select:focus { border-color: #66b83b; outline: 3px solid rgb(122 222 54 / 20%); }
+.athlete-personal-record-picker select:disabled { color: #667085; background: #f3f5f7; }
+.athlete-personal-record-detail { display: grid; gap: 12px; min-width: 0; }
+.athlete-personal-record-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.athlete-personal-record-identity .rider-avatar { width: 42px; height: 42px; flex: 0 0 42px; }
+.athlete-personal-record-identity strong { min-width: 0; overflow-wrap: anywhere; }
+.athlete-personal-record-empty { margin: 0; color: #667085; font-size: 13px; }
 
 .account-deletion-panel {
   display: grid;
@@ -230,8 +264,6 @@
 .club-owner-intro small { max-width: 310px; color: #667085; text-align: right; }
 .club-roster-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .club-roster-list article { gap: 10px; min-width: 0; padding: 10px; border: 1px solid #e0e6ea; border-radius: 11px; background: #fafcfd; }
-.club-roster-list article .personal-record-editor { flex: 1 1 100%; grid-column: auto; padding: 8px; }
-.club-roster-list article .personal-record-editor-controls input { width: 110px; }
 .club-roster-list .rider-avatar { width: 42px; height: 42px; flex: 0 0 42px; }
 .club-roster-name { display: grid; min-width: 0; flex: 1; }
 .club-roster-name strong { overflow-wrap: anywhere; }
@@ -433,6 +465,7 @@
   .account-profile-view { padding: 10px; }
   .account-profile-hero { grid-template-columns: 1fr; }
   .account-profile-photo-note { grid-column: auto; }
+  .athlete-personal-record-picker { grid-template-columns: 1fr; }
   .account-deletion-summary { align-items: flex-start; flex-direction: column; }
   .account-deletion-summary-actions { width: 100%; justify-content: stretch; }
   .account-deletion-summary-actions > * { flex: 1 1 180px; }

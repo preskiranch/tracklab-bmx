@@ -596,9 +596,11 @@ export function accountDeletionReady({
 
 export function AccountDeletionPanel({
   email,
+  accountId,
   onAccountDeleted,
 }: {
   email: string;
+  accountId?: string;
   onAccountDeleted?: () => void | Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -637,7 +639,7 @@ export function AccountDeletionPanel({
     setDeletionStatus('deleting');
     setDeletionMessage('Permanently deleting your TrackLab account…');
     try {
-      await deleteAuthAccount(password, 'DELETE');
+      await deleteAuthAccount(password, 'DELETE', accountId);
       setDeletionMessage('Your TrackLab account was deleted.');
       if (onAccountDeleted) {
         await onAccountDeleted();
@@ -804,6 +806,8 @@ export function AccountProfileView({
   const [clubPhotoDraft, setClubPhotoDraft] = useState(profile.photoUrl);
   const [inviteLinks, setInviteLinks] = useState<Record<string, string>>({});
   const [clubBusyId, setClubBusyId] = useState<string | null>(null);
+  const [personalRecordSearch, setPersonalRecordSearch] = useState('');
+  const [personalRecordRiderId, setPersonalRecordRiderId] = useState('');
   const [spreadsheetExportMessage, setSpreadsheetExportMessage] = useState('');
   const [privateHeartRateCache, setPrivateHeartRateCache] = useState<ReadonlyMap<string, PrivateHeartRateCacheEntry>>(
     () => new Map(),
@@ -899,6 +903,11 @@ export function AccountProfileView({
     () => studioRiders.filter((rider) => !rider.deletedAt).sort((left, right) => left.name.localeCompare(right.name)),
     [studioRiders],
   );
+  const personalRecordRiders = useMemo(() => {
+    const search = personalRecordSearch.trim().toLocaleLowerCase();
+    return visibleStudioRiders.filter((rider) => rider.name.toLocaleLowerCase().includes(search));
+  }, [personalRecordSearch, visibleStudioRiders]);
+  const personalRecordRider = personalRecordRiders.find((rider) => rider.id === personalRecordRiderId);
   const effectiveMembershipLabel = clubState.memberships.length > 0
     ? 'Club Athlete / free studio data access'
     : membershipLabel;
@@ -1262,7 +1271,62 @@ export function AccountProfileView({
         />
       </section>
 
-      <AccountDeletionPanel email={email} />
+      <AccountDeletionPanel email={email} accountId={profileId} />
+
+      {canManagePersonalRecords && clubState.canManageClub && onPersonalRecordChange && visibleStudioRiders.length > 0 && (
+        <section className="athlete-personal-records" aria-labelledby="athlete-personal-records-title">
+          <header>
+            <h2 id="athlete-personal-records-title">Athlete personal records</h2>
+            <p>Find an athlete to view or update their Get Pulled max watts.</p>
+          </header>
+          <div className="athlete-personal-record-picker">
+            <label>
+              <span>Search athletes</span>
+              <input
+                type="search"
+                placeholder="Search by name"
+                value={personalRecordSearch}
+                onChange={(event) => {
+                  setPersonalRecordSearch(event.target.value);
+                  setPersonalRecordRiderId('');
+                }}
+              />
+            </label>
+            <label>
+              <span>Athlete</span>
+              <select
+                value={personalRecordRider?.id ?? ''}
+                disabled={personalRecordRiders.length === 0}
+                onChange={(event) => setPersonalRecordRiderId(event.target.value)}
+              >
+                <option value="">Select an athlete</option>
+                {personalRecordRiders.map((rider) => <option key={rider.id} value={rider.id}>{rider.name}</option>)}
+              </select>
+            </label>
+          </div>
+          {personalRecordRider ? (
+            <div className="athlete-personal-record-detail">
+              <div className="athlete-personal-record-identity">
+                <RiderAvatar name={personalRecordRider.name} photoUrl={personalRecordRider.photoUrl} />
+                <strong>{personalRecordRider.name}</strong>
+              </div>
+              <PersonalRecordEditor
+                key={personalRecordRider.id}
+                targetId={personalRecordRider.id}
+                records={personalRecordRider.personalRecords}
+                label="Get Pulled max watts"
+                onChange={onPersonalRecordChange}
+              />
+            </div>
+          ) : (
+            <p className="athlete-personal-record-empty" role="status">
+              {personalRecordRiders.length === 0
+                ? 'No athletes match your search.'
+                : 'Select an athlete to edit their personal record.'}
+            </p>
+          )}
+        </section>
+      )}
 
       {(clubInviteToken
         || clubState.memberships.length > 0
@@ -1358,14 +1422,6 @@ export function AccountProfileView({
                     <article key={rider.id}>
                       <RiderAvatar name={rider.name} photoUrl={rider.photoUrl} />
                       <div className="club-roster-name"><strong>{rider.name}</strong><small>{claimed ? `Connected${member.athleteName ? ` to ${member.athleteName}` : ''}` : inviteLink ? 'Invitation ready' : 'Not claimed'}</small></div>
-                      {canManagePersonalRecords && (
-                        <PersonalRecordEditor
-                          targetId={rider.id}
-                          records={rider.personalRecords}
-                          label="Get Pulled max watts"
-                          onChange={onPersonalRecordChange}
-                        />
-                      )}
                       <div className="club-roster-actions">
                         {inviteLink && !claimed && <button type="button" onClick={() => copyInvitation(inviteLink)}><Copy size={15} /> Copy link</button>}
                         {!claimed && <button className="primary" type="button" disabled={clubBusyId === rider.id} onClick={() => inviteRider(rider)}><UserPlus size={15} /> {inviteLink ? 'New link' : 'Invite'}</button>}

@@ -75,6 +75,7 @@ import {
 import { safeSetLocalStorage } from './lib/browserStorage';
 import { shouldOpenCommunityHomeOnLaunch } from './lib/startupLanding';
 import type { ReactionTestResult } from './lib/reactionTest';
+import type { ReactionRecordOwner } from './lib/reactionTestCloud';
 import { resolveHeartRateResultsMetricState } from './lib/heartRateMetric';
 import { isTrackLabNativeShell, trackLabServiceOrigin } from './lib/serviceOrigins';
 import {
@@ -7676,6 +7677,12 @@ export default function App() {
     return undefined;
   };
 
+  const reactionRecordOwner = useMemo<ReactionRecordOwner | null>(() => (
+    clubTabletRider && clubTabletSession
+      ? { kind: 'tablet', credential: clubTabletSession, deviceToken: clubTabletDevice?.deviceToken ?? '' }
+      : authUser ? { kind: 'account', accountId: authUser.id } : null
+  ), [clubTabletRider?.id, clubTabletSession, clubTabletDevice?.deviceToken, authUser?.id]);
+
   const promoteReactionTestPersonalBest = useCallback((
     riderId: string,
     reactionTimeMs: number,
@@ -7746,11 +7753,10 @@ export default function App() {
   ]);
 
   const handleReactionTestResult = useCallback((result: ReactionTestResult) => {
-    // Reaction Test stays free and does not require a Wattbike, a room, or a
-    // purchase. Signed-in riders still receive the same private session
-    // history durability as the rest of TrackLab's training tools.
+    // Reaction practice has a personal best, not a training-session log.
     const reactionRider = clubTabletRider ?? accountRider;
-    if (!authUser || !reactionRider) return;
+    if (!reactionRider || !reactionRecordOwner || !result.valid || result.reactionTimeMs == null) return;
+    const resultOwner = reactionRecordOwner;
 
     if (result.valid && result.reactionTimeMs != null) {
       promoteReactionTestPersonalBest(
@@ -7760,47 +7766,10 @@ export default function App() {
       );
     }
 
-    const startedAt = result.startedAtEpoch ?? result.recordedAtEpoch;
-    const riderId = reactionRider.id;
-    return import('./lib/trainingHistory').then(({ saveTrainingSession }) => saveTrainingSession({
-      id: result.id,
-      activityType: 'bmx-race',
-      title: result.falseStart
-        ? 'Reaction Test · False start'
-        : `Reaction Test · ${result.rating.toUpperCase()}`,
-      startedAt,
-      endedAt: result.recordedAtEpoch,
-      durationMs: result.reactionTimeMs ?? 0,
-      distanceMeters: 0,
-      details: {
-        summaries: [{
-          playerId: 1,
-          riderId,
-          riderName: reactionRider.name,
-          rank: result.valid ? 1 : undefined,
-          finishTimeMs: result.reactionTimeMs ?? undefined,
-          distanceMeters: 0,
-          sampleCount: 0,
-        }],
-        reactionTimesByPlayer: result.valid && result.reactionTimeMs != null
-          ? { 1: result.reactionTimeMs }
-          : {},
-        reactionTest: {
-          version: 1,
-          reactionTimeMs: result.reactionTimeMs,
-          rating: result.rating,
-          stage: result.stage,
-          valid: result.valid,
-          late: result.late,
-          falseStart: result.falseStart,
-          cadenceDelayMs: result.cadenceDelayMs,
-          recordedAt: result.recordedAtEpoch,
-        },
-      },
-    })).then(() => {
-      setTrainingHistoryRevision((revision) => revision + 1);
-    });
-  }, [accountRider, authUser, clubTabletRider, promoteReactionTestPersonalBest]);
+    return import('./lib/reactionTestCloud')
+      .then(({ saveReactionPersonalBest }) => saveReactionPersonalBest(result, resultOwner))
+      .then(() => undefined);
+  }, [accountRider, clubTabletRider, reactionRecordOwner, promoteReactionTestPersonalBest]);
 
   const openReactionTest = () => {
     if (appMode !== 'reaction-test') reactionReturnModeRef.current = appMode;
@@ -13790,6 +13759,8 @@ export default function App() {
         ) : reactionTestMode ? (
           <Suspense fallback={lazyLoadingFallback}>
             <ReactionTestView
+              key={(clubTabletRider ?? accountRider)?.id ?? 'reaction-guest'}
+              recordOwner={reactionRecordOwner}
               onExit={closeReactionTest}
               onResult={handleReactionTestResult}
               personalBestMs={(clubTabletRider ?? accountRider)?.personalRecords?.reactionTestBestMs ?? null}

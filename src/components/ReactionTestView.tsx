@@ -21,15 +21,18 @@ import {
 } from '../lib/reactionTest';
 import { uciStartToneIntervalMs } from '../lib/uciStartGate';
 import { ReactionGateLayer, REACTION_GATE_DROP_MS } from './ReactionGateLayer';
+import { ReactionLeaderboard } from './ReactionLeaderboard';
+import { flushReactionPersonalBest, localReactionPersonalBest, type ReactionRecordOwner } from '../lib/reactionTestCloud';
 import './ReactionTestView.css';
 
 type ReactionTestRunState = 'ready' | 'arming' | 'waiting' | 'running' | 'finished';
 
 export type ReactionTestViewProps = {
-  /** Results are persisted by the existing TrackLab session-history layer. */
+  /** Save only a personal best and eligible leaderboard time. */
   onResult?: (result: ReactionTestResult) => void | Promise<void>;
   /** The rider's durable all-time best, measured from the first UCI tone. */
   personalBestMs?: number | null;
+  recordOwner?: ReactionRecordOwner | null;
   onExit?: () => void;
 };
 
@@ -51,7 +54,7 @@ function ratingLabel(result: ReactionTestResult) {
  * A free-standing, touch-first BMX start reaction exercise. CSS handles only
  * scene motion; timing and scoring stay in the UCI cadence plan.
  */
-export function ReactionTestView({ onResult, personalBestMs = null, onExit }: ReactionTestViewProps) {
+export function ReactionTestView({ onResult, personalBestMs = null, recordOwner = null, onExit }: ReactionTestViewProps) {
   const [runState, setRunState] = useState<ReactionTestRunState>('ready');
   const [activeStage, setActiveStage] = useState<ReactionTestStage>('idle');
   const [gateReleased, setGateReleased] = useState(false);
@@ -62,6 +65,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, onExit }: Re
   ));
   const [newPersonalRecord, setNewPersonalRecord] = useState(false);
   const [notice, setNotice] = useState('Press start, then tap anywhere on the race surface when you react.');
+  const [saveError, setSaveError] = useState('');
 
   const generationRef = useRef(0);
   const timeoutsRef = useRef<number[]>([]);
@@ -126,20 +130,44 @@ export function ReactionTestView({ onResult, personalBestMs = null, onExit }: Re
     setGateSettled(false);
     setResult(null);
     setNewPersonalRecord(false);
+    setSaveError('');
     setNotice('Press start, then tap anywhere on the race surface when you react.');
     setRunStateSafely('ready');
   }, [clearTimers, setRunStateSafely]);
 
   useEffect(() => resetAttempt, [resetAttempt]);
 
-  useEffect(() => {
-    const incoming = Number(personalBestMs);
+  const acceptPersonalBest = useCallback((milliseconds: number) => {
+    const incoming = Number(milliseconds);
     if (!Number.isFinite(incoming) || incoming <= 0) return;
     if (personalBestRef.current == null || incoming < personalBestRef.current) {
       personalBestRef.current = incoming;
       setDisplayedPersonalBestMs(incoming);
     }
-  }, [personalBestMs]);
+  }, []);
+
+  useEffect(() => {
+    if (personalBestMs != null) acceptPersonalBest(personalBestMs);
+  }, [personalBestMs, acceptPersonalBest]);
+
+  useEffect(() => {
+    if (!recordOwner) return;
+    let active = true;
+    const localBest = localReactionPersonalBest(recordOwner);
+    if (localBest != null) acceptPersonalBest(localBest);
+    const retry = () => {
+      void flushReactionPersonalBest(recordOwner).then((profile) => {
+        if (!active || !profile) return;
+        if (profile.personalBestMs != null) acceptPersonalBest(profile.personalBestMs);
+        setSaveError('');
+      }).catch(() => {
+        if (active) setSaveError('Your PR is saved on this device and will sync when connected.');
+      });
+    };
+    retry();
+    window.addEventListener('online', retry);
+    return () => { active = false; window.removeEventListener('online', retry); };
+  }, [recordOwner, acceptPersonalBest]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -164,6 +192,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, onExit }: Re
     setResult(nextResult);
     void Promise.resolve(onResult?.(nextResult)).catch((error: unknown) => {
       console.warn('Could not save Reaction Test result:', error);
+      setSaveError('Your PR is saved on this device and will sync when connected.');
     });
   }, [onResult]);
 
@@ -345,6 +374,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, onExit }: Re
         tabIndex={0}
         onPointerDownCapture={(event) => captureReaction(event.target, event.timeStamp)}
         onKeyDown={(event) => {
+          if (event.target instanceof Element && event.target.closest('.reaction-control-action')) return;
           if (event.key === ' ' || event.key === 'Enter') {
             event.preventDefault();
             captureReaction(event.target, event.timeStamp);
@@ -424,8 +454,8 @@ export function ReactionTestView({ onResult, personalBestMs = null, onExit }: Re
                 <strong>{result.falseStart ? '—' : `${formatReactionTime(result.reactionTimeMs)} sec`}</strong>
                 <em>{ratingLabel(result)}</em>
                 <small>{result.falseStart
-                  ? 'This try was saved as invalid and does not count as a reaction time.'
-                  : `${result.stage === 'red' ? 'First red' : result.stage.replace('-', ' ')} stage · saved to your TrackLab history`}</small>
+                  ? 'False start · does not count toward your PR or leaderboard.'
+                  : `${result.stage === 'red' ? 'First red' : result.stage.replace('-', ' ')} stage`}</small>
               </div>
             ) : (
               <div className="reaction-ready-card">
@@ -433,7 +463,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, onExit }: Re
                 <span>{runState === 'ready' ? 'Ready at the gate' : 'Tap the entire race surface — no small button to find.'}</span>
               </div>
             )}
-            <div
+            <div className="reaction-record-actions"><div
               className={`reaction-pr-badge${newPersonalRecord ? ' is-new-record' : ''}`}
               role={newPersonalRecord ? 'status' : undefined}
               aria-live="polite"
@@ -443,6 +473,9 @@ export function ReactionTestView({ onResult, personalBestMs = null, onExit }: Re
                 ? '—'
                 : `${formatReactionTime(displayedPersonalBestMs)} sec`}</span>
             </div>
+            <ReactionLeaderboard disabled={runState !== 'ready' && !retryAvailable} onPersonalBest={acceptPersonalBest} recordOwner={recordOwner} />
+            </div>
+            {saveError && <small className="reaction-save-error" role="alert">{saveError}</small>}
           </div>
 
           {runState === 'ready' ? (

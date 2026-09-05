@@ -403,7 +403,7 @@
   .reaction-result-stack { gap: 4px; }
   .reaction-result-card small { display: none; }
   .reaction-pr-badge { padding: 4px 8px; font-size: .68rem; }
-  .reaction-primary-action { min-height: 44px; padding: 8px 14px; }
+  .reaction-primary-action { width: auto; flex: 0 0 auto; min-height: 44px; padding: 8px 14px; }
 }
 
 @media (orientation: landscape) and (max-height: 360px) {

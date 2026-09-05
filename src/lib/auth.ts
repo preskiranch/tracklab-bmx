@@ -115,7 +115,7 @@ export async function logoutAuthUser() {
  * requires the literal confirmation value. Keeping both values in the JSON
  * contract makes an accidental one-click deletion impossible.
  */
-export async function deleteAuthAccount(password: string, confirmation: 'DELETE') {
+export async function deleteAuthAccount(password: string, confirmation: 'DELETE', accountId?: string) {
   const response = await fetch('/api/auth/account', {
     method: 'DELETE',
     credentials: 'same-origin',
@@ -131,6 +131,10 @@ export async function deleteAuthAccount(password: string, confirmation: 'DELETE'
   }
   if (payload.deleted !== true) {
     throw new Error('TrackLab could not confirm that the account was deleted. Try again.');
+  }
+  if (accountId) {
+    const { clearLocalReactionAccount } = await import('./reactionTestCloud');
+    clearLocalReactionAccount(accountId);
   }
   await clearNativeAuthToken();
 }

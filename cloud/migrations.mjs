@@ -2284,6 +2284,31 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           VALIDATE CONSTRAINT rooms_round_number_check`,
       ],
     },
+    {
+      version: 45,
+      name: 'store measured reaction personal bests and opt-in leaderboard settings',
+      statements: [
+        `ALTER TABLE ${schema}.club_tablet_result_authorizations
+          ADD COLUMN IF NOT EXISTS recording_expires_at TIMESTAMPTZ`,
+        `ALTER TABLE ${schema}.club_tablet_result_authorizations
+          ADD COLUMN IF NOT EXISTS recording_ended_at TIMESTAMPTZ`,
+        `ALTER TABLE ${schema}.club_tablet_result_authorizations
+          ADD COLUMN IF NOT EXISTS recording_athlete_profile_key TEXT`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.reaction_test_bests (
+          user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          studio_rider_id TEXT NOT NULL DEFAULT '',
+          best_ms DOUBLE PRECISION CHECK (best_ms > 0 AND best_ms <= 60000),
+          leaderboard_joined BOOLEAN NOT NULL DEFAULT false,
+          display_name TEXT NOT NULL DEFAULT '',
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (user_id, studio_rider_id),
+          CHECK (NOT leaderboard_joined OR (studio_rider_id = '' AND char_length(display_name) BETWEEN 2 AND 32))
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_reaction_leaderboard
+          ON ${schema}.reaction_test_bests (best_ms, user_id)
+          WHERE leaderboard_joined AND studio_rider_id = '' AND best_ms IS NOT NULL`,
+      ],
+    },
   ];
 }
 
