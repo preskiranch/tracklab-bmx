@@ -2309,6 +2309,14 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           WHERE leaderboard_joined AND studio_rider_id = '' AND best_ms IS NOT NULL`,
       ],
     },
+    {
+      version: 46,
+      name: 'preserve explicit reaction leaderboard hiding during automatic enrollment',
+      statements: [
+        `ALTER TABLE ${schema}.reaction_test_bests
+          ADD COLUMN IF NOT EXISTS leaderboard_hidden BOOLEAN NOT NULL DEFAULT false`,
+      ],
+    },
   ];
 }
 

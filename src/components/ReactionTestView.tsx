@@ -66,6 +66,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
   const [newPersonalRecord, setNewPersonalRecord] = useState(false);
   const [notice, setNotice] = useState('Press start, then tap anywhere on the race surface when you react.');
   const [saveError, setSaveError] = useState('');
+  const [savedResultRevision, setSavedResultRevision] = useState(0);
 
   const generationRef = useRef(0);
   const timeoutsRef = useRef<number[]>([]);
@@ -160,6 +161,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
         if (!active || !profile) return;
         if (profile.personalBestMs != null) acceptPersonalBest(profile.personalBestMs);
         setSaveError('');
+        setSavedResultRevision((value) => value + 1);
       }).catch(() => {
         if (active) setSaveError('Your PR is saved on this device and will sync when connected.');
       });
@@ -190,7 +192,12 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
     }
     setNewPersonalRecord(beatExistingRecord);
     setResult(nextResult);
-    void Promise.resolve(onResult?.(nextResult)).catch((error: unknown) => {
+    void Promise.resolve(onResult?.(nextResult)).then(() => {
+      if (nextResult.valid) {
+        setSaveError('');
+        setSavedResultRevision((value) => value + 1);
+      }
+    }).catch((error: unknown) => {
       console.warn('Could not save Reaction Test result:', error);
       setSaveError('Your PR is saved on this device and will sync when connected.');
     });
@@ -473,7 +480,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
                 ? '—'
                 : `${formatReactionTime(displayedPersonalBestMs)} sec`}</span>
             </div>
-            <ReactionLeaderboard disabled={runState !== 'ready' && !retryAvailable} onPersonalBest={acceptPersonalBest} recordOwner={recordOwner} />
+            <ReactionLeaderboard disabled={runState !== 'ready' && !retryAvailable} onPersonalBest={acceptPersonalBest} recordOwner={recordOwner} refreshKey={savedResultRevision} />
             </div>
             {saveError && <small className="reaction-save-error" role="alert">{saveError}</small>}
           </div>

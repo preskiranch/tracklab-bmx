@@ -12,25 +12,37 @@ test.afterEach(async ({ page }) => {
   expect(pageErrors.get(page), 'The reaction leaderboard must not raise browser runtime errors.').toEqual([]);
 });
 
-async function mockReactionAccount(page: Page, canJoinLeaderboard = true) {
+type ReactionResultWrite = {
+  result: { reactionTimeMs: number | null; valid: boolean; falseStart: boolean };
+  expectedAccountId: string;
+};
+
+async function mockReactionAccount(page: Page, options: {
+  canJoinLeaderboard?: boolean;
+  personalBestMs?: number | null;
+  joined?: boolean;
+  hidden?: boolean;
+  tier?: 'spectator' | 'racer';
+  resultGate?: Promise<void>;
+} = {}) {
   const now = Date.now();
   const account = {
     id: 'private-reaction-account',
     profileKey: 'user:private-reaction-account',
     email: 'private-reaction-account@tracklab.test',
-    name: 'Private Account Identity',
+    name: 'Current Account Rider',
     admin: false,
-    membership: { tier: 'spectator', bikeSeats: 1, updatedAt: now },
+    membership: { tier: options.tier ?? 'spectator', bikeSeats: 1, updatedAt: now },
   };
   const state = {
-    personalBestMs: 205,
-    leaderboard: { joined: false, displayName: '' },
-    canJoinLeaderboard,
+    personalBestMs: options.personalBestMs === undefined ? 205 : options.personalBestMs,
+    leaderboard: { joined: options.joined ?? false, hidden: options.hidden ?? false, displayName: account.name },
+    canJoinLeaderboard: options.canJoinLeaderboard ?? true,
   };
   const limits: number[] = [];
   const preferenceWrites: Array<{ joined: boolean; displayName?: string; expectedAccountId: string }> = [];
   const trainingWrites: string[] = [];
-  const resultWrites: unknown[] = [];
+  const resultWrites: ReactionResultWrite[] = [];
   let userData: Record<string, unknown> = {
     trackMappings: {},
     customRoutes: [],
@@ -41,7 +53,7 @@ async function mockReactionAccount(page: Page, canJoinLeaderboard = true) {
   const rows = Array.from({ length: 50 }, (_, index) => ({
     rank: index + 1,
     displayName: index === 0 ? 'Championship Gate Specialist' : `Gate Rider ${String(index + 1).padStart(2, '0')}`,
-    reactionTimeMs: 180 + index * 10,
+    reactionTimeMs: 180 + index * 50,
     isYou: false,
   }));
 
@@ -55,17 +67,18 @@ async function mockReactionAccount(page: Page, canJoinLeaderboard = true) {
     }
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify(userData) });
   });
-  await page.route(/\/api\/reaction-test(?:\?.*)?$/, (route) => route.fulfill({
-    contentType: 'application/json',
-    body: JSON.stringify(state),
-  }));
+  await page.route(/\/api\/reaction-test(?:\?.*)?$/, (route) => {
+    expect(new URL(route.request().url()).searchParams.get('expectedAccountId')).toBe(account.id);
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify(state) });
+  });
   await page.route('**/api/reaction-test/leaderboard*', async (route) => {
     if (route.request().method() === 'PATCH') {
       const preference = route.request().postDataJSON() as typeof preferenceWrites[number];
       preferenceWrites.push(preference);
       state.leaderboard = {
         joined: preference.joined,
-        displayName: preference.displayName ?? state.leaderboard.displayName,
+        hidden: !preference.joined,
+        displayName: account.name,
       };
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify(state) });
       return;
@@ -74,13 +87,22 @@ async function mockReactionAccount(page: Page, canJoinLeaderboard = true) {
     expect(query.get('expectedAccountId')).toBe(account.id);
     const limit = Number(query.get('limit'));
     limits.push(limit);
-    const entries = rows.map((row, index) => index === 2 && state.leaderboard.joined
-      ? { ...row, displayName: state.leaderboard.displayName, reactionTimeMs: state.personalBestMs, isYou: true }
-      : row).slice(0, limit);
+    const accountEntry = state.leaderboard.joined && state.personalBestMs != null
+      ? [{ rank: 0, displayName: account.name, reactionTimeMs: state.personalBestMs, isYou: true }] : [];
+    const entries = [...rows, ...accountEntry].sort((left, right) => left.reactionTimeMs - right.reactionTimeMs)
+      .slice(0, limit).map((entry, index) => ({ ...entry, rank: index + 1 }));
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ entries }) });
   });
-  await page.route('**/api/reaction-test/result', (route) => {
-    resultWrites.push(route.request().postDataJSON());
+  await page.route('**/api/reaction-test/result', async (route) => {
+    const payload = route.request().postDataJSON() as ReactionResultWrite;
+    expect(payload.expectedAccountId).toBe(account.id);
+    resultWrites.push(payload);
+    await options.resultGate;
+    const result = payload.result;
+    if (result.valid && !result.falseStart && result.reactionTimeMs != null && result.reactionTimeMs > 0) {
+      state.personalBestMs = Math.min(state.personalBestMs ?? Infinity, result.reactionTimeMs);
+      if (state.canJoinLeaderboard && !state.leaderboard.hidden) state.leaderboard.joined = true;
+    }
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify(state) });
   });
   await page.route('**/api/training-sessions*', (route) => {
@@ -112,10 +134,10 @@ async function openLeaderboard(page: Page, view: Locator) {
   return dialog;
 }
 
-test('reaction leaderboard defaults to Top 5 and publishes only an explicitly chosen display name', async ({ page }) => {
+test('reaction leaderboard defaults to Top 5 and shows the account name without an enrollment form', async ({ page }) => {
   const mock = await mockReactionAccount(page);
   const view = await openReactionTest(page);
-  let dialog = await openLeaderboard(page, view);
+  const dialog = await openLeaderboard(page, view);
   const size = dialog.getByLabel('Leaderboard size', { exact: true });
   await expect(size).toHaveValue('5');
   await expect(size.locator('option')).toHaveText(['Top 5', 'Top 10', 'Top 25', 'Top 50']);
@@ -123,9 +145,13 @@ test('reaction leaderboard defaults to Top 5 and publishes only an explicitly ch
   await expect(dialog.getByText('Gate Rider 06', { exact: true })).toHaveCount(0);
   expect(mock.limits).toEqual([5]);
   expect(mock.preferenceWrites).toEqual([]);
-  await expect(dialog).not.toContainText(mock.account.name);
+  await expect(dialog.getByRole('heading', { name: 'Your leaderboard time', exact: true })).toBeVisible();
+  await expect(dialog).toContainText(mock.account.name);
   await expect(dialog).not.toContainText(mock.account.email);
-  await expect(dialog.getByLabel('Leaderboard display name', { exact: true })).toHaveValue('');
+  await expect(dialog.getByLabel('Leaderboard display name', { exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Join leaderboard', exact: true })).toHaveCount(0);
+  await expect(dialog.locator('form')).toHaveCount(0);
+  await expect(dialog).toContainText(/automatically/i);
 
   for (const limit of [10, 25, 50]) {
     await size.selectOption(String(limit));
@@ -133,37 +159,151 @@ test('reaction leaderboard defaults to Top 5 and publishes only an explicitly ch
     await expect.poll(() => mock.limits.at(-1)).toBe(limit);
     if (limit < 50) await expect(dialog.getByText(`Gate Rider ${limit + 1}`, { exact: true })).toHaveCount(0);
   }
-  await size.selectOption('5');
-  await dialog.getByLabel('Leaderboard display name', { exact: true }).fill('Gate Flyer');
-  await dialog.getByRole('button', { name: 'Join leaderboard', exact: true }).click();
-  await expect(dialog.getByRole('button', { name: 'Leave leaderboard', exact: true })).toBeVisible();
-  await expect.poll(() => mock.preferenceWrites).toEqual([{
-    joined: true, displayName: 'Gate Flyer', expectedAccountId: mock.account.id,
-  }]);
-  await expect(dialog.getByRole('rowheader', { name: 'Gate Flyer You', exact: true })).toBeVisible();
-  await expect(dialog).not.toContainText(mock.account.name);
-  await expect(dialog).not.toContainText(mock.account.email);
+  expect(mock.state.leaderboard.joined).toBe(false);
+  expect(mock.preferenceWrites).toEqual([]);
   expect(mock.trainingWrites).toEqual([]);
   expect(mock.resultWrites).toEqual([]);
+});
 
-  // Reloading exercises the account preference response, rather than only the
-  // optimistic state after the join request.
-  const reopenedView = await openReactionTest(page);
-  dialog = await openLeaderboard(page, reopenedView);
-  await expect(dialog.getByRole('button', { name: 'Leave leaderboard', exact: true })).toBeVisible();
-  await expect(dialog.getByRole('rowheader', { name: 'Gate Flyer You', exact: true })).toBeVisible();
-  await dialog.getByLabel('Leaderboard display name', { exact: true }).fill('Gate Flyer Updated');
-  await dialog.getByRole('button', { name: 'Save display name', exact: true }).click();
-  await expect(dialog.getByRole('rowheader', { name: 'Gate Flyer Updated You', exact: true })).toBeVisible();
-  await expect.poll(() => mock.preferenceWrites[1]).toEqual({
-    joined: true, displayName: 'Gate Flyer Updated', expectedAccountId: mock.account.id,
+async function preparePredictableCadence(page: Page) {
+  await page.addInitScript(() => {
+    const timingWindow = window as typeof window & { __reactionFirstRedAt?: number };
+    window.addEventListener('tracklab-start-gate-tone', (event) => {
+      if ((event as CustomEvent<{ kind?: string }>).detail?.kind === 'uci-red'
+        && timingWindow.__reactionFirstRedAt === undefined) {
+        timingWindow.__reactionFirstRedAt = performance.now();
+      }
+    });
+    const original = Crypto.prototype.getRandomValues;
+    Crypto.prototype.getRandomValues = function (array) {
+      if (array instanceof Uint32Array && array.length === 1) {
+        array[0] = 0;
+        return array;
+      }
+      return original.call(this, array);
+    };
   });
-  await dialog.getByRole('button', { name: 'Leave leaderboard', exact: true }).click();
-  await expect(dialog.getByRole('button', { name: 'Join leaderboard', exact: true })).toBeVisible();
-  await expect.poll(() => mock.preferenceWrites.length).toBe(3);
-  expect(mock.preferenceWrites[2]).toMatchObject({ joined: false, expectedAccountId: mock.account.id });
-  await expect(dialog.getByRole('rowheader', { name: 'Gate Flyer Updated You', exact: true })).toHaveCount(0);
-  expect(mock.state.personalBestMs).toBe(205);
+}
+
+async function recordValidRun(page: Page, view: Locator, reactionDelayMs: number) {
+  const retry = view.getByRole('button', { name: 'Try Again', exact: true });
+  if (await retry.isVisible()) await retry.click();
+  await page.evaluate(() => {
+    delete (window as typeof window & { __reactionFirstRedAt?: number }).__reactionFirstRedAt;
+  });
+  await view.getByRole('button', { name: 'Start Reaction Test', exact: true }).click();
+  await page.waitForFunction((delay) => {
+    const firstRedAt = (window as typeof window & { __reactionFirstRedAt?: number }).__reactionFirstRedAt;
+    return firstRedAt !== undefined && performance.now() - firstRedAt >= delay;
+  }, reactionDelayMs);
+  await view.locator('.reaction-race-surface').click({ position: { x: 500, y: 300 } });
+  await expect(view.locator('.reaction-result-card')).toBeVisible();
+  await expect(view.getByText('TOO EARLY / FALSE START', { exact: true })).toHaveCount(0);
+  await expect(retry).toBeVisible();
+}
+
+for (const tier of ['racer', 'spectator'] as const) {
+  test(`${tier} account automatically posts its best valid run under its existing name`, async ({ page }) => {
+    test.setTimeout(90_000);
+    const mock = await mockReactionAccount(page, { tier, personalBestMs: null });
+    await preparePredictableCadence(page);
+    const view = await openReactionTest(page);
+    let bestMs = Infinity;
+    for (const [index, delay] of [900, 300, 1_500].entries()) {
+      await recordValidRun(page, view, delay);
+      await expect.poll(() => mock.resultWrites.length).toBe(index + 1);
+      const result = mock.resultWrites[index].result;
+      expect(result).toMatchObject({ valid: true, falseStart: false });
+      const milliseconds = result.reactionTimeMs!;
+      expect(milliseconds).toBeGreaterThan(0);
+      if (index === 1) expect(milliseconds).toBeLessThan(bestMs);
+      if (index === 2) expect(milliseconds).toBeGreaterThan(bestMs);
+      bestMs = Math.min(bestMs, milliseconds);
+
+      const dialog = await openLeaderboard(page, view);
+      await dialog.getByLabel('Leaderboard size', { exact: true }).selectOption('50');
+      const ownRow = dialog.locator('tbody tr.is-you');
+      await expect(ownRow).toHaveCount(1);
+      await expect(ownRow.getByRole('rowheader')).toHaveText(`${mock.account.name} You`);
+      await expect(ownRow.getByRole('cell').last()).toHaveText(`${(bestMs / 1_000).toFixed(2)} sec`);
+      await expect(dialog.getByRole('button', { name: 'Hide my time', exact: true })).toBeVisible();
+      await expect(dialog.getByRole('button', { name: 'Join leaderboard', exact: true })).toHaveCount(0);
+      await expect(dialog.getByLabel('Leaderboard display name', { exact: true })).toHaveCount(0);
+      await dialog.getByRole('button', { name: 'Close leaderboard', exact: true }).click();
+      expect(mock.state.personalBestMs).toBe(bestMs);
+      expect(mock.state.leaderboard).toEqual({ joined: true, hidden: false, displayName: mock.account.name });
+      expect(mock.preferenceWrites).toEqual([]);
+      expect(mock.trainingWrites).toEqual([]);
+    }
+
+    const reopenedView = await openReactionTest(page);
+    const dialog = await openLeaderboard(page, reopenedView);
+    await dialog.getByLabel('Leaderboard size', { exact: true }).selectOption('50');
+    await expect(dialog.locator('tbody tr.is-you')).toHaveCount(1);
+    await expect(dialog.locator('tbody tr.is-you')).toContainText(`${(bestMs / 1_000).toFixed(2)} sec`);
+    expect(mock.preferenceWrites).toEqual([]);
+  });
+}
+
+test('an open leaderboard refreshes automatically when a delayed result finishes saving', async ({ page }) => {
+  let releaseResult!: () => void;
+  const resultGate = new Promise<void>((resolve) => { releaseResult = resolve; });
+  const mock = await mockReactionAccount(page, { tier: 'racer', personalBestMs: null, resultGate });
+  await preparePredictableCadence(page);
+  try {
+    const view = await openReactionTest(page);
+    await recordValidRun(page, view, 300);
+    await expect.poll(() => mock.resultWrites.length).toBe(1);
+    expect(mock.state.personalBestMs).toBeNull();
+    const dialog = await openLeaderboard(page, view);
+    await dialog.getByLabel('Leaderboard size', { exact: true }).selectOption('50');
+    await expect(dialog.getByText('Gate Rider 50', { exact: true })).toBeAttached();
+    await expect(dialog.locator('tbody tr.is-you')).toHaveCount(0);
+
+    releaseResult();
+    await expect(dialog.locator('tbody tr.is-you')).toHaveCount(1);
+    await expect(dialog.locator('tbody tr.is-you')).toContainText(mock.account.name);
+    await expect(dialog.locator('tbody tr.is-you')).toContainText(`${(mock.resultWrites[0].result.reactionTimeMs! / 1_000).toFixed(2)} sec`);
+    await expect(dialog.getByRole('button', { name: 'Hide my time', exact: true })).toBeVisible();
+    expect(mock.preferenceWrites).toEqual([]);
+    expect(mock.trainingWrites).toEqual([]);
+  } finally {
+    releaseResult();
+  }
+});
+
+test('hiding a leaderboard time persists across reload and a later valid run until shown again', async ({ page }) => {
+  test.setTimeout(60_000);
+  const mock = await mockReactionAccount(page, { joined: true, personalBestMs: 2_000 });
+  await preparePredictableCadence(page);
+  let view = await openReactionTest(page);
+  let dialog = await openLeaderboard(page, view);
+  await dialog.getByLabel('Leaderboard size', { exact: true }).selectOption('50');
+  await expect(dialog.locator('tbody tr.is-you')).toHaveCount(1);
+  await dialog.getByRole('button', { name: 'Hide my time', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: 'Show my time', exact: true })).toBeVisible();
+  await expect(dialog.locator('tbody tr.is-you')).toHaveCount(0);
+  expect(mock.preferenceWrites).toMatchObject([{ joined: false, expectedAccountId: mock.account.id }]);
+
+  view = await openReactionTest(page);
+  dialog = await openLeaderboard(page, view);
+  await expect(dialog.getByRole('button', { name: 'Show my time', exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Close leaderboard', exact: true }).click();
+  await recordValidRun(page, view, 300);
+  await expect.poll(() => mock.resultWrites.length).toBe(1);
+  expect(mock.state.personalBestMs).toBeLessThan(2_000);
+  expect(mock.state.leaderboard).toMatchObject({ joined: false, hidden: true });
+  dialog = await openLeaderboard(page, view);
+  await expect(dialog.getByRole('button', { name: 'Show my time', exact: true })).toBeVisible();
+  await expect(dialog.locator('tbody tr.is-you')).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Show my time', exact: true }).click();
+  await dialog.getByLabel('Leaderboard size', { exact: true }).selectOption('50');
+  await expect(dialog.locator('tbody tr.is-you')).toHaveCount(1);
+  await expect(dialog.getByRole('rowheader', { name: `${mock.account.name} You`, exact: true })).toBeAttached();
+  expect(mock.preferenceWrites).toMatchObject([
+    { joined: false, expectedAccountId: mock.account.id },
+    { joined: true, expectedAccountId: mock.account.id },
+  ]);
   expect(mock.trainingWrites).toEqual([]);
 });
 
@@ -199,13 +339,18 @@ test('reaction leaderboard stays contained without overlapping controls on phone
           && rect.top < other.bottom - 1 && rect.bottom > other.top + 1;
         return {
           inViewport: rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight,
+          lightLabelsReadable: [...view.querySelectorAll<HTMLElement>('.reaction-light small')].every((label) => (
+            Number.parseFloat(getComputedStyle(label).fontSize) >= 14 && label.scrollWidth <= label.clientWidth + 1
+          )),
+          personalRecordReadable: Number.parseFloat(getComputedStyle(view.querySelector('.reaction-pr-badge span')!).fontSize) >= 16,
           clearsSceneControls: ['.reaction-title', '.reaction-exit-action', '.reaction-tree'].every((selector) => {
             const other = view.querySelector(selector);
             return !other || !overlaps(other.getBoundingClientRect());
           }),
         };
       });
-      expect(headerLayout).toEqual({ inViewport: true, clearsSceneControls: true });
+      expect(headerLayout).toEqual({ inViewport: true, clearsSceneControls: true, lightLabelsReadable: true, personalRecordReadable: true });
+      await page.screenshot({ fullPage: false, path: testInfo.outputPath(`reaction-readable-${viewport.label}.png`) });
       const dialog = await openLeaderboard(page, view);
       for (const limit of [5, 50]) {
         await dialog.getByLabel('Leaderboard size', { exact: true }).selectOption(String(limit));
@@ -240,13 +385,23 @@ test('reaction leaderboard stays contained without overlapping controls on phone
   }
 });
 
-test('reaction leaderboard prevents enrollment when the active context cannot join', async ({ page }) => {
-  const mock = await mockReactionAccount(page, false);
+test('read-only leaderboard contexts keep the personal PR without automatic enrollment', async ({ page }) => {
+  const mock = await mockReactionAccount(page, { canJoinLeaderboard: false, personalBestMs: 2_000 });
+  await preparePredictableCadence(page);
   const view = await openReactionTest(page);
+  await expect(view.getByText('PR · 2.00 sec', { exact: true })).toBeVisible();
+  await recordValidRun(page, view, 300);
+  await expect.poll(() => mock.resultWrites.length).toBe(1);
+  expect(mock.state.personalBestMs).toBeLessThan(2_000);
+  expect(mock.state.leaderboard.joined).toBe(false);
   const dialog = await openLeaderboard(page, view);
   await expect(dialog.getByRole('button', { name: 'Join leaderboard', exact: true })).toHaveCount(0);
   await expect(dialog.getByRole('button', { name: 'Leave leaderboard', exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Hide my time', exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Show my time', exact: true })).toHaveCount(0);
   await expect(dialog.getByLabel('Leaderboard display name', { exact: true })).toHaveCount(0);
+  await expect(dialog.locator('tbody tr.is-you')).toHaveCount(0);
+  await expect(dialog).not.toContainText(mock.account.name);
   await expect(dialog).not.toContainText(mock.account.email);
   expect(mock.preferenceWrites).toEqual([]);
   expect(mock.trainingWrites).toEqual([]);
@@ -262,11 +417,45 @@ test('the public reaction leaderboard remains available when the private profile
   const view = await openReactionTest(page);
   const dialog = await openLeaderboard(page, view);
   await expect(dialog.getByLabel('Leaderboard size', { exact: true })).toHaveValue('5');
+  await expect(dialog.getByRole('alert')).toContainText('Your leaderboard settings could not load');
+  await expect(dialog).not.toContainText('Sign in to your own account');
   await expect(dialog.getByRole('button', { name: 'Join leaderboard', exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Hide my time', exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Show my time', exact: true })).toHaveCount(0);
   await expect(dialog.getByLabel('Leaderboard display name', { exact: true })).toHaveCount(0);
   await dialog.getByLabel('Leaderboard size', { exact: true }).selectOption('50');
   await expect(dialog.getByText('Gate Rider 50', { exact: true })).toBeAttached();
   expect(mock.preferenceWrites).toEqual([]);
+  expect(mock.trainingWrites).toEqual([]);
+});
+
+test('a paid account can retry a failed profile load without being told to sign in or reenroll', async ({ page }) => {
+  const mock = await mockReactionAccount(page, { tier: 'racer', joined: true });
+  let profileUnavailable = true;
+  await page.route(/\/api\/reaction-test(?:\?.*)?$/, (route) => profileUnavailable
+    ? route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Temporarily unavailable' }) })
+    : route.fallback());
+  const view = await openReactionTest(page);
+  const dialog = await openLeaderboard(page, view);
+  await expect(dialog.getByRole('alert')).toContainText('Your leaderboard settings could not load');
+  await expect(dialog.getByRole('rowheader', { name: `${mock.account.name} You`, exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Join leaderboard', exact: true })).toHaveCount(0);
+  await expect(dialog).not.toContainText('Sign in to your own account');
+
+  profileUnavailable = false;
+  await dialog.getByRole('button', { name: 'Try again', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toHaveCount(0);
+  await expect(dialog.getByRole('heading', { name: 'Your leaderboard time', exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Hide my time', exact: true })).toBeVisible();
+
+  profileUnavailable = true;
+  await dialog.getByLabel('Leaderboard size', { exact: true }).selectOption('10');
+  await expect(dialog.getByRole('alert')).toContainText('Your leaderboard settings could not load');
+  await expect(dialog.getByRole('heading', { name: 'Your leaderboard time', exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Hide my time', exact: true })).toBeVisible();
+  await expect(dialog).not.toContainText('Sign in to your own account');
+  expect(mock.preferenceWrites).toEqual([]);
+  expect(mock.resultWrites).toEqual([]);
   expect(mock.trainingWrites).toEqual([]);
 });
 

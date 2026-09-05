@@ -532,6 +532,7 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
   const reactionResults: Array<{ reactionTimeMs: number | null; valid: boolean; falseStart: boolean }> = [];
   const trainingWrites: string[] = [];
   let savedPersonalBestMs = 2_000;
+  let reactionLeaderboardJoined = false;
   const authUser = {
     id: 'reaction-test-rider',
     profileKey: 'user:reaction-test-rider',
@@ -580,7 +581,7 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
     contentType: 'application/json',
     body: JSON.stringify({
       personalBestMs: savedPersonalBestMs,
-      leaderboard: { joined: false, displayName: '' },
+      leaderboard: { joined: reactionLeaderboardJoined, hidden: false, displayName: authUser.name },
       canJoinLeaderboard: true,
     }),
   }));
@@ -593,12 +594,13 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
     reactionResults.push(requestBody.result);
     if (requestBody.result.valid && requestBody.result.reactionTimeMs != null) {
       savedPersonalBestMs = Math.min(savedPersonalBestMs, requestBody.result.reactionTimeMs);
+      reactionLeaderboardJoined = true;
     }
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
         personalBestMs: savedPersonalBestMs,
-        leaderboard: { joined: false, displayName: '' },
+        leaderboard: { joined: reactionLeaderboardJoined, hidden: false, displayName: authUser.name },
         canJoinLeaderboard: true,
       }),
     });
@@ -761,7 +763,10 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
         const exit = element.querySelector<HTMLElement>('.reaction-exit-action')?.getBoundingClientRect();
         const tree = element.querySelector<HTMLElement>('.reaction-tree')?.getBoundingClientRect();
         const panel = element.querySelector<HTMLElement>('.reaction-bottom-panel')?.getBoundingClientRect();
-        const resultStack = element.querySelector<HTMLElement>('.reaction-result-stack')?.getBoundingClientRect();
+        // The compact landscape footer uses display: contents for the wrapper;
+        // measure its visible cards and record controls instead of its empty box.
+        const resultRects = [...element.querySelectorAll<HTMLElement>('.reaction-result-stack > *')]
+          .map((item) => item.getBoundingClientRect()).filter((rect) => rect.width > 0 && rect.height > 0);
         const primaryAction = element.querySelector<HTMLElement>('.reaction-primary-action')?.getBoundingClientRect();
         const stage = element.querySelector<HTMLElement>('.reaction-stage')?.getBoundingClientRect();
         const scene = element.querySelector<HTMLElement>('.reaction-scene-frame')?.getBoundingClientRect();
@@ -789,8 +794,34 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
           Math.max(...gateCorners.map(({ x }) => x)) - Math.min(...gateCorners.map(({ x }) => x)),
           Math.max(...gateCorners.map(({ y }) => y)) - Math.min(...gateCorners.map(({ y }) => y)),
         );
+        const readableText = (text: HTMLElement, container: HTMLElement) => {
+          const textRange = document.createRange();
+          textRange.selectNodeContents(text);
+          const textRect = textRange.getBoundingClientRect();
+          const containerRect = container.getBoundingClientRect();
+          return {
+            fontSize: Number.parseFloat(getComputedStyle(text).fontSize),
+            fits: text.scrollWidth <= text.clientWidth + 1
+              && textRect.left >= containerRect.left - 1 && textRect.right <= containerRect.right + 1
+              && textRect.top >= containerRect.top - 1 && textRect.bottom <= containerRect.bottom + 1,
+          };
+        };
+        const prBadge = element.querySelector<HTMLElement>('.reaction-pr-badge')!;
+        const prText = prBadge.querySelector<HTMLElement>('span')!;
         return {
           bulbWidth: element.querySelector<HTMLElement>('.reaction-light-bulb')?.getBoundingClientRect().width ?? 0,
+          lightLabels: [...element.querySelectorAll<HTMLElement>('.reaction-light small')].map((label) => {
+            const row = label.closest<HTMLElement>('.reaction-light')!;
+            const labelRect = label.getBoundingClientRect();
+            const bulbRect = row.querySelector<HTMLElement>('.reaction-light-bulb')!.getBoundingClientRect();
+            const markerRect = row.querySelector<HTMLElement>('.reaction-light-stop-marker')?.getBoundingClientRect();
+            return {
+              ...readableText(label, row),
+              clearsBulb: !overlaps(labelRect, bulbRect),
+              clearsMarker: !overlaps(labelRect, markerRect),
+            };
+          }),
+          personalRecord: readableText(prText, prBadge),
           rect: element.getBoundingClientRect().toJSON(),
           surfaceRect: rectFor('.reaction-race-surface'),
           stageRect: stage?.toJSON(),
@@ -812,10 +843,10 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
           exitRect: rectFor('.reaction-exit-action'),
           treeRect: rectFor('.reaction-tree'),
           panelRect: rectFor('.reaction-bottom-panel'),
-          resultRect: resultStack?.toJSON(),
+          resultRects: resultRects.map((rect) => rect.toJSON()),
           actionRect: primaryAction?.toJSON(),
           controlsOverlap: {
-            resultAndAction: overlaps(resultStack, primaryAction),
+            resultAndAction: resultRects.some((rect) => overlaps(rect, primaryAction)),
             titleAndExit: overlaps(title, exit),
             titleAndTree: overlaps(title, tree),
             treeAndPanel: overlaps(tree, panel),
@@ -833,6 +864,13 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
       expect(geometry.bulbWidth).toBeGreaterThanOrEqual(
         viewport.height <= 480 || viewport.width <= 320 ? 32 : 38,
       );
+      expect(geometry.lightLabels).toHaveLength(4);
+      for (const label of geometry.lightLabels) {
+        expect(label.fontSize).toBeGreaterThanOrEqual(14);
+        expect(label).toMatchObject({ fits: true, clearsBulb: true, clearsMarker: true });
+      }
+      expect(geometry.personalRecord.fontSize).toBeGreaterThanOrEqual(16);
+      expect(geometry.personalRecord.fits).toBe(true);
       expect(geometry.documentFits).toBe(true);
       expect(geometry.documentHeightFits).toBe(true);
       // WebKit rounds dynamic viewport units to 1/64 CSS pixel. Keep the
@@ -847,7 +885,7 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
       expect(Number(geometry.sceneRect?.width) / Number(geometry.sceneRect?.height)).toBeCloseTo(1672 / 941, 2);
       expect(geometry.stageRect?.x).toBeCloseTo(0, 1);
       expect(geometry.stageRect?.y).toBeCloseTo(0, 1);
-      expect(Number(geometry.stageRect?.width) * Number(geometry.stageRect?.height))
+      expect.soft(Number(geometry.stageRect?.width) * Number(geometry.stageRect?.height))
         .toBeGreaterThan(viewport.width * viewport.height * 0.5);
       // The source frame must cover the entire photo area. Constraining it to
       // fit inside the portrait viewport caused the original letterboxing.
@@ -892,14 +930,15 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
       }
       expect(geometry.exitRect?.width).toBeGreaterThanOrEqual(44);
       expect(geometry.exitRect?.height).toBeGreaterThanOrEqual(44);
-      for (const rect of [geometry.titleRect, geometry.exitRect, geometry.treeRect, geometry.resultRect, geometry.actionRect]) {
+      for (const rect of [geometry.titleRect, geometry.exitRect, geometry.treeRect, ...geometry.resultRects, geometry.actionRect]) {
         expect(rect?.left).toBeGreaterThanOrEqual(safeArea.left);
         expect(rect?.right).toBeLessThanOrEqual(viewport.width - safeArea.right);
         expect(rect?.top).toBeGreaterThanOrEqual(safeArea.top);
         expect(rect?.bottom).toBeLessThanOrEqual(viewport.height - safeArea.bottom);
       }
       expect(Number(geometry.titleRect?.x) + Number(geometry.titleRect?.width)).toBeLessThanOrEqual(Number(geometry.exitRect?.x));
-      expect(geometry.controlsOverlap).toEqual({
+      expect.soft(geometry.controlsOverlap, JSON.stringify({ viewport, state, gateCorners: geometry.gateCorners,
+        treeRect: geometry.treeRect, panelRect: geometry.panelRect })).toEqual({
         resultAndAction: false,
         titleAndExit: false,
         titleAndTree: false,
@@ -1091,9 +1130,7 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
   }));
   expect(settledBackground).toEqual(immutableBackground);
   await expect(reactionView.getByRole('button', { name: 'Try Again' })).toBeVisible();
-  for (const viewport of responsiveViewports.filter(({ label }) => ![
-    'compact-iphone-portrait', 'large-iphone-portrait',
-  ].includes(label))) {
+  for (const viewport of responsiveViewports) {
     await verifyResponsiveLayout(viewport, 'result');
   }
   await page.setViewportSize({ width: 390, height: 844 });

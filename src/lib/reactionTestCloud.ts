@@ -47,7 +47,7 @@ export function clearLocalReactionAccount(accountId: string) {
 
 export type ReactionProfile = {
   personalBestMs: number | null;
-  leaderboard: { joined: boolean; displayName: string };
+  leaderboard: { joined: boolean; hidden?: boolean; displayName: string };
   canJoinLeaderboard: boolean;
 };
 

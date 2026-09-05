@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
 import * as persistence from './persistence.mjs';
-import { isReactionTestSession, measuredReactionTestBestMs, reactionLeaderboardDisplayName } from './reactionTest.mjs';
+import { isReactionTestSession, measuredReactionTestBestMs, reactionLeaderboardAccountName, reactionLeaderboardDisplayName } from './reactionTest.mjs';
 import { cloudTelemetry } from './telemetry.mjs';
 import { planClubLiveExploreClusters } from './clubLiveExploreClusters.mjs';
 import {
@@ -10064,12 +10064,15 @@ async function reactionTestResponse(access) {
     .filter((best) => typeof best === 'number' && Number.isFinite(best) && best > 0);
   return {
     personalBestMs: bests.length ? Math.min(...bests) : null,
-    leaderboard: tablet ? { joined: false, displayName: '' } : measured.leaderboard,
+    leaderboard: tablet ? { joined: false, hidden: false, displayName: '' } : {
+      ...measured.leaderboard,
+      displayName: measured.leaderboard.displayName || reactionLeaderboardAccountName(access.authSession.user.displayName),
+    },
     canJoinLeaderboard: !tablet,
   };
 }
 
-async function saveReactionTestForAccess(access, result, { legacy = false } = {}) {
+async function saveReactionTestForAccess(access, result, { legacy = false, autoJoinLeaderboard = false } = {}) {
   const bestMs = measuredReactionTestBestMs(result, { legacy });
   if (bestMs == null) return;
   const targets = access.tabletSession ? [
@@ -10082,6 +10085,8 @@ async function saveReactionTestForAccess(access, result, { legacy = false } = {}
   for (const target of targets) {
     if (measuredMs != null) await persistence.saveReactionTestBest(
       target.profileKey.slice(5), measuredMs, target.studioRiderId || '',
+      { autoJoinDisplayName: autoJoinLeaderboard && access.authSession && !access.tabletSession
+        ? reactionLeaderboardAccountName(access.authSession.user.displayName) : '' },
     );
     const saved = await persistRecordedReactionTestPersonalBest({
       ...target, sessions: [{ details: { reactionTest: result } }],
@@ -24495,7 +24500,7 @@ async function serveStatic(request, response) {
     }
     // A shared tablet can read the public board, but never inherits an owner's
     // identity from an ambient browser cookie.
-    const authSession = request.headers['x-tracklab-club-tablet-session']
+    const authSession = requestClubTabletSessionToken(request) || requestClubTabletResultToken(request)
       ? null : await currentAuthSession(request);
     const expectedAccountId = requestUrl.searchParams.get('expectedAccountId');
     const viewerId = expectedAccountId == null || expectedAccountId === authSession?.user?.id
@@ -24536,7 +24541,7 @@ async function serveStatic(request, response) {
         writeJson(response, 400, { error: 'This Reaction Test was recorded after the original tablet athlete session ended.' });
         return;
       }
-      await saveReactionTestForAccess(access, payload.result);
+      await saveReactionTestForAccess(access, payload.result, { autoJoinLeaderboard: true });
       writeJson(response, 200, await reactionTestResponse(access), { 'Cache-Control': 'no-store' });
       return;
     }

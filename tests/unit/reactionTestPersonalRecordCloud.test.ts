@@ -86,7 +86,7 @@ beforeAll(async () => {
       PORT: String(port),
       DATABASE_URL: '',
       OPENAI_API_KEY: '',
-      TRACKLAB_ADMIN_EMAILS: 'reaction-roster-owner@tracklab.test',
+      TRACKLAB_ADMIN_EMAILS: 'reaction-roster-owner@tracklab.test,reaction-unclaimed-owner@tracklab.test',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -219,7 +219,7 @@ describe('Reaction Test personal-record cloud durability', () => {
     await expect(history.json()).resolves.toMatchObject({ sessions: [], totals: { sessions: 0, bmxRaces: 0 } });
   });
 
-  it('builds a claimed Club Tablet roster from the best field on either profile', async () => {
+  it('keeps claimed tablet results private until a personal run joins, then updates the athlete leaderboard entry', async () => {
     const ownerRegistration = await api('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify({
@@ -327,7 +327,7 @@ describe('Reaction Test personal-record cloud durability', () => {
     const tabletSession = await selection.json() as { sessionToken: string; resultUploadToken: string };
     const tabletHeaders = { 'X-TrackLab-Club-Tablet-Session': tabletSession.sessionToken };
     await expect((await api('/api/reaction-test', { headers: tabletHeaders }, athleteCookie)).json()).resolves.toEqual({
-      personalBestMs: 350, leaderboard: { joined: false, displayName: '' }, canJoinLeaderboard: false,
+      personalBestMs: 350, leaderboard: { joined: false, hidden: false, displayName: '' }, canJoinLeaderboard: false,
     });
     const result = {
       id: 'tablet-reaction-result', startedAt: 1000, recordedAt: 1100,
@@ -340,7 +340,7 @@ describe('Reaction Test personal-record cloud durability', () => {
     }, athleteCookie);
     expect(tabletSave.status).toBe(200);
     await expect(tabletSave.json()).resolves.toEqual({
-      personalBestMs: 100, leaderboard: { joined: false, displayName: '' }, canJoinLeaderboard: false,
+      personalBestMs: 100, leaderboard: { joined: false, hidden: false, displayName: '' }, canJoinLeaderboard: false,
     });
     await expect((await api('/api/user-data', {}, athleteCookie)).json()).resolves.toMatchObject({
       accountProfile: { personalRecords: { reactionTestBestMs: 100 } },
@@ -360,19 +360,50 @@ describe('Reaction Test personal-record cloud durability', () => {
     expect((await api('/api/reaction-test', {
       headers: { 'X-TrackLab-Club-Tablet-Session': 'invalid-tablet-token' },
     }, athleteCookie)).status).toBe(401);
+    await expect((await api('/api/reaction-test', {}, athleteCookie)).json()).resolves.toEqual({
+      personalBestMs: 100,
+      leaderboard: { joined: false, hidden: false, displayName: 'Claimed Reaction Rider' },
+      canJoinLeaderboard: true,
+    });
+    await expect((await api('/api/reaction-test', {}, freshOwnerCookie)).json()).resolves.toEqual({
+      personalBestMs: null,
+      leaderboard: { joined: false, hidden: false, displayName: 'Reaction Test Club' },
+      canJoinLeaderboard: true,
+    });
     await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [] });
-    const personalOptIn = await api('/api/reaction-test/leaderboard', {
-      method: 'PATCH', body: JSON.stringify({ joined: true, displayName: 'Chosen Public Name' }),
+    const personalRun = await api('/api/reaction-test/result', {
+      method: 'POST', body: JSON.stringify({ result: {
+        ...result, id: 'personal-slower-reaction-result', reactionTimeMs: 200,
+        recordedAt: result.startedAt + 200, recordedAtEpoch: result.startedAtEpoch + 200,
+      } }),
     }, athleteCookie);
-    expect(personalOptIn.status).toBe(200);
+    expect(personalRun.status).toBe(200);
+    await expect(personalRun.json()).resolves.toEqual({
+      personalBestMs: 100,
+      leaderboard: { joined: true, hidden: false, displayName: 'Claimed Reaction Rider' },
+      canJoinLeaderboard: true,
+    });
+    await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [
+      { rank: 1, displayName: 'Claimed Reaction Rider', reactionTimeMs: 100, isYou: false },
+    ] });
     await expect((await api('/api/reaction-test', { headers: tabletHeaders })).json()).resolves.toEqual({
-      personalBestMs: 100, leaderboard: { joined: false, displayName: '' }, canJoinLeaderboard: false,
+      personalBestMs: 100, leaderboard: { joined: false, hidden: false, displayName: '' }, canJoinLeaderboard: false,
     });
     expect((await api('/api/reaction-test/leaderboard', {
       method: 'PATCH', headers: tabletHeaders, body: JSON.stringify({ joined: false, displayName: '' }),
     }, athleteCookie)).status).toBe(403);
+    const joinedAthleteTabletSave = await api('/api/reaction-test/result', {
+      method: 'POST', headers: tabletHeaders, body: JSON.stringify({ result: {
+        ...result, id: 'tablet-joined-athlete-result', reactionTimeMs: 90,
+        recordedAt: result.startedAt + 90, recordedAtEpoch: result.startedAtEpoch + 90,
+      } }),
+    }, freshOwnerCookie);
+    expect(joinedAthleteTabletSave.status).toBe(200);
+    await expect(joinedAthleteTabletSave.json()).resolves.toEqual({
+      personalBestMs: 90, leaderboard: { joined: false, hidden: false, displayName: '' }, canJoinLeaderboard: false,
+    });
     await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [
-      { rank: 1, displayName: 'Chosen Public Name', reactionTimeMs: 100, isYou: false },
+      { rank: 1, displayName: 'Claimed Reaction Rider', reactionTimeMs: 90, isYou: false },
     ] });
     await expect((await api('/api/training-sessions', {}, athleteCookie)).json()).resolves.toMatchObject({ sessions: [] });
 
@@ -397,7 +428,12 @@ describe('Reaction Test personal-record cloud durability', () => {
       method: 'POST', headers: completionHeaders, body: JSON.stringify({ result: pendingResult }),
     });
     expect(completedUpload.status).toBe(200);
-    await expect(completedUpload.json()).resolves.toMatchObject({ personalBestMs: 75, canJoinLeaderboard: false });
+    await expect(completedUpload.json()).resolves.toEqual({
+      personalBestMs: 75, leaderboard: { joined: false, hidden: false, displayName: '' }, canJoinLeaderboard: false,
+    });
+    await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [
+      { rank: 1, displayName: 'Claimed Reaction Rider', reactionTimeMs: 75, isYou: false },
+    ] });
     const afterExpiry = Date.now() + 1000;
     expect((await api('/api/reaction-test/result', {
       method: 'POST', headers: completionHeaders,
@@ -419,5 +455,104 @@ describe('Reaction Test personal-record cloud durability', () => {
       method: 'POST', headers: completionHeaders, body: JSON.stringify({ result: pendingResult }),
     })).status).toBe(200);
     await expect((await api('/api/training-sessions', {}, athleteCookie)).json()).resolves.toMatchObject({ sessions: [] });
+
+    const hiddenPreference = await api('/api/reaction-test/leaderboard', {
+      method: 'PATCH', body: JSON.stringify({ joined: false, displayName: 'Claimed Reaction Rider' }),
+    }, athleteCookie);
+    expect(hiddenPreference.status).toBe(200);
+    const hiddenAthleteTabletSave = await api('/api/reaction-test/result', {
+      method: 'POST', headers: { 'X-TrackLab-Club-Tablet-Session': nextSession.sessionToken },
+      body: JSON.stringify({ result: {
+        ...result, id: 'tablet-hidden-athlete-result', reactionTimeMs: 50,
+        recordedAt: result.startedAt + 50, recordedAtEpoch: result.startedAtEpoch + 50,
+      } }),
+    }, freshOwnerCookie);
+    expect(hiddenAthleteTabletSave.status).toBe(200);
+    await expect(hiddenAthleteTabletSave.json()).resolves.toEqual({
+      personalBestMs: 50, leaderboard: { joined: false, hidden: false, displayName: '' }, canJoinLeaderboard: false,
+    });
+    await expect((await api('/api/reaction-test', {}, athleteCookie)).json()).resolves.toEqual({
+      personalBestMs: 50,
+      leaderboard: { joined: false, hidden: true, displayName: 'Claimed Reaction Rider' },
+      canJoinLeaderboard: true,
+    });
+    await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [] });
+  });
+
+  it('never joins or changes the owner account when an unclaimed tablet athlete records a result', async () => {
+    const registration = await api('/api/auth/register', {
+      method: 'POST', body: JSON.stringify({
+        email: 'reaction-unclaimed-owner@tracklab.test',
+        name: 'Unclaimed Reaction Club', password: 'tracklab-test-password',
+      }),
+    });
+    expect(registration.status).toBe(201);
+    const ownerCookie = (registration.headers.get('set-cookie') || '').split(';', 1)[0];
+    const studioRiderId = `reaction-unclaimed-${Date.now()}`;
+    const now = Date.now();
+    const rosterSave = await api('/api/user-data', {
+      method: 'PATCH', body: JSON.stringify({
+        accountProfile: {
+          personalRecords: { reactionTestBestMs: 700, reactionTestBestUpdatedAt: now },
+          updatedAt: now,
+        },
+        studioRiders: [{
+          id: studioRiderId, name: 'Unclaimed Reaction Rider',
+          personalRecords: { reactionTestBestMs: 600, reactionTestBestUpdatedAt: now },
+          createdAt: now, updatedAt: now,
+        }],
+      }),
+    }, ownerCookie);
+    expect(rosterSave.status).toBe(200);
+    const deviceResponse = await api('/api/club-tablet/devices', {
+      method: 'POST', body: JSON.stringify({ name: 'Unclaimed Reaction Tablet' }),
+    }, ownerCookie);
+    expect(deviceResponse.status).toBe(201);
+    const device = await deviceResponse.json() as { deviceToken: string };
+    const ownerLogin = await api('/api/auth/login', {
+      method: 'POST', body: JSON.stringify({
+        email: 'reaction-unclaimed-owner@tracklab.test', password: 'tracklab-test-password',
+      }),
+    });
+    expect(ownerLogin.status).toBe(200);
+    const freshOwnerCookie = (ownerLogin.headers.get('set-cookie') || '').split(';', 1)[0];
+    const selection = await api('/api/club-tablet/sessions', {
+      method: 'POST', headers: { Authorization: `Bearer ${device.deviceToken}` },
+      body: JSON.stringify({ studioRiderId, bikeDeviceId: 'UnclaimedReactionBike' }),
+    });
+    expect(selection.status).toBe(201);
+    const tabletSession = await selection.json() as { sessionToken: string };
+    const tabletHeaders = { 'X-TrackLab-Club-Tablet-Session': tabletSession.sessionToken };
+    const boardBefore = await (await api('/api/reaction-test/leaderboard')).json();
+    await expect((await api('/api/reaction-test', { headers: tabletHeaders }, freshOwnerCookie)).json()).resolves.toEqual({
+      personalBestMs: 600, leaderboard: { joined: false, hidden: false, displayName: '' }, canJoinLeaderboard: false,
+    });
+    const result = {
+      id: 'unclaimed-tablet-reaction-result', startedAt: 1000, recordedAt: 1090,
+      startedAtEpoch: Date.now() - 1000, recordedAtEpoch: Date.now() - 910,
+      reactionTimeMs: 90, stage: 'red', rating: 'excellent', valid: true,
+      late: false, falseStart: false, cadenceDelayMs: 1200,
+    };
+    const tabletSave = await api('/api/reaction-test/result', {
+      method: 'POST', headers: tabletHeaders, body: JSON.stringify({ result }),
+    }, freshOwnerCookie);
+    expect(tabletSave.status).toBe(200);
+    await expect(tabletSave.json()).resolves.toEqual({
+      personalBestMs: 90, leaderboard: { joined: false, hidden: false, displayName: '' }, canJoinLeaderboard: false,
+    });
+    await expect((await api('/api/reaction-test', {}, freshOwnerCookie)).json()).resolves.toEqual({
+      personalBestMs: 700,
+      leaderboard: { joined: false, hidden: false, displayName: 'Unclaimed Reaction Club' },
+      canJoinLeaderboard: true,
+    });
+    await expect((await api('/api/user-data', {}, freshOwnerCookie)).json()).resolves.toMatchObject({
+      accountProfile: { personalRecords: { reactionTestBestMs: 700 } },
+      studioRiders: [expect.objectContaining({
+        id: studioRiderId, personalRecords: expect.objectContaining({ reactionTestBestMs: 90 }),
+      })],
+    });
+    await expect((await api('/api/reaction-test/leaderboard', { headers: tabletHeaders }, freshOwnerCookie)).json())
+      .resolves.toEqual(boardBefore);
+    await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual(boardBefore);
   });
 });

@@ -2,7 +2,7 @@ import pg from 'pg';
 import { createHash, randomUUID } from 'node:crypto';
 import { runDatabaseMigrations } from './migrations.mjs';
 import { cloudTelemetry } from './telemetry.mjs';
-import { isReactionTestSession } from './reactionTest.mjs';
+import { isReactionTestSession, reactionLeaderboardDisplayName } from './reactionTest.mjs';
 import { appleAppAccountTokenLineageHash } from './appleBilling.mjs';
 import {
   maximumAcceptedTrainingSpeedKph,
@@ -3531,7 +3531,11 @@ function enrichMemoryClubTrainingSession(session) {
 function reactionTestRecord(row) {
   return {
     personalBestMs: row?.best_ms == null ? null : Number(row.best_ms),
-    leaderboard: { joined: row?.leaderboard_joined === true, displayName: row?.display_name || '' },
+    leaderboard: {
+      joined: row?.leaderboard_joined === true,
+      hidden: row?.leaderboard_hidden === true,
+      displayName: row?.display_name || '',
+    },
   };
 }
 
@@ -3547,17 +3551,18 @@ export async function loadReactionTestBest(userId, studioRiderId = '') {
     return reactionTestRecord(record);
   }
   const result = requireReactionTestStorage(await query(
-    `SELECT best_ms, leaderboard_joined, display_name FROM ${schema}.reaction_test_bests
+    `SELECT best_ms, leaderboard_joined, leaderboard_hidden, display_name FROM ${schema}.reaction_test_bests
      WHERE user_id = $1 AND studio_rider_id = $2`, [userId, studioRiderId],
   ));
   return reactionTestRecord(result.rows[0]);
 }
 
 /** Atomic minimum is independent of editable account-profile records. */
-export async function saveReactionTestBest(userId, bestMs, studioRiderId = '') {
+export async function saveReactionTestBest(userId, bestMs, studioRiderId = '', { autoJoinDisplayName = '' } = {}) {
   if (typeof bestMs !== 'number' || !Number.isFinite(bestMs) || bestMs <= 0 || bestMs > 60_000) {
     throw new TypeError('A valid measured Reaction Test time is required.');
   }
+  const autoJoinName = !studioRiderId && reactionLeaderboardDisplayName(autoJoinDisplayName);
   if (!pool) {
     if (databaseConfigured) requireReactionTestStorage(null);
     if (!memoryAuthUsersById.has(userId) || memoryErasedAuthUserIdHashes.has(erasedAuthUserIdHash(userId))) {
@@ -3566,18 +3571,29 @@ export async function saveReactionTestBest(userId, bestMs, studioRiderId = '') {
     const key = JSON.stringify([userId, studioRiderId]);
     const previous = memoryReactionTestBests.get(key);
     const record = {
-      userId, studioRiderId, leaderboard_joined: false, display_name: '', ...previous,
+      userId, studioRiderId, leaderboard_joined: false, leaderboard_hidden: false, display_name: '', ...previous,
       best_ms: previous?.best_ms == null ? bestMs : Math.min(previous.best_ms, bestMs),
     };
+    if (autoJoinName && !record.leaderboard_hidden && !record.leaderboard_joined) {
+      record.leaderboard_joined = true;
+      record.display_name = autoJoinName;
+    }
     memoryReactionTestBests.set(key, record);
     return reactionTestRecord(record);
   }
   const result = requireReactionTestStorage(await query(
-    `INSERT INTO ${schema}.reaction_test_bests (user_id, studio_rider_id, best_ms)
-     VALUES ($1, $2, $3)
+    `INSERT INTO ${schema}.reaction_test_bests (user_id, studio_rider_id, best_ms, leaderboard_joined, display_name)
+     VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (user_id, studio_rider_id) DO UPDATE SET
-       best_ms = LEAST(reaction_test_bests.best_ms, EXCLUDED.best_ms), updated_at = now()
-     RETURNING best_ms, leaderboard_joined, display_name`, [userId, studioRiderId, bestMs],
+       best_ms = LEAST(reaction_test_bests.best_ms, EXCLUDED.best_ms),
+       leaderboard_joined = reaction_test_bests.leaderboard_joined
+         OR (EXCLUDED.leaderboard_joined AND NOT reaction_test_bests.leaderboard_hidden),
+       display_name = CASE WHEN EXCLUDED.leaderboard_joined
+         AND NOT reaction_test_bests.leaderboard_hidden AND NOT reaction_test_bests.leaderboard_joined
+         THEN EXCLUDED.display_name ELSE reaction_test_bests.display_name END,
+       updated_at = now()
+     RETURNING best_ms, leaderboard_joined, leaderboard_hidden, display_name`,
+    [userId, studioRiderId, bestMs, Boolean(autoJoinName), autoJoinName || ''],
   ));
   return reactionTestRecord(result.rows[0]);
 }
@@ -3590,17 +3606,18 @@ export async function saveReactionTestLeaderboardSettings(userId, { joined, disp
     }
     const key = JSON.stringify([userId, '']);
     const record = { userId, studioRiderId: '', ...memoryReactionTestBests.get(key),
-      leaderboard_joined: joined, display_name: joined ? displayName : '' };
+      leaderboard_joined: joined, leaderboard_hidden: !joined, display_name: joined ? displayName : '' };
     memoryReactionTestBests.set(key, record);
     return reactionTestRecord(record);
   }
   const result = requireReactionTestStorage(await query(
-    `INSERT INTO ${schema}.reaction_test_bests (user_id, leaderboard_joined, display_name)
-     VALUES ($1, $2, $3)
+    `INSERT INTO ${schema}.reaction_test_bests (user_id, leaderboard_joined, display_name, leaderboard_hidden)
+     VALUES ($1, $2, $3, $4)
      ON CONFLICT (user_id, studio_rider_id) DO UPDATE SET
        leaderboard_joined = EXCLUDED.leaderboard_joined,
+       leaderboard_hidden = EXCLUDED.leaderboard_hidden,
        display_name = EXCLUDED.display_name, updated_at = now()
-     RETURNING best_ms, leaderboard_joined, display_name`, [userId, joined, joined ? displayName : ''],
+     RETURNING best_ms, leaderboard_joined, leaderboard_hidden, display_name`, [userId, joined, joined ? displayName : '', !joined],
   ));
   return reactionTestRecord(result.rows[0]);
 }

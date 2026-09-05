@@ -36,3 +36,17 @@ export function reactionLeaderboardDisplayName(value) {
   if (name.length < 2 || name.length > 32 || /[\p{Cc}\p{Cf}<>@]/u.test(name)) return null;
   return name;
 }
+
+/** Account names allow 64 characters; public leaderboard names allow 32. */
+export function reactionLeaderboardAccountName(value) {
+  if (typeof value !== 'string' || /[\p{Cc}\p{Cf}<>@]/u.test(value)) return 'TrackLab rider';
+  const name = value.trim().replace(/\s+/gu, ' ');
+  if (name.length < 2 || name.length > 64) return 'TrackLab rider';
+  // Never split a surrogate pair when shortening the authenticated name.
+  let shortened = '';
+  for (const character of name) {
+    if (shortened.length + character.length > 32) break;
+    shortened += character;
+  }
+  return reactionLeaderboardDisplayName(shortened) || 'TrackLab rider';
+}

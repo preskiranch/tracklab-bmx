@@ -11,20 +11,21 @@ import {
 } from '../lib/reactionTestCloud';
 import './ReactionLeaderboard.css';
 
-export function ReactionLeaderboard({ disabled, onPersonalBest, recordOwner }: {
+export function ReactionLeaderboard({ disabled, onPersonalBest, recordOwner, refreshKey = 0 }: {
   disabled: boolean;
   onPersonalBest: (milliseconds: number) => void;
   recordOwner: ReactionRecordOwner | null;
+  refreshKey?: number;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [open, setOpen] = useState(false);
   const [limit, setLimit] = useState(5);
   const [entries, setEntries] = useState<ReactionLeader[]>([]);
   const [profile, setProfile] = useState<ReactionProfile | null>(null);
-  const [displayName, setDisplayName] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [profileError, setProfileError] = useState('');
   const [revision, setRevision] = useState(0);
 
   useEffect(() => {
@@ -32,9 +33,11 @@ export function ReactionLeaderboard({ disabled, onPersonalBest, recordOwner }: {
     void loadReactionProfile(recordOwner).then((next) => {
       if (!active) return;
       setProfile(next);
-      setDisplayName(next.leaderboard.displayName);
+      setProfileError('');
       if (next.personalBestMs != null) onPersonalBest(next.personalBestMs);
-    }).catch(() => { /* Playing remains available when the board is offline. */ });
+    }).catch(() => {
+      if (active) setProfileError('Your leaderboard settings could not load. Please try again.');
+    });
     return () => { active = false; };
   }, [onPersonalBest, recordOwner]);
 
@@ -59,20 +62,21 @@ export function ReactionLeaderboard({ disabled, onPersonalBest, recordOwner }: {
     void loadReactionProfile(recordOwner).then((next) => {
       if (!active) return;
       setProfile(next);
-      setDisplayName(next.leaderboard.displayName);
+      setProfileError('');
       if (next.personalBestMs != null) onPersonalBest(next.personalBestMs);
-    }).catch(() => { if (active) setProfile(null); });
+    }).catch(() => {
+      if (active) setProfileError('Your leaderboard settings could not load. Please try again.');
+    });
     return () => { active = false; };
-  }, [open, limit, revision, onPersonalBest, recordOwner]);
+  }, [open, limit, revision, refreshKey, onPersonalBest, recordOwner]);
 
   const updateParticipation = async (joined: boolean) => {
     if (saving) return;
     setSaving(true);
     setError('');
     try {
-      const next = await setReactionLeaderboardParticipation(joined, displayName.trim(), recordOwner);
+      const next = await setReactionLeaderboardParticipation(joined, profile?.leaderboard.displayName ?? '', recordOwner);
       setProfile(next);
-      setDisplayName(next.leaderboard.displayName);
       setRevision((value) => value + 1);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not update your leaderboard entry.');
@@ -82,9 +86,9 @@ export function ReactionLeaderboard({ disabled, onPersonalBest, recordOwner }: {
   };
 
   return <>
-    <button type="button" className="reaction-leaderboard-trigger reaction-control-action" disabled={disabled}
+    <button type="button" className="reaction-leaderboard-trigger reaction-control-action" aria-label="Leaderboard" title="Leaderboard" disabled={disabled}
       onPointerDown={(event) => event.stopPropagation()} onClick={() => setOpen(true)}>
-      <Trophy size={15} aria-hidden="true" /> Leaderboard
+      <Trophy size={15} aria-hidden="true" /> <span>Leaderboard</span>
     </button>
     <dialog ref={dialogRef} className="reaction-leaderboard-dialog reaction-control-action" aria-labelledby="reaction-leaderboard-title"
       onPointerDown={(event) => event.stopPropagation()}
@@ -111,22 +115,25 @@ export function ReactionLeaderboard({ disabled, onPersonalBest, recordOwner }: {
               <td>{formatReactionTime(entry.reactionTimeMs)} sec</td>
             </tr>)}</tbody>
           </table>
-          {!entries.length && !error && <p className="reaction-leaderboard-empty">Be the first to set a time and join the leaderboard.</p>}
+          {!entries.length && !error && <p className="reaction-leaderboard-empty">Set a valid time to appear on the leaderboard.</p>}
         </>}
         <section className="reaction-leaderboard-participation" aria-label="Your leaderboard entry">
+          {profileError && <p className="reaction-leaderboard-error" role="alert">{profileError} <button type="button" onClick={() => setRevision((value) => value + 1)}>Try again</button></p>}
           {profile?.canJoinLeaderboard ? <>
-            <h3>{profile.leaderboard.joined ? 'Your public entry' : 'Join with your free account'}</h3>
-            <p>Your chosen name and best time will be public. False starts do not count. You can leave at any time.</p>
-            <form onSubmit={(event) => { event.preventDefault(); void updateParticipation(true); }}>
-              <label>Leaderboard display name<input aria-label="Leaderboard display name" value={displayName} minLength={2} maxLength={32}
-                autoComplete="nickname" required disabled={saving || loading} onChange={(event) => setDisplayName(event.target.value)} /></label>
-              <div className="reaction-leaderboard-form-actions">
-                <button type="submit" disabled={saving || loading || displayName.trim().length < 2}>{saving ? 'Saving…' : profile.leaderboard.joined ? 'Save display name' : 'Join leaderboard'}</button>
-                {profile.leaderboard.joined && <button type="button" disabled={saving || loading} onClick={() => void updateParticipation(false)}>Leave leaderboard</button>}
-              </div>
-            </form>
-            <small>Only times recorded in Reaction Test qualify. Set a new time after this update to appear.</small>
-          </> : <p>Sign in to your own free account to join the leaderboard. Your personal PR is still available while playing on a studio tablet.</p>}
+            <h3>Your leaderboard time</h3>
+            <p>Signed in as <strong>{profile.leaderboard.displayName}</strong>.</p>
+            <p>{profile.leaderboard.hidden
+              ? 'Your time is hidden. Your personal PR still updates while you play.'
+              : 'Your best valid time posts automatically under your account name when you play. A faster time replaces it automatically.'}</p>
+            <div className="reaction-leaderboard-form-actions">
+              <button type="button" disabled={saving || loading} onClick={() => void updateParticipation(Boolean(profile.leaderboard.hidden))}>
+                {saving ? 'Saving…' : profile.leaderboard.hidden ? 'Show my time' : 'Hide my time'}
+              </button>
+            </div>
+            <small>One best time per account. False starts do not count. Free and paid accounts are both eligible.</small>
+          </> : recordOwner?.kind === 'account'
+            ? !profileError && <p>Loading your account’s leaderboard settings…</p>
+            : <p>Sign in to your own account to post your best time automatically. Your personal PR is still available while playing on a studio tablet.</p>}
         </section>
       </div>
     </dialog>

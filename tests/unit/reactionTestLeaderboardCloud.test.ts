@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 let child: ChildProcess;
 let baseUrl = '';
@@ -31,10 +31,10 @@ function api(pathname: string, init: RequestInit = {}, cookie = '') {
   });
 }
 
-async function register() {
+async function register(options: { name?: string; email?: string } = {}) {
   accountSequence += 1;
-  const email = `reaction-board-${accountSequence}@tracklab.test`;
-  const name = `Private Account ${accountSequence}`;
+  const email = options.email || `reaction-board-${accountSequence}@tracklab.test`;
+  const name = options.name || `Account Rider ${accountSequence}`;
   const response = await api('/api/auth/register', {
     method: 'POST',
     body: JSON.stringify({ email, name, password: 'tracklab-test-password' }),
@@ -77,7 +77,8 @@ function setPreference(cookie: string, joined: boolean, displayName = '') {
   }, cookie);
 }
 
-beforeAll(async () => {
+beforeEach(async () => {
+  serverOutput = '';
   baseUrl = `http://127.0.0.1:${await availablePort()}`;
   child = spawn(process.execPath, ['cloud/server.mjs'], {
     cwd: process.cwd(),
@@ -87,7 +88,7 @@ beforeAll(async () => {
       PORT: new URL(baseUrl).port,
       DATABASE_URL: '',
       OPENAI_API_KEY: '',
-      TRACKLAB_ADMIN_EMAILS: '',
+      TRACKLAB_ADMIN_EMAILS: 'reaction-paid-racer@tracklab.test',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -105,7 +106,7 @@ beforeAll(async () => {
   throw new Error(`Reaction leaderboard server did not become healthy.\n${serverOutput}`);
 }, 25_000);
 
-afterAll(async () => {
+afterEach(async () => {
   if (!child || child.exitCode != null) return;
   child.kill('SIGTERM');
   await new Promise<void>((resolve) => {
@@ -118,7 +119,7 @@ afterAll(async () => {
 });
 
 describe('Reaction Test leaderboard API', () => {
-  it('requires authentication for private records and settings while keeping opted-in ranks public', async () => {
+  it('requires authentication for private records and settings while keeping ranks public', async () => {
     expect((await api('/api/reaction-test')).status).toBe(401);
     expect((await saveResult('', 200)).status).toBe(401);
     expect((await setPreference('', true, 'Anonymous Rider')).status).toBe(401);
@@ -132,7 +133,7 @@ describe('Reaction Test leaderboard API', () => {
     const initial = await api('/api/reaction-test', {}, account.cookie);
     await expect(initial.json()).resolves.toEqual({
       personalBestMs: null,
-      leaderboard: { joined: false, displayName: '' },
+      leaderboard: { joined: false, hidden: false, displayName: account.name },
       canJoinLeaderboard: true,
     });
     const invalidMeasurements = [
@@ -156,7 +157,7 @@ describe('Reaction Test leaderboard API', () => {
     await expect((await api('/api/reaction-test', {}, account.cookie)).json()).resolves.toMatchObject({ personalBestMs: null });
     const matchingAccount = await api('/api/reaction-test/result', {
       method: 'POST',
-      body: JSON.stringify({ result: measuredResult(200), expectedAccountId: account.id }),
+      body: JSON.stringify({ result: measuredResult(200), expectedAccountId: account.id, displayName: 'Forged Name' }),
     }, account.cookie);
     expect(matchingAccount.status).toBe(200);
     await expect(matchingAccount.json()).resolves.toMatchObject({ personalBestMs: 200 });
@@ -171,12 +172,13 @@ describe('Reaction Test leaderboard API', () => {
     }, account.cookie);
     expect(mismatchedSettings.status).toBe(409);
     await expect((await api('/api/reaction-test', {}, account.cookie)).json()).resolves.toMatchObject({
-      leaderboard: { joined: false, displayName: '' },
+      leaderboard: { joined: true, hidden: false, displayName: account.name },
     });
     await expect((await api('/api/training-sessions', {}, account.cookie)).json()).resolves.toMatchObject({ sessions: [] });
+    expect((await setPreference(account.cookie, false)).status).toBe(200);
   });
 
-  it('keeps measured bests private until opt-in and separates editable profile records from ranking scores', async () => {
+  it('automatically ranks measured account bests without accepting editable profile scores', async () => {
     const account = await register();
     const patch = await api('/api/user-data', {
       method: 'PATCH',
@@ -188,39 +190,57 @@ describe('Reaction Test leaderboard API', () => {
       }),
     }, account.cookie);
     expect(patch.status).toBe(200);
-    expect((await setPreference(account.cookie, true, 'Measured Gate Rider')).status).toBe(200);
+    await expect((await api('/api/reaction-test', {}, account.cookie)).json()).resolves.toMatchObject({
+      personalBestMs: 1, leaderboard: { joined: false, hidden: false, displayName: account.name },
+    });
     await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [] });
 
     const first = await saveResult(account.cookie, 210.125);
     expect(first.status).toBe(200);
     await expect(first.json()).resolves.toMatchObject({
       personalBestMs: 1,
-      leaderboard: { joined: true, displayName: 'Measured Gate Rider' },
+      leaderboard: { joined: true, hidden: false, displayName: account.name },
     });
     const board = await api('/api/reaction-test/leaderboard', {}, account.cookie);
     expect(board.headers.get('cache-control')).toContain('no-store');
     await expect(board.json()).resolves.toEqual({ entries: [{
-      rank: 1, displayName: 'Measured Gate Rider', reactionTimeMs: 210.125, isYou: true,
+      rank: 1, displayName: account.name, reactionTimeMs: 210.125, isYou: true,
     }] });
     await expect((await api('/api/reaction-test/leaderboard?expectedAccountId=another-account', {}, account.cookie)).json()).resolves.toEqual({ entries: [{
-      rank: 1, displayName: 'Measured Gate Rider', reactionTimeMs: 210.125, isYou: false,
+      rank: 1, displayName: account.name, reactionTimeMs: 210.125, isYou: false,
     }] });
+    for (const header of ['X-TrackLab-Club-Tablet-Session', 'X-TrackLab-Club-Tablet-Result-Token']) {
+      await expect((await api('/api/reaction-test/leaderboard', {
+        headers: { [header]: 'tablet-credential' },
+      }, account.cookie)).json()).resolves.toEqual({ entries: [{
+        rank: 1, displayName: account.name, reactionTimeMs: 210.125, isYou: false,
+      }] });
+      expect((await api('/api/reaction-test', {
+        headers: { [header]: 'invalid-tablet-credential' },
+      }, account.cookie)).status).toBe(header.endsWith('Result-Token') ? 403 : 401);
+      expect((await api('/api/reaction-test/result', {
+        method: 'POST', headers: { [header]: 'invalid-tablet-credential' },
+        body: JSON.stringify({ result: measuredResult(20) }),
+      }, account.cookie)).status).toBe(401);
+    }
     expect((await saveResult(account.cookie, 300)).status).toBe(200);
     await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [{
-      rank: 1, displayName: 'Measured Gate Rider', reactionTimeMs: 210.125, isYou: false,
+      rank: 1, displayName: account.name, reactionTimeMs: 210.125, isYou: false,
     }] });
     expect((await saveResult(account.cookie, 190)).status).toBe(200);
     await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [{
-      rank: 1, displayName: 'Measured Gate Rider', reactionTimeMs: 190, isYou: false,
+      rank: 1, displayName: account.name, reactionTimeMs: 190, isYou: false,
     }] });
     await expect((await api('/api/training-sessions', {}, account.cookie)).json()).resolves.toMatchObject({ sessions: [] });
     expect((await setPreference(account.cookie, false)).status).toBe(200);
   });
 
-  it('requires a public display name, supports renaming and opt-out, and retains the private PR', async () => {
+  it('preserves explicit public renaming and hiding while later measurements improve the private PR', async () => {
     const account = await register();
     expect((await saveResult(account.cookie, 200)).status).toBe(200);
-    await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [] });
+    await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [{
+      rank: 1, displayName: account.name, reactionTimeMs: 200, isYou: false,
+    }] });
     for (const name of ['', 'A', account.email, 'x'.repeat(33)]) {
       expect((await setPreference(account.cookie, true, name)).status, name).toBe(400);
     }
@@ -238,8 +258,91 @@ describe('Reaction Test leaderboard API', () => {
     expect((await setPreference(account.cookie, false)).status).toBe(200);
     await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [] });
     await expect((await api('/api/reaction-test', {}, account.cookie)).json()).resolves.toMatchObject({
-      personalBestMs: 200, leaderboard: { joined: false },
+      personalBestMs: 200, leaderboard: { joined: false, hidden: true, displayName: account.name },
     });
+    expect((await saveResult(account.cookie, 150)).status).toBe(200);
+    expect((await saveResult(account.cookie, 350)).status).toBe(200);
+    await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [] });
+    await expect((await api('/api/reaction-test', {}, account.cookie)).json()).resolves.toMatchObject({
+      personalBestMs: 150, leaderboard: { joined: false, hidden: true },
+    });
+    expect((await setPreference(account.cookie, true, account.name)).status).toBe(200);
+    await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [{
+      rank: 1, displayName: account.name, reactionTimeMs: 150, isYou: false,
+    }] });
+    await expect((await api('/api/reaction-test', {}, account.cookie)).json()).resolves.toMatchObject({
+      leaderboard: { joined: true, hidden: false },
+    });
+    expect((await setPreference(account.cookie, false)).status).toBe(200);
+  });
+
+  it('recognizes existing Racer and free accounts and uses their names without an enrollment request', async () => {
+    for (const [email, tier] of [
+      ['reaction-paid-racer@tracklab.test', 'racer'],
+      ['reaction-free-rider@tracklab.test', 'spectator'],
+    ]) {
+      const account = await register({ email });
+      await expect((await api('/api/auth/me', {}, account.cookie)).json()).resolves.toMatchObject({
+        user: { id: account.id, name: account.name, membership: { tier } },
+      });
+      await expect((await saveResult(account.cookie, 220)).json()).resolves.toMatchObject({
+        personalBestMs: 220, leaderboard: { joined: true, hidden: false, displayName: account.name },
+      });
+      await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [{
+        rank: 1, displayName: account.name, reactionTimeMs: 220, isYou: false,
+      }] });
+      expect((await setPreference(account.cookie, false)).status).toBe(200);
+    }
+  });
+
+  it('keeps existing measurements unpublished during reads, then uses the prior best on a slower new run', async () => {
+    const account = await register();
+    const result = measuredResult(170);
+    const seed = await api('/api/training-sessions', {
+      method: 'POST',
+      body: JSON.stringify({ session: {
+        id: 'reaction-test-existing-best', activityType: 'bmx-race', title: 'Reaction Test · EXCELLENT',
+        startedAt: result.startedAtEpoch, endedAt: result.recordedAtEpoch, durationMs: 170,
+        distanceMeters: 0, source: 'live', details: { reactionTest: result },
+      } }),
+    }, account.cookie);
+    expect(seed.status).toBe(201);
+    for (let read = 0; read < 2; read += 1) {
+      await expect((await api('/api/reaction-test', {}, account.cookie)).json()).resolves.toMatchObject({
+        personalBestMs: 170, leaderboard: { joined: false, hidden: false, displayName: account.name },
+      });
+      await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [] });
+    }
+    await expect((await saveResult(account.cookie, 250)).json()).resolves.toMatchObject({
+      personalBestMs: 170, leaderboard: { joined: true, hidden: false, displayName: account.name },
+    });
+    const responses = await Promise.all([250, 140, 180, 140, 300].map((time) => saveResult(account.cookie, time)));
+    expect(responses.map((response) => response.status)).toEqual([200, 200, 200, 200, 200]);
+    await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [{
+      rank: 1, displayName: account.name, reactionTimeMs: 140, isYou: false,
+    }] });
+    expect((await setPreference(account.cookie, false)).status).toBe(200);
+  });
+
+  it('shortens account names safely and never falls back to the account email', async () => {
+    for (const [name, publicName] of [
+      ['A long account name that exceeds thirty two characters', 'A long account name that exceeds'],
+      ['unsafe-name@tracklab.test', 'TrackLab rider'],
+      ['<Rider>', 'TrackLab rider'],
+      ['A', 'TrackLab rider'],
+    ]) {
+      const account = await register({ name });
+      await expect((await api('/api/reaction-test', {}, account.cookie)).json()).resolves.toMatchObject({
+        leaderboard: { joined: false, hidden: false, displayName: publicName },
+      });
+      await expect((await saveResult(account.cookie, 230)).json()).resolves.toMatchObject({
+        leaderboard: { joined: true, hidden: false, displayName: publicName },
+      });
+      const entries = await (await api('/api/reaction-test/leaderboard')).json();
+      expect(entries).toEqual({ entries: [{ rank: 1, displayName: publicName, reactionTimeMs: 230, isYou: false }] });
+      expect(JSON.stringify(entries)).not.toContain(account.email);
+      expect((await setPreference(account.cookie, false)).status).toBe(200);
+    }
   });
 
   it('sorts faster reactions first and accepts only Top 5, 10, 25, and 50 limits', async () => {

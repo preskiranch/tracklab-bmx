@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import * as persistence from '../../cloud/persistence.mjs';
 import { databaseMigrations } from '../../cloud/migrations.mjs';
+import { reactionLeaderboardAccountName } from '../../cloud/reactionTest.mjs';
 
 async function account() {
   const id = randomUUID();
@@ -19,7 +20,7 @@ describe('Reaction Test measured best persistence', () => {
     await persistence.saveUserData(`user:${id}`, { accountProfile: { personalRecords: { reactionTestBestMs: 1 } } });
     await persistence.saveReactionTestBest(id, 70, 'studio-private');
     await expect(persistence.loadReactionTestBest(id)).resolves.toEqual({
-      personalBestMs: 110, leaderboard: { joined: true, displayName: 'Public Rider' },
+      personalBestMs: 110, leaderboard: { joined: true, hidden: false, displayName: 'Public Rider' },
     });
     await expect(persistence.loadReactionTestLeaderboard(id, 5)).resolves.toEqual([
       { rank: 1, displayName: 'Public Rider', reactionTimeMs: 110, isYou: true },
@@ -35,6 +36,46 @@ describe('Reaction Test measured best persistence', () => {
     await expect(persistence.loadReactionTestBest(id)).resolves.toMatchObject({ personalBestMs: null });
     await expect(persistence.loadReactionTestBest(id, 'studio-private')).resolves.toMatchObject({ personalBestMs: null });
     await expect(persistence.saveReactionTestBest(id, 50)).rejects.toThrow();
+  });
+
+  it('atomically enrolls personal measured minima and preserves explicit hiding across later runs', async () => {
+    const id = await account();
+    const automatic = { autoJoinDisplayName: 'Account Rider' };
+    await persistence.saveReactionTestBest(id, 170);
+    await expect(persistence.loadReactionTestLeaderboard()).resolves.toEqual([]);
+    await persistence.saveReactionTestBest(id, 250, '', automatic);
+    await expect(persistence.loadReactionTestBest(id)).resolves.toEqual({
+      personalBestMs: 170, leaderboard: { joined: true, hidden: false, displayName: 'Account Rider' },
+    });
+    await Promise.all([190, 100, 200, 100, 400].map((ms) => persistence.saveReactionTestBest(id, ms, '', automatic)));
+    await expect(persistence.loadReactionTestLeaderboard(id)).resolves.toEqual([
+      { rank: 1, displayName: 'Account Rider', reactionTimeMs: 100, isYou: true },
+    ]);
+    await persistence.saveReactionTestBest(id, 40, 'unclaimed-rider', automatic);
+    await expect(persistence.loadReactionTestBest(id, 'unclaimed-rider')).resolves.toMatchObject({
+      personalBestMs: 40, leaderboard: { joined: false, hidden: false },
+    });
+    await persistence.saveReactionTestLeaderboardSettings(id, { joined: false, displayName: '' });
+    await Promise.all([90, 180].map((ms) => persistence.saveReactionTestBest(id, ms, '', automatic)));
+    await expect(persistence.loadReactionTestBest(id)).resolves.toEqual({
+      personalBestMs: 90, leaderboard: { joined: false, hidden: true, displayName: '' },
+    });
+    await expect(persistence.loadReactionTestLeaderboard()).resolves.toEqual([]);
+    await persistence.saveReactionTestLeaderboardSettings(id, { joined: true, displayName: 'Chosen Name' });
+    await persistence.saveReactionTestBest(id, 120, '', automatic);
+    await expect(persistence.loadReactionTestBest(id)).resolves.toEqual({
+      personalBestMs: 90, leaderboard: { joined: true, hidden: false, displayName: 'Chosen Name' },
+    });
+    await persistence.deleteAuthUserAccount(id);
+  });
+
+  it('uses safe authenticated names and shortens long names without splitting Unicode characters', () => {
+    expect(reactionLeaderboardAccountName('  Gate   Rider  ')).toBe('Gate Rider');
+    expect(reactionLeaderboardAccountName('X'.repeat(31) + '🚲 Rider')).toBe('X'.repeat(31));
+    expect(reactionLeaderboardAccountName('X'.repeat(64))).toBe('X'.repeat(32));
+    for (const name of [null, '', 'A', 'X'.repeat(65), 'person@example.test', '<Rider>', 'Rider\u0000', 'Rider\u200b']) {
+      expect(reactionLeaderboardAccountName(name)).toBe('TrackLab rider');
+    }
   });
 
   it('applies leaderboard limits without duplicates or private identity fields', async () => {
@@ -75,6 +116,8 @@ describe('Reaction Test measured best persistence', () => {
     const migration = databaseMigrations().find((entry: { version: number }) => entry.version === 45);
     expect(migration?.statements.join('\n')).toContain('REFERENCES tracklab.auth_users(id) ON DELETE CASCADE');
     expect(migration?.statements.join('\n')).toContain('PRIMARY KEY (user_id, studio_rider_id)');
+    const hidingMigration = databaseMigrations().find((entry: { version: number }) => entry.version === 46);
+    expect(hidingMigration?.statements.join('\n')).toContain('leaderboard_hidden BOOLEAN NOT NULL DEFAULT false');
     const source = readFileSync(new URL('../../cloud/persistence.mjs', import.meta.url), 'utf8');
     expect(source).toContain('best_ms = LEAST(reaction_test_bests.best_ms, EXCLUDED.best_ms)');
     expect(source).toMatch(/AND NOT \(sessions.details \? 'reactionTest'\)[\s\S]*?ORDER BY sessions.started_at DESC LIMIT/);

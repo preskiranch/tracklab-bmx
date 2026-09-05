@@ -23,10 +23,9 @@
 .reaction-leaderboard-empty { padding: 24px 8px; }
 .reaction-leaderboard-participation { margin-top: 22px; padding: 16px; background: #112217; border: 1px solid #344b2d; border-radius: 12px; }
 .reaction-leaderboard-participation h3 { margin: 0 0 6px; font-size: 1rem; }
-.reaction-leaderboard-participation form { display: grid; gap: 12px; margin: 14px 0; }
-.reaction-leaderboard-participation label { display: grid; gap: 5px; font-size: .8rem; }
+.reaction-leaderboard-participation p + p { margin-top: 8px; }
 .reaction-leaderboard-participation small { color: #a8bca4; font-size: .72rem; }
-.reaction-leaderboard-form-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.reaction-leaderboard-form-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
 .reaction-leaderboard-form-actions button { padding: 10px 14px; min-height: 44px; border: 1px solid #5c773a; border-radius: 9px; background: #d0ff39; color: #142400; font-weight: 800; cursor: pointer; }
 .reaction-leaderboard-form-actions button + button { background: transparent; color: #e5f3dd; }
 .reaction-leaderboard-form-actions button:disabled { opacity: .5; cursor: default; }
@@ -35,3 +34,8 @@
 @media (max-width: 420px) { .reaction-leaderboard-dialog > header { padding: 14px; } .reaction-leaderboard-dialog h2 { font-size: 1.1rem; } .reaction-leaderboard-scroll { padding: 14px; } .reaction-leaderboard-participation { padding: 12px; } }
 @media (max-height: 480px) { .reaction-leaderboard-trigger { padding: 4px 8px; font-size: .68rem; } }
 @media (max-height: 420px) { .reaction-leaderboard-dialog > header { padding: 10px 16px; } .reaction-leaderboard-eyebrow { display: none; } }
+@media (orientation: portrait) and (max-width: 360px) {
+  .reaction-leaderboard-trigger { justify-content: center; width: 44px; height: 44px; padding: 8px; }
+  .reaction-leaderboard-trigger > span { display: none; }
+  .reaction-leaderboard-trigger svg { width: 20px; height: 20px; }
+}
