@@ -690,15 +690,35 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
     await expect(gateFallbackCanvas).toHaveCSS('visibility', 'hidden');
   }
 
-  for (const viewport of [
-    { label: 'compact iPhone', width: 320, height: 568 },
-    { label: 'current iPhone', width: 390, height: 844 },
-    { label: 'large iPhone', width: 430, height: 932 },
-    { label: 'iPhone landscape', width: 844, height: 390 },
-    { label: 'iPad Air', width: 820, height: 1180 },
-  ]) {
-    await test.step(`fills the ${viewport.label} screen without app chrome`, async () => {
+  const responsiveViewports = [
+    { label: 'compact-iphone-portrait', width: 320, height: 568 },
+    { label: 'compact-iphone-landscape', width: 568, height: 320 },
+    { label: 'iphone-portrait', width: 390, height: 844 },
+    { label: 'iphone-landscape', width: 844, height: 390 },
+    { label: 'iphone-portrait-return', width: 390, height: 844 },
+    { label: 'large-iphone-portrait', width: 430, height: 932 },
+    { label: 'ultrawide-landscape', width: 1920, height: 600 },
+    { label: 'ipad-portrait', width: 820, height: 1180 },
+    { label: 'ipad-landscape', width: 1180, height: 820 },
+    { label: 'ipad-portrait-return', width: 820, height: 1180 },
+  ];
+  const verifyResponsiveLayout = async (
+    viewport: typeof responsiveViewports[number],
+    state: 'ready' | 'result',
+  ) => {
+    await test.step(`${state}: fills ${viewport.label} and keeps the gate and controls clear`, async () => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      const safeArea = viewport.width > viewport.height
+        ? { top: 0, right: 59, bottom: 21, left: 59 }
+        : { top: 59, right: 0, bottom: 34, left: 0 };
+      // A browser viewport does not expose the WKWebView notch/home-indicator
+      // insets. Exercise the same layout variables used by the native shell.
+      await reactionView.evaluate((element, insets) => {
+        for (const [edge, value] of Object.entries(insets)) {
+          (element as HTMLElement).style.setProperty(`--reaction-safe-${edge}`, `${value}px`);
+        }
+        return new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      }, safeArea);
       const geometry = await reactionView.evaluate((element) => {
         const rectFor = (selector: string) => (
           element.querySelector<HTMLElement>(selector)?.getBoundingClientRect().toJSON()
@@ -717,15 +737,39 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
         const panel = element.querySelector<HTMLElement>('.reaction-bottom-panel')?.getBoundingClientRect();
         const resultStack = element.querySelector<HTMLElement>('.reaction-result-stack')?.getBoundingClientRect();
         const primaryAction = element.querySelector<HTMLElement>('.reaction-primary-action')?.getBoundingClientRect();
+        const stage = element.querySelector<HTMLElement>('.reaction-stage')?.getBoundingClientRect();
         const scene = element.querySelector<HTMLElement>('.reaction-scene-frame')?.getBoundingClientRect();
         const background = element.querySelector<HTMLImageElement>('.reaction-scene-background');
         const gateLayer = element.querySelector<HTMLElement>('.reaction-gate-layer');
         const gateSource = element.querySelector<HTMLImageElement>('.reaction-gate-selected-source');
+        const releasedQuad = (gateLayer?.dataset.gateFlushQuad ?? '').split(' ').map((pair) => {
+          const [x, y] = pair.split(',').map(Number);
+          return { x, y };
+        });
+        // These are the corners of the approved upright gate in the 1672 × 941
+        // source photograph. Include the released corners to prove that a crop
+        // cannot hide either end of its movement after the device is rotated.
+        const gateCorners = [
+          { x: 929, y: 459 }, { x: 1174, y: 671 },
+          { x: 1147, y: 879 }, { x: 928, y: 500 },
+          ...releasedQuad,
+        ].map(({ x, y }) => ({
+          x: (scene?.left ?? 0) + (x * (scene?.width ?? 0) / 1672),
+          y: (scene?.top ?? 0) + (y * (scene?.height ?? 0) / 941),
+        }));
+        const gateBounds = new DOMRect(
+          Math.min(...gateCorners.map(({ x }) => x)),
+          Math.min(...gateCorners.map(({ y }) => y)),
+          Math.max(...gateCorners.map(({ x }) => x)) - Math.min(...gateCorners.map(({ x }) => x)),
+          Math.max(...gateCorners.map(({ y }) => y)) - Math.min(...gateCorners.map(({ y }) => y)),
+        );
         return {
           bulbWidth: element.querySelector<HTMLElement>('.reaction-light-bulb')?.getBoundingClientRect().width ?? 0,
           rect: element.getBoundingClientRect().toJSON(),
           surfaceRect: rectFor('.reaction-race-surface'),
+          stageRect: stage?.toJSON(),
           sceneRect: scene?.toJSON(),
+          gateCorners,
           background: background ? {
             naturalHeight: background.naturalHeight,
             naturalWidth: background.naturalWidth,
@@ -736,16 +780,25 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
             naturalHeight: gateSource.naturalHeight,
             naturalWidth: gateSource.naturalWidth,
             layerRect: gateLayer?.getBoundingClientRect().toJSON(),
+            coordinateRect: rectFor('.reaction-gate-coordinate-space'),
           } : null,
           titleRect: rectFor('.reaction-title'),
           exitRect: rectFor('.reaction-exit-action'),
           treeRect: rectFor('.reaction-tree'),
           panelRect: rectFor('.reaction-bottom-panel'),
+          resultRect: resultStack?.toJSON(),
+          actionRect: primaryAction?.toJSON(),
           controlsOverlap: {
             resultAndAction: overlaps(resultStack, primaryAction),
             titleAndExit: overlaps(title, exit),
             titleAndTree: overlaps(title, tree),
             treeAndPanel: overlaps(tree, panel),
+            exitAndTree: overlaps(exit, tree),
+            stageAndPanel: overlaps(stage, panel),
+            gateAndTitle: overlaps(gateBounds, title),
+            gateAndExit: overlaps(gateBounds, exit),
+            gateAndTree: overlaps(gateBounds, tree),
+            gateAndPanel: overlaps(gateBounds, panel),
           },
           documentFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
           documentHeightFits: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
@@ -756,20 +809,55 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
       );
       expect(geometry.documentFits).toBe(true);
       expect(geometry.documentHeightFits).toBe(true);
-      expect(geometry.rect).toMatchObject({ x: 0, y: 0, width: viewport.width, height: viewport.height });
-      expect(geometry.surfaceRect).toMatchObject({ x: 0, y: 0, width: viewport.width, height: viewport.height });
+      // WebKit rounds dynamic viewport units to 1/64 CSS pixel. Keep the
+      // tolerance below 0.05 px so rounding cannot hide a visible layout gap.
+      for (const rect of [geometry.rect, geometry.surfaceRect]) {
+        for (const [edge, expected] of Object.entries({ x: 0, y: 0, width: viewport.width, height: viewport.height })) {
+          expect(Number(rect?.[edge])).toBeCloseTo(expected, 1);
+        }
+      }
       expect(geometry.sceneRect?.width).toBeGreaterThan(0);
       expect(geometry.sceneRect?.height).toBeGreaterThan(0);
       expect(Number(geometry.sceneRect?.width) / Number(geometry.sceneRect?.height)).toBeCloseTo(1672 / 941, 2);
-      expect(geometry.sceneRect?.x).toBeGreaterThanOrEqual(0);
-      expect(geometry.sceneRect?.y).toBeGreaterThanOrEqual(0);
-      expect(Number(geometry.sceneRect?.x) + Number(geometry.sceneRect?.width)).toBeLessThanOrEqual(viewport.width);
-      expect(Number(geometry.sceneRect?.y) + Number(geometry.sceneRect?.height)).toBeLessThanOrEqual(viewport.height);
+      expect(geometry.stageRect?.x).toBeCloseTo(0, 1);
+      expect(geometry.stageRect?.y).toBeCloseTo(0, 1);
+      expect(Number(geometry.stageRect?.width) * Number(geometry.stageRect?.height))
+        .toBeGreaterThan(viewport.width * viewport.height * 0.5);
+      // The source frame must cover the entire photo area. Constraining it to
+      // fit inside the portrait viewport caused the original letterboxing.
+      expect(geometry.sceneRect?.left).toBeLessThanOrEqual(Number(geometry.stageRect?.left) + 1);
+      expect(geometry.sceneRect?.top).toBeLessThanOrEqual(Number(geometry.stageRect?.top) + 1);
+      expect(geometry.sceneRect?.right).toBeGreaterThanOrEqual(Number(geometry.stageRect?.right) - 1);
+      expect(geometry.sceneRect?.bottom).toBeGreaterThanOrEqual(Number(geometry.stageRect?.bottom) - 1);
+      if (viewport.width >= 1100 && viewport.width / viewport.height >= 2.7) {
+        // Very wide displays reserve a right-hand control rail so a shallow
+        // photo crop cannot cut off the far end of the upright gate.
+        expect(geometry.stageRect?.height).toBeCloseTo(viewport.height, 1);
+        expect(geometry.panelRect?.top).toBeCloseTo(0, 1);
+        expect(Number(geometry.panelRect?.left)).toBeCloseTo(Number(geometry.stageRect?.right), 1);
+        expect(geometry.panelRect?.right).toBeCloseTo(viewport.width, 1);
+      } else {
+        expect(geometry.stageRect?.width).toBeCloseTo(viewport.width, 1);
+        expect(Number(geometry.panelRect?.top)).toBeCloseTo(Number(geometry.stageRect?.bottom), 1);
+      }
+      expect(geometry.panelRect?.bottom).toBeCloseTo(viewport.height, 1);
       expect(geometry.background).toMatchObject({ naturalHeight: 941, naturalWidth: 1672 });
       expect(geometry.background?.rect).toEqual(geometry.sceneRect);
       expect(Number(geometry.background?.rect.width) / Number(geometry.background?.rect.height)).toBeCloseTo(1672 / 941, 2);
       expect(geometry.gateSource).toMatchObject({ naturalHeight: 941, naturalWidth: 1672 });
       expect(geometry.gateSource?.layerRect).toEqual(geometry.sceneRect);
+      for (const edge of ['left', 'top', 'width', 'height']) {
+        expect(Number(geometry.gateSource?.coordinateRect?.[edge]))
+          .toBeCloseTo(Number(geometry.sceneRect?.[edge]), 1);
+      }
+      expect(geometry.gateCorners).toHaveLength(8);
+      for (const point of geometry.gateCorners) {
+        expect(Number.isFinite(point.x) && Number.isFinite(point.y)).toBe(true);
+        expect(point.x).toBeGreaterThanOrEqual(Number(geometry.stageRect?.left) - 1);
+        expect(point.x).toBeLessThanOrEqual(Number(geometry.stageRect?.right) + 1);
+        expect(point.y).toBeGreaterThanOrEqual(Number(geometry.stageRect?.top) - 1);
+        expect(point.y).toBeLessThanOrEqual(Number(geometry.stageRect?.bottom) + 1);
+      }
       for (const rect of [geometry.titleRect, geometry.exitRect, geometry.treeRect, geometry.panelRect]) {
         expect(rect?.x).toBeGreaterThanOrEqual(0);
         expect(rect?.y).toBeGreaterThanOrEqual(0);
@@ -778,16 +866,35 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
       }
       expect(geometry.exitRect?.width).toBeGreaterThanOrEqual(44);
       expect(geometry.exitRect?.height).toBeGreaterThanOrEqual(44);
+      for (const rect of [geometry.titleRect, geometry.exitRect, geometry.treeRect, geometry.resultRect, geometry.actionRect]) {
+        expect(rect?.left).toBeGreaterThanOrEqual(safeArea.left);
+        expect(rect?.right).toBeLessThanOrEqual(viewport.width - safeArea.right);
+        expect(rect?.top).toBeGreaterThanOrEqual(safeArea.top);
+        expect(rect?.bottom).toBeLessThanOrEqual(viewport.height - safeArea.bottom);
+      }
       expect(Number(geometry.titleRect?.x) + Number(geometry.titleRect?.width)).toBeLessThanOrEqual(Number(geometry.exitRect?.x));
       expect(geometry.controlsOverlap).toEqual({
         resultAndAction: false,
         titleAndExit: false,
         titleAndTree: false,
         treeAndPanel: false,
+        exitAndTree: false,
+        stageAndPanel: false,
+        gateAndTitle: false,
+        gateAndExit: false,
+        gateAndTree: false,
+        gateAndPanel: false,
       });
       await expect(page.locator('.sidebar')).toBeHidden();
       await expect(page.locator('.platform-topbar')).toBeHidden();
+      await page.screenshot({
+        fullPage: false,
+        path: testInfo.outputPath(`reaction-test-${state}-${viewport.label}.png`),
+      });
     });
+  };
+  for (const viewport of responsiveViewports) {
+    await verifyResponsiveLayout(viewport, 'ready');
   }
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({
@@ -954,11 +1061,22 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
   }));
   expect(settledBackground).toEqual(immutableBackground);
   await expect(reactionView.getByRole('button', { name: 'Try Again' })).toBeVisible();
+  for (const viewport of responsiveViewports.filter(({ label }) => ![
+    'compact-iphone-portrait', 'large-iphone-portrait',
+  ].includes(label))) {
+    await verifyResponsiveLayout(viewport, 'result');
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({
     fullPage: false,
     path: testInfo.outputPath('reaction-test-stopped-light-mobile.png'),
   });
   await page.setViewportSize({ width: 1280, height: 720 });
+  await reactionView.evaluate((element) => {
+    for (const edge of ['top', 'right', 'bottom', 'left']) {
+      (element as HTMLElement).style.removeProperty(`--reaction-safe-${edge}`);
+    }
+  });
   await page.screenshot({
     fullPage: false,
     path: testInfo.outputPath('reaction-test-flat-desktop.png'),
@@ -2816,24 +2934,33 @@ test('Monitor View fits four complete bike panels into a fullscreen 2-by-2 wall 
     await expect(cards).toHaveCount(4);
     await expect(page.locator('.platform-shell')).toHaveClass(/utility-fullscreen/);
 
-    const boxes = await cards.evaluateAll((elements) => elements.map((element) => {
-      const box = element.getBoundingClientRect();
-      return { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
-    }));
-    expect(boxes[0].left).toBeLessThan(boxes[1].left);
-    expect(boxes[0].top).toBe(boxes[1].top);
-    expect(boxes[2].left).toBeLessThan(boxes[3].left);
-    expect(boxes[2].top).toBeGreaterThan(boxes[0].top);
-    expect(Math.max(...boxes.map((box) => box.bottom))).toBeLessThanOrEqual(page.viewportSize()!.height);
-    expect(await page.locator('.platform-main').evaluate((element) => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
+    // The native fullscreen transition can briefly expose zero-sized boxes
+    // after the fullscreen class is present. Assert the settled painted wall.
+    await expect.poll(() => cards.evaluateAll((elements) => {
+      const boxes = elements.map((element) => element.getBoundingClientRect());
+      if (boxes.length !== 4 || boxes.some((box) => box.width <= 0 || box.height <= 0)) return false;
+      const main = document.querySelector('.platform-main');
+      return boxes[0].left < boxes[1].left
+        && boxes[0].top === boxes[1].top
+        && boxes[2].left < boxes[3].left
+        && boxes[2].top > boxes[0].top
+        && Math.max(...boxes.map((box) => box.bottom)) <= window.innerHeight
+        && Boolean(main && main.scrollHeight <= main.clientHeight + 1);
+    })).toBe(true);
 
     for (let index = 0; index < 4; index += 1) {
       const card = cards.nth(index);
       const scene = card.getByRole('img', { name: /pulling the TrackLab sled/i });
       await expect(scene).toBeVisible();
-      const sceneBounds = await scene.boundingBox();
-      const finishBounds = await scene.locator('[data-finish-line="pull"]').boundingBox();
-      expect(finishBounds!.height).toBeGreaterThan(sceneBounds!.height * .3);
+      // The live cards can re-render while telemetry and fullscreen layout
+      // settle. Measure both boxes together and wait for a painted finish line.
+      await expect.poll(() => scene.evaluate((element) => {
+        const sceneBounds = element.getBoundingClientRect();
+        const finishBounds = element.querySelector('[data-finish-line="pull"]')?.getBoundingClientRect();
+        return sceneBounds.height > 0 && finishBounds && finishBounds.width > 0
+          ? finishBounds.height / sceneBounds.height
+          : 0;
+      })).toBeGreaterThan(.3);
       await expect(card.locator('.monitor-primary')).toBeVisible();
       await expect(card.locator('.monitor-secondary')).toBeVisible();
       await expect(card.locator('.monitor-sprint-result')).toBeVisible();
@@ -6750,14 +6877,17 @@ test('completed race finishes the active sentence and authoritative placements b
     expect(finishCountdownText).toMatch(/(?:10|[1-9]).*remaining riders still racing/is);
   }
   await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
-  const raceStillActive = await page.evaluate(() => (
-    (window as typeof window & {
+  // Read the race state and its transient cancel control in one snapshot.
+  // The final rider can finish between separate browser round trips.
+  await expect.poll(() => page.evaluate(() => {
+    const state = (window as typeof window & {
       __tracklabLiveDebug?: { raceState?: string };
-    }).__tracklabLiveDebug?.raceState === 'racing'
-  ));
-  if (raceStillActive) {
-    await expect(page.getByRole('button', { name: /Cancel Race/i })).toBeVisible();
-  }
+    }).__tracklabLiveDebug?.raceState;
+    const cancel = [...document.querySelectorAll('button')]
+      .find((button) => /Cancel Race/i.test(button.textContent ?? ''));
+    return state === 'finished'
+      || (state === 'racing' && Boolean(cancel?.getClientRects().length));
+  })).toBe(true);
   await page.waitForTimeout(1_000);
   await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
 

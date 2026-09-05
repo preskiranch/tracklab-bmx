@@ -1,4 +1,8 @@
 .reaction-test-view {
+  --reaction-safe-top: env(safe-area-inset-top, 0px);
+  --reaction-safe-right: env(safe-area-inset-right, 0px);
+  --reaction-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --reaction-safe-left: env(safe-area-inset-left, 0px);
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -9,6 +13,8 @@
 .reaction-race-surface {
   position: relative;
   isolation: isolate;
+  display: flex;
+  flex-direction: column;
   height: 100%;
   overflow: hidden;
   background: #07110d;
@@ -17,6 +23,20 @@
   user-select: none;
   -webkit-tap-highlight-color: transparent;
   cursor: crosshair;
+}
+
+.reaction-stage {
+  position: relative;
+  isolation: isolate;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  padding: max(18px, calc(var(--reaction-safe-top) + 10px)) max(18px, calc(var(--reaction-safe-right) + 12px)) 12px max(18px, calc(var(--reaction-safe-left) + 12px));
 }
 
 .reaction-race-surface:focus-visible {
@@ -38,26 +58,13 @@
   background: #07110d;
 }
 
-.reaction-scene-stack::before {
-  position: absolute;
-  inset: -6%;
-  content: '';
-  background: url('/assets/reaction-test-eight-lane-base.png') center / cover no-repeat;
-  filter: blur(20px) saturate(.78) brightness(.58);
-  opacity: .78;
-  transform: scale(1.06);
-}
-
 .reaction-scene-frame {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  width: max(100vw, 177.6833vh);
-  width: max(100vw, 177.6833dvh);
+  top: 0;
+  left: 0;
+  width: 100%;
   aspect-ratio: 1672 / 941;
   overflow: hidden;
-  transform: translate(-50%, -50%);
-  box-shadow: 0 0 44px rgb(0 0 0 / 46%);
 }
 
 .reaction-scene-background,
@@ -113,16 +120,16 @@
 .reaction-scene-vignette {
   z-index: -1;
   background:
-    linear-gradient(180deg, rgb(1 9 7 / 79%) 0%, transparent 22%, transparent 62%, rgb(1 8 5 / 83%) 100%),
-    linear-gradient(90deg, rgb(1 8 5 / 32%), transparent 34%, transparent 68%, rgb(1 8 5 / 38%));
+    linear-gradient(180deg, rgb(1 9 7 / 32%) 0%, transparent 30%, transparent 80%, rgb(1 8 5 / 18%) 100%);
 }
 
 .reaction-hud {
   display: flex;
+  flex: 0 0 auto;
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
-  padding: max(clamp(18px, 3vw, 34px), env(safe-area-inset-top)) max(clamp(76px, 7vw, 96px), calc(env(safe-area-inset-right) + 66px)) clamp(18px, 3vw, 34px) max(clamp(18px, 3vw, 34px), env(safe-area-inset-left));
+  max-width: calc(100% - 60px);
 }
 
 .reaction-title,
@@ -156,8 +163,8 @@
 
 .reaction-exit-action {
   position: absolute;
-  top: max(16px, calc(env(safe-area-inset-top) + 10px));
-  right: max(16px, calc(env(safe-area-inset-right) + 10px));
+  top: max(18px, calc(var(--reaction-safe-top) + 10px));
+  right: max(18px, calc(var(--reaction-safe-right) + 12px));
   z-index: 20;
   display: grid;
   place-items: center;
@@ -176,9 +183,8 @@
 }
 
 .reaction-tree {
-  position: absolute;
-  top: clamp(7.5rem, 14vw, 10rem);
-  left: clamp(18px, 5vw, 74px);
+  position: relative;
+  flex: 0 0 auto;
   display: grid;
   gap: 11px;
   width: clamp(184px, 18vw, 216px);
@@ -229,19 +235,15 @@
 }
 
 .reaction-bottom-panel {
-  position: absolute;
-  right: clamp(14px, 2.5vw, 30px);
-  bottom: clamp(14px, 2.5vw, 30px);
-  left: clamp(14px, 2.5vw, 30px);
+  position: relative;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 15px 17px;
-  border: 1px solid rgb(238 255 233 / 35%);
-  border-radius: 18px;
-  background: rgb(0 12 7 / 84%);
-  box-shadow: 0 10px 30px rgb(0 0 0 / 32%);
+  padding: 14px max(18px, calc(var(--reaction-safe-right) + 12px)) max(14px, calc(var(--reaction-safe-bottom) + 8px)) max(18px, calc(var(--reaction-safe-left) + 12px));
+  border-top: 1px solid rgb(238 255 233 / 28%);
+  background: #06130c;
 }
 
 .reaction-ready-card,
@@ -253,6 +255,7 @@
 .reaction-result-stack {
   display: grid;
   gap: 8px;
+  min-width: 0;
 }
 
 .reaction-pr-badge {
@@ -336,61 +339,90 @@
 }
 
 @media (max-width: 720px) {
-  .reaction-hud {
-    display: grid;
-    gap: 10px;
-    padding: max(14px, calc(env(safe-area-inset-top) + 10px)) max(72px, calc(env(safe-area-inset-right) + 62px)) 14px max(14px, env(safe-area-inset-left));
-  }
-  .reaction-tree { top: 5.75rem; left: 14px; width: 148px; padding: 10px; gap: 7px; }
+  .reaction-title { padding: 10px 12px; }
+  .reaction-title strong { font-size: 1.05rem; }
+  .reaction-tree { width: 148px; padding: 10px; gap: 7px; }
   .reaction-light { grid-template-columns: 41px minmax(0, 1fr) 23px; gap: 7px; font-size: .55rem; }
   .reaction-light-bulb { width: 39px; border-width: 2px; }
   .reaction-light-stop-marker { width: 23px; border-width: 1px; }
   .reaction-bottom-panel {
-    right: max(14px, env(safe-area-inset-right));
-    bottom: max(14px, env(safe-area-inset-bottom));
-    left: max(14px, env(safe-area-inset-left));
     display: grid;
-    gap: 11px;
-    padding: 13px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    min-height: calc(130px + max(8px, var(--reaction-safe-bottom)));
+    gap: 10px;
   }
-  .reaction-primary-action { width: 100%; }
+  .reaction-primary-action { width: 100%; min-width: 0; padding-inline: 10px; }
+  .reaction-primary-action svg { flex-shrink: 0; }
+  .reaction-result-card small { display: none; }
+  .reaction-pr-badge { padding: 6px 8px; font-size: .7rem; }
+  .reaction-ready-card { font-size: .9rem; }
+}
+
+@media (orientation: portrait) {
+  .reaction-tree {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    width: min(100%, 448px);
+    padding: 12px 8px;
+    gap: 8px;
+  }
+  .reaction-light {
+    position: relative;
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: 6px;
+    font-size: .55rem;
+  }
+  .reaction-light-bulb { width: clamp(40px, 11vw, 58px); }
+  .reaction-light-stop-marker { position: absolute; top: 0; right: -2px; width: 21px; }
 }
 
 @media (max-width: 720px) and (max-height: 700px) {
+  .reaction-stage { gap: 10px; }
   .reaction-title { padding: 9px 11px; }
   .reaction-title strong { font-size: 1rem; }
-  .reaction-tree { top: 4.55rem; width: 132px; padding: 8px; gap: 5px; }
-  .reaction-light { grid-template-columns: 35px minmax(0, 1fr) 21px; gap: 5px; }
+  .reaction-tree { padding: 8px; gap: 5px; }
   .reaction-light-bulb { width: 33px; }
   .reaction-light-stop-marker { width: 21px; }
-  .reaction-bottom-panel { gap: 8px; padding: 10px; }
+  .reaction-bottom-panel { gap: 8px; padding-top: 10px; }
   .reaction-result-stack { gap: 5px; }
   .reaction-pr-badge { padding: 5px 8px; }
   .reaction-primary-action { min-height: 46px; padding-block: 9px; }
 }
 
 @media (max-height: 480px) {
-  .reaction-hud {
-    padding: max(10px, env(safe-area-inset-top)) max(66px, calc(env(safe-area-inset-right) + 58px)) 10px max(12px, env(safe-area-inset-left));
-  }
+  .reaction-stage { gap: 10px; padding-top: max(10px, var(--reaction-safe-top)); }
   .reaction-title { padding: 8px 10px; }
   .reaction-title strong { font-size: .95rem; }
-  .reaction-exit-action { top: max(10px, env(safe-area-inset-top)); right: max(10px, env(safe-area-inset-right)); width: 44px; height: 44px; }
-  .reaction-tree { top: 4.45rem; left: max(12px, env(safe-area-inset-left)); width: 138px; padding: 8px; gap: 4px; }
+  .reaction-exit-action { top: max(10px, var(--reaction-safe-top)); width: 44px; height: 44px; }
+  .reaction-tree { width: 138px; padding: 8px; gap: 4px; }
   .reaction-light { grid-template-columns: 34px minmax(0, 1fr) 20px; gap: 5px; font-size: .5rem; }
   .reaction-light-bulb { width: 32px; border-width: 2px; }
   .reaction-light-stop-marker { width: 20px; border-width: 1px; }
-  .reaction-bottom-panel { right: max(10px, env(safe-area-inset-right)); bottom: max(10px, env(safe-area-inset-bottom)); left: max(10px, env(safe-area-inset-left)); gap: 10px; padding: 9px 12px; }
+  .reaction-bottom-panel { display: flex; min-height: 0; gap: 10px; padding-top: 9px; }
   .reaction-result-stack { gap: 4px; }
   .reaction-result-card small { display: none; }
   .reaction-pr-badge { padding: 4px 8px; font-size: .68rem; }
   .reaction-primary-action { min-height: 44px; padding: 8px 14px; }
 }
 
-@media (pointer: coarse), (max-width: 900px), (max-height: 700px) {
-  .reaction-scene-frame {
-    width: min(100vw, 177.6833vh);
-    width: min(100vw, 177.6833dvh);
+@media (orientation: landscape) and (max-height: 360px) {
+  .reaction-tree { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .reaction-light { position: relative; grid-template-columns: 1fr; justify-items: center; gap: 3px; }
+  .reaction-light-stop-marker { position: absolute; top: 0; right: -3px; width: 18px; }
+}
+
+/* A very wide, shallow desktop window needs a side rail to retain the whole
+   gate. Normal phones and tablets keep their result card at the bottom. */
+@media (min-width: 1100px) and (min-aspect-ratio: 27 / 10) {
+  .reaction-race-surface { flex-direction: row; }
+  .reaction-bottom-panel {
+    flex-direction: column;
+    justify-content: center;
+    width: 320px;
+    border-top: 0;
+    border-left: 1px solid rgb(238 255 233 / 28%);
+    padding-top: max(18px, calc(var(--reaction-safe-top) + 10px));
   }
 }
 

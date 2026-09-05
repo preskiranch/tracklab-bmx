@@ -314,7 +314,8 @@ export function ReactionGateLayer({ released, onSettled }: ReactionGateLayerProp
     const coordinateSpace = coordinateSpaceRef.current;
     if (!layer || !coordinateSpace) return undefined;
     const updateScale = () => {
-      coordinateSpace.style.transform = `scale(${layer.clientWidth / SCENE_WIDTH}, ${layer.clientHeight / SCENE_HEIGHT})`;
+      const { width, height } = layer.getBoundingClientRect();
+      coordinateSpace.style.transform = `scale(${width / SCENE_WIDTH}, ${height / SCENE_HEIGHT})`;
     };
     updateScale();
     const observer = new ResizeObserver(updateScale);

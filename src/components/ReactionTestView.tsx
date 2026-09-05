@@ -1,5 +1,5 @@
 import { Check, Flag, RotateCcw, Timer, Trophy, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   playStartGateToneConfirmed,
   playUciRandomStartVoice,
@@ -72,6 +72,35 @@ export function ReactionTestView({ onResult, personalBestMs = null, onExit }: Re
   const resultCapturedRef = useRef(false);
   const runStateRef = useRef<ReactionTestRunState>('ready');
   const personalBestRef = useRef(displayedPersonalBestMs);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const sceneFrameRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    const frame = sceneFrameRef.current;
+    if (!stage || !frame) return;
+    const frameScene = () => {
+      const { width, height } = stage.getBoundingClientRect();
+      if (!width || !height) return;
+      // Fill the actual photo area, including after the result card changes size.
+      // One uniform transform keeps the original photograph and rigid gate
+      // registered. The downhill edge stays visible above the reserved footer.
+      const scale = Math.max(width / 1672, height / 941);
+      const frameWidth = 1672 * scale;
+      const frameHeight = 941 * scale;
+      const left = Math.max(width - frameWidth, Math.min(0, width / 2 - 1100 * scale));
+      Object.assign(frame.style, {
+        width: `${frameWidth}px`,
+        height: `${frameHeight}px`,
+        left: `${left}px`,
+        top: `${height - frameHeight}px`,
+      });
+    };
+    frameScene();
+    const observer = new ResizeObserver(frameScene);
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, []);
 
   const setRunStateSafely = useCallback((next: ReactionTestRunState) => {
     runStateRef.current = next;
@@ -323,68 +352,70 @@ export function ReactionTestView({ onResult, personalBestMs = null, onExit }: Re
         }}
         aria-label="Reaction area. Tap anywhere after the first red light to record your reaction."
       >
-        {onExit && (
-          <button
-            aria-label="Exit Reaction Test"
-            className="reaction-exit-action reaction-control-action"
-            type="button"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={onExit}
-          >
-            <X aria-hidden="true" size={20} />
-          </button>
-        )}
-        <div
-          className="reaction-scene-stack"
-          data-gate-state={gateSettled ? 'settled' : gateReleased ? 'dropping' : 'upright'}
-          aria-label={gateReleased ? 'Full-width starting gate released' : 'Full-width starting gate upright and locked'}
-        >
-          <div className="reaction-scene-frame">
-            <img
-              className="reaction-scene-background"
-              src="/assets/reaction-test-eight-lane-base.png"
-              alt="Side view of an eight-lane starting hill with a fixed metal deck and a gate recess in the dirt"
-              draggable={false}
-            />
-            <ReactionGateLayer released={gateReleased} onSettled={handleGateSettled} />
-          </div>
-        </div>
-        <div className="reaction-scene-vignette" aria-hidden="true" />
-
-        <header className="reaction-hud">
-          <div className="reaction-title">
-            <strong><Timer size={19} /> Reaction Test</strong>
-          </div>
-        </header>
-        <p className="reaction-live-status sr-only" role="status" aria-live="polite">{notice}</p>
-
-        <div className="reaction-tree" aria-label={`Starting tree: ${activeStage === 'idle' ? 'ready' : activeStage}`}>
-          {[
-            { stage: 'red' as const, label: 'RED', resultLabel: 'red', color: 'red' },
-            { stage: 'yellow-1' as const, label: 'YELLOW', resultLabel: 'first yellow', color: 'yellow' },
-            { stage: 'yellow-2' as const, label: 'YELLOW', resultLabel: 'second yellow', color: 'yellow' },
-            { stage: 'green' as const, label: 'GREEN', resultLabel: 'green', color: 'green' },
-          ].map((light, index) => (
-            <div
-              className={`reaction-light reaction-light-${light.color} ${historicalLightIndex >= index ? 'lit' : ''} ${activeStage === light.stage ? 'current' : ''}`}
-              data-reaction-stage={light.stage}
-              key={light.stage}
+        <div className="reaction-stage" ref={stageRef}>
+          {onExit && (
+            <button
+              aria-label="Exit Reaction Test"
+              className="reaction-exit-action reaction-control-action"
+              type="button"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={onExit}
             >
-              <span className="reaction-light-bulb" />
-              <small>{light.label}</small>
-              {result?.stage === light.stage && (
-                <span
-                  className="reaction-light-stop-marker"
-                  aria-label={`Reaction recorded at the ${light.resultLabel} light`}
-                  title="Reaction recorded here"
-                >
-                  <Check aria-hidden="true" size={17} strokeWidth={4} />
-                </span>
-              )}
+              <X aria-hidden="true" size={20} />
+            </button>
+          )}
+          <div
+            className="reaction-scene-stack"
+            data-gate-state={gateSettled ? 'settled' : gateReleased ? 'dropping' : 'upright'}
+            aria-label={gateReleased ? 'Full-width starting gate released' : 'Full-width starting gate upright and locked'}
+          >
+            <div className="reaction-scene-frame" ref={sceneFrameRef}>
+              <img
+                className="reaction-scene-background"
+                src="/assets/reaction-test-eight-lane-base.png"
+                alt="Side view of an eight-lane starting hill with a fixed metal deck and a gate recess in the dirt"
+                draggable={false}
+              />
+              <ReactionGateLayer released={gateReleased} onSettled={handleGateSettled} />
             </div>
-          ))}
-        </div>
+          </div>
+          <div className="reaction-scene-vignette" aria-hidden="true" />
 
+          <header className="reaction-hud">
+            <div className="reaction-title">
+              <strong><Timer size={19} /> Reaction Test</strong>
+            </div>
+          </header>
+          <p className="reaction-live-status sr-only" role="status" aria-live="polite">{notice}</p>
+
+          <div className="reaction-tree" aria-label={`Starting tree: ${activeStage === 'idle' ? 'ready' : activeStage}`}>
+            {[
+              { stage: 'red' as const, label: 'RED', resultLabel: 'red', color: 'red' },
+              { stage: 'yellow-1' as const, label: 'YELLOW', resultLabel: 'first yellow', color: 'yellow' },
+              { stage: 'yellow-2' as const, label: 'YELLOW', resultLabel: 'second yellow', color: 'yellow' },
+              { stage: 'green' as const, label: 'GREEN', resultLabel: 'green', color: 'green' },
+            ].map((light, index) => (
+              <div
+                className={`reaction-light reaction-light-${light.color} ${historicalLightIndex >= index ? 'lit' : ''} ${activeStage === light.stage ? 'current' : ''}`}
+                data-reaction-stage={light.stage}
+                key={light.stage}
+              >
+                <span className="reaction-light-bulb" />
+                <small>{light.label}</small>
+                {result?.stage === light.stage && (
+                  <span
+                    className="reaction-light-stop-marker"
+                    aria-label={`Reaction recorded at the ${light.resultLabel} light`}
+                    title="Reaction recorded here"
+                  >
+                    <Check aria-hidden="true" size={17} strokeWidth={4} />
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+
+        </div>
         <div className="reaction-bottom-panel">
           <div className="reaction-result-stack">
             {result ? (
