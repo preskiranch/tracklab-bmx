@@ -112,10 +112,10 @@ describe('Reaction Test native gate geometry', () => {
 
   it('uses the corrected photograph anchors and keeps both projected hinges stationary', () => {
     const expected = [
-      { x: 852, y: 395 },
-      { x: 983, y: 577 },
-      { x: 955, y: 806 },
-      { x: 847, y: 472 },
+      { x: 656 * 1672 / 1280, y: 298 * 941 / 720 },
+      { x: 764 * 1672 / 1280, y: 461 * 941 / 720 },
+      { x: 712 * 1672 / 1280, y: 610 * 941 / 720 },
+      { x: 639 * 1672 / 1280, y: 354 * 941 / 720 },
     ];
     REACTION_GATE_SOURCE_QUAD.forEach((point, i) => {
       expect(point.x).toBeCloseTo(expected[i].x, 9);
@@ -138,7 +138,7 @@ describe('Reaction Test native gate geometry', () => {
           const world = reactionGateWorldPoint(8 * fraction, startRadius + (endRadius - startRadius) * fraction, progress);
           const homogeneous = projectReactionGateWorldPointHomogeneous(world);
           expect(Object.values(homogeneous).every(Number.isFinite)).toBe(true);
-          expect(homogeneous.w).toBeCloseTo(1 + 0.2739156133490952 * world.across - 0.09193416386287169 * world.upright, 12);
+          expect(homogeneous.w).toBeCloseTo(1 + 0.2232254223834902 * world.across - 0.04297539403560494 * world.upright, 12);
           expect(homogeneous.w).toBeGreaterThan(0);
           const point = projectReactionGateWorldPoint(world);
           const deviation = Math.abs((end.x - start.x) * (point.y - start.y)
@@ -161,8 +161,12 @@ describe('Reaction Test native gate geometry', () => {
         expect(reactionGateWorldPoint(across, radius, 1)).toEqual({ across, downhill: radius, upright: 0 });
       }
     }
-    const expected = [{ x: 910.9232939165123, y: 484.53397919931615 },
-      { x: 1159, y: 846 }, { x: 955, y: 806 }, { x: 847, y: 472 }];
+    const expected = [
+      { x: 907.8414105747314, y: 480.4858258484388 },
+      { x: 868 * 1672 / 1280, y: 648 * 941 / 720 },
+      { x: 712 * 1672 / 1280, y: 610 * 941 / 720 },
+      { x: 639 * 1672 / 1280, y: 354 * 941 / 720 },
+    ];
     REACTION_GATE_FLUSH_QUAD.forEach((point, i) => {
       expect(point.x).toBeCloseTo(expected[i].x, 9);
       expect(point.y).toBeCloseTo(expected[i].y, 9);

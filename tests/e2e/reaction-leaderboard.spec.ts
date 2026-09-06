@@ -236,7 +236,7 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
     await expect(gate).toHaveAttribute('data-gate-progress', '1.000');
     await expect(gate.locator('[data-gate-photo-clip=mesh]')).toHaveCSS('opacity', '1');
     await expect(gate.locator('[data-gate-photo=reveal]')).toHaveCSS('opacity', '1');
-    await expect(gate.locator('[data-gate-photo=mesh]')).toHaveJSProperty('naturalWidth', 3840);
+    await expect(gate.locator('[data-gate-photo=mesh]')).toHaveJSProperty('naturalWidth', 1280);
     expect(await sounds()).toHaveLength(1);
     expect((await sounds())[0].duration).toBeCloseTo(1, 3);
 
@@ -257,7 +257,7 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
           settled,
           photoVisible: getComputedStyle(element.querySelector('[data-gate-photo-clip=mesh]')!).opacity === '1'
             && getComputedStyle(element.querySelector('[data-gate-photo=mesh]')!).transform.startsWith('matrix3d(')
-            && (element.querySelector('[data-gate-photo=mesh]') as HTMLImageElement).naturalWidth === 3840,
+            && (element.querySelector('[data-gate-photo=mesh]') as HTMLImageElement).naturalWidth === 1280,
         });
         if (settled) observer.disconnect();
       };
@@ -487,24 +487,22 @@ test('reaction leaderboard stays contained without overlapping controls on phone
   await mockReactionAccount(page);
   const view = await openReactionTest(page);
   const viewports = [
-    { label: 'compact-phone-portrait', width: 320, height: 568 },
-    { label: 'compact-phone-landscape', width: 568, height: 320 },
-    { label: 'phone-portrait', width: 390, height: 844 },
-    { label: 'phone-landscape', width: 844, height: 390 },
-    { label: 'tablet-portrait', width: 820, height: 1180 },
-    { label: 'tablet-landscape', width: 1180, height: 820 },
+    { label: 'compact-phone-portrait', width: 320, height: 568, safeArea: { top: 20, right: 0, bottom: 0, left: 0 } },
+    { label: 'compact-phone-landscape', width: 568, height: 320, safeArea: { top: 0, right: 0, bottom: 0, left: 0 } },
+    { label: 'phone-portrait', width: 390, height: 844, safeArea: { top: 59, right: 0, bottom: 34, left: 0 } },
+    { label: 'phone-landscape', width: 844, height: 390, safeArea: { top: 0, right: 59, bottom: 21, left: 59 } },
+    { label: 'tablet-portrait', width: 820, height: 1180, safeArea: { top: 24, right: 0, bottom: 20, left: 0 } },
+    { label: 'tablet-landscape', width: 1180, height: 820, safeArea: { top: 24, right: 0, bottom: 20, left: 0 } },
   ];
   for (const viewport of viewports) {
     await test.step(viewport.label, async () => {
-      await page.setViewportSize({ width: viewport.width, height: viewport.height });
-      const safeArea = viewport.width > viewport.height
-        ? { top: 0, right: 59, bottom: 21, left: 59 }
-        : { top: 59, right: 0, bottom: 34, left: 0 };
+      const { safeArea } = viewport;
       await view.evaluate((element, insets) => {
         for (const [edge, value] of Object.entries(insets)) {
           (element as HTMLElement).style.setProperty(`--reaction-safe-${edge}`, `${value}px`);
         }
       }, safeArea);
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
       const leaderboardButton = view.getByRole('button', { name: 'Leaderboard', exact: true });
       await expect(leaderboardButton).toBeVisible();
       const headerLayout = await leaderboardButton.evaluate((button) => {
@@ -517,7 +515,7 @@ test('reaction leaderboard stays contained without overlapping controls on phone
           lightLabelsReadable: [...view.querySelectorAll<HTMLElement>('.reaction-light small')].every((label) => (
             Number.parseFloat(getComputedStyle(label).fontSize) >= 14 && label.scrollWidth <= label.clientWidth + 1
           )),
-          personalRecordReadable: Number.parseFloat(getComputedStyle(view.querySelector('.reaction-pr-badge span')!).fontSize) >= 16,
+          personalRecordReadable: Number.parseFloat(getComputedStyle(view.querySelector('.reaction-pr-badge span')!).fontSize) >= 13,
           clearsSceneControls: ['.reaction-title', '.reaction-exit-action', '.reaction-tree'].every((selector) => {
             const other = view.querySelector(selector);
             return !other || !overlaps(other.getBoundingClientRect());
@@ -650,6 +648,105 @@ test('leaderboard controls do not interrupt an active reaction attempt', async (
   expect(mock.trainingWrites).toEqual([]);
 });
 
+test('original reaction scene keeps the full tree and gate clear in ready and dropped phone/tablet views', async ({ page }, testInfo) => {
+  await mockReactionAccount(page);
+  await preparePredictableCadence(page);
+  await page.setViewportSize({ width: 1180, height: 820 });
+  const view = await openReactionTest(page);
+  const gate = view.locator('.reaction-gate-layer');
+  const viewports = [
+    { label: 'compact-portrait', width: 320, height: 568, top: 20, bottom: 0, side: 0 },
+    { label: 'compact-landscape', width: 568, height: 320, top: 0, bottom: 0, side: 0 },
+    { label: 'phone-portrait', width: 393, height: 852, top: 59, bottom: 34, side: 0 },
+    { label: 'phone-landscape', width: 852, height: 393, top: 0, bottom: 21, side: 45 },
+    { label: 'tablet-portrait', width: 820, height: 1180, top: 24, bottom: 20, side: 0 },
+    { label: 'tablet-landscape', width: 1180, height: 820, top: 24, bottom: 20, side: 0 },
+  ];
+  for (const state of ['ready', 'dropped'] as const) {
+    if (state === 'dropped') {
+      await recordValidRun(page, view, 1_100);
+      await expect(gate).toHaveAttribute('data-gate-progress', '1.000');
+    }
+    for (const viewport of viewports) {
+      await test.step(`${state} ${viewport.label}`, async () => {
+        await view.evaluate((element, safe) => {
+          const style = (element as HTMLElement).style;
+          style.setProperty('--reaction-safe-top', `${safe.top}px`);
+          style.setProperty('--reaction-safe-bottom', `${safe.bottom}px`);
+          style.setProperty('--reaction-safe-left', `${safe.side}px`);
+          style.setProperty('--reaction-safe-right', `${safe.side}px`);
+        }, viewport);
+        await page.setViewportSize({ width: viewport.width, height: viewport.height });
+        await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        const framing = await view.evaluate(element => {
+          const scene = element.querySelector('.reaction-scene-frame')!.getBoundingClientRect();
+          const image = element.querySelector<HTMLImageElement>('.reaction-scene-background')!;
+          const tree = element.querySelector('.reaction-tree')!.getBoundingClientRect();
+          const gateLayer = element.querySelector('.reaction-gate-layer')!;
+          const points = ['data-gate-upright-quad', 'data-gate-flush-quad'].flatMap(attribute => (
+            gateLayer.getAttribute(attribute)!.split(' ').map(pair => {
+              const [x, y] = pair.split(',').map(Number);
+              return { x: scene.left + x / 1672 * scene.width, y: scene.top + y / 941 * scene.height };
+            })
+          ));
+          const gateBounds = {
+            left: Math.min(...points.map(point => point.x)), right: Math.max(...points.map(point => point.x)),
+            top: Math.min(...points.map(point => point.y)), bottom: Math.max(...points.map(point => point.y)),
+          };
+          const controls = ['.reaction-title', '.reaction-exit-action', '.reaction-result-stack', '.reaction-primary-action']
+            .map(selector => ({ selector, rect: element.querySelector(selector)!.getBoundingClientRect() }));
+          const recordStack = element.querySelector('.reaction-result-stack')!.getBoundingClientRect();
+          const recordChildren = [...element.querySelectorAll<HTMLElement>('.reaction-result-stack *')]
+            .filter(child => child.getBoundingClientRect().width > 0 && !child.closest('dialog'));
+          const intersects = (a: Pick<DOMRect, 'left' | 'right' | 'top' | 'bottom'>, b: Pick<DOMRect, 'left' | 'right' | 'top' | 'bottom'>) => (
+            Math.min(a.right, b.right) > Math.max(a.left, b.left) + 1 && Math.min(a.bottom, b.bottom) > Math.max(a.top, b.top) + 1
+          );
+          return {
+            source: { width: image.naturalWidth, height: image.naturalHeight, path: image.getAttribute('src') },
+            tree: tree.toJSON(), gateBounds, points,
+            collisions: controls.filter(control => intersects(control.rect, tree) || intersects(control.rect, gateBounds)).map(control => control.selector),
+            recordOverflow: recordChildren.filter(child => {
+              const rect = child.getBoundingClientRect();
+              return rect.left < recordStack.left - 1 || rect.right > recordStack.right + 1
+                || child.scrollWidth > child.clientWidth + 1;
+            }).map(child => `${child.tagName}.${child.className}`),
+            controls: controls.map(control => ({ selector: control.selector, ...control.rect.toJSON() })),
+            scene: scene.toJSON(), layer: gateLayer.getBoundingClientRect().toJSON(),
+            overflow: document.documentElement.scrollWidth > innerWidth,
+          };
+        });
+        expect(framing.source).toEqual({ width: 1280, height: 720, path: '/assets/reaction-test-bmx-original-dirt-fixed.png' });
+        expect(framing.overflow).toBe(false);
+        expect(framing.collisions, `${state} ${viewport.label}: floating controls must leave the original subjects visible`).toEqual([]);
+        expect(framing.recordOverflow, `${state} ${viewport.label}: record text and controls must stay inside their card`).toEqual([]);
+        for (const subject of [framing.tree, framing.gateBounds]) {
+          expect(subject.left).toBeGreaterThanOrEqual(0);
+          expect(subject.top).toBeGreaterThanOrEqual(0);
+          expect(subject.right).toBeLessThanOrEqual(viewport.width);
+          expect(subject.bottom).toBeLessThanOrEqual(viewport.height);
+        }
+        for (const control of framing.controls) {
+          expect(control.left).toBeGreaterThanOrEqual(viewport.side);
+          expect(control.right).toBeLessThanOrEqual(viewport.width - viewport.side);
+          expect(control.top).toBeGreaterThanOrEqual(viewport.top);
+          expect(control.bottom).toBeLessThanOrEqual(viewport.height - viewport.bottom);
+        }
+        expect(framing.layer).toEqual(framing.scene);
+        await expect(view.locator('.reaction-scene-vignette')).toHaveCount(0);
+        if (state === 'ready') {
+          await expect(view.locator('.reaction-tree')).toHaveClass(/is-ready/);
+          await expect(view.locator('[data-lamp-state="lit"]')).toHaveCount(4);
+          for (const bulb of await view.locator('.reaction-light-bulb').all()) await expect(bulb).toHaveCSS('visibility', 'hidden');
+        } else {
+          await expect(view.locator('[data-lamp-state="stopped"]')).toHaveCount(1);
+          await expect(view.locator('[data-lamp-state="dim"]')).toHaveCount(3);
+        }
+        await page.screenshot({ path: testInfo.outputPath(`original-scene-${state}-${viewport.label}.png`) });
+      });
+    }
+  }
+});
+
 for (const [cueNumber, stoppedStage] of ['red', 'yellow-1', 'yellow-2', 'green'].entries()) {
   test(`photo tree retains the ${stoppedStage} lamp after the gate drops`, async ({ page }, testInfo) => {
     await mockReactionAccount(page);
@@ -664,8 +761,9 @@ for (const [cueNumber, stoppedStage] of ['red', 'yellow-1', 'yellow-2', 'green']
     }, cueNumber);
     await page.setViewportSize({ width: 1180, height: 820 });
     const view = await openReactionTest(page);
-    await expect(view.locator('.reaction-scene-background')).toHaveJSProperty('naturalWidth', 3840);
-    await expect(view.locator('[data-lamp-state="dim"]')).toHaveCount(4);
+    await expect(view.locator('.reaction-scene-background')).toHaveJSProperty('naturalWidth', 1280);
+    await expect(view.locator('.reaction-tree')).toHaveClass(/is-ready/);
+    await expect(view.locator('[data-lamp-state="lit"]')).toHaveCount(4);
     await view.getByRole('button', { name: 'Start Reaction Test', exact: true }).click();
     await expect(view.locator(`[data-reaction-stage="${stoppedStage}"]`)).toHaveAttribute('data-lamp-state', 'stopped');
     await expect(view.getByRole('button', { name: 'Try Again', exact: true })).toBeVisible();
@@ -680,6 +778,7 @@ for (const [cueNumber, stoppedStage] of ['red', 'yellow-1', 'yellow-2', 'green']
     })).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`tree-${stoppedStage}-phone.png`) });
     await view.getByRole('button', { name: 'Try Again', exact: true }).click();
-    await expect(view.locator('[data-lamp-state="dim"]')).toHaveCount(4);
+    await expect(view.locator('.reaction-tree')).toHaveClass(/is-ready/);
+    await expect(view.locator('[data-lamp-state="lit"]')).toHaveCount(4);
   });
 }

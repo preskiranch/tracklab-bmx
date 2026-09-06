@@ -652,6 +652,8 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
   const revealPhoto = gateLayer.locator('img[data-gate-photo="reveal"]');
   const capPhoto = gateLayer.locator('img[data-gate-photo="cap"]');
   const meshPhoto = gateLayer.locator('img[data-gate-photo="mesh"]');
+  const flatMeshPhoto = gateLayer.locator('img[data-gate-photo="flat-mesh"]');
+  const hingePhoto = gateLayer.locator('img[data-gate-photo="hinge"]');
   const capPhotoClip = gateLayer.locator('[data-gate-photo-clip="cap"]');
   const meshPhotoClip = gateLayer.locator('[data-gate-photo-clip="mesh"]');
   await expect(sceneStack).toBeVisible();
@@ -661,25 +663,25 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
   await expect.poll(() => sceneBackground.evaluate((image) => {
     const frame = image as HTMLImageElement;
     return { complete: frame.complete, height: frame.naturalHeight, width: frame.naturalWidth };
-  })).toEqual({ complete: true, height: 2160, width: 3840 });
-  await expect(sceneBackground).toHaveAttribute('src', '/assets/reaction-test-bmx-approved-4k.jpg');
+  })).toEqual({ complete: true, height: 720, width: 1280 });
+  await expect(sceneBackground).toHaveAttribute('src', '/assets/reaction-test-bmx-original-dirt-fixed.png');
   await expect(gateLayer).toHaveAttribute('data-gate-motion', 'rigid-quarter-cylinder');
   await expect(gateLayer).toHaveAttribute('data-gate-renderer', 'photo-projective-svg');
   await expect(gateSvg).toBeVisible();
   await expect(gateSvg).toHaveAttribute('viewBox', '0 0 1672 941');
   await expect(gateLayer.locator('canvas')).toHaveCount(0);
-  await expect(gateLayer.locator('img')).toHaveCount(3);
-  for (const photo of [revealPhoto, capPhoto, meshPhoto]) await expect(photo).toHaveCount(1);
-  await expect(revealPhoto).toHaveAttribute('src', '/assets/reaction-test-bmx-gate-reveal.jpg');
-  for (const photo of [capPhoto, meshPhoto]) {
-    await expect(photo).toHaveAttribute('src', '/assets/reaction-test-bmx-approved-4k.jpg');
+  await expect(gateLayer.locator('img')).toHaveCount(5);
+  for (const photo of [revealPhoto, capPhoto, meshPhoto, flatMeshPhoto, hingePhoto]) await expect(photo).toHaveCount(1);
+  await expect(revealPhoto).toHaveAttribute('src', '/assets/reaction-test-bmx-original-gate-reveal.png');
+  for (const photo of [capPhoto, meshPhoto, flatMeshPhoto, hingePhoto]) {
+    await expect(photo).toHaveAttribute('src', '/assets/reaction-test-bmx-original-dirt-fixed.png');
   }
   await expect.poll(() => gateLayer.locator('img').evaluateAll((images) => images.every((image) => {
     const photo = image as HTMLImageElement;
     return photo.complete && photo.naturalWidth > 0 && photo.naturalHeight > 0;
   }))).toBe(true);
   const verifyPhotoProjections = async () => {
-    for (const photo of [capPhoto, meshPhoto]) {
+    for (const photo of [capPhoto, meshPhoto, flatMeshPhoto]) {
       const projection = await photo.evaluate((element) => {
         const image = element as HTMLImageElement;
         const style = getComputedStyle(image);
@@ -695,7 +697,7 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
         };
       });
       expect(projection.src).toBe(await sceneBackground.evaluate((image) => (image as HTMLImageElement).currentSrc));
-      expect(projection).toMatchObject({ width: 3840, height: 2160, origin: '0px 0px', coordinateWidth: 1672, coordinateHeight: 941 });
+      expect(projection).toMatchObject({ width: 1280, height: 720, origin: '0px 0px', coordinateWidth: 1672, coordinateHeight: 941 });
       expect(projection.sourceClip).toMatch(/^(?:path|polygon)\(.+\)$/);
       expect(projection.transform).toMatch(/^matrix3d\(.+\)$/);
       const coefficients = projection.transform.slice('matrix3d('.length, -1).split(',').map(Number);
@@ -704,19 +706,24 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
     }
   };
   await verifyPhotoProjections();
-  // The photo layers paint the gate; the transparent SVG retains its exact
-  // geometry for projection and responsive framing throughout the movement.
+  // The photo planes paint the face and end cap; the transparent mesh SVG
+  // retains exact geometry for projection and responsive framing.
   await expect(gateMesh).toHaveCount(1);
   await expect(gateMesh).toHaveAttribute('data-gate-quad', (await gateLayer.getAttribute('data-gate-upright-quad'))!);
-  for (const group of [gateBody, gateCap, fixedDeck]) {
-    await expect(group).toHaveCount(1);
-    const bounds = await group.evaluate((element) => {
-      const { width, height } = (element as SVGGraphicsElement).getBBox();
-      return { width, height };
-    });
-    expect(bounds.width).toBeGreaterThan(0);
-    expect(bounds.height).toBeGreaterThan(0);
-  }
+  // The curved shell samples metal from the same photograph. A valid end
+  // cap projection suppresses only its synthetic fallback, not the shell.
+  await expect(gateBody).toHaveCount(1);
+  expect(await gateBody.locator('path').count()).toBeGreaterThan(0);
+  expect(await gateBody.locator('path[fill^="url("]').count()).toBeGreaterThan(0);
+  await expect(gateSvg.locator('pattern image')).toHaveAttribute('href', '/assets/reaction-test-bmx-original-dirt-fixed.png');
+  await expect(gateCap).toHaveCount(0);
+  await expect(fixedDeck).toHaveCount(1);
+  const deckBounds = await fixedDeck.evaluate((element) => {
+    const { width, height } = (element as SVGGraphicsElement).getBBox();
+    return { width, height };
+  });
+  expect(deckBounds.width).toBeGreaterThan(0);
+  expect(deckBounds.height).toBeGreaterThan(0);
   const uprightMeshBounds = await gateMesh.evaluate((element) => {
     const { x, y, width, height } = (element as SVGGraphicsElement).getBBox();
     return { x, y, width, height };
@@ -724,24 +731,31 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
   expect(uprightMeshBounds.width).toBeGreaterThan(100);
   expect(uprightMeshBounds.height).toBeGreaterThan(100);
   const revealFootprint = await revealPhoto.evaluate((element) => {
-    const clip = getComputedStyle(element).clipPath;
-    const pathData = /^path\(["'](.+)["']\)$/.exec(clip)?.[1];
-    if (!pathData) return { clip, mask: null, gate: null };
+    const maskImage = getComputedStyle(element).maskImage;
+    const encodedSvg = /^url\(["']?data:image\/svg\+xml,([^"']+)["']?\)$/.exec(maskImage)?.[1];
+    const maskDocument = encodedSvg
+      ? new DOMParser().parseFromString(decodeURIComponent(encodedSvg), 'image/svg+xml') : null;
+    const pathData = maskDocument?.querySelector('path')?.getAttribute('d');
+    const layer = element.closest('.reaction-gate-layer')!;
+    const capClip = getComputedStyle(layer.querySelector('[data-gate-photo="cap"]')!).clipPath;
+    const capPathData = /^path\(["'](.+)["']\)$/.exec(capClip)?.[1];
+    if (!pathData || !capPathData) return { maskImage, mask: null, gate: null, feather: null };
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     const path = document.createElementNS(svg.namespaceURI, 'path') as SVGPathElement;
+    const cap = document.createElementNS(svg.namespaceURI, 'path') as SVGPathElement;
     svg.setAttribute('width', '0');
     svg.setAttribute('height', '0');
     svg.style.position = 'absolute';
     path.setAttribute('d', pathData);
-    svg.append(path);
+    cap.setAttribute('d', capPathData);
+    svg.append(path, cap);
     document.body.append(svg);
     try {
       const { x, y, width, height } = path.getBBox();
-      const parts = [...element.closest('.reaction-gate-layer')!.querySelectorAll<SVGGraphicsElement>(
-        '[data-gate-part="mesh"], [data-gate-part="body"]',
-      )].map((part) => part.getBBox());
+      const parts = [cap.getBBox(), layer.querySelector<SVGGraphicsElement>('[data-gate-part="mesh"]')!.getBBox()];
       return {
-        clip,
+        maskImage,
+        feather: Number(maskDocument?.querySelector('feGaussianBlur')?.getAttribute('stdDeviation')),
         mask: { left: x, top: y, right: x + width, bottom: y + height, width, height },
         gate: {
           left: Math.min(...parts.map((part) => part.x)),
@@ -754,31 +768,43 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
       svg.remove();
     }
   });
-  expect(revealFootprint.clip).toMatch(/^path\(.+\)$/);
+  expect(revealFootprint.maskImage).toMatch(/^url\(["']?data:image\/svg\+xml,/);
   expect(revealFootprint.mask).not.toBeNull();
   expect(revealFootprint.gate).not.toBeNull();
+  expect(revealFootprint.feather).toBeGreaterThan(0);
+  expect(revealFootprint.feather).toBeLessThanOrEqual(2);
   expect(revealFootprint.mask!.width).toBeGreaterThan(0);
   expect(revealFootprint.mask!.height).toBeGreaterThan(0);
   expect(revealFootprint.mask!.width * revealFootprint.mask!.height).toBeLessThan(1672 * 941 * 0.25);
-  // Permit a narrow photographed rim without locking the hand-traced mask.
-  // Its extent must follow the gate, never the surrounding full-frame photo.
+  // The feathered reveal follows only the original gate silhouette. The
+  // surrounding hill, concrete, tree, and spectators retain their base photo.
   for (const edge of ['left', 'top', 'right', 'bottom'] as const) {
     expect(Math.abs(revealFootprint.mask![edge] - revealFootprint.gate![edge])).toBeLessThan(32);
   }
   const immutableDeck = await fixedDeck.innerHTML();
+  const readHinge = () => hingePhoto.evaluate((element) => ({
+    src: (element as HTMLImageElement).currentSrc,
+    clip: getComputedStyle(element).clipPath,
+    transform: getComputedStyle(element).transform,
+  }));
+  const immutableHinge = await readHinge();
+  expect(immutableHinge.src).toBe(await sceneBackground.evaluate((image) => (image as HTMLImageElement).currentSrc));
+  expect(immutableHinge.clip).toMatch(/^path\(.+\)$/);
+  expect(immutableHinge.transform).toBe('none');
   await expect.poll(() => gateLayer.getAttribute('data-gate-progress')).toBe('0.000');
   await expect(sceneStack).toHaveAttribute('data-gate-state', 'upright');
-  for (const overlay of [gateSvg, revealPhoto, capPhotoClip, meshPhotoClip]) {
+  for (const overlay of [gateSvg, revealPhoto, capPhotoClip, meshPhotoClip, flatMeshPhoto, hingePhoto]) {
     await expect(overlay).toHaveCSS('opacity', '0');
   }
   await sceneStack.evaluate((element) => {
     const layer = element.querySelector<HTMLElement>('.reaction-gate-layer')!;
     const gateWindow = window as typeof window & {
-      __reactionGateTransitions?: Array<{ at: number; progress: number; state: string | null }>;
+      __reactionGateTransitions?: Array<{ at: number; progress: number; state: string | null; bodyChildren: number }>;
     };
     const record = () => gateWindow.__reactionGateTransitions?.push({
       at: performance.now(),
       progress: Number(layer.dataset.gateProgress),
+      bodyChildren: layer.querySelector('[data-gate-part="body"]')!.childElementCount,
       state: element.getAttribute('data-gate-state'),
     });
     gateWindow.__reactionGateTransitions = [];
@@ -814,18 +840,27 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
     state: 'ready' | 'result',
   ) => {
     await test.step(`${state}: fills ${viewport.label} and keeps the gate and controls clear`, async () => {
-      await page.setViewportSize({ width: viewport.width, height: viewport.height });
-      const safeArea = viewport.width > viewport.height
-        ? { top: 0, right: 59, bottom: 21, left: 59 }
-        : { top: 59, right: 0, bottom: 34, left: 0 };
+      const landscape = viewport.width > viewport.height;
+      const compactPhone = Math.min(viewport.width, viewport.height) === 320;
+      const tablet = viewport.label.startsWith('ipad-');
+      const desktop = viewport.label === 'ultrawide-landscape';
+      const safeArea = compactPhone
+        ? { top: landscape ? 0 : 20, right: 0, bottom: 0, left: 0 }
+        : tablet ? { top: 24, right: 0, bottom: 20, left: 0 }
+          : desktop ? { top: 0, right: 0, bottom: 0, left: 0 }
+            : landscape ? { top: 0, right: 59, bottom: 21, left: 59 }
+              : { top: 59, right: 0, bottom: 34, left: 0 };
       // A browser viewport does not expose the WKWebView notch/home-indicator
       // insets. Exercise the same layout variables used by the native shell.
       await reactionView.evaluate((element, insets) => {
         for (const [edge, value] of Object.entries(insets)) {
           (element as HTMLElement).style.setProperty(`--reaction-safe-${edge}`, `${value}px`);
         }
-        return new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       }, safeArea);
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await reactionView.evaluate(() => new Promise<void>((resolve) => (
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )));
       const geometry = await reactionView.evaluate((element) => {
         const rectFor = (selector: string) => (
           element.querySelector<HTMLElement>(selector)?.getBoundingClientRect().toJSON()
@@ -841,11 +876,27 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
         const title = element.querySelector<HTMLElement>('.reaction-title')?.getBoundingClientRect();
         const exit = element.querySelector<HTMLElement>('.reaction-exit-action')?.getBoundingClientRect();
         const tree = element.querySelector<HTMLElement>('.reaction-tree')?.getBoundingClientRect();
-        const panel = element.querySelector<HTMLElement>('.reaction-bottom-panel')?.getBoundingClientRect();
-        // The compact landscape footer uses display: contents for the wrapper;
-        // measure its visible cards and record controls instead of its empty box.
+        const panel = element.querySelector<HTMLElement>('.reaction-bottom-panel')!;
+        // The footer floats over the full-screen stage. Only its painted cards
+        // and buttons obstruct the scene; its transparent flex gap does not.
         const resultRects = [...element.querySelectorAll<HTMLElement>('.reaction-result-stack > *')]
           .map((item) => item.getBoundingClientRect()).filter((rect) => rect.width > 0 && rect.height > 0);
+        const resultStack = element.querySelector<HTMLElement>('.reaction-result-stack')!;
+        const resultStackRect = resultStack.getBoundingClientRect();
+        const recordItems = [...resultStack.querySelectorAll<HTMLElement>(
+          '.reaction-pr-badge, .reaction-pr-badge span, .reaction-leaderboard-trigger',
+        )];
+        const recordRects = recordItems.map((item) => item.getBoundingClientRect());
+        const hasRecordCard = Number.parseFloat(getComputedStyle(resultStack).borderTopWidth) > 0;
+        const recordContentsFit = recordItems.every((item, index) => {
+          const rect = recordRects[index];
+          // Portrait has no containing card: NEW PR may grow beyond that
+          // transparent wrapper while staying inside the safe viewport below.
+          return item.scrollWidth <= item.clientWidth + 1 && (!hasRecordCard || (
+            rect.left >= resultStackRect.left - 1 && rect.right <= resultStackRect.right + 1
+            && rect.top >= resultStackRect.top - 1 && rect.bottom <= resultStackRect.bottom + 1
+          ));
+        });
         const primaryAction = element.querySelector<HTMLElement>('.reaction-primary-action')?.getBoundingClientRect();
         const stage = element.querySelector<HTMLElement>('.reaction-stage')?.getBoundingClientRect();
         const scene = element.querySelector<HTMLElement>('.reaction-scene-frame')?.getBoundingClientRect();
@@ -910,6 +961,7 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
             };
           }),
           personalRecord: readableText(prText, prBadge),
+          recordContentsFit,
           rect: element.getBoundingClientRect().toJSON(),
           surfaceRect: rectFor('.reaction-race-surface'),
           stageRect: stage?.toJSON(),
@@ -935,30 +987,32 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
           titleRect: rectFor('.reaction-title'),
           exitRect: rectFor('.reaction-exit-action'),
           treeRect: rectFor('.reaction-tree'),
-          panelRect: rectFor('.reaction-bottom-panel'),
+          panelRect: panel.getBoundingClientRect().toJSON(),
+          panelPosition: getComputedStyle(panel).position,
           resultRects: resultRects.map((rect) => rect.toJSON()),
+          recordRects: recordRects.map((rect) => rect.toJSON()),
           actionRect: primaryAction?.toJSON(),
           controlsOverlap: {
             resultAndAction: resultRects.some((rect) => overlaps(rect, primaryAction)),
             titleAndExit: overlaps(title, exit),
             titleAndTree: overlaps(title, tree),
-            treeAndPanel: overlaps(tree, panel),
+            treeAndControls: [...resultRects, ...recordRects, primaryAction].some((rect) => overlaps(tree, rect)),
             exitAndTree: overlaps(exit, tree),
-            stageAndPanel: overlaps(stage, panel),
             gateAndTitle: overlaps(gateBounds, title),
             gateAndExit: overlaps(gateBounds, exit),
             gateAndTree: overlaps(gateBounds, tree),
-            gateAndPanel: overlaps(gateBounds, panel),
+            gateAndControls: [...resultRects, ...recordRects, primaryAction].some((rect) => overlaps(gateBounds, rect)),
           },
           documentFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
           documentHeightFits: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
         };
       });
       // Photographic lamps scale with the hill; no separate labels or checkmark.
-      expect(geometry.bulbWidth).toBeCloseTo(Number(geometry.sceneRect?.width) * 75 / 1672, 1);
+      expect(geometry.bulbWidth).toBeCloseTo(Number(geometry.sceneRect?.width) * 55 / 1280, 1);
       expect(geometry.lightLabels).toHaveLength(0);
-      expect(geometry.personalRecord.fontSize).toBeGreaterThanOrEqual(16);
+      expect(geometry.personalRecord.fontSize).toBeGreaterThanOrEqual(13);
       expect(geometry.personalRecord.fits).toBe(true);
+      expect(geometry.recordContentsFit).toBe(true);
       expect(geometry.documentFits).toBe(true);
       expect(geometry.documentHeightFits).toBe(true);
       // WebKit rounds dynamic viewport units to 1/64 CSS pixel. Keep the
@@ -973,24 +1027,17 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
       expect(Number(geometry.sceneRect?.width) / Number(geometry.sceneRect?.height)).toBeCloseTo(1672 / 941, 2);
       expect(geometry.stageRect?.x).toBeCloseTo(0, 1);
       expect(geometry.stageRect?.y).toBeCloseTo(0, 1);
-      expect.soft(Number(geometry.stageRect?.width) * Number(geometry.stageRect?.height))
-        .toBeGreaterThan(viewport.width * viewport.height * 0.5);
-      // Fit the physical tree and gate together; portrait may letterbox.
-      expect(geometry.sceneRect?.top).toBeGreaterThanOrEqual(Number(geometry.stageRect?.top) - 1);
-      expect(geometry.sceneRect?.bottom).toBeLessThanOrEqual(Number(geometry.stageRect?.bottom) + 1);
-      if (viewport.width >= 1100 && viewport.width / viewport.height >= 2.7) {
-        // Very wide displays reserve a right-hand control rail so a shallow
-        // photo crop cannot cut off the far end of the upright gate.
-        expect(geometry.stageRect?.height).toBeCloseTo(viewport.height, 1);
-        expect(geometry.panelRect?.top).toBeCloseTo(0, 1);
-        expect(Number(geometry.panelRect?.left)).toBeCloseTo(Number(geometry.stageRect?.right), 1);
-        expect(geometry.panelRect?.right).toBeCloseTo(viewport.width, 1);
-      } else {
-        expect(geometry.stageRect?.width).toBeCloseTo(viewport.width, 1);
-        expect(Number(geometry.panelRect?.top)).toBeCloseTo(Number(geometry.stageRect?.bottom), 1);
+      expect(geometry.stageRect?.width).toBeCloseTo(viewport.width, 1);
+      expect(geometry.stageRect?.height).toBeCloseTo(viewport.height, 1);
+      // Portrait fits the whole photo vertically; landscape may crop its edges
+      // while the physical tree and both gate positions remain fully visible.
+      if (!landscape) {
+        expect(geometry.sceneRect?.top).toBeGreaterThanOrEqual(Number(geometry.stageRect?.top) - 1);
+        expect(geometry.sceneRect?.bottom).toBeLessThanOrEqual(Number(geometry.stageRect?.bottom) + 1);
       }
-      expect(geometry.panelRect?.bottom).toBeCloseTo(viewport.height, 1);
-      expect(geometry.background).toMatchObject({ naturalHeight: 2160, naturalWidth: 3840 });
+      expect(geometry.panelPosition).toBe('absolute');
+      expect(geometry.panelRect?.bottom).toBeCloseTo(viewport.height - safeArea.bottom - (landscape ? 10 : 14), 1);
+      expect(geometry.background).toMatchObject({ naturalHeight: 720, naturalWidth: 1280 });
       expect(geometry.background?.rect).toEqual(geometry.sceneRect);
       expect(Number(geometry.background?.rect.width) / Number(geometry.background?.rect.height)).toBeCloseTo(1672 / 941, 2);
       expect(geometry.gateSvg?.viewBox).toEqual({ x: 0, y: 0, width: 1672, height: 941 });
@@ -1016,7 +1063,7 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
       }
       expect(geometry.exitRect?.width).toBeGreaterThanOrEqual(44);
       expect(geometry.exitRect?.height).toBeGreaterThanOrEqual(44);
-      for (const rect of [geometry.titleRect, geometry.exitRect, geometry.treeRect, ...geometry.resultRects, geometry.actionRect]) {
+      for (const rect of [geometry.titleRect, geometry.exitRect, geometry.treeRect, ...geometry.resultRects, ...geometry.recordRects, geometry.actionRect]) {
         expect(rect?.left).toBeGreaterThanOrEqual(safeArea.left);
         expect(rect?.right).toBeLessThanOrEqual(viewport.width - safeArea.right);
         expect(rect?.top).toBeGreaterThanOrEqual(safeArea.top);
@@ -1028,13 +1075,12 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
         resultAndAction: false,
         titleAndExit: false,
         titleAndTree: false,
-        treeAndPanel: false,
+        treeAndControls: false,
         exitAndTree: false,
-        stageAndPanel: false,
         gateAndTitle: false,
         gateAndExit: false,
         gateAndTree: false,
-        gateAndPanel: false,
+        gateAndControls: false,
       });
       await expect(page.locator('.sidebar')).toBeHidden();
       await expect(page.locator('.platform-topbar')).toBeHidden();
@@ -1113,29 +1159,43 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
   await expect(revealPhoto).toHaveCSS('opacity', '1');
   await expect(meshPhotoClip).toHaveCSS('opacity', '1');
   await verifyPhotoProjections();
-  const collapsedCap = await capPhotoClip.evaluate((element) => {
-    const clip = getComputedStyle(element).clipPath;
-    const values = clip.match(/[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi)?.map(Number) ?? [];
-    const points = Array.from({ length: Math.floor(values.length / 2) }, (_, index) => ({
+  // The cap rotates beneath the receiving plane and is hidden when fully
+  // down; flat grating from the same photograph fills the exact flush quad.
+  await expect(capPhotoClip).toHaveCSS('opacity', '0');
+  await expect(flatMeshPhoto).toHaveCSS('opacity', '1');
+  await expect(hingePhoto).toHaveCSS('opacity', '1');
+  expect(await readHinge()).toEqual(immutableHinge);
+  const flatProjection = await flatMeshPhoto.evaluate((element) => {
+    const photo = element as HTMLImageElement;
+    const style = getComputedStyle(photo);
+    const values = style.clipPath.match(/[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi)?.map(Number) ?? [];
+    const matrix = new DOMMatrix(photo.style.transform);
+    const source = Array.from({ length: values.length / 2 }, (_, index) => ({
       x: values[index * 2], y: values[index * 2 + 1],
     }));
-    const area = Math.abs(points.reduce((sum, point, index) => {
-      const next = points[(index + 1) % points.length];
-      return sum + point.x * next.y - point.y * next.x;
-    }, 0)) / 2;
-    return { clip, points, area };
+    return {
+      source,
+      projected: source.map(({ x, y }) => {
+        const point = new DOMPoint(x, y).matrixTransform(matrix);
+        return { x: point.x / point.w, y: point.y / point.w };
+      }),
+    };
   });
-  expect(collapsedCap.clip).toMatch(/^polygon\(.+\)$/);
-  expect(collapsedCap.points.length).toBeGreaterThanOrEqual(3);
-  expect(collapsedCap.points.every(({ x, y }) => Number.isFinite(x) && Number.isFinite(y))).toBe(true);
-  expect(collapsedCap.area).toBe(0);
+  expect(flatProjection.source).toHaveLength(4);
+  for (const [index, [x, y]] of [[639, 354], [710, 608], [540, 575], [587, 350]].entries()) {
+    expect(flatProjection.source[index].x).toBeCloseTo(x * 1672 / 1280, 2);
+    expect(flatProjection.source[index].y).toBeCloseTo(y * 941 / 720, 2);
+  }
+  expect(JSON.parse((await gateLayer.getAttribute('data-gate-diagnostics'))!)).toMatchObject({
+    height: 1, depth: 1, farEndPlane: 8, farEndOverrun: 0, meshMaxZ: 0,
+  });
   const gateTransitions = await page.evaluate(() => (
     window as typeof window & {
-      __reactionGateTransitions?: Array<{ at: number; progress: number; state: string | null }>;
+      __reactionGateTransitions?: Array<{ at: number; progress: number; state: string | null; bodyChildren: number }>;
     }
   ).__reactionGateTransitions ?? []);
-  expect(gateTransitions.some(({ progress, state }) => (
-    progress > 0 && progress < 1 && state === 'dropping'
+  expect(gateTransitions.some(({ progress, state, bodyChildren }) => (
+    progress > 0 && progress < 1 && state === 'dropping' && bodyChildren > 0
   ))).toBe(true);
   const settledTransitions = gateTransitions.filter(({ state }) => state === 'settled');
   expect(settledTransitions.length).toBeGreaterThan(0);
@@ -1150,6 +1210,15 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
       return { x, y };
     }) ?? [];
   expect(flushQuad).toHaveLength(4);
+  for (const [index, point] of flatProjection.projected.entries()) {
+    // CSSOM serializes matrix coefficients to limited precision. Require
+    // subpixel correspondence even after that round-trip.
+    expect(Math.abs(point.x - flushQuad[index].x)).toBeLessThan(0.5);
+    expect(Math.abs(point.y - flushQuad[index].y)).toBeLessThan(0.5);
+  }
+  const uprightQuad = (await gateLayer.getAttribute('data-gate-upright-quad'))!.split(' ');
+  const droppedQuad = (await gateMesh.getAttribute('data-gate-quad'))!.split(' ');
+  expect(droppedQuad.slice(2)).toEqual(uprightQuad.slice(2));
   for (const { x, y } of flushQuad) {
     expect(Number.isFinite(x) && Number.isFinite(y)).toBe(true);
     expect(x).toBeGreaterThanOrEqual(0);

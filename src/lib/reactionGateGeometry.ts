@@ -70,13 +70,15 @@ export function reactionGateBodySection(progress: number, across = 0, segments =
   return arc.length ? [{ across, downhill: 0, upright: 0 }, ...arc] : [];
 }
 
-/** One shared camera fits the approved 4K photograph: both hinge corners, both
- * upright free corners, and the near end of the flush receiving surface. */
+/** One shared camera fits the original photograph: the fixed hinge, upright
+ * grille corners, and the receiving surface at the dirt/concrete seam.
+ * Anchors are measured in the original 1280×720 photo, then scaled into the
+ * shared 1672×941 scene. Rotation and equal gate height/depth stay in world space. */
 export function projectReactionGateWorldPointHomogeneous(point: ReactionGateWorldPoint): ReactionGateHomogeneousPoint {
   return {
-    w: 1 + (0.2739156133490952 * point.across) - (0.09193416386287169 * point.upright),
-    x: 955 + (218.5065245066836 * point.across) + (204 * point.downhill) - (62.37128307720286 * point.upright),
-    y: 806 + (87.53816950077294 * point.across) + (40 * point.downhill) - (282.046012548877 * point.upright),
+    w: 1 + (0.2232254223834902 * point.across) - (0.04297539403560494 * point.upright),
+    x: (712 + (133.51604490305024 * point.across) + (156 * point.downhill) + (19.166798956797827 * point.upright)) * (1672 / 1280),
+    y: (610 + (47.02179952375554 * point.across) + (38 * point.downhill) - (168.81165665041388 * point.upright)) * (941 / 720),
   };
 }
 

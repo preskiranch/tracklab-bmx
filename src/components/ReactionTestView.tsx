@@ -26,6 +26,7 @@ import { flushReactionPersonalBest, localReactionPersonalBest, type ReactionReco
 import './ReactionTestView.css';
 import { ReactionTree } from './ReactionTree';
 import { prepareReactionGateAirSounds, primeReactionGateAirSounds } from '../lib/reactionGateAudio';
+import { REACTION_SCENE_HEIGHT, REACTION_SCENE_IMAGE, REACTION_SCENE_WIDTH } from '../lib/reactionScene';
 
 type ReactionTestRunState = 'ready' | 'arming' | 'waiting' | 'running' | 'finished';
 
@@ -92,23 +93,49 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
     const frameScene = () => {
       const { width, height } = stage.getBoundingClientRect();
       if (!width || !height) return;
-      // Keep the approved tree and the entire gate together in the photo.
-      // Portrait screens letterbox instead of cropping the reaction signal away.
+      // The selected portrait preview preserves the complete original tree and
+      // gate, with space above and below. Landscape uses the full subject height.
       const portrait = width < height;
-      const visibleWidth = portrait ? 1080 : 1672;
-      const cropLeft = portrait ? 300 : 0;
-      const titleBottom = stage.querySelector('.reaction-hud')?.getBoundingClientRect().bottom ?? 0;
-      const headerSpace = Math.max(0, titleBottom - stage.getBoundingClientRect().top) + 10;
-      const photoHeight = Math.max(1, height - headerSpace);
-      const scale = Math.min(width / visibleWidth, photoHeight / 941);
-      const frameWidth = 1672 * scale;
-      const frameHeight = 941 * scale;
+      const bounds = stage.getBoundingClientRect();
+      const titleBottom = stage.querySelector('.reaction-hud')?.getBoundingClientRect().bottom ?? bounds.top;
+      const controls = stage.parentElement?.querySelector<HTMLElement>('.reaction-bottom-panel');
+      const bottomOffset = controls ? parseFloat(getComputedStyle(controls).bottom) : 0;
+      const safeBottom = Math.max(0, (bottomOffset || 0) - (portrait ? 14 : 10));
+      const headerSpace = Math.max(0, titleBottom - bounds.top) + 20;
+      // Reserve the result/record/start controls for every state. A captured
+      // result must not move the photograph while the cadence finishes.
+      const photoSpace = Math.max(1, height - headerSpace - safeBottom - 180);
+      const controlBounds = controls?.getBoundingClientRect();
+      // A 128px record card fits the unchanged PR and Leaderboard typography.
+      // Reserve both control columns before positioning the photographed scene.
+      const landscapeSubjectSpace = controlBounds ? Math.max(1, controlBounds.width - 128 - 108 - 20) : width;
+      const scale = portrait
+        ? Math.min(width / 1000, photoSpace / REACTION_SCENE_HEIGHT)
+        : Math.min(width / REACTION_SCENE_WIDTH, height / 862, landscapeSubjectSpace / (1180 - 359));
+      const frameWidth = REACTION_SCENE_WIDTH * scale;
+      const frameHeight = REACTION_SCENE_HEIGHT * scale;
+      let left = portrait ? (width - 1000 * scale) / 2 - 300 * scale : (width - frameWidth) / 2;
+      if (!portrait && controlBounds) {
+        const minLeft = controlBounds.left - bounds.left + 128 + 10 - 359 * scale;
+        const maxLeft = controlBounds.right - bounds.left - 108 - 10 - 1180 * scale;
+        left = Math.max(minLeft, Math.min(left, maxLeft));
+      }
       Object.assign(frame.style, {
         width: `${frameWidth}px`,
         height: `${frameHeight}px`,
-        left: `${portrait ? (width - visibleWidth * scale) / 2 - cropLeft * scale : (width - frameWidth) / 2}px`,
-        top: `${headerSpace + (photoHeight - frameHeight) / 2}px`,
+        left: `${left}px`,
+        top: `${portrait ? headerSpace + (photoSpace - frameHeight) * 0.45 : (height - 862 * scale) / 2 - 30 * scale}px`,
       });
+      // Keep floating landscape controls outside the tree base and gate cap,
+      // including the narrower 568px phone viewport.
+      if (controls && controlBounds) {
+        const treeLeft = left + 359 * scale;
+        const gateRight = left + 1180 * scale;
+        const titleLeft = stage.querySelector('.reaction-hud')?.getBoundingClientRect().left ?? bounds.left;
+        stage.style.setProperty('--reaction-title-max-width', `${Math.max(80, treeLeft - (titleLeft - bounds.left) - 10)}px`);
+        controls.style.setProperty('--reaction-side-record-width', `${Math.max(128, treeLeft - (controlBounds.left - bounds.left) - 10)}px`);
+        controls.style.setProperty('--reaction-side-action-width', `${Math.max(108, controlBounds.right - bounds.left - gateRight - 10)}px`);
+      }
     };
     frameScene();
     const observer = new ResizeObserver(frameScene);
@@ -428,15 +455,14 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
             <div className="reaction-scene-frame" ref={sceneFrameRef}>
               <img
                 className="reaction-scene-background"
-                src="/assets/reaction-test-bmx-approved-4k.jpg"
+                src={REACTION_SCENE_IMAGE}
                 alt="BMX starting hill with a four-lamp signal tree, starting platform, trackside spectators and canopies"
                 draggable={false}
               />
               <ReactionGateLayer released={gateReleased} onSettled={handleGateSettled} />
-              <ReactionTree activeStage={activeStage} stoppedStage={result?.stage ?? null} />
+              <ReactionTree activeStage={activeStage} stoppedStage={result?.stage ?? null} ready={runState === 'ready'} />
             </div>
           </div>
-          <div className="reaction-scene-vignette" aria-hidden="true" />
 
           <header className="reaction-hud">
             <div className="reaction-title">

@@ -11,6 +11,7 @@ import {
 import { buildReactionGateFrame, REACTION_GATE_FIXED_PATHS, type ReactionGatePath } from '../lib/reactionGateRendering';
 import { playReactionGateAirSound, reactionGateAirProfiles } from '../lib/reactionGateAudio';
 import { createReactionGatePhotoWarp } from '../lib/reactionGatePhotoWarp';
+import { REACTION_SCENE_IMAGE } from '../lib/reactionScene';
 
 export {
   projectReactionGateQuad,
@@ -25,13 +26,29 @@ export const REACTION_GATE_DROP_MS = 260;
 export const REACTION_GATE_RAISE_MS = reactionGateAirProfiles.raise.durationSeconds * 1_000;
 const serializeQuad = (quad: ReactionGateQuad) => quad.map(({ x, y }) => `${x},${y}`).join(' ');
 const polygon = (quad: ReactionGateQuad) => `polygon(${quad.map(({ x, y }) => `${x}px ${y}px`).join(',')})`;
-const PHOTO = '/assets/reaction-test-bmx-approved-4k.jpg';
-const REVEAL = '/assets/reaction-test-bmx-gate-reveal.jpg';
-// Only the photographed raised gate can uncover the lower-resolution hidden
-// surface. The hill, deck, spectators, and all other master pixels stay fixed.
-const OCCLUSION = 'path("M849 390 L878 390 L1040 588 L1041 590 L1067 610 L1088 630 L1105 650 L1120 670 L1132 690 L1142 710 L1150 730 L1156 750 L1160 770 L1163 790 L1165 810 L1167 830 L1167 849 L952 811 L844 474 Z")';
+const PHOTO = REACTION_SCENE_IMAGE;
+const REVEAL = '/assets/reaction-test-bmx-original-gate-reveal.png';
+// Reveal the hidden surface only where the original raised gate occluded it.
+// Feather the outer safety margin to avoid a cut-out edge; the ready photo and
+// all other background pixels stay fixed.
+const originalPath = (points: number[][]) => points.map(([x, y], index) =>
+  `${index ? 'L' : 'M'}${x * SCENE_WIDTH / 1280},${y * SCENE_HEIGHT / 720}`).join(' ') + ' Z';
+const CAP_OUTLINE = originalPath([[764,460],[794,461],[810,478],[826,499],[841,523],[852,548],[861,577],[867,604],[869,628],[867,650],[713,612]]);
+const OCCLUSION_PATH = originalPath([[651,294],[669,297],[803,458],[817,474],[834,496],[849,521],[860,547],[869,576],[874,604],[875,632],[871,653],[710,614],[636,356]]);
+const OCCLUSION_MASK = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="1672" height="941"><defs><filter id="edge" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation="1.6"/></filter></defs><path d="${OCCLUSION_PATH}" fill="white" filter="url(#edge)"/></svg>`)}")`;
+// Clip the rotating photographed end cap at the actual receiving plane.
+// Its exact source outline is retained, including the top rail and bevel.
+const ABOVE_GROUND = `path("${originalPath([[-1000,-1000],[3000,-1000],[3000,610 + (3000-712)*38/156],[-1000,610 + (-1000-712)*38/156]])}")`;
 const PHOTO_STYLE: CSSProperties = { position: 'absolute', inset: 0, width: SCENE_WIDTH, height: SCENE_HEIGHT, maxWidth: 'none', transformOrigin: '0 0', pointerEvents: 'none' };
-const SOURCE_CAP = buildReactionGateFrame(0).cap[0].d;
+const SOURCE_CAP = CAP_OUTLINE;
+// Keep the photographed hinge metal above the hidden-background repair. It
+// belongs to the fixed platform, so it never opens a dirt seam as the face turns.
+const HINGE_STRIP = originalPath([[635,351],[643,354],[718,615],[704,612]]);
+// The original photo also contains this same grating viewed flat. Sample it
+// near the end of the drop, where stretching the foreshortened upright photo
+// would discard most of the grille detail. Both views follow the same quad.
+const FLAT_GRATING_SOURCE = [[639,354],[710,608],[540,575],[587,350]]
+  .map(([x, y]) => ({ x: x * SCENE_WIDTH / 1280, y: y * SCENE_HEIGHT / 720 })) as ReactionGateQuad;
 const capPlane = (progress: number): ReactionGateQuad => [
   { across: 0, downhill: 0, upright: 1 }, { across: 0, downhill: 1, upright: 1 },
   { across: 0, downhill: 1, upright: 0 }, { across: 0, downhill: 0, upright: 0 },
@@ -63,6 +80,8 @@ export function ReactionGateLayer({ released, onSettled }: ReactionGateLayerProp
   const prefix = `reaction-gate-${useId().replace(/:/g, '')}`;
   const frame = useMemo(() => buildReactionGateFrame(progress), [progress]);
   const meshWarp = useMemo(() => createReactionGatePhotoWarp(REACTION_GATE_SOURCE_QUAD, frame.quad), [frame.quad]);
+  const flatMeshWarp = useMemo(() => createReactionGatePhotoWarp(FLAT_GRATING_SOURCE, frame.quad), [frame.quad]);
+  const flatMeshOpacity = Math.max(0, Math.min(1, (progress - 0.65) / 0.35));
   const capWarp = useMemo(() => createReactionGatePhotoWarp(SOURCE_CAP_PLANE, capPlane(progress)), [progress]);
 
   useEffect(() => { onSettledRef.current = onSettled; }, [onSettled]);
@@ -158,9 +177,15 @@ export function ReactionGateLayer({ released, onSettled }: ReactionGateLayerProp
       ref={layerRef}
     >
       <div className="reaction-gate-coordinate-space" ref={coordinateSpaceRef}>
-        <img data-gate-photo="reveal" src={REVEAL} alt="" draggable={false} style={{ ...PHOTO_STYLE, clipPath: OCCLUSION, opacity: progress > 0 ? 1 : 0 }} />
+        <img data-gate-photo="reveal" src={REVEAL} alt="" draggable={false} style={{ ...PHOTO_STYLE, maskImage: OCCLUSION_MASK, WebkitMaskImage: OCCLUSION_MASK, opacity: progress > 0 ? 1 : 0 }} />
         <svg className="reaction-gate-svg" style={{ opacity: progress > 0 ? 1 : 0 }} width={SCENE_WIDTH} height={SCENE_HEIGHT} viewBox={`0 0 ${SCENE_WIDTH} ${SCENE_HEIGHT}`} preserveAspectRatio="none" focusable="false">
           <defs>
+            <pattern id={`${prefix}-shell-metal`} patternUnits="userSpaceOnUse" width="13.0625" height="13.06944" viewBox="725 385 10 10">
+              {/* Original rail sample averages RGB121/121/123. Keep its silver
+                  color and subtle grain without magnifying isolated specks. */}
+              <rect x="725" y="385" width="10" height="10" fill="#79797b" />
+              <image href={PHOTO} width="1280" height="720" preserveAspectRatio="none" opacity="0.15" />
+            </pattern>
             <linearGradient id={`${prefix}-cap`} x1="0" y1="0" x2="1" y2="1">
               <stop offset="0" stopColor="#99978f" /><stop offset="0.35" stopColor="#838078" />
               <stop offset="0.78" stopColor="#73716a" /><stop offset="1" stopColor="#65635e" />
@@ -175,9 +200,11 @@ export function ReactionGateLayer({ released, onSettled }: ReactionGateLayerProp
           </defs>
           <g data-gate-part="fixed" opacity="0"><GatePaths paths={REACTION_GATE_FIXED_PATHS} prefix={prefix} /></g>
           <g className="reaction-gate-body" data-gate-part="body" data-gate-body-visible={progress < 1}>
-            {progress < 1 && <>
-              <GatePaths paths={frame.shell} prefix={prefix} />
-              <g data-gate-part="cap">
+            {progress < 1 && <GatePaths paths={frame.shell.map(part => part.fill.startsWith('rgb(')
+              ? { ...part, fill: '@shell-metal' }
+              : { ...part, stroke: '#8c8a80' })} prefix={prefix} />}
+            {progress < 1 && !capWarp && <>
+              <g data-gate-part="cap" opacity={capWarp ? 0 : 1}>
                 <GatePaths paths={frame.cap} prefix={prefix} />
                 {frame.bolts.map(({ x, y }, index) => <circle key={index} cx={x} cy={y} r="2.7" fill={`url(#${prefix}-bolt)`} stroke="#565857" strokeWidth="0.6" />)}
               </g>
@@ -187,12 +214,14 @@ export function ReactionGateLayer({ released, onSettled }: ReactionGateLayerProp
             <GatePaths paths={frame.mesh} prefix={prefix} />
           </g>
         </svg>
-        <div data-gate-photo-clip="cap" style={{ ...PHOTO_STYLE, clipPath: frame.cap.length ? `path("${frame.cap[0].d}")` : 'polygon(0 0,0 0,0 0)', opacity: progress > 0 && capWarp ? 1 : 0 }}>
+        <div data-gate-photo-clip="cap" style={{ ...PHOTO_STYLE, clipPath: ABOVE_GROUND, opacity: progress > 0 && progress < 1 && capWarp ? 1 : 0 }}>
           <img data-gate-photo="cap" src={PHOTO} alt="" draggable={false} style={{ ...PHOTO_STYLE, clipPath: `path("${SOURCE_CAP}")`, transform: capWarp?.cssTransform }} />
         </div>
         <div data-gate-photo-clip="mesh" style={{ ...PHOTO_STYLE, clipPath: polygon(frame.quad), opacity: progress > 0 && meshWarp ? 1 : 0 }}>
           <img data-gate-photo="mesh" src={PHOTO} alt="" draggable={false} style={{ ...PHOTO_STYLE, clipPath: polygon(REACTION_GATE_SOURCE_QUAD), transform: meshWarp?.cssTransform }} />
+          {flatMeshWarp && <img data-gate-photo="flat-mesh" src={PHOTO} alt="" draggable={false} style={{ ...PHOTO_STYLE, clipPath: polygon(FLAT_GRATING_SOURCE), transform: flatMeshWarp.cssTransform, opacity: flatMeshOpacity }} />}
         </div>
+        <img data-gate-photo="hinge" src={PHOTO} alt="" draggable={false} style={{ ...PHOTO_STYLE, clipPath: `path("${HINGE_STRIP}")`, opacity: progress > 0 ? 1 : 0 }} />
       </div>
     </div>
   );

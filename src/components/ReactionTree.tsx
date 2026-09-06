@@ -1,35 +1,37 @@
 import type { CSSProperties } from 'react';
 import type { ReactionTestStage, ReactionTestResult } from '../lib/reactionTest';
 import { reactionTreeLampState, type ReactionTreeLamp } from '../lib/reactionTree';
+import { REACTION_SCENE_IMAGE, REACTION_SCENE_SOURCE_HEIGHT, REACTION_SCENE_SOURCE_WIDTH } from '../lib/reactionScene';
 import './ReactionTree.css';
 
-const scene = '/assets/reaction-test-bmx-approved-4k.jpg';
-const photoWidth = 1672;
-// Lens bounds in the logical 1672 × 941 coordinate space of the approved 4K photograph. Each lens samples the same
-// photograph, preserving its LEDs and metal housing instead of drawing a new lamp.
+const tree = { x: 275, y: 30, width: 166, height: 515 };
+// Bounds measured in the exact 1280 × 720 original photograph. Lens masks
+// sample that same photograph, so its LED texture and housings stay intact.
 const lamps: { stage: ReactionTreeLamp; label: string; x: number; y: number; width: number; height: number; glow: string }[] = [
-  { stage: 'red', label: 'red', x: 452, y: 90, width: 75, height: 71, glow: '#ff293c' },
-  { stage: 'yellow-1', label: 'first yellow', x: 454, y: 191, width: 72, height: 73, glow: '#ffc52b' },
-  { stage: 'yellow-2', label: 'second yellow', x: 454, y: 289, width: 73, height: 72, glow: '#ffc52b' },
-  { stage: 'green', label: 'green', x: 455, y: 384, width: 71, height: 70, glow: '#25ed6b' },
+  { stage: 'red', label: 'red', x: 344, y: 75, width: 55, height: 58, glow: '#ff293c' },
+  { stage: 'yellow-1', label: 'first yellow', x: 345, y: 151, width: 54, height: 58, glow: '#ffc52b' },
+  { stage: 'yellow-2', label: 'second yellow', x: 345, y: 226, width: 54, height: 57, glow: '#ffc52b' },
+  { stage: 'green', label: 'green', x: 345, y: 297, width: 54, height: 57, glow: '#25ed6b' },
 ];
 
-export function ReactionTree({ activeStage, stoppedStage }: { activeStage: ReactionTestStage; stoppedStage: ReactionTestResult['stage'] | null }) {
+export function ReactionTree({ activeStage, stoppedStage, ready = false }: { activeStage: ReactionTestStage; stoppedStage: ReactionTestResult['stage'] | null; ready?: boolean }) {
   return (
-    <div className="reaction-tree" style={{ left: `${360 / photoWidth * 100}%`, width: `${215 / photoWidth * 100}%` }} role="group" aria-label={stoppedStage === 'too-early'
+    <div className={`reaction-tree${ready ? ' is-ready' : ''}`} style={{ left: `${tree.x / REACTION_SCENE_SOURCE_WIDTH * 100}%`, top: `${tree.y / REACTION_SCENE_SOURCE_HEIGHT * 100}%`, width: `${tree.width / REACTION_SCENE_SOURCE_WIDTH * 100}%`, height: `${tree.height / REACTION_SCENE_SOURCE_HEIGHT * 100}%` }} role="group" aria-label={ready
+      ? 'Starting tree: ready, four illuminated lights'
+      : stoppedStage === 'too-early'
       ? 'Starting tree: false start, no light recorded'
       : `Starting tree: ${stoppedStage ? `reaction recorded at ${stoppedStage}` : activeStage}`}>
       {lamps.map((lamp) => {
-        const state = reactionTreeLampState(lamp.stage, activeStage, stoppedStage);
+        const state = ready ? 'lit' : reactionTreeLampState(lamp.stage, activeStage, stoppedStage);
         return <span key={lamp.stage} className={`reaction-light is-${state}`}
           data-reaction-stage={lamp.stage} data-lamp-state={state} role="img"
           aria-label={`${lamp.label} light${state === 'stopped' ? ', reaction recorded here' : state === 'lit' ? ', illuminated' : ', dim'}`}
-          style={{ left: `${(lamp.x - 360) / 215 * 100}%`, top: `${(lamp.y - 40) / 670 * 100}%`,
-            width: `${lamp.width / 215 * 100}%`, height: `${lamp.height / 670 * 100}%`,
+          style={{ left: `${(lamp.x - tree.x) / tree.width * 100}%`, top: `${(lamp.y - tree.y) / tree.height * 100}%`,
+            width: `${lamp.width / tree.width * 100}%`, height: `${lamp.height / tree.height * 100}%`,
             '--lamp-glow': lamp.glow } as CSSProperties}>
-          <span className="reaction-light-bulb" style={{ backgroundImage: `url(${scene})`,
-            backgroundSize: `${photoWidth / lamp.width * 100}% ${941 / lamp.height * 100}%`,
-            backgroundPosition: `${lamp.x / (photoWidth - lamp.width) * 100}% ${lamp.y / (941 - lamp.height) * 100}%` }} />
+          <span className="reaction-light-bulb" style={{ backgroundImage: `url(${REACTION_SCENE_IMAGE})`,
+            backgroundSize: `${REACTION_SCENE_SOURCE_WIDTH / lamp.width * 100}% ${REACTION_SCENE_SOURCE_HEIGHT / lamp.height * 100}%`,
+            backgroundPosition: `${lamp.x / (REACTION_SCENE_SOURCE_WIDTH - lamp.width) * 100}% ${lamp.y / (REACTION_SCENE_SOURCE_HEIGHT - lamp.height) * 100}%` }} />
         </span>;
       })}
     </div>
