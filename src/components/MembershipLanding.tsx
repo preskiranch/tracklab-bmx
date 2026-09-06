@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Activity,
+  ArrowUpRight,
   BarChart3,
   Bike,
   Compass,
@@ -282,8 +283,8 @@ export function MembershipLanding({
             <Radio size={20} strokeWidth={2.6} />
           </div>
           <div>
-            <h1>TrackLab BMX</h1>
-            <p>Wattbike racing and training network</p>
+            <h2>TrackLab BMX</h2>
+            <p>Find your next ride.</p>
           </div>
         </div>
         <nav className="membership-hub-nav" aria-label="TrackLab home navigation">
@@ -326,8 +327,8 @@ export function MembershipLanding({
 
       <header className="membership-nav membership-hub-topbar" id="membership-hub-content-top">
         <div>
-          <span className="eyebrow">{profileComplete ? `Welcome back, ${profileName}` : 'Explore without an account'}</span>
-          <h1>{activeTab === 'home' ? 'Your BMX home base.' : activeTab === 'tracks' ? 'Global BMX tracks' : activeTab === 'shops' ? 'Global bike shops' : activeTab === 'training' ? 'Wattbike training' : 'Your results'}</h1>
+          <span className="eyebrow">{profileComplete ? `Welcome back, ${profileName}` : 'Made for the way you ride'}</span>
+          <h1>{activeTab === 'home' ? <>Your BMX <span>home base.</span></> : activeTab === 'tracks' ? 'Global BMX tracks' : activeTab === 'shops' ? 'Global bike shops' : activeTab === 'training' ? 'Wattbike training' : 'Your results'}</h1>
         </div>
         <div className="membership-nav-actions">
           <div className="watch-connect-indicator-slot" id="watch-connect-indicator-slot" />
@@ -341,8 +342,8 @@ export function MembershipLanding({
               <Play size={16} /> Demo Race
             </button>
           )}
-          <button className="secondary-button" type="button" onClick={() => enterFromLocator(onEnterApp)} disabled={!profileComplete}>
-            Open App
+          <button className="primary-button" type="button" onClick={profileComplete ? () => enterFromLocator(onEnterApp) : revealSignIn}>
+            {profileComplete ? 'Open App' : 'Get started'}
           </button>
         </div>
       </header>
@@ -350,28 +351,57 @@ export function MembershipLanding({
       {activeTab === 'home' && (
         <>
           <section className="membership-hub-intro">
-            <span className="membership-pill"><Globe2 size={15} /> Global BMX community</span>
-            <h2>Discover globally. Train when you are ready.</h2>
-            <p>Track and bike-shop directories are free to explore. Free accounts also get the Reaction Test; Wattbike activities and saved training results are available when your account is ready.</p>
+            <div>
+              <h2>The BMX experience. <span>Built around you.</span></h2>
+              <p>Discover a new track, find your local bike shop, and make your next start your best.</p>
+            </div>
             <div className="membership-hub-status" aria-label="TrackLab account status">
-              <span><strong>{membership.tier === 'racer' ? membership.bikeSeats : 'Free'}</strong> {membership.tier === 'racer' ? 'bike seats' : 'directory access'}</span>
+              <span><Globe2 size={16} /><strong>{membership.tier === 'racer' ? membership.bikeSeats : 'Free'}</strong> {membership.tier === 'racer' ? 'bike seats' : 'to explore'}</span>
             </div>
           </section>
           <section className="membership-hub-cards" aria-label="TrackLab directories">
-            <article className="membership-hub-feature">
-              <div>
-                <span className="eyebrow">Global directory</span>
-                <h2>Find BMX tracks anywhere</h2>
-                <p>Browse by country, state, and city, or move across the world map.</p>
-                <button className="primary-button" type="button" onClick={() => selectTab('tracks')}><MapPinned size={17} /> Open track finder</button>
+            <article className="membership-hub-feature membership-feature-reaction">
+              <div className="membership-feature-copy">
+                <span className="eyebrow">Reaction Test</span>
+                <h2>A better start.<br />Every time.</h2>
+                <p>Find your focus. Beat your best.</p>
+                <button className="membership-feature-link" type="button" onClick={profileComplete ? () => enterFromLocator(onOpenReactionTest) : revealSignIn}>Try the Reaction Test <ArrowUpRight size={17} /></button>
               </div>
-              <Globe2 className="membership-hub-globe" aria-hidden="true" />
+              <img className="membership-reaction-photo" src="/assets/reaction-test-bmx-original-dirt-fixed.png" alt="TrackLab's starting gate and four-light tree overlooking a BMX track" width="1280" height="720" />
             </article>
-            <article className="membership-hub-secondary">
-              <span className="eyebrow">Nearby support</span>
-              <h2>Global bike shops</h2>
-              <p>Search near your location or browse any country, state, and city worldwide.</p>
-              <button className="secondary-button" type="button" onClick={() => selectTab('shops')}><Store size={17} /> Open shop finder</button>
+            <article className="membership-hub-feature membership-feature-tracks">
+              <div className="membership-feature-copy">
+                <span className="eyebrow">BMX tracks</span>
+                <h2>Your next track.<br />Closer than you think.</h2>
+                <p>Explore the global BMX directory.</p>
+                <button className="membership-feature-link" type="button" onClick={() => selectTab('tracks')}>Open track finder <ArrowUpRight size={17} /></button>
+              </div>
+              <div className="membership-track-art" aria-hidden="true">
+                <svg viewBox="0 0 400 260" fill="none">
+                  <path d="M-20 54 74 80 132 22 231 55 290-18M-10 187 71 147 140 180 219 128 410 187M54-20 107 115 70 285M220-15 184 91 275 208 252 280M341-20 307 96 405 109" stroke="currentColor" strokeWidth="26" />
+                  <path d="M-20 54 74 80 132 22 231 55 290-18M-10 187 71 147 140 180 219 128 410 187M54-20 107 115 70 285M220-15 184 91 275 208 252 280M341-20 307 96 405 109" stroke="white" strokeWidth="21" />
+                  <path d="m107 115 77-24 35 37 56 80" stroke="#1d1d1f" strokeWidth="4" strokeDasharray="1 9" strokeLinecap="round" />
+                  <circle cx="275" cy="208" r="8" fill="#1d1d1f" stroke="white" strokeWidth="4" />
+                  <g transform="translate(157 43)"><path d="M27 66S0 38 0 27a27 27 0 0 1 54 0c0 11-27 39-27 39Z" fill="#1d1d1f" /><circle cx="27" cy="26" r="9" fill="white" /></g>
+                </svg>
+              </div>
+            </article>
+            <article className="membership-hub-feature membership-feature-shops">
+              <div className="membership-feature-copy">
+                <span className="eyebrow">Bike shops</span>
+                <h2>Local knowledge.<br />A world of support.</h2>
+                <p>Find the people who keep you riding.</p>
+                <button className="membership-feature-link" type="button" onClick={() => selectTab('shops')}>Open shop finder <ArrowUpRight size={17} /></button>
+              </div>
+              <div className="membership-bike-art" aria-hidden="true">
+                <svg viewBox="0 0 400 260" fill="none" stroke="currentColor" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round">
+                  <ellipse cx="202" cy="215" rx="153" ry="8" fill="currentColor" opacity=".06" stroke="none" />
+                  <circle cx="94" cy="156" r="53" strokeWidth="8" /><circle cx="309" cy="156" r="53" strokeWidth="8" />
+                  <path d="m94 156 71-77 45 77H94l65-57 126-12-75 69m-45-77-9-24m-18 0h43m128 101-28-87-12-33 28-5m-28 5-14-12m-45 132 18 21h20" />
+                  <circle cx="210" cy="156" r="14" strokeWidth="3" /><circle cx="94" cy="156" r="5" /><circle cx="309" cy="156" r="5" />
+                  <path d="M94 105v102m-51-51h102m164-51v102m-51-51h102" strokeWidth="1" opacity=".3" />
+                </svg>
+              </div>
             </article>
           </section>
           {profileComplete && (
@@ -433,7 +463,7 @@ export function MembershipLanding({
 
       <section id="free-account-gate" className={`profile-gate ${profileComplete ? 'complete' : ''}`} aria-label="Required profile">
         <div>
-          <span className="eyebrow">Login required</span>
+          <span className="eyebrow">Your TrackLab account</span>
           <h2>{profileComplete ? 'Account ready' : creatingAccount ? 'Create your free TrackLab account' : 'Sign in to TrackLab'}</h2>
           <p>
             Every rider signs in before using account features. Free accounts can explore the public BMX track and
@@ -513,8 +543,8 @@ export function MembershipLanding({
               </button>
               <p className="profile-gate-note">
                 {creatingAccount
-                  ? 'Use your main email here. The owner account unlocks admin racer access automatically.'
-                  : 'First time on this deployment? Create the free account before signing in.'}
+                  ? 'Your free account keeps your profile and favorites together.'
+                  : 'New to TrackLab? Create a free account to get started.'}
               </p>
             </>
           )}
@@ -549,9 +579,7 @@ export function MembershipLanding({
             <Smartphone size={20} />
           </div>
           <span className="eyebrow">Racer · Apple subscription</span>
-          <h3>{appleStoreAvailable == null
-            ? 'Checking App Store...'
-            : selectedOffer?.displayName?.trim() || 'App Store plan unavailable'}</h3>
+          <h3>{selectedOffer?.displayName?.trim() || 'Racer membership'}</h3>
           {productPriceAvailable && (
             <p className="apple-plan-price">{selectedOffer?.displayPrice} / month</p>
           )}
@@ -683,10 +711,8 @@ export function MembershipLanding({
         </article>
       </section>
       )}
-      <footer
-        aria-label="TrackLab policies and support"
-        style={{ display: 'flex', justifyContent: 'center', gap: 18, padding: '10px 20px 42px' }}
-      >
+      <footer className="membership-site-footer" aria-label="TrackLab policies and support">
+        <strong>TrackLab BMX</strong>
         <a href="/support" style={{ color: 'var(--muted)', fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>Support</a>
         <a href="/privacy" style={{ color: 'var(--muted)', fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>Privacy</a>
       </footer>

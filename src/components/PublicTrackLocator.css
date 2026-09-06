@@ -3,7 +3,8 @@
   padding: 28px 24px;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  background: #000;
+  background: var(--panel-soft);
+  color: var(--ink);
 }
 
 .public-locator-inner {
@@ -41,10 +42,10 @@
 .public-locator-header > strong {
   flex: 0 0 auto;
   padding: 8px 10px;
-  border: 1px solid rgb(255 255 255 / 38%);
-  border-radius: 7px;
-  background: rgb(0 0 0 / 10%);
-  color: rgb(255 255 255 / 78%);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 13px;
 }
 
@@ -57,12 +58,10 @@
   margin-bottom: 16px;
   padding: 18px 20px;
   overflow: hidden;
-  border: 1px solid rgb(255 255 255 / 38%);
-  border-radius: 10px;
-  background:
-    radial-gradient(circle at 86% 28%, rgb(0 0 0 / 17%), transparent 32%),
-    linear-gradient(135deg, #000 0%, #000 100%);
-  color: #fff;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .public-track-global-earth > div:first-child {
@@ -73,7 +72,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
 }
 
 .public-track-global-earth h3 {
@@ -84,7 +83,7 @@
 .public-track-global-earth p {
   max-width: 660px;
   margin-top: 5px;
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -103,20 +102,20 @@
   width: 100%;
   min-height: 48px;
   padding: 8px 14px;
-  border: 1px solid #fff;
-  border-radius: 8px;
-  background: #fff;
-  color: #000;
+  border: 1px solid var(--ink);
+  border-radius: 16px;
+  background: var(--ink);
+  color: var(--panel);
   font-size: 14px;
-  font-weight: 950;
+  font-weight: 650;
   line-height: 1.2;
 }
 
 .public-track-global-earth-action button:hover,
 .public-track-global-earth-action button:focus-visible {
-  border-color: #fff;
-  background: #fff;
-  color: #000;
+  border-color: var(--line-strong);
+  background: var(--ink);
+  color: var(--panel);
 }
 
 .public-track-global-earth-action button:disabled {
@@ -126,7 +125,7 @@
 
 .public-track-global-earth-action small {
   overflow: hidden;
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
   font-size: 10px;
   text-align: center;
   text-overflow: ellipsis;
@@ -141,8 +140,8 @@
   min-height: 0;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #000;
+  border-radius: 24px;
+  background: var(--panel);
 }
 
 .public-locator-search-panel {
@@ -153,7 +152,7 @@
   max-height: 700px;
   padding: 16px;
   border-right: 1px solid var(--line);
-  background: #000;
+  background: var(--panel);
 }
 
 .public-track-search,
@@ -164,9 +163,9 @@
 
 .public-track-search > span,
 .public-locator-filters label > span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 650;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -178,13 +177,13 @@
   min-height: 44px;
   padding: 0 11px;
   border: 1px solid var(--line);
-  border-radius: 7px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .public-track-search > div:focus-within {
-  border-color: rgb(255 255 255 / 26%);
+  border-color: var(--line-strong);
   box-shadow: 0 0 0 3px rgba(129, 129, 129, 0.14);
 }
 
@@ -195,7 +194,7 @@
   background: transparent;
   color: var(--ink);
   font-size: 16px;
-  font-weight: 750;
+  font-weight: 600;
   outline: 0;
 }
 
@@ -215,7 +214,12 @@
   min-width: 0;
   padding: 0 8px;
   font-size: 16px;
-  font-weight: 800;
+  font-weight: 600;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .public-track-categories {
@@ -225,8 +229,8 @@
   margin-top: 10px;
   padding: 4px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #000;
+  border-radius: 20px;
+  background: var(--panel-soft);
 }
 
 .public-track-categories button {
@@ -238,17 +242,17 @@
   min-height: 44px;
   padding: 6px 9px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 16px;
   background: transparent;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 650;
 }
 
 .public-track-categories button.selected {
-  border-color: #fff;
-  background: #000;
-  color: #fff;
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--ink);
   box-shadow: 0 1px 3px rgba(22, 22, 22, 0.08);
 }
 
@@ -285,21 +289,21 @@
   min-width: 0;
   padding: 10px;
   border: 1px solid transparent;
-  border-radius: 7px;
-  background: #000;
+  border-radius: 16px;
+  background: var(--panel);
   color: var(--ink);
   text-align: left;
 }
 
 .public-track-results button:hover {
   border-color: var(--line-strong);
-  background: #000;
+  background: var(--panel-soft);
 }
 
 .public-track-results button.selected {
-  border-color: #fff;
-  background: #000;
-  box-shadow: inset 3px 0 0 var(--lime);
+  border-color: var(--line-strong);
+  background: var(--panel-soft);
+  box-shadow: inset 3px 0 0 var(--ink);
 }
 
 .public-track-results button strong,
@@ -319,7 +323,7 @@
 
 .public-track-results button strong svg {
   flex: 0 0 auto;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .public-track-results button span {
@@ -335,7 +339,7 @@
   grid-template-rows: minmax(465px, 1fr) auto auto;
   min-width: 0;
   min-height: 0;
-  background: #000;
+  background: var(--panel);
 }
 
 .public-track-map {
@@ -374,8 +378,8 @@
   grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
   gap: 6px;
   padding: 12px 16px;
-  border-top: 1px solid rgb(255 255 255 / 14%);
-  background: #000;
+  border-top: 1px solid var(--line);
+  background: var(--panel-soft);
 }
 
 .public-track-official-links a {
@@ -386,12 +390,12 @@
   min-width: 0;
   min-height: 44px;
   padding: 4px 7px;
-  border: 1px solid rgb(255 255 255 / 28%);
-  border-radius: 7px;
-  background: rgb(0 0 0 / 10%);
-  color: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 14px;
-  font-weight: 850;
+  font-weight: 600;
   line-height: 1.2;
   overflow-wrap: anywhere;
   text-align: center;
@@ -403,8 +407,8 @@
 }
 
 .public-track-official-links a:hover {
-  border-color: rgb(255 255 255 / 38%);
-  background: rgb(0 0 0 / 14%);
+  border-color: var(--line-strong);
+  background: var(--panel-soft);
 }
 
 .public-track-details {
@@ -412,8 +416,9 @@
   gap: 10px;
   min-width: 0;
   padding: 12px 16px;
-  border-top: 1px solid rgb(255 255 255 / 14%);
-  color: #fff;
+  border-top: 1px solid var(--line);
+  color: var(--ink);
+  background: var(--panel);
 }
 
 .public-track-details > div:first-child {
@@ -451,7 +456,7 @@
   display: block;
   margin-top: 4px;
   overflow: hidden;
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
   font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -473,9 +478,9 @@
 }
 
 .public-track-link-group > span {
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
   font-size: 10px;
-  font-weight: 900;
+  font-weight: 650;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -508,12 +513,12 @@
   min-width: 0;
   min-height: 44px;
   padding: 0 8px;
-  border: 1px solid rgb(255 255 255 / 22%);
-  border-radius: 7px;
-  background: rgb(0 0 0 / 8%);
-  color: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 650;
   line-height: 1.15;
   overflow-wrap: normal;
   text-align: center;
@@ -533,18 +538,18 @@
 
 .public-track-actions a:hover,
 .public-track-actions button:hover {
-  border-color: rgb(255 255 255 / 38%);
-  background: rgb(0 0 0 / 14%);
+  border-color: var(--line-strong);
+  background: var(--panel-soft);
 }
 
 .public-track-actions button[aria-pressed="true"] {
-  border-color: rgb(255 255 255 / 38%);
-  background: rgb(0 0 0 / 20%);
-  color: #fff;
+  border-color: var(--line-strong);
+  background: var(--panel-soft);
+  color: var(--ink);
 }
 
 .public-track-earth-group > small {
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
   font-size: 10px;
   line-height: 1.3;
 }
@@ -557,7 +562,7 @@
   gap: 8px 12px;
   min-width: 0;
   padding-top: 10px;
-  border-top: 1px solid rgb(255 255 255 / 14%);
+  border-top: 1px solid var(--line);
 }
 
 .public-track-nearby-shops > header,
@@ -578,7 +583,7 @@
 
 .public-track-nearby-shops > header svg {
   flex: 0 0 auto;
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
 }
 
 .public-track-nearby-shops > header span {
@@ -592,7 +597,7 @@
 
 .public-track-nearby-shops > header small {
   overflow: hidden;
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -622,10 +627,10 @@
   min-width: 0;
   min-height: 48px;
   padding: 6px 7px 6px 9px;
-  border: 1px solid rgb(255 255 255 / 20%);
-  border-radius: 7px;
-  background: rgb(0 0 0 / 7%);
-  color: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel-soft);
+  color: var(--ink);
   text-align: left;
 }
 
@@ -633,8 +638,8 @@
 .public-track-nearby-shops > ul button:focus-visible,
 .public-track-nearby-shops__all:hover,
 .public-track-nearby-shops__all:focus-visible {
-  border-color: rgb(255 255 255 / 38%);
-  background: rgb(0 0 0 / 13%);
+  border-color: var(--line-strong);
+  background: var(--panel-soft);
 }
 
 .public-track-nearby-shops > ul button > span {
@@ -655,26 +660,26 @@
 }
 
 .public-track-nearby-shops > ul button small {
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
   font-size: 9px;
 }
 
 .public-track-nearby-shops > ul button b {
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
   font-size: 10px;
   white-space: nowrap;
 }
 
 .public-track-nearby-shops > ul button > svg {
   flex: 0 0 auto;
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
 }
 
 .public-track-nearby-shops__status {
   grid-area: results;
   min-width: 0;
   margin: 0;
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
   font-size: 11px;
   line-height: 1.35;
 }
@@ -683,7 +688,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
 }
 
 .public-track-nearby-shops__status--error span {
@@ -694,12 +699,12 @@
 .public-track-nearby-shops__all {
   min-height: 40px;
   padding: 0 10px;
-  border: 1px solid rgb(255 255 255 / 22%);
-  border-radius: 7px;
-  background: rgb(0 0 0 / 8%);
-  color: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 11px;
-  font-weight: 900;
+  font-weight: 650;
   white-space: nowrap;
 }
 
@@ -925,18 +930,18 @@
   min-height: 44px;
   margin: 10px auto 0;
   padding: 8px 10px;
-  border: 1px solid rgb(255 255 255 / 35%);
-  border-radius: 8px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .public-track-action-status.error {
-  border-color: rgb(255 255 255 / 35%);
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  border-color: var(--line);
+  background: var(--panel-soft);
+  color: var(--ink);
 }
 
 .public-track-action-status span {
@@ -973,8 +978,8 @@
   padding: 18px;
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 14px;
-  background: #000;
+  border-radius: 24px;
+  background: var(--panel);
   color: var(--ink);
   box-shadow: 0 24px 80px rgba(11, 11, 11, 0.32);
   outline: none;
@@ -1007,11 +1012,11 @@
   min-height: 44px;
   padding: 7px 12px;
   border: 1px solid var(--line-strong);
-  border-radius: 7px;
-  background: #000;
+  border-radius: 16px;
+  background: var(--panel);
   color: var(--ink);
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 650;
   text-decoration: none;
 }
 
@@ -1023,9 +1028,9 @@
 
 .public-track-share-outside {
   padding: 12px;
-  border: 1px solid rgb(255 255 255 / 38%);
-  border-radius: 9px;
-  background: #000;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel-soft);
 }
 
 .public-track-share-outside span,
@@ -1049,9 +1054,9 @@
 }
 
 .public-track-share-friends label > span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 650;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -1063,7 +1068,7 @@
   min-height: 44px;
   padding: 0 10px;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: 16px;
 }
 
 .public-track-share-friends input {
@@ -1074,6 +1079,7 @@
   background: transparent;
   font-size: 16px;
   outline: 0;
+  color: var(--ink);
 }
 
 .public-track-share-list {
@@ -1088,21 +1094,21 @@
   min-height: 58px;
   padding: 7px 8px 7px 11px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #000;
+  border-radius: 16px;
+  background: var(--panel);
 }
 
 .public-track-share-list button {
-  border-color: rgb(255 255 255 / 38%);
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .public-track-share-empty {
   min-height: 84px;
   padding: 18px;
   border: 1px dashed var(--line-strong);
-  border-radius: 8px;
+  border-radius: 16px;
   color: var(--muted);
   text-align: center;
 }
@@ -1283,6 +1289,7 @@
 
   .public-track-official-links {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-inline: 12px;
   }
 
   .public-track-official-links .public-track-federation-link,
@@ -1318,7 +1325,7 @@
   .public-track-share-dialog {
     max-height: calc(100dvh - max(16px, env(safe-area-inset-top)));
     padding: 14px;
-    border-radius: 14px 14px 8px 8px;
+    border-radius: 24px 24px 16px 16px;
   }
 
   .public-track-share-outside {
