@@ -25366,9 +25366,15 @@ async function serveStatic(request, response) {
   }
 }
 
+const { createPreskiWaitlistMount } = await import('./preskiWaitlist/mount.mjs');
+const routePreskiWaitlist = createPreskiWaitlistMount();
+
 const server = createServer((request, response) => {
   const requestId = instrumentHttpRequest(request, response, cloudTelemetry, { service: 'cloud' });
   applySecurityHeaders(request, response);
+  // This namespace has its own exact-origin policy and owner bearer auth.
+  // Keep TrackLab's existing mutation and native-app policies unchanged.
+  if (routePreskiWaitlist(request, response)) return;
   applyNativeAppCors(request, response);
   const nativePreflight = nativeAppCorsPreflight(request);
   if (nativePreflight.native) {
