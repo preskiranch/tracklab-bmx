@@ -1889,7 +1889,14 @@ function clubAthleteDisplayName(fullNameValue, nicknameValue, fallbackName) {
   return `${fullName.slice(0, availableNameLength).trim()}${suffix}`;
 }
 
+async function withAutomaticBetaAccess(user) {
+  if (!user || user.betaAccess) return user;
+  const grant = await persistence.ensurePublicBetaAccess(user.id);
+  return grant ? { ...user, betaAccess: grant } : user;
+}
+
 async function createSignedInResponse(request, response, user, statusCode = 200) {
+  user = await withAutomaticBetaAccess(user);
   const token = createSessionToken();
   const sessionId = randomUUID();
   const expiresAt = new Date(Date.now() + authSessionMaxAgeSeconds * 1000).toISOString();
@@ -1939,6 +1946,12 @@ async function currentAuthSessionByHash(hash, sessionCache = authSessionLookups)
     return null;
   }
 
+  const betaUser = await withAutomaticBetaAccess(session.user);
+  if (betaUser !== session.user) {
+    session = { ...session, user: betaUser };
+    authSessionLookups.refreshUser(betaUser);
+    personalAuthSessions.refreshUser(betaUser);
+  }
   const lastSeenAt = Date.parse(session.lastSeen ?? '');
   if (!Number.isFinite(lastSeenAt) || Date.now() - lastSeenAt >= authSessionTouchIntervalMs) {
     sessionCache.scheduleTouch(hash, session, persistence.touchAuthSession);
@@ -5544,7 +5557,7 @@ async function handleChildDeviceRequest(request, response, requestUrl) {
   if (!user) { reply(409, { error: 'The setup link is no longer available. Ask your parent for a new link.' }); return true; }
   const native = requestIsNativeApp(request);
   if (!native) setAuthCookie(response, request, token);
-  reply(200, { user: publicAuthUser(user), ...(native ? { nativeSessionToken: token } : {}) });
+  reply(200, { user: publicAuthUser(await withAutomaticBetaAccess(user)), ...(native ? { nativeSessionToken: token } : {}) });
   return true;
 }
 

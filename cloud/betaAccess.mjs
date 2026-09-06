@@ -28,3 +28,10 @@ export function publicBetaAccessStatus(grant, now = Date.now()) {
     revokedAt,
   };
 }
+
+// Explicit, time-limited public beta enrollment. No client header or purchase bypass.
+export function publicBetaPolicy(environment = process.env, now = Date.now()) {
+  const endsAt = Date.parse(String(environment.TRACKLAB_PUBLIC_BETA_ENDS_AT ?? ''));
+  if (!Number.isFinite(endsAt) || endsAt <= now) return null;
+  return { bikeSeats: 4, expiresAt: Math.min(endsAt, now + 90 * 86400000) };
+}

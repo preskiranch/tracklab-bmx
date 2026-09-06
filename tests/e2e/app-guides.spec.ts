@@ -116,9 +116,9 @@ for (const viewport of viewports) {
     await expect(beta).toBeVisible();
     await expect(nav.getByRole('button', { name: 'Beta Testing Info', exact: true })).toHaveAttribute('aria-current', 'page');
     await expect(beta.locator('.app-guide-section > h2').first()).toHaveText('Start testing TrackLab');
-    const invitation = beta.getByRole('article').filter({ has: page.getByRole('heading', { name: 'Accept your personal beta invitation', exact: true }) });
+    const invitation = beta.getByRole('article').filter({ has: page.getByRole('heading', { name: 'Start your automatic beta access', exact: true }) });
     await expect(invitation.locator('ol > li')).toHaveCount(4);
-    await expect(invitation).toContainText('using the email address that received the invitation');
+    await expect(invitation).toContainText('automatically gives a new tester four simultaneous Wattbike connections');
     await expect(invitation).toContainText('TestFlight installation invitation are separate');
     await expect(beta.locator('#guide-tracks-shops')).toBeAttached();
     await expectNoHorizontalOverflow(page);

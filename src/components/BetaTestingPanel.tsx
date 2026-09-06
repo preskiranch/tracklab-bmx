@@ -89,7 +89,7 @@ export function BetaTestingPanel({ user, focusRequested = false, onFocusHandled,
       <p>Train with your Wattbike, upload your records, and race other riders’ ghosts. Live multiplayer is coming soon.</p>
       {loading ? <p role="status">Loading beta access…</p> : beta?.active ? (
         <div className="beta-access-summary"><strong>{beta.bikeSeats} Wattbike connection{beta.bikeSeats === 1 ? '' : 's'} included</strong><span>Beta access through {dateLabel(beta.expiresAt)}. No purchase required.</span></div>
-      ) : !user.admin && <p>Beta Wattbike access is available by invitation. Open your personal invitation link to activate it.</p>}
+      ) : !user.admin && <p>No active Wattbike beta grant is available for this account. Automatic enrollment applies while the public beta is open; expired or revoked access is not renewed by signing in. Contact the beta organizer if you need access.</p>}
       <a className="beta-action" href={betaFeedbackHref(typeof navigator === 'undefined' ? '' : navigator.userAgent, version)}><Mail size={17} /> Send beta feedback</a>
       {onOpenInfo && <button className="beta-action" type="button" onClick={onOpenInfo}>Read Beta Testing Info</button>}
       <small>Your email app opens with a feedback template. You can review it and attach screenshots before sending.</small>

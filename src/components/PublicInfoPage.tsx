@@ -103,7 +103,7 @@ function PrivacyPage() {
           This notice describes the current TrackLab BMX web and iPhone/iPad app behavior. TrackLab combines
           Wattbike telemetry, mapped tracks, training history, multiplayer rooms, and optional AI commentary.
         </p>
-        <span className="public-info-updated">Last updated September 1, 2026</span>
+        <span className="public-info-updated">Last updated September 6, 2026</span>
       </section>
 
       <section className="public-info-summary" aria-label="Privacy summary">
@@ -140,7 +140,7 @@ function PrivacyPage() {
                 Account records include your name, email address, password credential, membership level, and sign-in
                 session. Passwords are stored by the TrackLab server as salted password hashes, not as readable
                 passwords. You may add a rider photo. Studio and Club Connect features can also store rider names,
-                nicknames, photos, club relationships, and invite status.
+                nicknames, photos, club relationships, and invite status. Beta access records include your account identifier, connection allowance, activation and expiration dates, and revocation/audit status. During open public beta enrollment, signing in automatically creates this temporary access record without a purchase.
               </p>
               <p>
                 A signed-in user who asks to claim a bike-shop listing supplies the shop identity, their relationship
@@ -472,7 +472,7 @@ function PrivacyPage() {
                 Family profiles let a signed-in parent or guardian create a separate managed athlete profile without
                 giving the child an email address or password. An existing account must approve an invitation before
                 its profile and training activity, including cycling power, can be viewed by the requesting parent.
-                Either account can remove that viewing permission. Family viewing does not grant account sign-in,
+                Either account can remove that viewing permission. A parent can separately issue a one-use, 15-minute child-phone setup link for a managed child. Redeeming it creates a child-only signed-in session under that child’s profile; it does not sign the child into the parent’s account. Parents can revoke child-phone sessions from Family. Treat setup links as private credentials. Family viewing does not grant account sign-in,
                 billing access, friend or message access, live location, or Apple Watch heart-rate access.
               </p>
               <p>
@@ -659,8 +659,7 @@ function SupportPage() {
         <details>
           <summary>Can the iOS app work offline?</summary>
           <p>
-            Not in its current architecture. The native shell loads the live service so account, maps, club, training,
-            and multiplayer data stay synchronized.
+            The native app bundles its interface, but account sign-in, cloud records, maps, route research, and studio services require an internet connection. Some local settings or ride-recovery checkpoints may remain on the device; this is not a guarantee that an offline ride will upload. Public live multiplayer is Coming soon.
           </p>
         </details>
       </section>

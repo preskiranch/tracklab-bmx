@@ -3,17 +3,17 @@ import type { AppGuideSection } from './appGuideTypes';
 export const betaGuideSection: AppGuideSection = {
   id: 'beta-start',
   title: 'Start testing TrackLab',
-  summary: 'Activate your invitation, connect a compatible Wattbike, and send useful feedback.',
+  summary: 'Sign in for public beta access, connect a compatible Wattbike, and send useful feedback.',
   articles: [
     {
-      title: 'Accept your personal beta invitation',
+      title: 'Start your automatic beta access',
       paragraphs: [
-        'A beta invitation unlocks temporary Wattbike access without a purchase. Each link belongs to one email address, can be accepted once, and expires after seven days. The testing period begins when you accept. The default invitation includes four simultaneous Wattbike connections for 90 days; your invitation may have a different connection allowance or duration.',
+        'While public beta enrollment is open, signing in automatically gives a new tester four simultaneous Wattbike connections, including parent-managed athletes using their own phone setup. This works on the native app and website and requires no separate beta invitation or purchase. Access has a fixed end date shown in More → Beta Testing and lasts no more than 90 days. Signing in again does not extend or restore expired or revoked access. Administrators can also issue individual invitations: Each link belongs to one email address, can be accepted once, and expires after seven days. The testing period begins when you accept. The default invitation includes four simultaneous Wattbike connections for 90 days; your invitation may have a different connection allowance or duration.',
       ],
       steps: [
-        'Open the personal invitation link supplied by the TrackLab administrator.',
-        'Create an account or sign in using the email address that received the invitation. Complete the account details requested on screen.',
-        'Accept the invitation, then open More → Beta Testing to check your connection allowance and access end date.',
+        'Install the eligible TestFlight build, or open the TrackLab website, then sign in.',
+        'Create your own account, or use the parent-managed child-phone setup link for the child. Complete the requested profile details.',
+        'Open More → Beta Testing to confirm four Wattbike connections and the access end date. If you have an individual invitation instead, open and accept it using its intended account.',
         'Use this same TrackLab account on your other devices. An account invitation and a TestFlight installation invitation are separate: install the iPhone or iPad beta through the TestFlight invitation supplied to you.',
       ],
     },
@@ -61,7 +61,7 @@ export const accountGuideSections: AppGuideSection[] = [
       {
         title: 'Start with a free account',
         paragraphs: [
-          'Free membership includes public track and mapped bike shop directories, Reaction Test, a community profile, and saved track favorites. Sign in to keep account features associated with your profile. Live personal Wattbike training requires active Racer access, which can come from an approved beta invitation or a verified subscription when purchasing is available.',
+          'Free membership includes public track and mapped bike shop directories, Reaction Test, a community profile, and saved track favorites. Sign in to keep account features associated with your profile. Live personal Wattbike training requires active Racer access, which can come from automatic public beta enrollment, an individual beta invitation, or a verified subscription when purchasing is available.',
           'An athlete can view and download their claimed club training history without buying a personal bike connection. Training through an enrolled club uses that club’s available capacity. Personal pairing at home requires your own active Wattbike access.',
         ],
       },

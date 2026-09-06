@@ -4,7 +4,7 @@ import { runDatabaseMigrations } from './migrations.mjs';
 import { cloudTelemetry } from './telemetry.mjs';
 import { isReactionTestSession, reactionLeaderboardDisplayName } from './reactionTest.mjs';
 import { appleAppAccountTokenLineageHash } from './appleBilling.mjs';
-import { betaInvitationPolicy, betaInvitationDurationMs, publicBetaAccessStatus } from './betaAccess.mjs';
+import { betaInvitationPolicy, betaInvitationDurationMs, publicBetaAccessStatus, publicBetaPolicy } from './betaAccess.mjs';
 import { familyChildName, familyInvitationDurationMs, familyMaximumChildren, managedChildId, accountTrainingProfileKey, trainingProfileAccountId } from './familyAccess.mjs';
 import {
   maximumAcceptedTrainingSpeedKph,
@@ -1232,6 +1232,36 @@ async function betaAudit(client, action, targetId, actorUserId, now) {
   else await client.query(`INSERT INTO ${schema}.beta_access_audit
     (id, action, target_id, actor_user_id, created_at) VALUES ($1,$2,$3,$4,to_timestamp($5/1000.0))`,
   [record.id, action, targetId, actorUserId, now]);
+}
+
+export async function ensurePublicBetaAccess(userId, now = Date.now()) {
+  const policy = publicBetaPolicy(process.env, now);
+  if (!userId || !policy) return null;
+  return withBetaLock(async (client) => {
+    const user = await client.query(`SELECT id FROM ${schema}.auth_users WHERE id=$1 FOR UPDATE`, [userId]);
+    if (!user.rows[0]) return null;
+    // Never re-enroll a revoked or expired tester, or replace an explicit grant.
+    const existing = await client.query(`SELECT * FROM ${schema}.beta_access_grants WHERE user_id=$1
+      ORDER BY (revoked_at IS NULL) DESC, created_at DESC, id DESC LIMIT 1`, [userId]);
+    if (existing.rows[0]) return betaGrantFromRow(existing.rows[0]);
+    const id = randomUUID();
+    const result = await client.query(`INSERT INTO ${schema}.beta_access_grants
+      (id,user_id,bike_seats,created_at,starts_at,expires_at)
+      VALUES ($1,$2,$3,to_timestamp($4/1000.0),to_timestamp($4/1000.0),to_timestamp($5/1000.0)) RETURNING *`,
+      [id,userId,policy.bikeSeats,now,policy.expiresAt]);
+    await betaAudit(client, 'grant-claimed', id, userId, now);
+    return betaGrantFromRow(result.rows[0]);
+  }, async () => {
+    if (!memoryAuthUsersById.has(userId)) return null;
+    const existing = memoryBetaGrantForUser(userId);
+    if (existing) return existing;
+    const grant = { id: randomUUID(), userId, inviteId: null, issuerUserId: null,
+      bikeSeats: policy.bikeSeats, createdAt: now, startsAt: now, expiresAt: policy.expiresAt,
+      revokedAt: null, revokedByUserId: null };
+    memoryBetaGrantsById.set(grant.id, grant);
+    await betaAudit(null, 'grant-claimed', grant.id, userId, now);
+    return { ...grant };
+  });
 }
 
 export async function createBetaAccessInvite(candidate, now = Date.now()) {
