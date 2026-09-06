@@ -1,23 +1,27 @@
 :root {
-  color-scheme: dark;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #000;
-  color: #fff;
+  color-scheme: light;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  background: #fff;
+  color: #1d1d1f;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  --panel: #000;
-  --panel-soft: #000;
-  --ink: #fff;
-  --muted: rgb(255 255 255 / 78%);
-  --line: rgb(255 255 255 / 18%);
-  --line-strong: rgb(255 255 255 / 42%);
-  --lime: #fff;
-  --blue: #fff;
+  --panel: #fff;
+  --panel-soft: #f5f5f7;
+  --ink: #1d1d1f;
+  --muted: #6e6e73;
+  --line: #d2d2d7;
+  --line-strong: #86868b;
+  --lime: #1d1d1f;
+  --blue: #1d1d1f;
   --amber: #a3a3a3;
   --red: #525252;
   --radius: 8px;
-  --shadow: 0 12px 32px rgb(0 0 0 / 28%);
+  --shadow: 0 8px 24px rgb(0 0 0 / 6%);
+  --accent: #1d1d1f;
+  --on-accent: #fff;
+  --field: #fff;
+  --hover: #f5f5f7;
 }
 
 * {
@@ -35,7 +39,7 @@ body {
   overflow-x: clip;
   overscroll-behavior-x: none;
   -webkit-text-size-adjust: 100%;
-  text-size-adjust: 100%; background: #000;
+  text-size-adjust: 100%; background: var(--panel);
 }
 
 #root {
@@ -103,14 +107,14 @@ input[type="text"],
   min-height: 44px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
   color: var(--ink);
   outline: none;
 }
 
 select:focus,
 input:focus {
-  border-color: rgb(255 255 255 / 26%);
+  border-color: var(--line);
   box-shadow: 0 0 0 3px rgba(129, 129, 129, 0.14);
 }
 
@@ -127,7 +131,7 @@ input:focus {
 .membership-page {
   min-height: 100vh;
   padding: 24px;
-  background: #000;
+  background: var(--panel);
 }
 
 .membership-nav {
@@ -160,26 +164,26 @@ input:focus {
 }
 
 .primary-button {
-  border: 1px solid #fff;
-  background: #fff;
-  color: #000;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
-.primary-button:hover { background: #fff; border-color: #fff; color: #000;
+.primary-button:hover { background: var(--accent); border-color: var(--accent); color: var(--on-accent);
 }
 
 .secondary-button,
 .membership-mini-card button {
   border: 1px solid var(--line);
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   text-decoration: none;
 }
 
 .secondary-button:hover,
 .membership-mini-card button:hover {
   border-color: var(--line-strong);
-  background: #000;
+  background: var(--panel);
 }
 
 .primary-button:disabled,
@@ -196,7 +200,7 @@ input:focus {
   padding: 0;
   border: 0;
   background: transparent;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 700;
 }
@@ -226,13 +230,13 @@ input:focus {
   padding: 18px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: rgb(0 0 0 / 95%);
+  background: rgb(255 255 255 / 95%);
   box-shadow: 0 10px 28px rgba(37, 37, 37, 0.06);
 }
 
 .profile-gate.complete {
-  border-color: rgb(255 255 255 / 38%);
-  background: linear-gradient(180deg, rgb(0 0 0 / 96%), rgb(0 0 0 / 92%));
+  border-color: var(--line-strong);
+  background: linear-gradient(180deg, rgb(255 255 255 / 96%), rgb(255 255 255 / 92%));
 }
 
 .profile-gate h2 {
@@ -261,7 +265,7 @@ input:focus {
 }
 
 .profile-gate-form label span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -274,21 +278,21 @@ input:focus {
   padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 13px;
   font-weight: 700;
 }
 
 .profile-gate-form input:focus {
-  border-color: rgb(255 255 255 / 26%);
-  outline: 3px solid rgb(255 255 255 / 16%);
+  border-color: var(--line);
+  outline: 3px solid var(--line);
 }
 
 .profile-gate-note {
   grid-column: 1 / -1;
   margin: -2px 0 0;
-  color: rgb(255 255 255 / 78%) !important;
+  color: var(--muted) !important;
   font-weight: 700;
 }
 
@@ -303,19 +307,19 @@ input:focus {
   gap: 3px;
   min-height: 56px;
   padding: 12px;
-  border: 1px solid rgb(255 255 255 / 38%);
+  border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: rgb(0 0 0 / 92%);
+  background: rgb(255 255 255 / 92%);
 }
 
 .account-ready-panel strong {
-  color: #fff;
+  color: var(--ink);
   font-size: 15px;
 }
 
 .account-ready-panel span {
   overflow: hidden;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -335,7 +339,7 @@ input:focus {
 .membership-mini-card {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: rgb(0 0 0 / 95%);
+  background: rgb(255 255 255 / 95%);
   box-shadow: 0 10px 28px rgba(37, 37, 37, 0.06);
 }
 
@@ -352,10 +356,10 @@ input:focus {
   width: fit-content;
   min-height: 30px;
   padding: 0 10px;
-  border: 1px solid rgb(255 255 255 / 34%);
+  border: 1px solid var(--line-strong);
   border-radius: 999px;
   background: rgb(0 0 0 / 12%);
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
@@ -396,7 +400,7 @@ input:focus {
 
 .status-metric span {
   display: block;
-  color: #fff;
+  color: var(--ink);
   font-size: 36px;
   font-weight: 700;
   line-height: 1;
@@ -448,7 +452,7 @@ input:focus {
 .membership-card li {
   position: relative;
   padding-left: 18px;
-  color: #fff;
+  color: var(--ink);
   font-size: 13px;
   font-weight: 750;
 }
@@ -475,14 +479,14 @@ input:focus {
   height: 42px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .card-icon.accent {
-  border-color: rgb(255 255 255 / 28%);
+  border-color: var(--line);
   background: rgb(0 0 0 / 10%);
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .seat-selector {
@@ -500,7 +504,7 @@ input:focus {
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 14px;
   font-weight: 700;
 }
@@ -511,7 +515,7 @@ input:focus {
 }
 
 .checkout-message.error {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-weight: 750;
 }
 
@@ -533,7 +537,7 @@ input:focus {
 
 .membership-mini-card small {
   overflow: hidden;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 750;
   text-overflow: ellipsis;
@@ -621,7 +625,7 @@ input:focus {
 .platform-shell.race-review-mode {
   display: block;
   min-height: 100vh;
-  background: #000;
+  background: var(--panel);
 }
 
 .race-review-mode .sidebar,
@@ -642,13 +646,13 @@ input:focus {
   width: 100%;
   height: 100vh;
   overflow: hidden;
-  background: #000;
+  background: var(--panel);
 }
 
 .race-review-map {
   min-height: 0;
-  border-bottom: 1px solid rgb(255 255 255 / 22%);
-  background: #000;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
 }
 
 .race-review-map .earth-panel {
@@ -656,7 +660,7 @@ input:focus {
   height: 100%;
   border: 0;
   border-radius: 0;
-  background: #000;
+  background: var(--panel);
   box-shadow: none;
 }
 
@@ -678,7 +682,7 @@ input:focus {
   grid-template-rows: auto auto minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
-  background: #000;
+  background: var(--panel);
 }
 
 .race-review-header {
@@ -688,7 +692,7 @@ input:focus {
   gap: 18px;
   padding: 14px 18px;
   border-bottom: 1px solid var(--line);
-  background: #000;
+  background: var(--panel);
 }
 
 .race-review-header h2 {
@@ -721,27 +725,27 @@ input:focus {
   padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
 
 .race-review-timer {
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .race-review-timer span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   text-transform: uppercase;
 }
 
 .race-review-controls button.primary {
-  border-color: #fff;
-  background: #fff;
-  color: #000;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .race-review-results {
@@ -760,7 +764,7 @@ input:focus {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .race-review-rider-heading {
@@ -804,14 +808,14 @@ input:focus {
   gap: 2px;
   min-width: 0;
   padding: 7px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: #000;
+  background: var(--panel);
 }
 
 .race-review-rider-metrics strong {
   overflow: hidden;
-  color: #fff;
+  color: var(--ink);
   font-size: 13px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -819,7 +823,7 @@ input:focus {
 }
 
 .race-review-rider-metrics small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
@@ -843,8 +847,8 @@ input:focus {
   top: 0;
   z-index: 1;
   padding: 10px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
   text-align: left;
@@ -862,21 +866,21 @@ input:focus {
 
 .race-review-zone-table td {
   padding: 10px;
-  border-top: 1px solid rgb(255 255 255 / 22%);
-  border-bottom: 1px solid rgb(255 255 255 / 22%);
-  background: #000;
-  color: #fff;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
   font-size: 12px;
   vertical-align: top;
 }
 
 .race-review-zone-table td:first-child {
-  border-left: 1px solid rgb(255 255 255 / 22%);
+  border-left: 1px solid var(--line);
   border-radius: 7px 0 0 7px;
 }
 
 .race-review-zone-table td:last-child {
-  border-right: 1px solid rgb(255 255 255 / 22%);
+  border-right: 1px solid var(--line);
   border-radius: 0 7px 7px 0;
 }
 
@@ -975,7 +979,7 @@ input:focus {
   width: 100vw;
   min-height: 100vh;
   overflow: hidden;
-  background: #000;
+  background: var(--panel);
 }
 
 .map-fullscreen .sidebar,
@@ -1025,9 +1029,9 @@ input:focus {
   width: min(380px, calc(100vw - 28px));
   max-height: calc(100vh - 28px);
   overflow: auto;
-  border: 1px solid rgb(255 255 255 / 38%);
+  border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: rgb(0 0 0 / 96%);
+  background: rgb(255 255 255 / 96%);
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
 }
 
@@ -1046,7 +1050,7 @@ input:focus {
 
 .map-fullscreen .mapping-section {
   border-bottom: 0;
-  background: rgb(0 0 0 / 96%);
+  background: rgb(255 255 255 / 96%);
   backdrop-filter: blur(12px);
 }
 
@@ -1078,7 +1082,7 @@ input:focus {
   min-width: 0;
   padding: 18px;
   border-right: 1px solid var(--line);
-  background: rgb(0 0 0 / 92%);
+  background: rgb(255 255 255 / 92%);
 }
 
 .brand-lockup,
@@ -1131,7 +1135,7 @@ input:focus {
   width: 42px;
   height: 42px;
   border-radius: 7px;
-  border: 1px solid rgb(255 255 255 / 12%); background: #000; color: #fff; border-color: rgb(255 255 255 / 26%);
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-color: var(--line);
 }
 
 .brand-lockup p,
@@ -1163,7 +1167,7 @@ input:focus {
 .monitor-panel {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: rgb(0 0 0 / 95%);
+  background: rgb(255 255 255 / 95%);
   box-shadow: 0 10px 28px rgba(37, 37, 37, 0.06);
 }
 
@@ -1210,25 +1214,25 @@ input:focus {
   gap: 7px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
 }
 
 .connection-source-switch button.selected {
-  border-color: #fff;
-  background: #000;
-  color: #fff;
+  border-color: var(--line-strong);
+  background: var(--panel);
+  color: var(--ink);
   box-shadow: 0 7px 16px rgba(23, 23, 23, 0.12);
 }
 
 .bluetooth-connect-button {
   width: 100%;
   margin-top: 9px;
-  border-color: rgb(255 255 255 / 22%);
-  background: linear-gradient(135deg, #000, #000);
-  color: #fff;
+  border-color: var(--line);
+  background: linear-gradient(135deg, var(--panel), var(--panel));
+  color: var(--ink);
 }
 
 .bluetooth-connect-button:disabled {
@@ -1257,14 +1261,14 @@ input:focus {
 }
 
 .bridge-control-button.start {
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .bridge-control-button.stop {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .bridge-control-button:disabled {
@@ -1280,7 +1284,7 @@ input:focus {
   padding: 0 9px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: #000;
+  background: var(--panel);
   color: var(--muted);
   font-size: 10px;
   font-weight: 700;
@@ -1288,24 +1292,24 @@ input:focus {
 }
 
 .bridge-live-pill.waiting {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .bridge-live-pill.live {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .bridge-prompt {
   margin-top: 9px;
   padding: 8px 9px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 750;
   line-height: 1.35;
@@ -1336,9 +1340,9 @@ input:focus {
   display: grid;
   gap: 9px;
   padding: 12px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: linear-gradient(180deg, #000 0%, #000 100%);
+  background: linear-gradient(180deg, var(--panel) 0%, var(--panel) 100%);
   box-shadow: 0 10px 24px rgba(84, 84, 84, 0.06);
 }
 
@@ -1350,7 +1354,7 @@ input:focus {
 }
 
 .workflow-heading span {
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -1359,7 +1363,7 @@ input:focus {
 
 .workflow-heading small {
   overflow: hidden;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -1380,42 +1384,42 @@ input:focus {
   padding: 7px 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
   text-align: left;
 }
 
 .workflow-step:hover {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 .workflow-step.complete {
-  border-color: rgb(255 255 255 / 22%);
+  border-color: var(--line);
 }
 
 .workflow-step.ghost-selected {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
   box-shadow: inset 3px 0 0 #a4a4a4;
 }
 
 .workflow-step.next {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
   box-shadow: inset 3px 0 0 #a7a7a7;
 }
 
-.workflow-step.primary-action { background: #fff; color: #000; border-color: #fff; box-shadow: none;
+.workflow-step.primary-action { background: var(--accent); color: var(--on-accent); border-color: var(--accent); box-shadow: none;
 }
 
-.workflow-step.primary-action:hover { background: #fff; border-color: #fff; color: #000;
+.workflow-step.primary-action:hover { background: var(--accent); border-color: var(--accent); color: var(--on-accent);
 }
 
-.workflow-step.primary-action .workflow-index { background: #fff; color: #000;
+.workflow-step.primary-action .workflow-index { background: var(--accent); color: var(--on-accent);
 }
 
 .workflow-step.primary-action .workflow-copy strong,
-.workflow-step.primary-action .workflow-copy small { color: #fff;
+.workflow-step.primary-action .workflow-copy small { color: var(--ink);
 }
 
 .workflow-index {
@@ -1425,25 +1429,25 @@ input:focus {
   width: 28px;
   height: 28px;
   border-radius: 7px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 700;
 }
 
 .workflow-step.complete .workflow-index {
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .workflow-step.ghost-selected .workflow-index {
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .workflow-step.next .workflow-index {
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .workflow-copy {
@@ -1460,13 +1464,13 @@ input:focus {
 }
 
 .workflow-copy strong {
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
 
 .workflow-copy small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 780;
 }
@@ -1490,20 +1494,20 @@ input:focus {
   width: 28px;
   height: 28px;
   padding: 0;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .workflow-lap-controls button:disabled {
-  color: rgb(255 255 255 / 78%);
-  background: #000;
+  color: var(--muted);
+  background: var(--panel);
 }
 
 .workflow-lap-controls > span {
   overflow: hidden;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   text-align: center;
@@ -1512,7 +1516,7 @@ input:focus {
 }
 
 .workflow-lap-controls b {
-  color: #fff;
+  color: var(--ink);
   font-size: 13px;
   font-weight: 700;
 }
@@ -1521,9 +1525,9 @@ input:focus {
   display: grid;
   gap: 8px;
   padding: 9px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgb(0 0 0 / 86%);
+  background: rgb(255 255 255 / 86%);
 }
 
 .workflow-race-entry-heading {
@@ -1534,7 +1538,7 @@ input:focus {
 }
 
 .workflow-race-entry-heading span {
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -1543,7 +1547,7 @@ input:focus {
 
 .workflow-race-entry-heading small {
   overflow: hidden;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -1559,14 +1563,14 @@ input:focus {
   display: grid;
   gap: 6px;
   padding: 6px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .race-entry-card.entered {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
   box-shadow: inset 3px 0 0 #b7b7b7;
 }
 
@@ -1578,20 +1582,20 @@ input:focus {
   width: 100%;
   min-height: 42px;
   padding: 6px 7px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
   text-align: left;
 }
 
 .race-entry-row:hover {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 .race-entry-row.entered {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
   box-shadow: inset 3px 0 0 #b7b7b7;
 }
 
@@ -1626,7 +1630,7 @@ input:focus {
 }
 
 .race-entry-copy .race-entry-bike-name {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
 }
@@ -1636,7 +1640,7 @@ input:focus {
   gap: 2px;
   align-items: start;
   min-width: 0;
-  color: #fff;
+  color: var(--ink);
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
@@ -1649,7 +1653,7 @@ input:focus {
 }
 
 .race-entry-monitor-id b {
-  color: #fff;
+  color: var(--ink);
   font-size: 18px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -1670,16 +1674,16 @@ input:focus {
   min-height: 26px;
   padding: 0 7px;
   border-radius: 999px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
 }
 
 .race-entry-status.entered {
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .race-entry-rider-select {
@@ -1688,11 +1692,11 @@ input:focus {
   align-items: center;
   gap: 7px;
   padding-top: 5px;
-  border-top: 1px solid rgb(255 255 255 / 22%);
+  border-top: 1px solid var(--line);
 }
 
 .race-entry-rider-select > span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -1702,10 +1706,10 @@ input:focus {
   min-width: 0;
   min-height: 34px;
   padding: 0 24px 0 8px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font: inherit;
   font-size: 12px;
   font-weight: 700;
@@ -1721,11 +1725,11 @@ input:focus {
 
 .race-entry-empty,
 .studio-rider-empty {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .studio-rider-error {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-weight: 700;
 }
 
@@ -1737,17 +1741,17 @@ input:focus {
 
 .race-entry-actions button {
   min-height: 28px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
 }
 
 .race-entry-actions button:hover {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 .race-entry-actions button:disabled {
@@ -1756,7 +1760,7 @@ input:focus {
 }
 
 .studio-rider-manager {
-  border-top: 1px solid rgb(255 255 255 / 22%);
+  border-top: 1px solid var(--line);
   padding-top: 7px;
 }
 
@@ -1766,7 +1770,7 @@ input:focus {
   justify-content: space-between;
   gap: 8px;
   min-height: 28px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   cursor: pointer;
   font-size: 10px;
   font-weight: 700;
@@ -1790,8 +1794,8 @@ input:focus {
   min-width: 21px;
   min-height: 21px;
   border-radius: 50%;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 9px;
 }
 
@@ -1814,7 +1818,7 @@ input:focus {
 }
 
 .studio-rider-add label > span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 9px;
   font-weight: 700;
 }
@@ -1825,10 +1829,10 @@ input:focus {
   min-width: 0;
   min-height: 31px;
   padding: 0 8px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font: inherit;
   font-size: 10px;
   font-weight: 700;
@@ -1841,15 +1845,15 @@ input:focus {
   justify-content: center;
   width: 32px;
   min-height: 31px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .studio-rider-add button:hover {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 .studio-rider-list {
@@ -1863,9 +1867,9 @@ input:focus {
   display: grid;
   gap: 6px;
   padding: 7px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .studio-rider-row-main {
@@ -1876,18 +1880,18 @@ input:focus {
 }
 
 .studio-rider-row-main small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 9px;
   font-weight: 700;
 }
 
 .studio-rider-row-main button {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .studio-rider-row-main button:hover {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 .race-entry-rider-photo {
@@ -1895,8 +1899,8 @@ input:focus {
   align-items: center;
   gap: 7px;
   padding-top: 5px;
-  border-top: 1px solid rgb(255 255 255 / 22%);
-  color: rgb(255 255 255 / 78%);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
   font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
@@ -1932,7 +1936,7 @@ input:focus {
 }
 
 .workflow-split-choice-heading span {
-  color: #fff;
+  color: var(--ink);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -1941,7 +1945,7 @@ input:focus {
 
 .workflow-split-choice-heading small {
   overflow: hidden;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -1957,9 +1961,9 @@ input:focus {
   display: grid;
   gap: 6px;
   padding: 7px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: rgb(0 0 0 / 82%);
+  background: rgb(255 255 255 / 82%);
 }
 
 .workflow-split-choice-rider {
@@ -1971,7 +1975,7 @@ input:focus {
 
 .workflow-split-choice-rider strong {
   min-width: 0;
-  color: #fff;
+  color: var(--ink);
   font-size: 11px;
   font-weight: 700;
   line-height: 1.25;
@@ -1991,18 +1995,18 @@ input:focus {
   justify-content: center;
   min-height: 28px;
   padding: 0 6px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
 }
 
 .workflow-split-choice-buttons button.selected {
-  border-color: #fff;
-  background: #000;
-  color: #fff;
+  border-color: var(--line-strong);
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .workflow-split-choice-buttons button:disabled {
@@ -2012,7 +2016,7 @@ input:focus {
 
 .side-nav {
   display: grid;
-  gap: 4px; background: #000; padding: 8px; border-radius: 10px;
+  gap: 4px; background: var(--panel); padding: 8px; border-radius: 10px;
 }
 
 .side-nav button {
@@ -2024,14 +2028,14 @@ input:focus {
   border-radius: 7px;
   background: transparent;
   font-weight: 700;
-  position: relative; color: rgb(255 255 255 / 86%);
+  position: relative; color: var(--muted);
 }
 
-.side-nav button.selected { background: #000; color: #fff; border-color: #fff;
+.side-nav button.selected { background: var(--panel); color: var(--ink); border-color: var(--line-strong);
 }
 
 .side-nav button:hover {
-  border-color: var(--line); background: #000; color: #fff;
+  border-color: var(--line); background: var(--panel); color: var(--ink);
 }
 
 .friends-online,
@@ -2064,15 +2068,15 @@ input:focus {
 }
 
 .friends-online {
-  background: #000;
-  border: 1px solid rgb(255 255 255 / 22%);
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--muted);
   gap: 4px;
 }
 
 .friends-online::before {
-  background: #000;
-  border: 1px solid rgb(255 255 255 / 26%);
+  background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 50%;
   content: '';
   height: 7px;
@@ -2082,8 +2086,8 @@ input:focus {
 .side-nav-count + .friends-online { margin-left: 0; }
 
 .side-nav-count {
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .side-nav-more {
@@ -2093,7 +2097,7 @@ input:focus {
   padding: 5px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #000;
+  background: var(--panel);
 }
 
 .watch-connect-indicator-slot {
@@ -2109,10 +2113,10 @@ input:focus {
   min-width: 0;
   min-height: 44px;
   padding: 6px 9px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font: inherit;
   font-size: 11px;
   font-weight: 700;
@@ -2127,7 +2131,7 @@ input:focus {
   height: 28px;
   place-items: center;
   border-radius: 50%;
-  background: #000;
+  background: var(--panel);
 }
 
 .watch-connect-indicator-icon b {
@@ -2155,43 +2159,43 @@ input:focus {
   margin-left: auto;
   place-items: center;
   border-radius: 50%;
-  background: rgb(0 0 0 / 74%);
+  background: rgb(255 255 255 / 74%);
   font-size: 13px;
   line-height: 1;
 }
 
 .watch-connect-indicator.live,
 .watch-connect-indicator.connected {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .watch-connect-indicator.live .watch-connect-indicator-icon,
 .watch-connect-indicator.connected .watch-connect-indicator-icon {
-  background: #000;
+  background: var(--panel);
 }
 
 .watch-connect-indicator.disconnected {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .watch-connect-indicator.disconnected .watch-connect-indicator-icon {
-  background: #000;
+  background: var(--panel);
 }
 
 .watch-connect-indicator.connecting,
 .watch-connect-indicator.syncing {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .watch-connect-indicator.connecting .watch-connect-indicator-icon,
 .watch-connect-indicator.syncing .watch-connect-indicator-icon {
-  background: #000;
+  background: var(--panel);
 }
 
 .watch-connect-indicator:hover {
@@ -2199,7 +2203,7 @@ input:focus {
 }
 
 .watch-connect-indicator:focus-visible {
-  outline: 3px solid rgb(255 255 255 / 26%);
+  outline: 3px solid var(--line);
   outline-offset: 2px;
 }
 
@@ -2265,7 +2269,7 @@ input:focus {
 
 .platform-main .heart-rate-account-block:focus,
 .platform-main .heart-rate-account-block:focus-visible {
-  outline: 3px solid rgb(255 255 255 / 26%);
+  outline: 3px solid var(--line);
   outline-offset: 3px;
 }
 
@@ -2287,31 +2291,31 @@ input:focus {
   gap: 8px;
   align-items: center;
   padding: 8px;
-  border: 1px solid rgb(255 255 255 / 26%);
+  border: 1px solid var(--line);
   border-radius: 9px;
-  background: #000;
-  color: rgb(255 255 255 / 86%);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .race-readiness-strip span {
   padding: 5px 9px;
-  border-right: 1px solid rgb(255 255 255 / 26%);
+  border-right: 1px solid var(--line);
   font-size: 12px;
   font-weight: 700;
 }
 
 .race-readiness-strip span.ready {
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
 }
 
 .race-readiness-strip button {
   min-height: 30px;
   margin-left: auto;
   padding: 0 12px;
-  border: 1px solid rgb(255 255 255 / 26%);
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: #000;
-  color: rgb(255 255 255 / 86%);
+  background: var(--panel);
+  color: var(--muted);
   font-weight: 700;
 }
 
@@ -2352,13 +2356,13 @@ input:focus {
   padding: 5px 9px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
   cursor: pointer;
 }
 
 .developer-preview-toggle.active {
-  border-color: #fff;
-  background: #000;
+  border-color: var(--line-strong);
+  background: var(--panel);
 }
 
 .developer-preview-toggle input {
@@ -2382,7 +2386,7 @@ input:focus {
 }
 
 .developer-preview-toggle b {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
 }
 
@@ -2424,7 +2428,7 @@ input:focus {
 .eyebrow {
   gap: 6px;
   margin-bottom: 5px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -2445,8 +2449,8 @@ input:focus {
   padding: 0 9px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 750;
   text-decoration: none;
@@ -3149,9 +3153,9 @@ input:focus {
   gap: 8px;
   width: clamp(54px, 5.8vw, 68px);
   padding: 11px 9px;
-  border: 2px solid rgb(255 255 255 / 38%);
+  border: 2px solid var(--line-strong);
   border-radius: 9px;
-  background: linear-gradient(180deg, rgb(0 0 0 / 96%), rgb(0 0 0 / 94%));
+  background: linear-gradient(180deg, rgb(255 255 255 / 96%), rgb(255 255 255 / 94%));
   box-shadow: 0 18px 46px rgba(0, 0, 0, 0.38);
   pointer-events: none;
   transform: translateX(-50%) scale(clamp(1.85, 1.25vw + 1.35, 2.25));
@@ -3199,10 +3203,10 @@ input:focus {
 .tree-lamp {
   display: block;
   aspect-ratio: 1;
-  border: 2px solid rgba(255, 255, 255, 0.22);
+  border: 2px solid var(--line);
   border-radius: 50%;
   background:
-    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.28), transparent 22%),
+    radial-gradient(circle at 32% 28%, var(--panel-soft), transparent 22%),
     radial-gradient(circle, rgba(114, 114, 114, 0.72), rgba(40, 40, 40, 0.92) 62%);
   opacity: 0.54;
 }
@@ -3213,21 +3217,21 @@ input:focus {
 
 .tree-lamp.red.active {
   background:
-    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.75), transparent 20%),
+    radial-gradient(circle at 32% 28%, var(--panel-soft), transparent 20%),
     radial-gradient(circle, #ff4b4b 0 36%, #cf1d1d 54%, #6f1111 72%);
   box-shadow: 0 0 22px rgba(255, 42, 42, 0.9);
 }
 
 .tree-lamp.yellow.active {
   background:
-    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.78), transparent 20%),
+    radial-gradient(circle at 32% 28%, var(--panel-soft), transparent 20%),
     radial-gradient(circle, #ffd84d 0 36%, #d99700 56%, #7a5100 74%);
   box-shadow: 0 0 22px rgba(255, 205, 45, 0.9);
 }
 
 .tree-lamp.green.active {
   background:
-    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.78), transparent 20%),
+    radial-gradient(circle at 32% 28%, var(--panel-soft), transparent 20%),
     radial-gradient(circle, #65f06c 0 36%, #18a044 56%, #0e5f2a 74%);
   box-shadow: 0 0 24px rgba(77, 238, 94, 0.95);
 }
@@ -3353,23 +3357,23 @@ input:focus {
   min-width: 0;
   min-height: 146px;
   padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--player-color) 55%, rgb(255 255 255 / 26%));
+  border: 1px solid color-mix(in srgb, var(--player-color) 55%, var(--line));
   border-left: 4px solid var(--player-color);
   border-radius: 9px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .rider-stat.remote {
   border-style: dashed;
   border-left: 3px solid var(--player-color);
-  background: #000;
+  background: var(--panel);
 }
 
 .rider-stat.ghost {
   border-style: dashed;
   border-left: 3px solid var(--player-color);
-  background: #000;
+  background: var(--panel);
 }
 
 .rider-stat div {
@@ -3396,7 +3400,7 @@ input:focus {
   justify-self: end;
   margin-left: auto;
   gap: 4px;
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
   font-size: 10px;
 }
 
@@ -3410,7 +3414,7 @@ input:focus {
   grid-area: place;
   align-self: end;
   padding-top: 5px;
-  border-top: 1px solid rgb(255 255 255 / 26%);
+  border-top: 1px solid var(--line);
   color: var(--player-color);
   font-size: 28px !important;
   font-weight: 700;
@@ -3418,7 +3422,7 @@ input:focus {
 }
 
 .rider-card-place.ready {
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
   font-size: 18px !important;
 }
 
@@ -3432,7 +3436,7 @@ input:focus {
   padding: 0 8px;
   border-radius: 7px;
   background: var(--player-color);
-  color: #111827;
+  color: #000;
   font-size: 12px;
   font-weight: 700;
 }
@@ -3448,8 +3452,8 @@ input:focus {
   overflow: hidden;
   border: 2px solid var(--rider-avatar-accent);
   border-radius: 50%;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   box-shadow: 0 2px 7px rgba(23, 23, 23, 0.18);
   font-size: 13px;
   font-weight: 700;
@@ -3471,9 +3475,9 @@ input:focus {
   align-items: center;
   min-width: 0;
   padding: 7px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .rider-photo-actions {
@@ -3491,10 +3495,10 @@ input:focus {
   justify-content: center;
   gap: 5px;
   padding: 0 8px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   cursor: pointer;
   font: inherit;
   font-size: 10px;
@@ -3507,8 +3511,8 @@ input:focus {
 
 .rider-photo-actions label:hover,
 .rider-photo-actions button:hover {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 .rider-photo-actions label.disabled,
@@ -3533,11 +3537,11 @@ input:focus {
 }
 
 .rider-photo-editor > small.success {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .rider-photo-editor > small.error {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .track-rider-marker-label {
@@ -3594,7 +3598,7 @@ input:focus {
 .race-announcer-section {
   background:
     radial-gradient(circle at 100% 0, rgb(0 0 0 / 10%), transparent 46%),
-    #000;
+    var(--panel);
 }
 
 .straight-sprint-air-picker > div {
@@ -3610,7 +3614,7 @@ input:focus {
 }
 
 .straight-sprint-air-picker button.selected {
-  background: #000;
+  background: var(--panel);
 }
 
 .announcer-enable-row,
@@ -3626,7 +3630,7 @@ input:focus {
   padding: 9px 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .announcer-enable-row > span {
@@ -3656,10 +3660,10 @@ input:focus {
   display: grid;
   gap: 3px;
   padding: 9px 10px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .announcer-service-status strong {
@@ -3676,9 +3680,9 @@ input:focus {
   display: grid;
   gap: 8px;
   padding: 10px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .ambient-admin-heading {
@@ -3689,7 +3693,7 @@ input:focus {
 }
 
 .ambient-admin-heading > span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -3699,28 +3703,28 @@ input:focus {
 .ambient-admin-heading button {
   min-height: 28px;
   padding: 0 9px;
-  border: 1px solid rgb(255 255 255 / 26%);
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
 }
 
 .ambient-admin-heading button.locked {
-  border-color: rgb(255 255 255 / 26%);
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .ambient-admin-controls > small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   line-height: 1.35;
 }
 
 .announcer-volume-row > span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -3752,7 +3756,7 @@ input:focus {
 }
 
 .angle-value {
-  color: #fff;
+  color: var(--ink);
   font-size: 13px;
   font-weight: 700;
 }
@@ -3765,7 +3769,7 @@ input:focus {
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .segmented-control.compact {
@@ -3808,19 +3812,19 @@ input:focus {
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 700;
 }
 
 .segmented-control button.selected {
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .panel-helper {
   margin: -2px 0 0;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 750;
   line-height: 1.35;
@@ -3838,7 +3842,7 @@ input:focus {
   padding: 9px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .split-choice-rider {
@@ -3850,7 +3854,7 @@ input:focus {
 
 .split-choice-rider strong {
   min-width: 0;
-  color: #fff;
+  color: var(--ink);
   font-size: 13px;
   font-weight: 700;
   line-height: 1.25;
@@ -3866,19 +3870,19 @@ input:focus {
 
 .split-choice-note {
   margin: 0;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 750;
   line-height: 1.35;
 }
 
 .ghost-section {
-  background: linear-gradient(180deg, #000 0%, #000 100%);
+  background: linear-gradient(180deg, var(--panel) 0%, var(--panel) 100%);
 }
 
 .ghost-race-setup {
   align-content: start;
-  background: linear-gradient(180deg, #000 0%, #000 100%);
+  background: linear-gradient(180deg, var(--panel) 0%, var(--panel) 100%);
 }
 
 .ghost-setup-summary {
@@ -3897,15 +3901,15 @@ input:focus {
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  color: #fff;
-  background: #000;
+  color: var(--ink);
+  background: var(--panel);
   font-size: 11px;
   font-weight: 700;
 }
 
 .ghost-setup-summary button:disabled {
-  color: rgb(255 255 255 / 78%);
-  background: #000;
+  color: var(--muted);
+  background: var(--panel);
 }
 
 .ghost-setup-state {
@@ -3915,10 +3919,10 @@ input:focus {
   gap: 10px;
   min-height: 48px;
   padding: 11px;
-  border: 1px dashed rgb(255 255 255 / 22%);
+  border: 1px dashed var(--line);
   border-radius: 9px;
-  color: rgb(255 255 255 / 78%);
-  background: #000;
+  color: var(--muted);
+  background: var(--panel);
   font-size: 11px;
   font-weight: 750;
   line-height: 1.4;
@@ -3926,9 +3930,9 @@ input:focus {
 
 .ghost-setup-state.error {
   border-style: solid;
-  border-color: rgb(255 255 255 / 35%);
-  color: #fff;
-  background: #000;
+  border-color: var(--line-strong);
+  color: var(--ink);
+  background: var(--panel);
 }
 
 .ghost-setup-options {
@@ -3946,15 +3950,15 @@ input:focus {
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  color: #fff;
-  background: #000;
+  color: var(--ink);
+  background: var(--panel);
   text-align: left;
 }
 
 .ghost-setup-options > button.selected {
-  border-color: #fff;
+  border-color: var(--line-strong);
   box-shadow: inset 3px 0 0 #828282;
-  background: #000;
+  background: var(--panel);
 }
 
 .ghost-setup-options > button:disabled {
@@ -3962,7 +3966,7 @@ input:focus {
 }
 
 .ghost-setup-rank {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
 }
@@ -3972,10 +3976,10 @@ input:focus {
   width: 32px;
   height: 32px;
   place-items: center;
-  border: 2px solid rgb(255 255 255 / 26%);
+  border: 2px solid var(--line);
   border-radius: 50%;
-  color: #fff;
-  background: #000;
+  color: var(--ink);
+  background: var(--panel);
   font-size: 10px;
   font-weight: 700;
 }
@@ -3996,18 +4000,18 @@ input:focus {
 
 .ghost-setup-copy small {
   margin-top: 2px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 9px;
 }
 
 .ghost-setup-options b {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
 }
 
 .loop-race-section {
   align-content: start;
-  background: #000;
+  background: var(--panel);
 }
 
 .lap-stepper {
@@ -4024,12 +4028,12 @@ input:focus {
   place-items: center;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .lap-stepper > button:disabled {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .lap-stepper label {
@@ -4041,7 +4045,7 @@ input:focus {
   min-height: 38px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #000;
+  background: var(--panel);
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
@@ -4053,7 +4057,7 @@ input:focus {
   padding: 0 5px;
   border: 0;
   background: transparent;
-  color: #fff;
+  color: var(--ink);
   font-size: 17px;
   font-weight: 700;
   text-align: center;
@@ -4082,14 +4086,14 @@ input:focus {
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
 
 .ghost-summary-row button:disabled {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .ghost-picker {
@@ -4126,7 +4130,7 @@ input:focus {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .ghost-rank-dropdown > summary,
@@ -4136,7 +4140,7 @@ input:focus {
   justify-content: space-between;
   gap: 10px;
   padding: 10px 12px;
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
@@ -4161,7 +4165,7 @@ input:focus {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .route-layout-card {
@@ -4170,7 +4174,7 @@ input:focus {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .route-layout-heading {
@@ -4179,7 +4183,7 @@ input:focus {
 }
 
 .route-layout-heading span {
-  color: #fff;
+  color: var(--ink);
   font-size: 13px;
   font-weight: 700;
 }
@@ -4202,7 +4206,7 @@ input:focus {
   padding: 7px 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #000;
+  background: var(--panel);
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
@@ -4210,9 +4214,9 @@ input:focus {
 }
 
 .route-layout-saved-row span.saved {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .zone-picker {
@@ -4228,23 +4232,23 @@ input:focus {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
   text-align: left;
 }
 
 .zone-picker button.selected {
-  border-color: #fff;
-  background: #000;
+  border-color: var(--line-strong);
+  background: var(--panel);
 }
 
 .zone-picker button.recovery {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 .zone-picker button.recovery.selected {
-  border-color: #fff;
-  background: #000;
+  border-color: var(--line-strong);
+  background: var(--panel);
 }
 
 .zone-picker span {
@@ -4270,7 +4274,7 @@ input:focus {
 }
 
 .mapping-section {
-  background: #000;
+  background: var(--panel);
 }
 
 .mapping-status-row {
@@ -4293,8 +4297,8 @@ input:focus {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 700;
   text-align: center;
@@ -4303,33 +4307,33 @@ input:focus {
 .mapping-hint {
   margin: 0;
   padding: 8px 9px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
   line-height: 1.35;
 }
 
 .mapping-hint.pedal-zone {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .mapping-race-view-card {
   display: grid;
   gap: 9px;
   padding: 10px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: #000;
+  background: var(--panel);
 }
 
 .mapping-race-view-card p {
   margin: 0;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   line-height: 1.4;
@@ -4343,10 +4347,10 @@ input:focus {
   width: 100%;
   min-height: 64px;
   padding: 10px 12px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   text-align: left;
 }
 
@@ -4362,7 +4366,7 @@ input:focus {
 }
 
 .mapping-obstacle-view-toggle small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 750;
   line-height: 1.35;
@@ -4374,26 +4378,26 @@ input:focus {
   min-width: 42px;
   min-height: 28px;
   border-radius: 999px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
 }
 
 .mapping-obstacle-view-toggle.active {
-  border-color: #fff;
-  background: #000;
-  color: #fff;
+  border-color: var(--line-strong);
+  background: var(--panel);
+  color: var(--ink);
   box-shadow: 0 0 0 2px rgb(165 165 165 / 13%);
 }
 
 .mapping-obstacle-view-toggle.active small {
-  color: #fff;
+  color: var(--ink);
 }
 
 .mapping-obstacle-view-toggle.active b {
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .zone-type-editor {
@@ -4402,7 +4406,7 @@ input:focus {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .zone-route-card {
@@ -4411,7 +4415,7 @@ input:focus {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .zone-route-steps {
@@ -4428,10 +4432,10 @@ input:focus {
   min-width: 0;
   min-height: 48px;
   padding: 6px 5px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   text-align: center;
 }
 
@@ -4445,14 +4449,14 @@ input:focus {
 }
 
 .zone-route-steps > .active {
-  border-color: #fff;
+  border-color: var(--line-strong);
   box-shadow: 0 0 0 2px rgb(165 165 165 / 18%);
 }
 
 .zone-route-steps > .complete {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .zone-route-steps strong,
@@ -4486,27 +4490,27 @@ input:focus {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
   text-align: left;
 }
 
 .zone-type-button.pedal {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 .zone-type-button.recovery {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 .zone-type-button.pending {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 .zone-type-button strong {
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
@@ -4534,20 +4538,20 @@ input:focus {
   width: 24px;
   height: 24px;
   padding: 0;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .zone-delete-button:hover {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 .zone-type-button span,
 .zone-type-button small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
 }
@@ -4559,10 +4563,10 @@ input:focus {
   min-width: 154px;
   min-height: 48px;
   padding: 7px 11px;
-  border: 1px solid rgb(255 255 255 / 38%);
+  border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: rgb(0 0 0 / 94%);
-  color: #fff;
+  background: rgb(255 255 255 / 94%);
+  color: var(--ink);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
 }
 
@@ -4590,13 +4594,13 @@ input:focus {
 }
 
 .mapping-tools-toggle-button small {
-  color: rgb(255 255 255 / 72%);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
 }
 
 .mapping-tools-toggle-button:hover {
-  background: rgb(0 0 0 / 96%);
+  background: rgb(255 255 255 / 96%);
 }
 
 .number-field {
@@ -4608,12 +4612,12 @@ input:focus {
   padding: 7px 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .number-field span,
 .number-field small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 700;
 }
@@ -4624,7 +4628,7 @@ input:focus {
   height: 28px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  color: #fff;
+  color: var(--ink);
   font-size: 13px;
   font-weight: 700;
   text-align: center;
@@ -4636,7 +4640,7 @@ input:focus {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .split-tool-header {
@@ -4654,7 +4658,7 @@ input:focus {
 
 .split-tool-header strong {
   overflow: hidden;
-  color: #fff;
+  color: var(--ink);
   font-size: 13px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -4663,12 +4667,12 @@ input:focus {
 
 .split-tool-header svg {
   flex: 0 0 auto;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .split-tool-card p {
   margin: 0;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 750;
   line-height: 1.35;
@@ -4687,12 +4691,12 @@ input:focus {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #000;
+  background: var(--panel);
 }
 
 .split-measurements div.ready {
-  border-color: rgb(255 255 255 / 38%);
-  background: #000;
+  border-color: var(--line-strong);
+  background: var(--panel);
 }
 
 .split-measurements strong,
@@ -4704,19 +4708,19 @@ input:focus {
 }
 
 .split-measurements strong {
-  color: #fff;
+  color: var(--ink);
   font-size: 11px;
   font-weight: 700;
 }
 
 .split-measurements span {
-  color: #fff;
+  color: var(--ink);
   font-size: 13px;
   font-weight: 700;
 }
 
 .split-measurements small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
 }
@@ -4739,7 +4743,7 @@ input:focus {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .split-row div {
@@ -4756,7 +4760,7 @@ input:focus {
 }
 
 .split-row strong {
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
@@ -4776,13 +4780,13 @@ input:focus {
   height: 32px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .split-row button:hover {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 .text-field {
@@ -4791,7 +4795,7 @@ input:focus {
 }
 
 .text-field span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 700;
 }
@@ -4802,7 +4806,7 @@ input:focus {
   min-height: 36px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  color: #fff;
+  color: var(--ink);
   font-size: 13px;
   font-weight: 700;
 }
@@ -4818,9 +4822,9 @@ input:focus {
   max-height: 186px;
   overflow: auto;
   padding: 5px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: #000;
+  background: var(--panel);
   box-shadow: 0 12px 28px rgba(36, 36, 36, 0.13);
 }
 
@@ -4832,15 +4836,15 @@ input:focus {
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
-  color: #fff;
+  color: var(--ink);
   text-align: left;
   cursor: pointer;
 }
 
 .location-suggestions button:hover,
 .location-suggestions button.selected {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 .location-suggestions strong {
@@ -4853,7 +4857,7 @@ input:focus {
 
 .location-suggestions small {
   overflow: hidden;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 750;
   text-overflow: ellipsis;
@@ -4862,7 +4866,7 @@ input:focus {
 
 .autocomplete-status {
   margin: 0;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   line-height: 1.35;
@@ -4871,10 +4875,10 @@ input:focus {
 .field-status {
   margin: 0;
   padding: 9px 10px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 750;
   line-height: 1.35;
@@ -4886,7 +4890,7 @@ input:focus {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #000;
+  background: var(--panel);
 }
 
 .custom-route-list-header,
@@ -4898,7 +4902,7 @@ input:focus {
 }
 
 .custom-route-list-header {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -4911,8 +4915,8 @@ input:focus {
   min-width: 22px;
   height: 22px;
   border-radius: 999px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 11px;
 }
 
@@ -4926,14 +4930,14 @@ input:focus {
 
 .custom-route-row {
   padding: 4px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .custom-route-row.selected {
-  border-color: #fff;
-  background: #000;
+  border-color: var(--line-strong);
+  background: var(--panel);
 }
 
 .custom-route-open,
@@ -4949,13 +4953,13 @@ input:focus {
   gap: 2px;
   min-width: 0;
   padding: 5px 7px;
-  color: #fff;
+  color: var(--ink);
   text-align: left;
 }
 
 .custom-route-open:hover,
 .custom-route-delete:hover {
-  background: #000;
+  background: var(--panel);
 }
 
 .custom-route-open:disabled {
@@ -4964,7 +4968,7 @@ input:focus {
 }
 
 .custom-route-row.selected .custom-route-open:hover {
-  background: #000;
+  background: var(--panel);
 }
 
 .custom-route-open strong,
@@ -4980,7 +4984,7 @@ input:focus {
 }
 
 .custom-route-open span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 750;
 }
@@ -4990,11 +4994,11 @@ input:focus {
   place-items: center;
   width: 32px;
   height: 32px;
-  color: #fff;
+  color: var(--ink);
 }
 
 .custom-route-delete:hover {
-  background: #000;
+  background: var(--panel);
 }
 
 .custom-route-confirm {
@@ -5008,25 +5012,25 @@ input:focus {
   padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
 }
 
 .custom-route-confirm button:hover {
-  background: #000;
+  background: var(--panel);
 }
 
 .custom-route-confirm button.danger {
-  border-color: rgb(255 255 255 / 26%);
-  background: #000;
-  color: #fff;
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .custom-route-confirm button.danger:hover {
-  background: #000;
+  background: var(--panel);
 }
 
 .mapping-actions {
@@ -5053,8 +5057,8 @@ input:focus {
   padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 11px;
   font-weight: 700;
 }
@@ -5073,7 +5077,7 @@ input:focus {
 
 .mapping-lifecycle-actions button strong {
   overflow: hidden;
-  color: #fff;
+  color: var(--ink);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5081,7 +5085,7 @@ input:focus {
 
 .mapping-lifecycle-actions button small {
   overflow: hidden;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -5094,23 +5098,23 @@ input:focus {
   justify-content: center;
   gap: 7px;
   min-height: 36px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
 
 .mapping-fullscreen-button:hover {
-  background: #000;
+  background: var(--panel);
 }
 
 .mapping-actions button:hover,
 .mapping-lifecycle-actions button:hover,
 .file-button:hover {
   border-color: var(--line-strong);
-  background: #000;
+  background: var(--panel);
 }
 
 .mapping-actions button:disabled,
@@ -5138,37 +5142,37 @@ input:focus {
 }
 
 .zone-chip.pedal {
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .zone-chip.technical {
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .zone-chip.recovery {
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .start-gate-status {
   display: grid;
   gap: 3px;
   padding: 10px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .start-gate-status strong {
-  color: #fff;
+  color: var(--ink);
   font-size: 16px;
   font-weight: 700;
 }
 
 .start-gate-status span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 700;
 }
@@ -5186,7 +5190,7 @@ input:focus {
   padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .metric-option input {
@@ -5215,7 +5219,7 @@ input:focus {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 700;
 }
@@ -5237,19 +5241,19 @@ input:focus {
 }
 
 .action-button.primary {
-  border: 1px solid #fff;
-  background: #fff;
-  color: #000;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .action-button.danger {
-  border: 1px solid rgb(255 255 255 / 26%);
-  background: #000;
-  color: #fff;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .action-button.danger:hover {
-  background: #000;
+  background: var(--panel);
 }
 
 .action-button.secondary,
@@ -5257,8 +5261,8 @@ input:focus {
 .clear-button,
 .room-actions button {
   border: 1px solid var(--line);
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .action-button.secondary:hover,
@@ -5266,7 +5270,7 @@ input:focus {
 .clear-button:hover,
 .room-actions button:hover {
   border-color: var(--line-strong);
-  background: #000;
+  background: var(--panel);
 }
 
 .square-button:disabled,
@@ -5322,10 +5326,10 @@ input:focus {
   align-items: center;
   margin: 0 10px;
   padding: 8px 9px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   line-height: 1.3;
@@ -5342,8 +5346,8 @@ input:focus {
   min-width: 20px;
   height: 20px;
   border-radius: 999px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 11px;
 }
 
@@ -5352,9 +5356,9 @@ input:focus {
   gap: 8px;
   margin: 10px 10px 0;
   padding: 10px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: #000;
+  background: var(--panel);
 }
 
 .demo-rider-count-control > div:first-child {
@@ -5365,13 +5369,13 @@ input:focus {
 }
 
 .demo-rider-count-control strong {
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
 
 .demo-rider-count-control span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
 }
@@ -5388,12 +5392,12 @@ input:focus {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .pair-card.online {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 .pair-card-header {
@@ -5416,7 +5420,7 @@ input:focus {
   padding: 0;
   border: 0;
   background: transparent;
-  color: #fff;
+  color: var(--ink);
   font: inherit;
   font-size: 13px;
   font-weight: 700;
@@ -5434,7 +5438,7 @@ input:focus {
 
 .select-label {
   gap: 6px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -5453,8 +5457,8 @@ input:focus {
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
@@ -5475,7 +5479,7 @@ input:focus {
   padding: 12px;
   border: 1px dashed var(--line-strong);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
   color: var(--muted);
   font-size: 12px;
 }
@@ -5486,7 +5490,7 @@ input:focus {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .room-card div {
@@ -5511,16 +5515,16 @@ input:focus {
   padding: 9px 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
 }
 
 .multiplayer-status.online {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .latency-card {
@@ -5530,8 +5534,8 @@ input:focus {
   padding: 9px 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .latency-card div {
@@ -5541,7 +5545,7 @@ input:focus {
 }
 
 .latency-card strong {
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
@@ -5556,18 +5560,18 @@ input:focus {
 }
 
 .latency-card.good {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 .latency-card.ok {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 .latency-card.poor {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 .profile-card {
@@ -5576,7 +5580,7 @@ input:focus {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .profile-key-row {
@@ -5628,10 +5632,10 @@ input:focus {
   gap: 7px;
   min-height: 36px;
   padding: 0 12px;
-  border: 1px solid rgb(255 255 255 / 26%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
@@ -5639,8 +5643,8 @@ input:focus {
 .primary-inline-button:disabled,
 .voice-card button:disabled {
   border-color: var(--line);
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .vote-candidate-list {
@@ -5657,14 +5661,14 @@ input:focus {
   padding: 9px 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   text-align: left;
 }
 
 .vote-candidate.selected {
-  border-color: #fff;
-  background: #000;
+  border-color: var(--line-strong);
+  background: var(--panel);
   box-shadow: inset 0 0 0 1px #e7e7e7;
 }
 
@@ -5697,8 +5701,8 @@ input:focus {
   width: 30px;
   height: 30px;
   border-radius: 999px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
@@ -5710,14 +5714,14 @@ input:focus {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .route-vote-card > div:first-child {
   display: flex;
   align-items: center;
   gap: 7px;
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
@@ -5726,9 +5730,9 @@ input:focus {
   justify-content: space-between;
   gap: 8px;
   padding: 9px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .challenge-card div,
@@ -5740,7 +5744,7 @@ input:focus {
 
 .challenge-card strong,
 .online-rider-row strong {
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
@@ -5764,8 +5768,8 @@ input:focus {
   padding: 0 9px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 11px;
   font-weight: 700;
 }
@@ -5781,9 +5785,9 @@ input:focus {
   gap: 10px;
   align-items: center;
   padding: 10px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .match-builder-copy {
@@ -5793,14 +5797,14 @@ input:focus {
 }
 
 .match-builder-card strong {
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
 
 .match-builder-card span {
   overflow: hidden;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -5816,7 +5820,7 @@ input:focus {
 }
 
 .studio-seat-selector b {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -5826,24 +5830,24 @@ input:focus {
   min-width: 28px;
   min-height: 26px;
   padding: 0 8px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 11px;
   font-weight: 700;
 }
 
 .studio-seat-selector button.active {
-  border-color: #fff;
-  background: #000;
-  color: #fff;
+  border-color: var(--line-strong);
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .selected-mini-button {
-  border-color: #fff !important;
-  background: #000 !important;
-  color: #fff !important;
+  border-color: var(--line-strong) !important;
+  background: var(--panel) !important;
+  color: var(--ink) !important;
 }
 
 .online-rider-row,
@@ -5853,7 +5857,7 @@ input:focus {
   padding: 9px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .online-rider-row {
@@ -5872,9 +5876,9 @@ input:focus {
   gap: 7px;
   align-items: center;
   padding: 8px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .social-request-row div,
@@ -5887,7 +5891,7 @@ input:focus {
 .social-request-row strong,
 .social-mini-row strong {
   overflow: hidden;
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -5911,8 +5915,8 @@ input:focus {
   padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 11px;
   font-weight: 700;
 }
@@ -5928,7 +5932,7 @@ input:focus {
   padding: 9px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .social-mini-row {
@@ -5952,8 +5956,8 @@ input:focus {
   padding: 0 9px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
@@ -5965,18 +5969,18 @@ input:focus {
   padding: 7px 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
   text-align: left;
 }
 
 .group-row.selected {
-  border-color: #fff;
-  background: #000;
+  border-color: var(--line-strong);
+  background: var(--panel);
 }
 
 .group-row strong {
   overflow: hidden;
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -6005,7 +6009,7 @@ input:focus {
 }
 
 .room-telemetry-row strong {
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
@@ -6019,11 +6023,11 @@ input:focus {
   padding: 9px;
   border: 1px dashed var(--line-strong);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .open-room-list span {
-  color: #fff;
+  color: var(--ink);
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -6035,8 +6039,8 @@ input:focus {
   padding: 6px 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   text-align: left;
@@ -6044,8 +6048,8 @@ input:focus {
 
 .open-room-link:hover:not(:disabled) {
   border-color: var(--line-strong);
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .selected-track-note {
@@ -6076,7 +6080,7 @@ input:focus {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .roster-row div {
@@ -6103,7 +6107,7 @@ input:focus {
   display: grid;
   gap: 4px;
   padding: 8px 0;
-  border-bottom: 1px solid rgb(255 255 255 / 34%);
+  border-bottom: 1px solid var(--line-strong);
 }
 
 .chat-message > div {
@@ -6112,7 +6116,7 @@ input:focus {
 }
 
 .chat-message p {
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -6146,9 +6150,9 @@ input:focus {
   gap: 12px;
   margin: 0 12px 12px;
   padding: 10px 12px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .capture-export-card > div:first-child {
@@ -6159,12 +6163,12 @@ input:focus {
 }
 
 .capture-export-card strong {
-  color: #fff;
+  color: var(--ink);
   font-size: 13px;
 }
 
 .capture-export-card small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 750;
   text-transform: uppercase;
@@ -6209,8 +6213,8 @@ input:focus {
   padding: 0 11px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 11px;
   font-weight: 700;
 }
@@ -6222,7 +6226,7 @@ input:focus {
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .race-summary-stats {
@@ -6236,14 +6240,14 @@ input:focus {
   gap: 3px;
   min-width: 0;
   padding: 10px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .race-summary-stats span,
 .race-summary-stats small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -6251,7 +6255,7 @@ input:focus {
 
 .race-summary-stats strong {
   overflow: hidden;
-  color: #fff;
+  color: var(--ink);
   font-size: 15px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -6271,8 +6275,8 @@ input:focus {
 .race-summary-table th,
 .race-summary-table td {
   padding: 9px 10px;
-  border-bottom: 1px solid rgb(255 255 255 / 34%);
-  color: #fff;
+  border-bottom: 1px solid var(--line-strong);
+  color: var(--ink);
   font-size: 12px;
   text-align: left;
   vertical-align: middle;
@@ -6280,7 +6284,7 @@ input:focus {
 }
 
 .race-summary-table th {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -6297,8 +6301,8 @@ input:focus {
   min-width: 42px;
   height: 28px;
   border-radius: 7px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-weight: 700;
 }
 
@@ -6343,7 +6347,7 @@ input:focus {
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .zone-table-card {
@@ -6359,13 +6363,13 @@ input:focus {
 .zone-table th,
 .zone-table td {
   padding: 9px 8px;
-  border-bottom: 1px solid rgb(255 255 255 / 34%);
+  border-bottom: 1px solid var(--line-strong);
   text-align: left;
   vertical-align: top;
 }
 
 .zone-table th {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -6383,7 +6387,7 @@ input:focus {
 }
 
 .zone-table td {
-  color: #fff;
+  color: var(--ink);
   font-size: 11px;
 }
 
@@ -6419,7 +6423,7 @@ input:focus {
 }
 
 .table-metric small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
@@ -6427,7 +6431,7 @@ input:focus {
 
 .table-metric strong {
   overflow-wrap: anywhere;
-  color: #fff;
+  color: var(--ink);
   font-size: 11px;
   font-weight: 700;
 }
@@ -6449,7 +6453,7 @@ input:focus {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .ghost-leaderboard-entry {
@@ -6468,8 +6472,8 @@ input:focus {
 }
 
 .ghost-leaderboard-entry.selected {
-  border-color: #fff;
-  background: #000;
+  border-color: var(--line-strong);
+  background: var(--panel);
   box-shadow: inset 3px 0 0 #b8b8b8;
 }
 
@@ -6531,7 +6535,7 @@ input:focus {
   min-width: 29px;
   height: 25px;
   border-radius: 999px;
-  background: #000;
+  background: var(--panel);
   font-size: 11px;
   font-weight: 700;
 }
@@ -6565,7 +6569,7 @@ input:focus {
 .diagnostic-card {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: rgb(0 0 0 / 95%);
+  background: rgb(255 255 255 / 95%);
   box-shadow: 0 10px 28px rgba(37, 37, 37, 0.06);
 }
 
@@ -6577,13 +6581,13 @@ input:focus {
   min-height: 132px;
   padding: 18px;
   background:
-    linear-gradient(135deg, rgb(0 0 0 / 96%), rgb(0 0 0 / 96%)),
-    #000;
+    linear-gradient(135deg, rgb(255 255 255 / 96%), rgb(255 255 255 / 96%)),
+    var(--panel);
 }
 
 .diagnostics-hero p {
   margin-top: 6px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 13px;
   font-weight: 760;
 }
@@ -6594,14 +6598,14 @@ input:focus {
   flex: 0 0 auto;
   width: 112px;
   height: 112px;
-  border: 10px solid rgb(255 255 255 / 22%);
+  border: 10px solid var(--line);
   border-radius: 50%;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .readiness-ring.ready {
-  border-color: rgb(255 255 255 / 22%);
+  border-color: var(--line);
 }
 
 .readiness-ring strong {
@@ -6610,7 +6614,7 @@ input:focus {
 }
 
 .readiness-ring span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -6627,19 +6631,19 @@ input:focus {
   gap: 8px;
   min-height: 138px;
   padding: 12px;
-  border-left: 4px solid rgb(255 255 255 / 22%);
+  border-left: 4px solid var(--line);
 }
 
 .diagnostic-card.ready {
-  border-left-color: rgb(255 255 255 / 22%);
+  border-left-color: var(--line);
 }
 
 .diagnostic-card.warning {
-  border-left-color: rgb(255 255 255 / 22%);
+  border-left-color: var(--line);
 }
 
 .diagnostic-card.blocked {
-  border-left-color: rgb(255 255 255 / 26%);
+  border-left-color: var(--line);
 }
 
 .diagnostic-card-head {
@@ -6654,34 +6658,34 @@ input:focus {
   width: 32px;
   height: 32px;
   border-radius: 7px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .diagnostic-card.ready .diagnostic-card-head span {
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .diagnostic-card.warning .diagnostic-card-head span {
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .diagnostic-card.blocked .diagnostic-card-head span {
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .diagnostic-card strong {
-  color: #fff;
+  color: var(--ink);
   font-size: 13px;
   font-weight: 700;
 }
 
 .diagnostic-card small,
 .diagnostic-card em {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-style: normal;
   font-weight: 780;
@@ -6690,7 +6694,7 @@ input:focus {
 
 .diagnostic-card em {
   align-self: end;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -6726,26 +6730,26 @@ input:focus {
   gap: 10px;
   min-height: 34px;
   padding: 8px 9px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 700;
 }
 
 .diagnostic-stat-list strong {
-  color: #fff;
+  color: var(--ink);
   font-size: 13px;
   font-weight: 700;
 }
 
 .diagnostic-note {
   padding: 9px 10px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 760;
   line-height: 1.4;
@@ -6771,8 +6775,8 @@ input:focus {
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
@@ -6780,13 +6784,13 @@ input:focus {
 .diagnostic-actions button:hover,
 .profile-key-card button:hover {
   border-color: var(--line-strong);
-  background: #000;
+  background: var(--panel);
 }
 
 .diagnostic-minor {
   display: grid;
   gap: 4px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 780;
 }
@@ -6795,19 +6799,19 @@ input:focus {
   display: grid;
   gap: 5px;
   padding: 11px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .diagnostic-track-card strong {
-  color: #fff;
+  color: var(--ink);
   font-size: 14px;
   font-weight: 700;
 }
 
 .diagnostic-track-card span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 780;
 }
@@ -6822,8 +6826,8 @@ input:focus {
   min-height: 24px;
   padding: 5px 7px;
   border-radius: 999px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -6835,14 +6839,14 @@ input:focus {
   gap: 5px 8px;
   align-items: center;
   padding: 10px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .profile-key-card span {
   grid-column: 1 / -1;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -6851,7 +6855,7 @@ input:focus {
 .profile-key-card strong {
   min-width: 0;
   overflow: hidden;
-  color: #fff;
+  color: var(--ink);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 13px;
   font-weight: 700;
@@ -6876,10 +6880,10 @@ input:focus {
   align-items: center;
   min-height: 32px;
   padding: 7px 8px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 12px;
   font-style: normal;
   font-weight: 700;
@@ -6893,7 +6897,7 @@ input:focus {
 }
 
 .diagnostic-bike-list small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
 }
@@ -6917,7 +6921,7 @@ input:focus {
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
   font-size: 12px;
   font-weight: 700;
 }
@@ -6944,15 +6948,15 @@ input:focus {
   border: 1px solid var(--line);
   border-left: 5px solid var(--player-color);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .monitor-card.idle {
-  border-left-color: rgb(255 255 255 / 22%);
+  border-left-color: var(--line);
 }
 
 .monitor-card.idle .monitor-live {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .monitor-card-head {
@@ -6972,14 +6976,14 @@ input:focus {
 }
 
 .monitor-bike-id {
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
 
 .monitor-card-head small {
   display: block;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 750;
 }
@@ -6987,7 +6991,7 @@ input:focus {
 .monitor-live {
   gap: 5px;
   margin-left: auto;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 700;
 }
@@ -7000,7 +7004,7 @@ input:focus {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .monitor-primary span {
@@ -7020,19 +7024,19 @@ input:focus {
   padding: 11px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .monitor-sprint-result.empty {
   place-items: center;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 700;
 }
 
 .monitor-sprint-result.capturing {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 .monitor-sprint-head {
@@ -7043,14 +7047,14 @@ input:focus {
 }
 
 .monitor-sprint-head strong {
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
 }
 
 .monitor-sprint-head span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 700;
 }
@@ -7067,20 +7071,20 @@ input:focus {
   gap: 3px;
   min-height: 44px;
   padding: 7px 5px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: #000;
+  background: var(--panel);
 }
 
 .monitor-sprint-grid span {
-  color: #fff;
+  color: var(--ink);
   font-size: 23px;
   font-weight: 700;
   line-height: 1;
 }
 
 .monitor-sprint-grid small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
   text-align: center;
@@ -7100,7 +7104,7 @@ input:focus {
 .developer-error {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: rgb(0 0 0 / 96%);
+  background: rgb(255 255 255 / 96%);
   box-shadow: 0 10px 28px rgba(37, 37, 37, 0.06);
 }
 
@@ -7110,19 +7114,19 @@ input:focus {
   justify-content: space-between;
   gap: 18px;
   padding: 18px;
-  background: linear-gradient(135deg, #000, #000 62%);
+  background: linear-gradient(135deg, var(--panel), var(--panel) 62%);
 }
 
 .developer-tools-header h1 {
   margin-top: 3px;
-  color: #fff;
+  color: var(--ink);
   font-size: 25px;
   letter-spacing: 0;
 }
 
 .developer-tools-header p {
   margin-top: 5px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 13px;
   font-weight: 720;
 }
@@ -7146,22 +7150,22 @@ input:focus {
 }
 
 .developer-admin-badge {
-  border: 1px solid rgb(255 255 255 / 22%);
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .developer-tools-actions button,
 .developer-error button {
-  border: 1px solid rgb(255 255 255 / 22%);
-  background: #000;
-  color: #fff;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .developer-tools-actions button:hover,
 .developer-error button:hover {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 .developer-tools-actions button:disabled {
@@ -7182,13 +7186,13 @@ input:focus {
   align-items: center;
   gap: 10px;
   padding: 12px 14px;
-  border-left: 4px solid rgb(255 255 255 / 26%);
-  color: #fff;
+  border-left: 4px solid var(--line);
+  color: var(--ink);
 }
 
 .developer-error span {
   flex: 1;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 720;
 }
@@ -7221,7 +7225,7 @@ input:focus {
 }
 
 .developer-usage-summary strong {
-  color: #fff;
+  color: var(--ink);
   font-size: 36px;
   font-weight: 700;
   line-height: 1;
@@ -7230,7 +7234,7 @@ input:focus {
 .developer-usage-summary > span:last-child,
 .developer-usage-meter small,
 .developer-usage-stat span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 780;
 }
@@ -7240,7 +7244,7 @@ input:focus {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 700;
 }
@@ -7269,7 +7273,7 @@ input:focus {
 }
 
 .developer-usage-stat strong {
-  color: #fff;
+  color: var(--ink);
   font-size: 27px;
   font-weight: 700;
 }
@@ -7293,12 +7297,12 @@ input:focus {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .developer-section-heading h2 {
   margin-top: 3px;
-  color: #fff;
+  color: var(--ink);
   font-size: 16px;
   letter-spacing: 0;
 }
@@ -7306,7 +7310,7 @@ input:focus {
 .developer-context-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
   overflow: hidden;
 }
@@ -7316,8 +7320,8 @@ input:focus {
   gap: 8px;
   min-width: 0;
   padding: 12px;
-  border-right: 1px solid rgb(255 255 255 / 22%);
-  background: #000;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
 }
 
 .developer-context-grid > div:last-child {
@@ -7329,13 +7333,13 @@ input:focus {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
 }
 
 .developer-context-grid strong {
-  color: #fff;
+  color: var(--ink);
   font-size: 22px;
   font-weight: 700;
 }
@@ -7359,7 +7363,7 @@ input:focus {
 }
 
 .developer-daily-column strong {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 9px;
 }
 
@@ -7369,18 +7373,18 @@ input:focus {
   min-height: 6px;
   margin: 0 auto;
   border-radius: 3px 3px 1px 1px;
-  background: #000;
+  background: var(--panel);
 }
 
 .developer-daily-column small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 9px;
   font-weight: 700;
 }
 
 .developer-track-table {
   display: grid;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 7px;
   overflow: hidden;
 }
@@ -7392,8 +7396,8 @@ input:focus {
   align-items: center;
   min-height: 40px;
   padding: 7px 10px;
-  border-bottom: 1px solid rgb(255 255 255 / 22%);
-  color: rgb(255 255 255 / 78%);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -7404,8 +7408,8 @@ input:focus {
 .developer-track-table .developer-track-table-head {
   grid-template-columns: minmax(0, 1fr) auto;
   min-height: 34px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -7421,8 +7425,8 @@ input:focus {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
 }
@@ -7430,7 +7434,7 @@ input:focus {
 .developer-track-table strong {
   min-width: 0;
   overflow: hidden;
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -7440,7 +7444,7 @@ input:focus {
   display: grid;
   place-items: center;
   min-height: 104px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 750;
   text-align: center;
@@ -7450,8 +7454,8 @@ input:focus {
   display: flex;
   gap: 11px;
   padding: 15px;
-  border-left: 4px solid rgb(255 255 255 / 26%);
-  color: rgb(255 255 255 / 78%);
+  border-left: 4px solid var(--line);
+  color: var(--muted);
 }
 
 .developer-tools-note > div {
@@ -7460,13 +7464,13 @@ input:focus {
 }
 
 .developer-tools-note strong {
-  color: #fff;
+  color: var(--ink);
   font-size: 13px;
 }
 
 .developer-tools-note p,
 .developer-tools-note small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 720;
   line-height: 1.45;
@@ -7477,7 +7481,7 @@ input:focus {
   align-items: center;
   gap: 5px;
   width: fit-content;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
 }
@@ -7677,7 +7681,7 @@ input:focus {
     overflow-x: hidden;
     overflow-x: clip;
     border-bottom: 1px solid var(--line);
-    background: #000;
+    background: var(--panel);
   }
 
   .side-nav > * {
@@ -7955,7 +7959,7 @@ input:focus {
   min-height: 520px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #000;
+  background: var(--panel);
   color: var(--muted);
   font-size: 13px;
   font-weight: 700;
@@ -7966,8 +7970,8 @@ input:focus {
   width: 38px;
   height: 38px;
   border-radius: 10px;
-  background: #000;
-  color: rgb(255 255 255 / 86%);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .explore-topbar-heading span {
@@ -8001,12 +8005,12 @@ input:focus {
   gap: 20px;
   padding: 22px 24px;
   overflow: hidden;
-  border: 1px solid rgb(255 255 255 / 26%);
+  border: 1px solid var(--line);
   border-radius: 14px;
   background:
     radial-gradient(circle at 82% 10%, rgb(0 0 0 / 20%), transparent 32%),
-    linear-gradient(135deg, #000, #000);
-  color: #fff;
+    linear-gradient(135deg, var(--panel), var(--panel));
+  color: var(--ink);
 }
 
 .explore-hero h2 {
@@ -8016,12 +8020,12 @@ input:focus {
 
 .explore-hero p {
   margin-top: 5px;
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
   font-size: 13px;
 }
 
 .explore-hero .eyebrow {
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
 }
 
 .explore-mode-switch,
@@ -8054,12 +8058,12 @@ input:focus {
 }
 
 .explore-mode-switch button {
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
 }
 
 .explore-mode-switch button.selected {
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .explore-demo-banner {
@@ -8067,15 +8071,15 @@ input:focus {
   align-items: center;
   gap: 9px;
   padding: 11px 14px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 12px;
 }
 
 .explore-demo-banner span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .explore-layout {
@@ -8108,7 +8112,7 @@ input:focus {
 
 .explore-room-card {
   border-bottom: 1px solid var(--line);
-  background: #000;
+  background: var(--panel);
 }
 
 .explore-room-card strong {
@@ -8132,8 +8136,8 @@ input:focus {
   padding: 0 12px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
@@ -8141,7 +8145,7 @@ input:focus {
 .explore-route-builder label {
   display: grid;
   gap: 6px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
 }
@@ -8164,41 +8168,41 @@ input:focus {
 
 .explore-travel-mode {
   border: 1px solid var(--line);
-  background: #000;
+  background: var(--panel);
 }
 
 .explore-travel-mode button {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .explore-travel-mode button.selected {
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   box-shadow: 0 3px 9px rgba(23, 23, 23, 0.18);
 }
 
 .explore-route-builder .explore-create-route,
 .explore-controls button.primary {
-  border-color: rgb(255 255 255 / 22%);
-  background: linear-gradient(135deg, #000, #000);
-  color: #fff;
+  border-color: var(--line);
+  background: linear-gradient(135deg, var(--panel), var(--panel));
+  color: var(--ink);
 }
 
 .explore-route-message {
   padding: 9px 10px;
   border-radius: 7px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 11px;
 }
 
 .explore-route-message.error {
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .explore-route-warning {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   line-height: 1.45;
 }
@@ -8258,7 +8262,7 @@ input:focus {
   padding: 7px 9px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #000;
+  background: var(--panel);
 }
 
 .explore-route-summary dt {
@@ -8285,7 +8289,7 @@ input:focus {
   min-height: 460px;
   overflow: hidden;
   border-radius: 10px;
-  background: #000;
+  background: var(--panel);
 }
 
 .explore-map-grid.single {
@@ -8324,8 +8328,8 @@ input:focus {
   padding: 0 10px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 11px;
   font-weight: 700;
 }
@@ -8336,7 +8340,7 @@ input:focus {
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: #000;
+  background: var(--panel);
 }
 
 .explore-camera-toolbar .explore-toolbar-toggle button {
@@ -8356,9 +8360,9 @@ input:focus {
 
 .explore-camera-toolbar .explore-map-labels-toggle.active,
 .explore-camera-toolbar .explore-toolbar-toggle button.active {
-  border-color: #fff;
-  background: #000;
-  color: #fff;
+  border-color: var(--line-strong);
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .explore-camera-position-toggle svg.behind {
@@ -8374,12 +8378,12 @@ input:focus {
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #000;
+  background: var(--panel);
 }
 
 .explore-camera-toolbar label span,
 .explore-camera-toolbar label small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
   white-space: nowrap;
@@ -8387,7 +8391,7 @@ input:focus {
 
 .explore-camera-toolbar label small {
   min-width: 52px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   text-align: right;
 }
 
@@ -8491,10 +8495,10 @@ input:focus {
   width: min(500px, calc(100% - 20px));
   max-height: min(620px, calc(100% - 36px));
   overflow: auto;
-  border: 1px solid rgb(255 255 255 / 24%);
+  border: 1px solid var(--line);
   border-radius: 16px;
-  background: rgb(0 0 0 / 98%);
-  color: #fff;
+  background: rgb(255 255 255 / 98%);
+  color: var(--ink);
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
   pointer-events: auto;
   backdrop-filter: blur(14px);
@@ -8509,15 +8513,15 @@ input:focus {
   justify-content: space-between;
   gap: 14px;
   padding: 13px 15px;
-  border-bottom: 1px solid rgb(255 255 255 / 22%);
-  background: rgb(0 0 0 / 98%);
+  border-bottom: 1px solid var(--line);
+  background: rgb(255 255 255 / 98%);
 }
 
 .explore-landmark-dialog > header > span {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -8529,10 +8533,10 @@ input:focus {
   place-items: center;
   width: 38px;
   height: 38px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 9px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .explore-landmark-loading,
@@ -8548,8 +8552,8 @@ input:focus {
 .explore-landmark-spinner {
   width: 34px;
   height: 34px;
-  border: 4px solid rgb(255 255 255 / 22%);
-  border-top-color: rgb(255 255 255 / 22%);
+  border: 4px solid var(--line);
+  border-top-color: var(--line);
   border-radius: 50%;
   animation: explore-landmark-spin 0.8s linear infinite;
 }
@@ -8562,7 +8566,7 @@ input:focus {
 
 .explore-landmark-error p {
   margin: 0;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -8572,8 +8576,8 @@ input:focus {
   padding: 0 16px;
   border: 0;
   border-radius: 8px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
 }
@@ -8590,7 +8594,7 @@ input:focus {
 }
 
 .explore-landmark-title > span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -8605,7 +8609,7 @@ input:focus {
 
 .explore-landmark-title p {
   margin: 0;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -8623,28 +8627,28 @@ input:focus {
   gap: 5px;
   min-height: 34px;
   padding: 6px 10px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 999px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 750;
 }
 
 .explore-landmark-facts > span:first-child svg {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .explore-landmark-facts > span.open {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .explore-landmark-facts > span.closed {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .explore-landmark-actions {
@@ -8661,29 +8665,29 @@ input:focus {
   gap: 7px;
   min-height: 42px;
   padding: 0 14px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 9px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 700;
   text-decoration: none;
 }
 
 .explore-landmark-actions button {
-  border-color: rgb(255 255 255 / 26%);
-  background: #000;
-  color: #fff;
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .explore-landmark-actions a:last-child {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
-  color: #fff;
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .explore-landmark-details > small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
 }
 
@@ -8820,7 +8824,7 @@ input:focus {
   border: 1px solid var(--line);
   border-left: 4px solid var(--player-color);
   border-radius: 8px;
-  background: #000;
+  background: var(--panel);
 }
 
 .explore-rider-strip img,
@@ -8831,8 +8835,8 @@ input:focus {
   height: 44px;
   border: 2px solid var(--player-color);
   border-radius: 50%;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 12px;
   font-weight: 700;
   object-fit: cover;
@@ -8899,14 +8903,14 @@ input:focus {
   padding: 7px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #000;
+  background: var(--panel);
   color: var(--ink);
   text-align: left;
 }
 
 .explore-demo-rider-picker button.selected {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 .explore-demo-rider-picker button > img,
@@ -8915,10 +8919,10 @@ input:focus {
   place-items: center;
   width: 30px;
   height: 30px;
-  border: 2px solid var(--player-color, rgb(255 255 255 / 22%));
+  border: 2px solid var(--player-color, var(--line));
   border-radius: 50%;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 9px;
   font-weight: 700;
   object-fit: cover;
@@ -8946,7 +8950,7 @@ input:focus {
 }
 
 .explore-demo-rider-picker button.selected b {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .explore-controls {
@@ -8961,9 +8965,9 @@ input:focus {
   justify-content: space-between;
   gap: 14px;
   padding: 12px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background: #000;
+  background: var(--panel);
 }
 
 .explore-completion-actions > div {
@@ -8973,7 +8977,7 @@ input:focus {
 }
 
 .explore-completion-actions > div:first-child {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .explore-completion-actions span {
@@ -8986,7 +8990,7 @@ input:focus {
 }
 
 .explore-completion-actions small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
 }
 
@@ -8997,10 +9001,10 @@ input:focus {
   gap: 7px;
   min-height: 40px;
   padding: 0 12px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 11px;
   font-weight: 700;
 }
@@ -9017,7 +9021,7 @@ input:focus {
   gap: 9px;
   min-height: 620px;
   padding: 30px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   text-align: center;
 }
 
@@ -9026,8 +9030,8 @@ input:focus {
   width: 70px;
   height: 70px;
   border-radius: 20px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .explore-empty-state h3 {
@@ -9186,7 +9190,7 @@ input:focus {
   display: block;
   min-height: 0;
   overflow: hidden;
-  background: #000;
+  background: var(--panel);
 }
 
 .explore-fullscreen .sidebar,
@@ -9545,33 +9549,64 @@ input:focus {
 /* Shared neutral interface tokens, following Tool Track's restrained SaaS surfaces. */
 button:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
 
-/* Black-and-white surfaces use borders and white actions for hierarchy. */
+/* White surfaces use subtle borders and dark actions for hierarchy. */
 .primary-button,
 .action-button.primary,
 .workflow-step.primary-action {
-  background: #fff;
-  color: #000;
-  border-color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
 }
 
 .primary-button:hover,
 .action-button.primary:hover,
 .workflow-step.primary-action:hover {
-  background: #fff;
-  color: #000;
-  border-color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
   box-shadow: 0 0 0 3px rgb(255 255 255 / 16%);
 }
 
 .workflow-step.primary-action :is(.workflow-copy, .workflow-copy small, .workflow-index) {
-  color: #000;
+  color: var(--on-accent);
 }
 
 :where(button, input, select, textarea, a):focus-visible {
-  outline: 2px solid #fff;
+  outline: 2px solid var(--line-strong);
   outline-offset: 3px;
 }
 
-button:focus-visible { outline-color: #fff; }
+button:focus-visible { outline-color: var(--line-strong); }
 
-::selection { background: #fff; color: #000; }
+::selection { background: var(--accent); color: var(--on-accent); }
+
+/* Photo and race overlays keep their original contrast and media colors. */
+
+.earth-stage,
+.race-rider-overlay,
+.reaction-test-view,
+.explore-street-view-overlay,
+.explore-fullscreen .explore-destination-overlay {
+  color-scheme: dark;
+  --panel: #000;
+  --panel-soft: #000;
+  --ink: #fff;
+  --muted: rgb(255 255 255 / 78%);
+  --line: rgb(255 255 255 / 18%);
+  --line-strong: rgb(255 255 255 / 42%);
+  --accent: #fff;
+  --on-accent: #000;
+  --field: #000;
+  --hover: #171717;
+  --lime: #fff;
+  --blue: #fff;
+  color: #fff;
+}
+
+.side-nav button.selected,
+.segmented-control button.active,
+.segmented-control button.selected {
+  background: var(--panel-soft);
+  color: var(--ink);
+  border-color: var(--ink);
+}

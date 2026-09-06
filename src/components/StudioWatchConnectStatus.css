@@ -1,9 +1,9 @@
 .studio-watch-connect-status {
   align-items: center;
-  background: #000;
-  border: 1px solid rgb(255 255 255 / 22%);
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
   border-radius: 999px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   display: inline-flex;
   font-size: 9px;
   font-weight: 800;
@@ -15,13 +15,13 @@
 
 .studio-watch-connect-status.connected,
 .studio-watch-connect-status.recognized {
-  background: #000;
-  border-color: rgb(255 255 255 / 22%);
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel-soft);
+  border-color: var(--line);
+  color: var(--muted);
 }
 
 .studio-watch-connect-status.ended {
-  background: #000;
-  border-color: rgb(255 255 255 / 22%);
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel-soft);
+  border-color: var(--line);
+  color: var(--muted);
 }

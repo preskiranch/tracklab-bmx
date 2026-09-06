@@ -8,26 +8,26 @@
 }
 
 .live-friend-audio-card {
-  background: #000;
-  border: 1px solid rgb(255 255 255 / 22%);
+  background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 14px;
   box-shadow: 0 18px 42px rgb(23 23 23 / 22%);
-  color: #fff;
+  color: var(--ink);
   display: grid;
   gap: 11px;
   padding: 14px;
   pointer-events: auto;
 }
 
-.live-friend-audio-card.active { border-color: #fff; box-shadow: 0 18px 42px rgb(79 79 79 / 20%); }
+.live-friend-audio-card.active { border-color: var(--line-strong); box-shadow: 0 18px 42px rgb(79 79 79 / 20%); }
 .live-friend-audio-card.compact-card { padding-right: 44px; position: relative; }
 .live-friend-audio-heading { align-items: center; display: grid; gap: 11px; grid-template-columns: auto minmax(0, 1fr); }
 .live-friend-audio-heading > span:last-child { display: grid; gap: 2px; min-width: 0; }
-.live-friend-audio-heading small { color: rgb(255 255 255 / 78%); font-size: 11px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
-.live-friend-audio-heading strong { color: #fff; line-height: 1.25; }
-.live-friend-audio-heading span span { color: rgb(255 255 255 / 78%); font-size: 12px; line-height: 1.35; }
+.live-friend-audio-heading small { color: var(--muted); font-size: 11px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.live-friend-audio-heading strong { color: var(--ink); line-height: 1.25; }
+.live-friend-audio-heading span span { color: var(--muted); font-size: 12px; line-height: 1.35; }
 .live-friend-audio-heading.compact { grid-template-columns: 24px minmax(0, 1fr); }
-.live-friend-audio-heading.compact > svg { color: rgb(255 255 255 / 78%); }
+.live-friend-audio-heading.compact > svg { color: var(--muted); }
 .live-friend-audio-avatar { display: inline-flex; }
 .live-friend-audio-avatar .rider-avatar { flex: 0 0 48px; height: 48px; width: 48px; }
 
@@ -36,10 +36,10 @@
 .live-friend-audio-retry,
 .live-friend-audio-dismiss {
   align-items: center;
-  background: #000;
-  border: 1px solid rgb(255 255 255 / 22%);
+  background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 9px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   display: inline-flex;
   font: inherit;
   font-size: 13px;
@@ -49,16 +49,16 @@
   min-height: 44px;
   padding: 8px 11px;
 }
-.live-friend-audio-actions button.primary { background: #fff; border-color: #fff; color: #000; }
+.live-friend-audio-actions button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .live-friend-audio-actions button:disabled,
 .live-friend-audio-retry:disabled { cursor: default; opacity: .58; }
 .live-friend-audio-actions button:focus-visible,
 .live-friend-audio-retry:focus-visible,
-.live-friend-audio-dismiss:focus-visible { outline: 3px solid rgb(255 255 255 / 38%); outline-offset: 2px; }
+.live-friend-audio-dismiss:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 
-.live-friend-audio-expiry { color: rgb(255 255 255 / 78%); font-size: 11px; font-weight: 750; text-align: right; }
-.live-friend-audio-status { color: rgb(255 255 255 / 78%); font-size: 11px; line-height: 1.4; margin: 0; }
-.live-friend-audio-status.error { color: rgb(255 255 255 / 78%); }
+.live-friend-audio-expiry { color: var(--muted); font-size: 11px; font-weight: 750; text-align: right; }
+.live-friend-audio-status { color: var(--muted); font-size: 11px; line-height: 1.4; margin: 0; }
+.live-friend-audio-status.error { color: var(--muted); }
 .live-friend-audio-retry { justify-self: start; }
 .live-friend-audio-dismiss { min-width: 44px; padding: 8px; position: absolute; right: 7px; top: 7px; }
 .live-friend-audio-spin { animation: live-friend-audio-spin .9s linear infinite; }

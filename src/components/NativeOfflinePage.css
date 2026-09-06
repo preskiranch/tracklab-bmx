@@ -1,7 +1,7 @@
 .native-offline-page {
   align-items: center;
-  background: radial-gradient(circle at 50% 20%, #000 0, #000 34%, #000 72%);
-  color: #fff;
+  background: var(--panel-soft);
+  color: var(--ink);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -19,7 +19,7 @@
 }
 
 .native-offline-page p {
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
   font-size: 17px;
   line-height: 1.5;
   margin: 0 auto 24px;
@@ -28,8 +28,8 @@
 
 .native-offline-page button,
 .native-offline-mark {
-  background: #000;
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
   font-weight: 900;
 }
 

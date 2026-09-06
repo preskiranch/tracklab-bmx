@@ -1,16 +1,16 @@
 .watch-connect-card {
-  background: #000;
-  border: 1px solid rgb(255 255 255 / 22%);
+  background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 14px;
   box-shadow: 0 8px 24px #1e1e1e12;
-  color: #fff;
+  color: var(--ink);
   display: grid;
   gap: 12px;
   padding: 14px;
 }
 
 .watch-connect-card:focus-visible {
-  outline: 3px solid rgb(255 255 255 / 26%);
+  outline: 3px solid var(--ink);
   outline-offset: 3px;
 }
 
@@ -22,9 +22,9 @@
 }
 
 .watch-connect-card-icon {
-  background: #000;
+  background: var(--panel-soft);
   border-radius: 12px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   display: grid;
   height: 40px;
   place-items: center;
@@ -32,7 +32,7 @@
 }
 
 .watch-connect-card .eyebrow {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   display: block;
   font-size: 9px;
   font-weight: 800;
@@ -46,14 +46,14 @@
 }
 
 .watch-connect-card header small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .watch-connect-card-status {
   align-items: center;
-  background: #000;
+  background: var(--panel-soft);
   border-radius: 999px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   display: inline-flex;
   font-size: 10px;
   font-weight: 800;
@@ -64,22 +64,22 @@
 
 .watch-connect-card-status.connecting,
 .watch-connect-card-status.syncing {
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel-soft);
+  color: var(--muted);
 }
 
 .watch-connect-card-status.connected {
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel-soft);
+  color: var(--muted);
 }
 
 .watch-connect-card-status.ended {
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel-soft);
+  color: var(--muted);
 }
 
 .watch-connect-card-message {
-  background: #000;
+  background: var(--panel-soft);
   border-radius: 10px;
   display: grid;
   gap: 3px;
@@ -98,13 +98,13 @@
 }
 
 .watch-connect-card-message small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .watch-connect-card-remote-reading {
   align-items: center;
-  background: #000;
-  border: 1px solid rgb(255 255 255 / 22%);
+  background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 11px;
   display: flex;
   gap: 12px;
@@ -122,7 +122,7 @@
 }
 
 .watch-connect-card-remote-reading > span small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   line-height: 1.4;
 }
 
@@ -135,10 +135,10 @@
 .watch-connect-card-actions button,
 .watch-connect-card-actions a {
   align-items: center;
-  background: #000;
-  border: 1px solid rgb(255 255 255 / 22%);
+  background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 9px;
-  color: #fff;
+  color: var(--ink);
   cursor: pointer;
   display: inline-flex;
   font: inherit;
@@ -154,9 +154,9 @@
 
 .watch-connect-card-actions button.primary,
 .watch-connect-card-actions a.primary {
-  background: #fff;
-  border-color: #fff;
-  color: #000;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
 }
 
 .watch-connect-card-actions button:disabled {
@@ -167,17 +167,17 @@
 .watch-connect-card-actions button:focus-visible,
 .watch-connect-card-actions a:focus-visible,
 .watch-connect-card-consent input:focus-visible {
-  outline: 3px solid rgb(255 255 255 / 26%);
+  outline: 3px solid var(--ink);
   outline-offset: 2px;
 }
 
 .watch-connect-card-install-help {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   line-height: 1.45;
 }
 
 .watch-connect-card-consent {
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 11px;
   display: grid;
   gap: 9px;
@@ -186,7 +186,7 @@
 }
 
 .watch-connect-card-consent legend {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 800;
   padding: 0 5px;
@@ -214,19 +214,19 @@
 }
 
 .watch-connect-card-consent small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   line-height: 1.4;
 }
 
 .watch-connect-card-privacy {
   align-items: flex-start;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   display: flex;
   gap: 8px;
 }
 
 .watch-connect-card-privacy svg {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   flex: none;
 }
 
@@ -237,7 +237,7 @@
 }
 
 .watch-connect-card-required {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 700;
 }
@@ -245,7 +245,7 @@
 .watch-connect-card-forget {
   background: none;
   border: 0;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   cursor: pointer;
   font: inherit;
   font-size: 10px;
@@ -261,7 +261,7 @@
 }
 
 .watch-connect-owner-note {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   margin: 0;
 }
@@ -282,13 +282,13 @@
 
 .watch-connect-owner-list li {
   align-items: center;
-  border-top: 1px solid rgb(255 255 255 / 22%);
+  border-top: 1px solid var(--line);
   justify-content: space-between;
   padding-top: 8px;
 }
 
 .watch-connect-owner-list li > span { flex-direction: column; }
-.watch-connect-owner-list small { color: rgb(255 255 255 / 78%); }
+.watch-connect-owner-list small { color: var(--muted); }
 
 .watch-connect-card .spin {
   animation: watch-connect-spin .8s linear infinite;
@@ -296,6 +296,16 @@
 
 @keyframes watch-connect-spin {
   to { transform: rotate(360deg); }
+}
+
+@media (max-width: 720px) {
+  .side-nav .watch-connect-indicator-label {
+    font-size: 11px;
+    font-weight: 600;
+    overflow-wrap: normal;
+    word-break: normal;
+    white-space: normal;
+  }
 }
 
 @media (max-width: 620px) {

@@ -1,9 +1,9 @@
 .studio-heart-rate-block {
-  background: #000;
-  border: 1px solid rgb(255 255 255 / 22%);
+  background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 14px;
   box-shadow: 0 8px 24px #1e1e1e12;
-  color: #fff;
+  color: var(--ink);
   display: grid;
   gap: 12px;
   padding: 14px;
@@ -17,9 +17,9 @@
 }
 
 .studio-heart-rate-block-icon {
-  background: #000;
+  background: var(--panel-soft);
   border-radius: 12px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   display: grid;
   height: 38px;
   place-items: center;
@@ -27,7 +27,7 @@
 }
 
 .studio-heart-rate-block .eyebrow {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   display: block;
   font-size: 9px;
   font-weight: 800;
@@ -41,14 +41,14 @@
 }
 
 .studio-heart-rate-block header small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .studio-heart-rate-block-status {
   align-items: center;
-  background: #000;
+  background: var(--panel-soft);
   border-radius: 999px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   display: flex;
   font-size: 10px;
   font-weight: 800;
@@ -59,22 +59,22 @@
 
 .studio-heart-rate-block-status.inviting,
 .studio-heart-rate-block-status.waiting-athlete {
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel-soft);
+  color: var(--muted);
 }
 
 .studio-heart-rate-block-status.watch-ready {
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel-soft);
+  color: var(--muted);
 }
 
 .studio-heart-rate-block-status.error {
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel-soft);
+  color: var(--muted);
 }
 
 .studio-heart-rate-block-message {
-  background: #000;
+  background: var(--panel-soft);
   border-radius: 10px;
   padding: 10px 12px;
 }
@@ -90,7 +90,7 @@
 }
 
 .studio-heart-rate-block-message small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   display: block;
   margin-top: 4px;
 }
@@ -103,10 +103,10 @@
 
 .studio-heart-rate-block-actions button {
   align-items: center;
-  background: #000;
-  border: 1px solid rgb(255 255 255 / 22%);
+  background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 9px;
-  color: #fff;
+  color: var(--ink);
   cursor: pointer;
   display: inline-flex;
   font: inherit;
@@ -120,13 +120,13 @@
 }
 
 .studio-heart-rate-block-actions button.primary {
-  background: #fff;
-  border-color: #fff;
-  color: #000;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
 }
 
 .studio-heart-rate-block-actions button:focus-visible {
-  outline: 3px solid rgb(255 255 255 / 26%);
+  outline: 3px solid var(--ink);
   outline-offset: 2px;
 }
 
@@ -137,13 +137,13 @@
 
 .studio-heart-rate-block-privacy {
   align-items: flex-start;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   display: flex;
   gap: 7px;
 }
 
 .studio-heart-rate-block-privacy svg {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   flex: none;
 }
 
@@ -155,7 +155,7 @@
 }
 
 .studio-heart-rate-block-stop-note {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .studio-heart-rate-block .spin {
@@ -187,10 +187,10 @@
 }
 
 .studio-heart-rate-overlay-close {
-  background: #000;
-  border: 1px solid rgb(255 255 255 / 22%);
+  background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 999px;
-  color: #fff;
+  color: var(--ink);
   cursor: pointer;
   font: inherit;
   font-size: 10px;

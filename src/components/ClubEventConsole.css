@@ -3,9 +3,9 @@
   gap: 16px;
   margin-bottom: 22px;
   padding: clamp(18px, 2.2vw, 28px);
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 22px;
-  background: #000;
+  background: var(--panel);
   box-shadow: 0 16px 42px rgba(49, 49, 49, 0.09);
 }
 
@@ -18,16 +18,16 @@
   gap: 14px;
 }
 
-.club-event-console-header h3 { margin: 4px 0 0; color: #fff; font-size: clamp(19px, 2vw, 27px); }
-.club-event-console-header .eyebrow { display: inline-flex; align-items: center; gap: 6px; color: rgb(255 255 255 / 78%); }
+.club-event-console-header h3 { margin: 4px 0 0; color: var(--ink); font-size: clamp(19px, 2vw, 27px); }
+.club-event-console-header .eyebrow { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 
 .club-event-mode-switch {
   display: flex;
   gap: 5px;
   padding: 5px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 14px;
-  background: #000;
+  background: var(--panel-soft);
 }
 
 .club-event-mode-switch button,
@@ -44,8 +44,8 @@
   font-weight: 900;
 }
 
-.club-event-mode-switch button { background: transparent; color: rgb(255 255 255 / 78%); }
-.club-event-mode-switch button.selected { background: #000; color: #fff; box-shadow: 0 5px 14px rgba(30, 30, 30, 0.18); }
+.club-event-mode-switch button { background: transparent; color: var(--muted); }
+.club-event-mode-switch button.selected { background: var(--panel-soft); color: var(--ink); box-shadow: 0 5px 14px rgba(30, 30, 30, 0.18); }
 .club-event-mode-switch button:disabled { opacity: 0.62; }
 
 .club-event-independent {
@@ -53,14 +53,14 @@
   align-items: flex-start;
   gap: 12px;
   padding: 15px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 15px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
 }
 
-.club-event-independent strong { display: block; color: rgb(255 255 255 / 78%); }
-.club-event-independent p { margin: 4px 0 0; color: rgb(255 255 255 / 78%); }
+.club-event-independent strong { display: block; color: var(--muted); }
+.club-event-independent p { margin: 4px 0 0; color: var(--muted); }
 
 .club-event-builder {
   display: grid;
@@ -68,7 +68,7 @@
   gap: 12px;
   padding: 16px;
   border-radius: 16px;
-  background: #000;
+  background: var(--panel-soft);
 }
 
 .club-event-builder-intro {
@@ -78,20 +78,20 @@
   padding-bottom: 2px;
 }
 
-.club-event-builder-intro strong { color: #fff; font-size: 15px; }
-.club-event-builder-intro span { color: rgb(255 255 255 / 78%); font-size: 12px; line-height: 1.45; }
+.club-event-builder-intro strong { color: var(--ink); font-size: 15px; }
+.club-event-builder-intro span { color: var(--muted); font-size: 12px; line-height: 1.45; }
 
 .club-event-builder label { display: grid; min-width: 0; gap: 6px; }
-.club-event-builder label > span { color: rgb(255 255 255 / 78%); font-size: 11px; font-weight: 900; text-transform: uppercase; }
+.club-event-builder label > span { color: var(--muted); font-size: 11px; font-weight: 900; text-transform: uppercase; }
 .club-event-builder input,
 .club-event-builder select {
   width: 100%;
   min-height: 44px;
   padding: 9px 11px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background: #000;
-  color: #fff;
+  background: var(--field);
+  color: var(--ink);
 }
 
 .club-event-builder-wide { grid-column: span 2; }
@@ -113,10 +113,10 @@
   align-items: center;
   gap: 8px;
   padding: 9px 10px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel-soft);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 800;
 }
@@ -128,21 +128,21 @@
   flex: 0 0 auto;
   place-items: center;
   border-radius: 7px;
-  background: #000;
-  color: rgb(255 255 255 / 86%);
+  background: var(--panel-soft);
+  color: var(--muted);
 }
 
 .club-event-race-view {
   display: grid;
   gap: 7px;
   padding: 11px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 11px;
-  background: #000;
+  background: var(--panel);
 }
 
 .club-event-race-view > span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 900;
   text-transform: uppercase;
@@ -161,64 +161,64 @@
   justify-content: center;
   gap: 6px;
   padding: 7px 9px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 9px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font: inherit;
   font-size: 11px;
   font-weight: 900;
 }
 
 .club-event-race-view button.selected {
-  border-color: #fff;
-  background: #000;
-  color: #fff;
+  border-color: var(--line-strong);
+  background: var(--panel-soft);
+  color: var(--ink);
   box-shadow: inset 0 0 0 1px #c0c0c0;
 }
 
-.club-event-race-view small { color: rgb(255 255 255 / 78%); font-size: 10px; line-height: 1.35; }
+.club-event-race-view small { color: var(--muted); font-size: 10px; line-height: 1.35; }
 
-.club-event-primary { border-color: rgb(255 255 255 / 22%) !important; background: #000 !important; color: #fff !important; }
-.club-event-primary:disabled { border-color: rgb(255 255 255 / 22%) !important; background: #000 !important; color: rgb(255 255 255 / 78%) !important; }
+.club-event-primary { border-color: var(--accent) !important; background: var(--accent) !important; color: var(--on-accent) !important; }
+.club-event-primary:disabled { border-color: var(--line) !important; background: var(--panel-soft) !important; color: var(--muted) !important; }
 
 .club-event-lobby {
   display: grid;
   gap: 14px;
   padding: 16px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 17px;
-  background: linear-gradient(145deg, #000, #000);
+  background: var(--panel);
 }
 
-.club-event-lobby.active { border-color: #fff; background: linear-gradient(145deg, #000, #000); }
-.club-event-icon { display: grid; width: 44px; height: 44px; flex: 0 0 auto; place-items: center; border-radius: 13px; background: #000; color: rgb(255 255 255 / 86%); }
+.club-event-lobby.active { border-color: var(--line-strong); background: var(--panel-soft); }
+.club-event-icon { display: grid; width: 44px; height: 44px; flex: 0 0 auto; place-items: center; border-radius: 13px; background: var(--panel-soft); color: var(--muted); }
 .club-event-lobby-title > div { min-width: 0; margin-right: auto; }
-.club-event-lobby-title > div > span { color: rgb(255 255 255 / 78%); font-size: 11px; font-weight: 900; text-transform: uppercase; }
+.club-event-lobby-title > div > span { color: var(--muted); font-size: 11px; font-weight: 900; text-transform: uppercase; }
 .club-event-lobby-title h4 { margin: 2px 0; font-size: 20px; }
-.club-event-lobby-title p { margin: 0; color: rgb(255 255 255 / 78%); font-size: 12px; }
-.club-event-lobby-title > strong { flex: 0 0 auto; padding: 7px 10px; border-radius: 999px; background: #000; color: rgb(255 255 255 / 78%); font-size: 12px; }
+.club-event-lobby-title p { margin: 0; color: var(--muted); font-size: 12px; }
+.club-event-lobby-title > strong { flex: 0 0 auto; padding: 7px 10px; border-radius: 999px; background: var(--panel); color: var(--muted); font-size: 12px; }
 
 .club-event-seats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
-.club-event-seat { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; padding: 11px; border: 1px solid rgb(255 255 255 / 22%); border-radius: 12px; background: #000; }
-.club-event-seat > b { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 8px; background: #000; color: rgb(255 255 255 / 78%); }
+.club-event-seat { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; padding: 11px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.club-event-seat > b { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 8px; background: var(--panel); color: var(--muted); }
 .club-event-seat strong,
 .club-event-seat small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .club-event-seat strong { font-size: 12px; }
-.club-event-seat small { margin-top: 2px; color: rgb(255 255 255 / 78%); font-size: 10px; }
-.club-event-seat > span { display: inline-flex; grid-column: 1 / -1; align-items: center; gap: 4px; color: rgb(255 255 255 / 78%); font-size: 10px; font-weight: 900; }
+.club-event-seat small { margin-top: 2px; color: var(--muted); font-size: 10px; }
+.club-event-seat > span { display: inline-flex; grid-column: 1 / -1; align-items: center; gap: 4px; color: var(--muted); font-size: 10px; font-weight: 900; }
 .club-event-seat.ready,
-.club-event-seat.active { border-color: rgb(255 255 255 / 22%); box-shadow: inset 0 3px #b1b1b1; }
+.club-event-seat.active { border-color: var(--line-strong); box-shadow: inset 0 3px #b1b1b1; }
 .club-event-seat.ready > span,
-.club-event-seat.active > span { color: rgb(255 255 255 / 78%); }
-.club-event-seat.stale { border-color: rgb(255 255 255 / 22%); background: #000; }
+.club-event-seat.active > span { color: var(--muted); }
+.club-event-seat.stale { border-color: var(--line); background: var(--panel); }
 
 .club-event-lobby-actions { justify-content: flex-end; }
-.club-event-lobby-actions button:not(.club-event-primary) { border-color: rgb(255 255 255 / 22%); background: #000; color: rgb(255 255 255 / 78%); }
+.club-event-lobby-actions button:not(.club-event-primary) { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
 .club-event-start-action { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
-.club-event-start-action p { max-width: 330px; margin: 0; color: rgb(255 255 255 / 78%); font-size: 11px; font-weight: 800; line-height: 1.35; text-align: right; }
-.club-event-start-action p.ready { color: rgb(255 255 255 / 78%); }
-.club-event-message { margin: 0; color: rgb(255 255 255 / 78%); font-size: 13px; }
+.club-event-start-action p { max-width: 330px; margin: 0; color: var(--muted); font-size: 11px; font-weight: 800; line-height: 1.35; text-align: right; }
+.club-event-start-action p.ready { color: var(--muted); }
+.club-event-message { margin: 0; color: var(--muted); font-size: 13px; }
 
 @media (max-width: 900px) {
   .club-event-console-header { align-items: flex-start; flex-direction: column; }

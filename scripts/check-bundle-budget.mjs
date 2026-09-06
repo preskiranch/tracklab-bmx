@@ -23,7 +23,9 @@ const budgets = {
   // fixed-width race rail containment adds under 250 raw / 50 Brotli bytes.
   javascriptRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_RAW_BYTES', 621_000),
   javascriptBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_BR_BYTES', 175_000),
-  cssRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_RAW_BYTES', 137_250),
+  // The app-wide light palette replaces literal colors with shared semantic
+  // tokens (about 5.3 KB raw / 160 bytes Brotli). Keep compressed caps unchanged.
+  cssRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_RAW_BYTES', 144_000),
   cssBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_BR_BYTES', 20_450),
   initialBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_INITIAL_BR_BYTES', 195_000),
 };

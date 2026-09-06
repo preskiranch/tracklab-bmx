@@ -78,6 +78,7 @@ import type { ReactionTestResult } from './lib/reactionTest';
 import type { ReactionRecordOwner } from './lib/reactionTestCloud';
 import { resolveHeartRateResultsMetricState } from './lib/heartRateMetric';
 import { isTrackLabNativeShell, trackLabServiceOrigin } from './lib/serviceOrigins';
+import { setAppSurfaceAppearance } from './lib/nativeAppearance';
 import {
   clubTabletRaceStartAllowed,
   type RaceStartSource,
@@ -5308,9 +5309,11 @@ export default function App() {
 
   useLayoutEffect(() => {
     const fullscreenActive = raceViewFullscreen || exploreRideFullscreen || utilityFullscreen || reactionTestMode;
+    setAppSurfaceAppearance(fullscreenActive);
     document.documentElement.classList.toggle('tracklab-race-active', fullscreenActive);
     document.body.classList.toggle('tracklab-race-active', fullscreenActive);
     return () => {
+      setAppSurfaceAppearance(false);
       document.documentElement.classList.remove('tracklab-race-active');
       document.body.classList.remove('tracklab-race-active');
     };

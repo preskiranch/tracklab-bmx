@@ -1,6 +1,6 @@
 .heart-rate-settings-card {
-  background: #000;
-  border: 1px solid rgb(255 255 255 / 22%);
+  background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 16px;
   box-shadow: 0 10px 28px rgba(27, 27, 27, .06);
   padding: clamp(18px, 3vw, 28px);
@@ -8,15 +8,15 @@
 
 .heart-rate-settings-card > header {
   align-items: center;
-  border-bottom: 1px solid rgb(255 255 255 / 22%);
-  color: rgb(255 255 255 / 78%);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
   display: flex;
   justify-content: space-between;
   padding-bottom: 16px;
 }
 
 .heart-rate-settings-card h2 {
-  color: #fff;
+  color: var(--ink);
   margin: 3px 0 0;
 }
 
@@ -35,7 +35,7 @@
 
 .heart-rate-settings-state span,
 .heart-rate-settings-state small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   line-height: 1.45;
 }
 
@@ -48,10 +48,10 @@
 .heart-rate-settings-actions button,
 .heart-rate-settings-actions a {
   align-items: center;
-  background: #000;
-  border: 1px solid rgb(255 255 255 / 22%);
+  background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 10px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   display: inline-flex;
   font-weight: 800;
   gap: 7px;
@@ -62,31 +62,31 @@
 
 .heart-rate-settings-actions button.primary,
 .heart-rate-settings-actions a.primary {
-  background: #fff;
-  border-color: #fff;
-  color: #000;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
 }
 
 .heart-rate-settings-actions a:focus-visible {
-  outline: 3px solid rgb(255 255 255 / 26%);
+  outline: 3px solid var(--ink);
   outline-offset: 2px;
 }
 
 .heart-rate-settings-install-help {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   flex-basis: 100%;
   line-height: 1.45;
 }
 
 .heart-rate-settings-actions button.danger {
-  color: rgb(255 255 255 / 78%);
+  color: var(--ink);
 }
 
 .heart-rate-relay-summary {
-  background: #000;
-  border: 1px solid rgb(255 255 255 / 22%);
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
   border-radius: 12px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   display: grid;
   gap: 3px;
   margin-top: 14px;
@@ -94,9 +94,9 @@
 }
 
 .heart-rate-relay-summary.warning {
-  background: #000;
-  border-color: rgb(255 255 255 / 22%);
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel-soft);
+  border-color: var(--line);
+  color: var(--muted);
 }
 
 .heart-rate-relay-summary span {
@@ -106,10 +106,10 @@
 
 .heart-rate-settings-privacy {
   align-items: flex-start;
-  background: #000;
-  border: 1px solid rgb(255 255 255 / 22%);
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
   border-radius: 12px;
-  color: #fff;
+  color: var(--ink);
   display: flex;
   gap: 9px;
   margin-top: 16px;
@@ -128,8 +128,8 @@
 }
 
 .heart-rate-studio-consent {
-  background: #000;
-  border: 1px solid rgb(255 255 255 / 22%);
+  background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 12px;
   display: grid;
   gap: 10px;
@@ -138,14 +138,14 @@
 }
 
 .heart-rate-studio-consent legend {
-  color: #fff;
+  color: var(--ink);
   font-size: 13px;
   font-weight: 900;
   padding: 0 5px;
 }
 
 .heart-rate-studio-consent > p {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
   margin: 0;
@@ -171,7 +171,7 @@
 }
 
 .heart-rate-studio-consent label small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   line-height: 1.4;
 }
 

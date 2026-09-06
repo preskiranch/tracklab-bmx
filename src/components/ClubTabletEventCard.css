@@ -3,12 +3,11 @@
   gap: 14px;
   margin-bottom: 20px;
   padding: clamp(17px, 2.2vw, 24px);
-  border: 2px solid rgb(255 255 255 / 22%);
+  border: 2px solid var(--line);
   border-radius: 20px;
   background:
-    radial-gradient(circle at 92% 10%, rgb(0 0 0 / 18%), transparent 35%),
-    #000;
-  color: #fff;
+    var(--panel);
+  color: var(--ink);
   box-shadow: 0 16px 44px rgba(45, 45, 45, 0.18);
 }
 
@@ -25,21 +24,21 @@
   height: 48px;
   place-items: center;
   border-radius: 14px;
-  background: #000;
-  color: #fff;
+  background: var(--panel-soft);
+  color: var(--ink);
 }
 
-.club-tablet-event-card .eyebrow { color: rgb(255 255 255 / 86%); }
+.club-tablet-event-card .eyebrow { color: var(--muted); }
 .club-tablet-event-card h3 { margin: 3px 0; font-size: clamp(21px, 2.2vw, 30px); }
-.club-tablet-event-card header p { color: rgb(255 255 255 / 86%); }
+.club-tablet-event-card header p { color: var(--muted); }
 .club-tablet-event-seat-count {
   display: inline-flex;
   align-items: center;
   gap: 7px;
   padding: 8px 11px;
-  border: 1px solid rgb(255 255 255 / 26%);
+  border: 1px solid var(--line);
   border-radius: 999px;
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
   font-weight: 900;
 }
 
@@ -56,25 +55,25 @@
   align-items: center;
   gap: 8px;
   padding: 9px 10px;
-  border: 1px solid rgb(255 255 255 / 26%);
+  border: 1px solid var(--line);
   border-radius: 11px;
-  background: #000;
-  color: rgb(255 255 255 / 86%);
+  background: var(--panel);
+  color: var(--muted);
 }
 
-.club-tablet-event-slots > span.this-tablet { border-color: rgb(255 255 255 / 22%); background: #000; }
-.club-tablet-event-slots > span.stale { border-color: rgb(255 255 255 / 22%); }
+.club-tablet-event-slots > span.this-tablet { border-color: var(--line); background: var(--panel); }
+.club-tablet-event-slots > span.stale { border-color: var(--line); }
 .club-tablet-event-slots b {
   display: grid;
   width: 23px;
   height: 23px;
   place-items: center;
   border-radius: 7px;
-  background: #000;
-  color: rgb(255 255 255 / 86%);
+  background: var(--panel);
+  color: var(--muted);
 }
 .club-tablet-event-slots small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.club-tablet-event-slots svg { color: rgb(255 255 255 / 86%); }
+.club-tablet-event-slots svg { color: var(--muted); }
 
 .club-tablet-event-join {
   display: grid;
@@ -89,11 +88,11 @@
   gap: 2px;
   min-width: 0;
   padding: 10px 12px;
-  border: 1px solid rgb(255 255 255 / 26%);
+  border: 1px solid var(--line);
   border-radius: 11px;
-  background: rgb(0 0 0 / 4%);
+  background: var(--panel);
 }
-.club-tablet-event-join span { color: rgb(255 255 255 / 78%); font-size: 11px; font-weight: 850; letter-spacing: 0.08em; text-transform: uppercase; }
+.club-tablet-event-join span { color: var(--muted); font-size: 11px; font-weight: 850; letter-spacing: 0.08em; text-transform: uppercase; }
 .club-tablet-event-join strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .club-tablet-event-join > button,
 .club-tablet-event-ready button,
@@ -106,8 +105,8 @@
   padding: 0 16px;
   border: 0;
   border-radius: 11px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-weight: 950;
 }
 .club-tablet-event-join > button:disabled { opacity: 0.48; }
@@ -122,15 +121,15 @@
   gap: 11px;
   padding: 12px;
   border-radius: 12px;
-  background: #000;
+  background: var(--panel-soft);
 }
-.club-tablet-event-countdown { background: #000; color: #fff; }
-.club-tablet-event-warning { background: #000; }
+.club-tablet-event-countdown { background: var(--panel); color: var(--ink); }
+.club-tablet-event-warning { background: var(--panel); }
 .club-tablet-event-note { grid-template-columns: auto minmax(0, 1fr); }
 .club-tablet-event-ready > svg,
 .club-tablet-event-warning > svg,
-.club-tablet-event-note > svg { color: rgb(255 255 255 / 86%); }
-.club-tablet-event-countdown > svg { color: #fff; }
+.club-tablet-event-note > svg { color: var(--muted); }
+.club-tablet-event-countdown > svg { color: var(--ink); }
 .club-tablet-event-ready strong,
 .club-tablet-event-ready small,
 .club-tablet-event-countdown strong,
@@ -141,38 +140,38 @@
 .club-tablet-event-note small { display: block; }
 .club-tablet-event-ready small,
 .club-tablet-event-warning small,
-.club-tablet-event-note small { margin-top: 3px; color: rgb(255 255 255 / 86%); }
-.club-tablet-event-countdown small { margin-top: 3px; color: rgb(255 255 255 / 78%); }
+.club-tablet-event-note small { margin-top: 3px; color: var(--muted); }
+.club-tablet-event-countdown small { margin-top: 3px; color: var(--muted); }
 .club-tablet-event-ready button,
-.club-tablet-event-warning button { min-height: 42px; background: #000; }
+.club-tablet-event-warning button { min-height: 42px; background: var(--panel); }
 
 .club-tablet-event-error,
 .club-tablet-event-message {
   padding: 9px 11px;
   border-radius: 10px;
-  background: #000;
-  color: rgb(255 255 255 / 86%) !important;
+  background: var(--panel-soft);
+  color: var(--muted) !important;
   font-weight: 800;
 }
-.club-tablet-event-message { background: #000; color: #fff !important; }
+.club-tablet-event-message { background: var(--panel-soft); color: var(--ink) !important; }
 .club-tablet-event-card > footer {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 12px;
 }
-.club-tablet-event-card.unavailable { border-color: rgb(255 255 255 / 22%); }
+.club-tablet-event-card.unavailable { border-color: var(--line); }
 .club-tablet-event-unavailable {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 11px;
 }
-.club-tablet-event-unavailable > svg { color: rgb(255 255 255 / 78%); }
+.club-tablet-event-unavailable > svg { color: var(--muted); }
 .club-tablet-event-unavailable strong,
 .club-tablet-event-unavailable small { display: block; }
-.club-tablet-event-unavailable small { margin-top: 3px; color: rgb(255 255 255 / 86%); }
+.club-tablet-event-unavailable small { margin-top: 3px; color: var(--muted); }
 .club-tablet-event-spin { animation: club-tablet-event-spin 1s linear infinite; }
 @keyframes club-tablet-event-spin { to { transform: rotate(360deg); } }
 

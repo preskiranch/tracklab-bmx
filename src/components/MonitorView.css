@@ -14,7 +14,7 @@
 
 .monitor-secondary .monitor-heart-rate.live svg,
 .monitor-secondary .monitor-heart-rate.live span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--ink);
 }
 
 .monitor-history-status {
@@ -24,18 +24,18 @@
 
 .monitor-history-status.authorizing,
 .monitor-history-status.saving {
-  background: rgb(0 0 0 / 16%);
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel-soft);
+  color: var(--ink);
 }
 
 .monitor-history-status.saved {
-  background: rgb(0 0 0 / 18%);
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel-soft);
+  color: var(--ink);
 }
 
 .monitor-history-status.error {
-  background: rgb(0 0 0 / 16%);
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel-soft);
+  color: var(--ink);
 }
 
 .monitor-card-actions {
@@ -53,10 +53,10 @@
   gap: 5px;
   min-height: 27px;
   padding: 4px 8px;
-  border: 1px solid rgb(255 255 255 / 30%);
+  border: 1px solid var(--line-strong);
   border-radius: 999px;
-  background: rgb(0 0 0 / 90%);
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--ink);
   font: inherit;
   font-size: 9px;
   font-weight: 800;
@@ -67,21 +67,21 @@
 .monitor-watch-button.waiting-athlete,
 .monitor-watch-button.waiting-watch,
 .monitor-watch-button.inviting {
-  border-color: rgb(255 255 255 / 35%);
-  background: rgb(0 0 0 / 94%);
-  color: rgb(255 255 255 / 78%);
+  border-color: var(--line-strong);
+  background: var(--panel-soft);
+  color: var(--ink);
 }
 
 .monitor-watch-button.watch-ready {
-  border-color: rgb(255 255 255 / 36%);
-  background: rgb(0 0 0 / 95%);
-  color: rgb(255 255 255 / 78%);
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .monitor-watch-button.error {
-  border-color: rgb(255 255 255 / 35%);
-  background: rgb(0 0 0 / 95%);
-  color: rgb(255 255 255 / 78%);
+  border-color: var(--line-strong);
+  background: var(--panel-soft);
+  color: var(--ink);
 }
 
 .monitor-watch-button:disabled {
@@ -106,7 +106,9 @@
   max-height: 90dvh;
   overflow: auto;
   border-radius: 16px;
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.18);
 }
 
 .monitor-studio-heart-rate-close {
@@ -116,10 +118,10 @@
   z-index: 2;
   min-height: 30px;
   padding: 5px 9px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line-strong);
   border-radius: 999px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font: inherit;
   font-size: 10px;
   font-weight: 800;

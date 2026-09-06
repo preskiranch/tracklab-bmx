@@ -4,14 +4,14 @@
   padding: 0 11px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: #000;
-  color: #fff;
+  background: var(--field);
+  color: var(--ink);
   font: inherit;
 }
 
 .explore-route-builder select:disabled {
-  color: rgb(255 255 255 / 78%);
-  background: #000;
+  color: var(--muted);
+  background: var(--panel-soft);
 }
 
 .explore-smart-route,
@@ -19,16 +19,16 @@
   display: grid;
   gap: 9px;
   padding: 11px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background: linear-gradient(145deg, #000, #000);
+  background: var(--panel-soft);
 }
 
 .explore-smart-route > div {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .explore-smart-route > div span {
@@ -37,7 +37,7 @@
 
 .explore-smart-route > div small,
 .explore-smart-route-result p {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   line-height: 1.4;
 }
@@ -49,8 +49,8 @@
   padding: 10px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: #000;
-  color: #fff;
+  background: var(--field);
+  color: var(--ink);
   font: inherit;
   line-height: 1.45;
 }
@@ -61,10 +61,10 @@
   justify-content: center;
   gap: 7px;
   min-height: 40px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--accent);
   border-radius: 8px;
-  background: #000;
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
   font-size: 11px;
   font-weight: 900;
 }
@@ -79,7 +79,7 @@
 }
 
 .explore-smart-route-result > div > span {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.07em;
@@ -90,7 +90,7 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--ink);
   font-size: 10px;
   font-weight: 800;
   text-decoration: none;
@@ -100,7 +100,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.08em;
@@ -116,9 +116,9 @@
 }
 
 .explore-route-builder .explore-map-route-button {
-  border-color: rgb(255 255 255 / 22%);
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .explore-map-picker-layer {
@@ -139,10 +139,11 @@
   width: min(1080px, 100%);
   height: min(820px, calc(100dvh - 36px));
   overflow: hidden;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 18px;
-  background: #000;
-  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.5);
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.18);
 }
 
 .explore-map-picker > header {
@@ -151,8 +152,8 @@
   justify-content: space-between;
   gap: 18px;
   padding: 18px 20px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .explore-map-picker > header h3 {
@@ -161,7 +162,7 @@
 }
 
 .explore-map-picker > header p {
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
   font-size: 11px;
 }
 
@@ -171,10 +172,10 @@
   width: 40px;
   height: 40px;
   place-items: center;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background: rgb(0 0 0 / 9%);
-  color: #fff;
+  background: var(--hover);
+  color: var(--ink);
 }
 
 .explore-map-picker-mode {
@@ -183,7 +184,7 @@
   gap: 8px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--line);
-  background: #000;
+  background: var(--panel-soft);
 }
 
 .explore-map-picker-mode button {
@@ -194,21 +195,21 @@
   padding: 0 12px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--ink);
   font-size: 11px;
   font-weight: 900;
 }
 
 .explore-map-picker-mode button.selected {
-  border-color: #fff;
-  background: #000;
-  color: #fff;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .explore-map-picker-mode > span {
   margin-left: auto;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 750;
 }
@@ -242,7 +243,7 @@
   gap: 8px;
   padding: 10px 14px;
   border-top: 1px solid var(--line);
-  background: #000;
+  background: var(--panel-soft);
 }
 
 .explore-map-picker-points > div {
@@ -253,15 +254,15 @@
   padding: 9px 11px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: #000;
+  background: var(--panel);
 }
 
 .explore-map-picker-points > div:first-child svg {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .explore-map-picker-points > div:last-child svg {
-  color: #fff;
+  color: var(--ink);
 }
 
 .explore-map-picker-points span {
@@ -270,7 +271,7 @@
 }
 
 .explore-map-picker-points small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.07em;
@@ -279,7 +280,7 @@
 
 .explore-map-picker-points strong {
   overflow: hidden;
-  color: #fff;
+  color: var(--ink);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -291,7 +292,7 @@
   gap: 8px;
   padding: 12px 14px;
   border-top: 1px solid var(--line);
-  background: #000;
+  background: var(--panel-soft);
 }
 
 .explore-map-picker > footer button {
@@ -303,16 +304,16 @@
   padding: 0 15px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 11px;
   font-weight: 900;
 }
 
 .explore-map-picker > footer button.primary {
-  border-color: rgb(255 255 255 / 22%);
-  background: linear-gradient(135deg, #000, #000);
-  color: #fff;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .explore-map-picker > footer button:disabled {

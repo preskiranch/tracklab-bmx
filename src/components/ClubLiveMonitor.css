@@ -2,8 +2,7 @@
   min-height: calc(100vh - 92px);
   padding: clamp(18px, 2.4vw, 34px);
   background:
-    radial-gradient(circle at 12% 8%, rgb(0 0 0 / 11%), transparent 28%),
-    #000;
+    var(--panel-soft);
 }
 
 .club-live-header {
@@ -18,7 +17,7 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .club-live-header h2 {
@@ -29,7 +28,7 @@
 
 .club-live-header p {
   margin: 0;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .club-live-connection {
@@ -38,16 +37,16 @@
   gap: 9px;
   min-height: 44px;
   padding: 7px 8px 7px 14px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 999px;
-  background: rgb(0 0 0 / 88%);
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
   font-weight: 800;
 }
 
 .club-live-connection.error {
-  border-color: rgb(255 255 255 / 22%);
-  color: rgb(255 255 255 / 78%);
+  border-color: var(--line);
+  color: var(--muted);
 }
 
 .club-live-connection button {
@@ -58,7 +57,7 @@
   padding: 0;
   border: 0;
   border-radius: 50%;
-  background: #000;
+  background: var(--panel);
   color: inherit;
 }
 
@@ -67,9 +66,9 @@
   gap: 14px;
   margin-bottom: 22px;
   padding: clamp(16px, 2vw, 24px);
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 20px;
-  background: rgb(0 0 0 / 90%);
+  background: var(--panel);
   box-shadow: 0 12px 34px rgba(49, 49, 49, 0.07);
 }
 
@@ -85,16 +84,16 @@
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
-  color: #fff;
+  color: var(--ink);
   font-weight: 900;
 }
 
-.club-live-tablet-overview-copy > span svg { color: rgb(255 255 255 / 78%); }
+.club-live-tablet-overview-copy > span svg { color: var(--muted); }
 
 .club-live-tablet-overview-copy p {
   max-width: 760px;
   margin: 0;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 13px;
   text-align: right;
 }
@@ -104,12 +103,12 @@
   align-items: center;
   gap: 5px;
   margin-right: 8px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-weight: 900;
   white-space: nowrap;
 }
 
-.club-live-bike-count.error { color: rgb(255 255 255 / 78%); }
+.club-live-bike-count.error { color: var(--muted); }
 
 .club-live-tablet-slots {
   display: grid;
@@ -121,10 +120,10 @@
   grid-column: 1 / -1;
   margin: 0;
   padding: 10px 12px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 11px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 13px;
   font-weight: 800;
 }
@@ -136,12 +135,12 @@
   gap: 8px 10px;
   align-items: center;
   padding: 12px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 14px;
-  background: #000;
+  background: var(--panel);
 }
 
-.club-live-tablet-slot.online { border-color: rgb(255 255 255 / 22%); background: #000; }
+.club-live-tablet-slot.online { border-color: var(--line); background: var(--panel); }
 .club-live-tablet-slot.training { box-shadow: inset 0 3px #b7b7b7; }
 
 .club-live-tablet-number {
@@ -150,19 +149,19 @@
   height: 28px;
   place-items: center;
   border-radius: 9px;
-  background: #000;
-  color: #fff;
+  background: var(--panel-soft);
+  color: var(--ink);
   font-size: 12px;
   font-weight: 900;
 }
 
 .club-live-tablet-slot strong,
 .club-live-tablet-slot small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.club-live-tablet-slot strong { color: #fff; font-size: 13px; }
-.club-live-tablet-slot small { margin-top: 2px; color: rgb(255 255 255 / 78%); font-size: 11px; }
+.club-live-tablet-slot strong { color: var(--ink); font-size: 13px; }
+.club-live-tablet-slot small { margin-top: 2px; color: var(--muted); font-size: 11px; }
 
 .club-live-tablet-slot .club-live-tablet-bike {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-weight: 900;
 }
 
@@ -171,12 +170,12 @@
   grid-column: 1 / -1;
   align-items: center;
   gap: 5px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 10px;
   font-weight: 800;
 }
 
-.club-live-tablet-presence.online { color: rgb(255 255 255 / 78%); }
+.club-live-tablet-presence.online { color: var(--muted); }
 
 .club-live-grid {
   display: grid;
@@ -211,10 +210,10 @@
   flex-direction: column;
   padding: clamp(18px, 2.2vw, 28px);
   overflow: hidden;
-  border: 1px solid rgb(255 255 255 / 16%);
-  border-top: 6px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
+  border-top: 6px solid var(--line);
   border-radius: 22px;
-  background: linear-gradient(145deg, #000, #000);
+  background: var(--panel);
   box-shadow: 0 16px 44px rgba(49, 49, 49, 0.1);
 }
 
@@ -223,14 +222,14 @@
 }
 
 .club-live-tile.demo {
-  border-color: rgb(255 255 255 / 38%);
-  border-top-color: rgb(255 255 255 / 22%);
+  border-color: var(--line);
+  border-top-color: var(--line);
   background:
-    linear-gradient(145deg, rgb(0 0 0 / 96%), rgb(0 0 0 / 98%));
+    var(--panel);
 }
 
 .club-live-tile.demo .club-live-athlete p {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-weight: 900;
 }
 
@@ -238,9 +237,9 @@
   color: rgb(255 255 255 / 86%);
 }
 
-.club-live-tile.paused { border-top-color: rgb(255 255 255 / 22%); }
-.club-live-tile.staging { border-top-color: rgb(255 255 255 / 26%); }
-.club-live-tile.stale { border-top-color: rgb(255 255 255 / 26%); opacity: 0.82; }
+.club-live-tile.paused { border-top-color: var(--line); }
+.club-live-tile.staging { border-top-color: var(--line); }
+.club-live-tile.stale { border-top-color: var(--line); opacity: 0.82; }
 
 .club-live-screen {
   position: relative;
@@ -444,8 +443,8 @@
   height: clamp(58px, 6vw, 82px);
   place-items: center;
   border-radius: 18px;
-  background: #000;
-  color: rgb(255 255 255 / 86%);
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .club-live-shared-avatar svg {
@@ -462,7 +461,7 @@
 
 .club-live-athlete p {
   margin: 5px 0 0;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 13px;
 }
 
@@ -472,8 +471,8 @@
   gap: 7px;
   padding: 7px 10px;
   border-radius: 999px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel-soft);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 900;
   text-transform: uppercase;
@@ -488,9 +487,9 @@
   box-shadow: 0 0 0 4px rgba(140, 140, 140, 0.14);
 }
 
-.club-live-status.paused { background: #000; color: rgb(255 255 255 / 78%); }
-.club-live-status.staging { background: #000; color: rgb(255 255 255 / 78%); }
-.club-live-status.stale { background: #000; color: rgb(255 255 255 / 78%); }
+.club-live-status.paused { background: var(--panel-soft); color: var(--muted); }
+.club-live-status.staging { background: var(--panel-soft); color: var(--muted); }
+.club-live-status.stale { background: var(--panel-soft); color: var(--muted); }
 
 .club-live-shared-participants {
   display: flex;
@@ -500,10 +499,10 @@
   gap: 12px;
   margin-top: 12px;
   padding: 10px 13px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 12px;
-  background: #000;
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel);
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -512,7 +511,7 @@
   flex: 0 0 auto;
   align-items: center;
   gap: 6px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .club-live-shared-participants span {
@@ -530,8 +529,8 @@
   margin: clamp(18px, 3vh, 32px) 0;
   padding: 14px;
   border-radius: 15px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .club-live-activity > span {
@@ -540,8 +539,8 @@
   height: 38px;
   place-items: center;
   border-radius: 11px;
-  background: #000;
-  color: #fff;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .club-live-activity strong,
@@ -552,7 +551,7 @@
 .club-live-activity small {
   margin-top: 3px;
   overflow: hidden;
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -561,7 +560,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: rgb(255 255 255 / 86%);
+  color: var(--muted);
   font-size: 11px;
   white-space: nowrap;
 }
@@ -611,14 +610,14 @@
   align-items: center;
   gap: 2px 7px;
   padding: 12px;
-  border: 1px solid rgb(255 255 255 / 22%);
+  border: 1px solid var(--line);
   border-radius: 13px;
-  background: #000;
+  background: var(--panel);
 }
 
 .club-live-metrics svg {
   grid-row: span 2;
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
 }
 
 .club-live-metrics strong {
@@ -628,7 +627,7 @@
 }
 
 .club-live-metrics small {
-  color: rgb(255 255 255 / 78%);
+  color: var(--muted);
   font-size: 11px;
   text-transform: uppercase;
 }
@@ -639,8 +638,8 @@
   gap: 12px;
   margin-top: 14px;
   padding-top: 12px;
-  border-top: 1px solid rgb(255 255 255 / 22%);
-  color: rgb(255 255 255 / 78%);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -650,15 +649,15 @@
   place-content: center;
   justify-items: center;
   padding: 30px;
-  border: 1px dashed rgb(255 255 255 / 22%);
+  border: 1px dashed var(--line);
   border-radius: 24px;
-  background: rgb(0 0 0 / 75%);
-  color: rgb(255 255 255 / 78%);
+  background: var(--panel-soft);
+  color: var(--muted);
   text-align: center;
 }
 
-.club-live-empty svg { color: rgb(255 255 255 / 78%); }
-.club-live-empty strong { margin-top: 13px; color: #fff; font-size: 22px; }
+.club-live-empty svg { color: var(--muted); }
+.club-live-empty strong { margin-top: 13px; color: var(--ink); font-size: 22px; }
 .club-live-empty p { max-width: 520px; margin: 7px 0 0; }
 .club-live-empty button { margin-top: 15px; }
 
