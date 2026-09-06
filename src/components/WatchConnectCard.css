@@ -308,6 +308,10 @@
   }
 }
 
+@media (max-width: 359px) {
+  .side-nav .watch-connect-indicator-label { font-size: 10px; }
+}
+
 @media (max-width: 620px) {
   .watch-connect-card > header {
     grid-template-columns: auto minmax(0, 1fr);
