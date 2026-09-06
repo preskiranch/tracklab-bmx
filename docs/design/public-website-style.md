@@ -8,4 +8,4 @@ The desktop navigation is a compact horizontal bar. On phones the brand/action r
 
 Existing tab state, deep links, back navigation, account handling, watch connection mounting and billing controls remain in place. Unavailable subscription state is still disclosed in the purchase controls; the plan card keeps the stable “Racer membership” title until an actual product name is loaded.
 
-This design is prepared for review before publication, following the user's earlier request to see website designs before they go live. Preview evidence is outside the repository at `output/tracklab-apple-style` in the shared Playground directory. No Render deployment or native build was produced for this design preview.
+The user approved the desktop and mobile design on September 6, 2026. It is included in website and iOS build 75. Design-preview evidence is outside the repository at `output/tracklab-apple-style` in the shared Playground directory; release evidence is in `output/tracklab-release75`.
