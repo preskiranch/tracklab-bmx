@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import {
   Activity,
   ArrowUpRight,
   BarChart3,
+  BookOpen,
+  FlaskConical,
   Bike,
   Compass,
   ExternalLink,
@@ -39,6 +41,8 @@ import {
 } from './PublicTrackLocator';
 import './PublicTrackLocator.css';
 import './MembershipLanding.css';
+
+const AppGuide = lazy(() => import('./AppGuide'));
 
 export type AppleBillingStatus = 'idle' | 'loading' | 'error' | 'success';
 export type AppleBillingAction = 'products' | 'purchase' | 'restore' | 'manage' | null;
@@ -126,9 +130,11 @@ export function MembershipLanding({
   onRestorePurchases,
   onManageSubscription,
 }: MembershipLandingProps) {
-  type LandingTab = 'home' | 'tracks' | 'shops' | 'training' | 'results';
+  type LandingTab = 'home' | 'tracks' | 'shops' | 'training' | 'results' | 'guide' | 'beta-info';
   const initialLandingTab = (): LandingTab => {
     const url = new URL(window.location.href);
+    if (url.hash === '#app-guide') return 'guide';
+    if (url.hash === '#beta-testing-info') return 'beta-info';
     if (url.hash === '#bike-shop-directory') return 'shops';
     if (url.hash === '#track-locator' || url.searchParams.has('locator')) return 'tracks';
     return 'home';
@@ -197,9 +203,12 @@ export function MembershipLanding({
     } else if (tab === 'shops') {
       url.hash = 'bike-shop-directory';
       url.searchParams.delete('locator');
+    } else if (tab === 'guide' || tab === 'beta-info') {
+      url.hash = tab === 'guide' ? 'app-guide' : 'beta-testing-info';
+      url.searchParams.delete('locator');
     } else {
       url.searchParams.delete('locator');
-      if (url.hash === '#track-locator' || url.hash === '#bike-shop-directory') url.hash = '';
+      if (['#track-locator', '#bike-shop-directory', '#app-guide', '#beta-testing-info'].includes(url.hash)) url.hash = '';
     }
     if (url.href !== window.location.href) {
       window.history.pushState(window.history.state, '', url);
@@ -218,9 +227,10 @@ export function MembershipLanding({
   };
   const consumeLocator = () => {
     const url = new URL(window.location.href);
-    if (url.searchParams.has('locator') || url.hash === '#track-locator' || url.hash === '#bike-shop-directory') {
+    const publicTabHash = ['#track-locator', '#bike-shop-directory', '#app-guide', '#beta-testing-info'].includes(url.hash);
+    if (url.searchParams.has('locator') || publicTabHash) {
       url.searchParams.delete('locator');
-      if (url.hash === '#track-locator' || url.hash === '#bike-shop-directory') url.hash = '';
+      if (publicTabHash) url.hash = '';
       window.history.replaceState(window.history.state, '', url);
     }
   };
@@ -312,6 +322,8 @@ export function MembershipLanding({
               </button>
             </>
           )}
+          <button className={activeTab === 'guide' ? 'active' : ''} type="button" aria-current={activeTab === 'guide' ? 'page' : undefined} onClick={() => selectTab('guide')}><BookOpen size={18} /> App Guide</button>
+          <button className={activeTab === 'beta-info' ? 'active' : ''} type="button" aria-current={activeTab === 'beta-info' ? 'page' : undefined} onClick={() => selectTab('beta-info')}><FlaskConical size={18} /> Beta Testing Info</button>
         </nav>
         {profileComplete ? (
           <div className="membership-hub-account">
@@ -328,7 +340,7 @@ export function MembershipLanding({
       <header className="membership-nav membership-hub-topbar" id="membership-hub-content-top">
         <div>
           <span className="eyebrow">{profileComplete ? `Welcome back, ${profileName}` : 'Made for the way you ride'}</span>
-          <h1>{activeTab === 'home' ? <>Your BMX <span>home base.</span></> : activeTab === 'tracks' ? 'Global BMX tracks' : activeTab === 'shops' ? 'Global bike shops' : activeTab === 'training' ? 'Wattbike training' : 'Your results'}</h1>
+          <h1>{activeTab === 'home' ? <>Your BMX <span>home base.</span></> : activeTab === 'tracks' ? 'Global BMX tracks' : activeTab === 'shops' ? 'Global bike shops' : activeTab === 'training' ? 'Wattbike training' : activeTab === 'guide' ? 'App Guide' : activeTab === 'beta-info' ? 'Beta Testing Info' : 'Your results'}</h1>
         </div>
         <div className="membership-nav-actions">
           <div className="watch-connect-indicator-slot" id="watch-connect-indicator-slot" />
@@ -461,13 +473,20 @@ export function MembershipLanding({
         </section>
       )}
 
+      {(activeTab === 'guide' || activeTab === 'beta-info') && <Suspense fallback={<p role="status">Loading your guide…</p>}>
+        <AppGuide key={activeTab} beta={activeTab === 'beta-info'} billingReady={appleBillingServerReady}
+          onOpenTracks={() => selectTab('tracks')} onOpenShops={() => selectTab('shops')}
+          onChangeGuide={() => selectTab(activeTab === 'guide' ? 'beta-info' : 'guide')} />
+      </Suspense>}
+
       <section id="free-account-gate" className={`profile-gate ${profileComplete ? 'complete' : ''}`} aria-label="Required profile">
         <div>
           <span className="eyebrow">Your TrackLab account</span>
           <h2>{profileComplete ? 'Account ready' : creatingAccount ? 'Create your free TrackLab account' : 'Sign in to TrackLab'}</h2>
           <p>
-            Every rider signs in before using account features. Free accounts can explore the public BMX track and
-            mapped bike shop directories and run the Reaction Test; racer accounts can connect Wattbikes and join private multiplayer races.
+            Browse BMX tracks and bike shops without signing in. A free account adds the Reaction Test, favorites,
+            and community features. Racer or invited beta access unlocks connected Wattbike training and recorded ghost racing.
+            Public live multiplayer is coming soon.
           </p>
           {shopClaimPrompt && !profileComplete && <p className="shop-claim-account-prompt" role="status">{shopClaimPrompt}</p>}
         </div>
@@ -585,12 +604,12 @@ export function MembershipLanding({
           )}
           <p>
             Choose a fixed plan for one to four simultaneous Wattbike connections. Every plan includes live Wattbike
-            telemetry, cloud training records, club monitoring, and multiplayer racing.
+            telemetry, cloud training records, recorded ghost racing, and access to authorized club tools. Public live multiplayer is coming soon.
           </p>
           {membership.tier === 'racer' && (
             <p className="apple-current-access">
               Current account access: up to {membership.bikeSeats} Wattbike {membership.bikeSeats === 1 ? 'connection' : 'connections'}.
-              This access is based on the latest subscription entitlement verified with Apple.
+              Your allowance reflects your active account access, including an eligible subscription or beta invitation.
             </p>
           )}
           <div className="apple-tier-selector" role="radiogroup" aria-label="Monthly Wattbike connection plan">
@@ -697,11 +716,11 @@ export function MembershipLanding({
           <span className="eyebrow">Racer tools</span>
           <h3>Built for connected training</h3>
           <p>
-            Connect up to four Wattbikes in a room, race mapped BMX tracks, send private invites, and compare zone data.
+            Connect Wattbikes within your allowance, train on mapped BMX courses, challenge compatible recorded ghosts, and compare zone data.
           </p>
           <ul>
-            <li>Private race rooms</li>
-            <li>Random online challenges</li>
+            <li>Recorded ghost challenges</li>
+            <li>Public live multiplayer: Coming soon</li>
             <li>Post-race analytics</li>
           </ul>
           <button className="secondary-button full-width" type="button" onClick={() => enterFromLocator(onEnterApp)} disabled={!profileComplete}>

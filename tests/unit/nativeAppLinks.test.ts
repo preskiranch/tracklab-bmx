@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  familyInviteTokenFromAppLink,
   heartRateAccountBlockCodeFromAppLink,
   heartRateStudioInviteCodeFromAppLink,
   listenForHeartRateAccountBlockAppLinks,
@@ -8,6 +9,46 @@ import {
 } from '../../src/lib/nativeAppLinks';
 
 describe('TrackLab native universal links', () => {
+  it('accepts a family link only on the production HTTPS root with a valid fragment token', () => {
+    const token = 'f'.repeat(43);
+    expect(familyInviteTokenFromAppLink(`https://tracklab-bmx.onrender.com/#familyInvite=${token}`)).toBe(token);
+    for (const href of [
+      `http://tracklab-bmx.onrender.com/#familyInvite=${token}`,
+      `https://tracklab-bmx.onrender.com.evil.example/#familyInvite=${token}`,
+      `https://tracklab-bmx.onrender.com:8443/#familyInvite=${token}`,
+      `https://tracklab-bmx.onrender.com/profile#familyInvite=${token}`,
+      `https://tracklab-bmx.onrender.com/?familyInvite=${token}`,
+      'https://tracklab-bmx.onrender.com/#familyInvite=short',
+    ]) expect(familyInviteTokenFromAppLink(href)).toBe('');
+  });
+
+  it('delivers family cold-launch and foreground links without duplicate immediate prompts', async () => {
+    const token = 'f'.repeat(43);
+    const url = `https://tracklab-bmx.onrender.com/#familyInvite=${token}`;
+    let listener: ((event: { url: string }) => void) | null = null;
+    const onFamilyInvite = vi.fn();
+    const onBetaInvite = vi.fn();
+    const remove = vi.fn(async () => undefined);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(10_000);
+    try {
+      const handle = await listenForHeartRateStudioInviteAppLinks(vi.fn(), {
+        isNativePlatform: () => true,
+        addListener: vi.fn(async (_name, nextListener) => { listener = nextListener; return { remove }; }),
+        getLaunchUrl: vi.fn(async () => ({ url })), onFamilyInvite, onBetaInvite,
+      });
+      await Promise.resolve();
+      expect(onFamilyInvite).toHaveBeenCalledWith(token);
+      listener?.({ url });
+      expect(onFamilyInvite).toHaveBeenCalledTimes(1);
+      now.mockReturnValue(11_001);
+      listener?.({ url });
+      expect(onFamilyInvite).toHaveBeenCalledTimes(2);
+      expect(onBetaInvite).not.toHaveBeenCalled();
+      await handle.remove();
+      expect(remove).toHaveBeenCalledTimes(1);
+    } finally { now.mockRestore(); }
+  });
+
   it('accepts only the exact production HTTPS host and a valid studio invitation', () => {
     expect(heartRateStudioInviteCodeFromAppLink(
       'https://tracklab-bmx.onrender.com/?heartRateStudioInvite=ABCD-EFGH',

@@ -4,6 +4,7 @@ import { normalizeHeartRateAccountBlockCode } from './heartRateAccountBlock';
 import { normalizeHeartRateStudioInviteCode } from './heartRateCloud';
 import { normalizeTrackLocatorId } from './mapLinks';
 import { betaInviteTokenFromHref } from './betaAccess';
+import { familyInviteTokenFromHref } from './familyAccounts';
 
 export const trackLabUniversalLinkHost = 'tracklab-bmx.onrender.com' as const;
 
@@ -51,6 +52,11 @@ export function betaInviteTokenFromAppLink(value: unknown) {
   return url ? betaInviteTokenFromHref(url.href) : '';
 }
 
+export function familyInviteTokenFromAppLink(value: unknown) {
+  const url = productionAppLink(value);
+  return url ? familyInviteTokenFromHref(url.href) : '';
+}
+
 /**
  * Accepts only the production TrackLab HTTPS universal-link origin and emits
  * the normalized one-use invitation code. The raw URL is never logged or
@@ -64,6 +70,7 @@ export async function listenForHeartRateStudioInviteAppLinks(
     getLaunchUrl?: AppLaunchUrl;
     onTrackLocator?: (trackId: string) => void;
     onBetaInvite?: (token: string) => void;
+    onFamilyInvite?: (token: string) => void;
   } = {},
 ): Promise<PluginListenerHandle> {
   const isNativePlatform = options.isNativePlatform ?? (() => Capacitor.isNativePlatform());
@@ -72,8 +79,19 @@ export async function listenForHeartRateStudioInviteAppLinks(
   const getLaunchUrl = options.getLaunchUrl ?? CapacitorApp.getLaunchUrl.bind(CapacitorApp);
   let lastDisposition = '';
   let lastBetaDispositionAt = 0;
+  let lastFamilyDispositionAt = 0;
   let lastTrackDispositionAt = 0;
   const handleUrl = (value: unknown) => {
+    const familyToken = familyInviteTokenFromAppLink(value);
+    if (familyToken && options.onFamilyInvite) {
+      const now = Date.now();
+      if (lastDisposition !== `family:${familyToken}` || now - lastFamilyDispositionAt >= 1_000) {
+        lastDisposition = `family:${familyToken}`;
+        lastFamilyDispositionAt = now;
+        options.onFamilyInvite(familyToken);
+      }
+      return;
+    }
     const betaToken = betaInviteTokenFromAppLink(value);
     if (betaToken && options.onBetaInvite) {
       const now = Date.now();

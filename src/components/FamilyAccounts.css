@@ -1,0 +1,127 @@
+.family-accounts, .family-invitation { color: #1d1d1f; }
+.family-accounts { min-width: 0; padding: 12px 0 40px; }
+.family-accounts :is(h1, h2, h3, p), .family-invitation :is(h2, p) { margin-top: 0; }
+.family-accounts :is(button, input), .family-invitation :is(button, input) { font: inherit; }
+.family-accounts button, .family-invitation button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 10px 16px; border: 1px solid #d2d2d7; border-radius: 12px; background: #fff; color: #1d1d1f; font-size: 14px; font-weight: 600; line-height: 1.35; cursor: pointer; }
+.family-accounts button:hover:not(:disabled), .family-invitation button:hover:not(:disabled) { background: #f5f5f7; }
+.family-accounts button:disabled, .family-invitation button:disabled { opacity: .5; cursor: default; }
+.family-accounts :is(button, input):focus-visible, .family-invitation :is(button, input):focus-visible { outline: 3px solid #0066cc; outline-offset: 3px; }
+.family-accounts .family-primary, .family-invitation .family-primary { background: #1d1d1f; color: #fff; border-color: #1d1d1f; }
+.family-accounts .family-primary:hover:not(:disabled), .family-invitation .family-primary:hover:not(:disabled) { background: #424245; }
+.family-accounts .family-icon-button, .family-invitation .family-icon-button { flex: 0 0 44px; width: 44px; padding: 10px; border-radius: 50%; }
+.family-intro { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+.family-kicker { display: flex; align-items: center; gap: 8px; margin-bottom: 18px; font-size: 13px; font-weight: 600; }
+.family-intro h1 { margin-bottom: 18px; font-size: clamp(30px, 4vw, 46px); font-weight: 650; line-height: 1.12; letter-spacing: -.04em; }
+.family-intro p { max-width: 780px; color: #515154; font-size: 17px; line-height: 1.6; }
+.family-privacy { display: flex; align-items: flex-start; gap: 12px; padding: 20px; margin-bottom: 26px; border: 1px solid #d2d2d7; border-radius: 18px; color: #515154; background: #fff; font-size: 14px; line-height: 1.6; }
+.family-privacy svg { flex: 0 0 auto; margin-top: 2px; }
+.family-setup-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.family-setup > summary { width: fit-content; min-height: 44px; padding: 12px 0; font-size: 14px; font-weight: 600; cursor: pointer; }
+.family-setup[open] > summary { margin-bottom: 14px; }
+.family-setup > summary:focus-visible, .family-archived > summary:focus-visible { outline: 3px solid #0066cc; outline-offset: 3px; border-radius: 6px; }
+.family-card { min-width: 0; padding: 28px; border-radius: 24px; background: #fff; box-shadow: 0 6px 25px rgb(0 0 0 / 4%); }
+.family-card > svg { margin-bottom: 20px; }
+.family-card h2, .family-children h2, .family-sharing h2 { margin-bottom: 12px; font-size: 23px; letter-spacing: -.025em; line-height: 1.25; }
+.family-card p, .family-children > p, .family-sharing > p { color: #515154; font-size: 14px; line-height: 1.65; }
+.family-card form, .family-created-link { display: grid; gap: 12px; }
+.family-card form { margin-top: 22px; }
+.family-accounts label { font-size: 13px; font-weight: 600; }
+.family-accounts input:not([type="checkbox"]) { display: block; width: 100%; min-width: 0; min-height: 46px; padding: 12px; border: 1px solid #86868b; border-radius: 10px; background: #fff; color: #1d1d1f; font-size: 16px; }
+.family-created-link { margin-top: 22px; }
+.family-created-link small { color: #6e6e73; }
+.family-children { margin-top: 38px; }
+.family-profile-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.family-accounts .family-profile { justify-content: flex-start; min-width: 0; padding: 18px; border-radius: 18px; text-align: left; }
+.family-accounts .family-profile.selected { border-color: #1d1d1f; box-shadow: 0 0 0 1px #1d1d1f; }
+.family-profile > span:not(.rider-avatar) { flex: 1; min-width: 0; }
+.family-profile > .rider-avatar { flex: 0 0 44px; width: 44px; height: 44px; }
+.family-profile strong { display: block; overflow-wrap: anywhere; font-size: 16px; }
+.family-profile small { display: block; margin-top: 5px; color: #6e6e73; font-size: 12px; font-weight: 400; }
+.family-profile > svg { flex: 0 0 auto; }
+.family-empty { display: flex; align-items: flex-start; gap: 18px; padding: 26px; border: 1px dashed #b8b8be; border-radius: 20px; margin-top: 22px; }
+.family-empty svg { flex: 0 0 auto; }
+.family-empty p { max-width: 700px; margin: 0; color: #515154; font-size: 15px; line-height: 1.6; }
+.family-athlete { min-width: 0; padding-top: 36px; margin-top: 36px; border-top: 1px solid #d2d2d7; }
+.family-athlete-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+.family-athlete-header > div { flex: 1; min-width: 0; }
+.family-athlete-header > .rider-avatar { flex: 0 0 48px; width: 48px; height: 48px; }
+.family-athlete-header .eyebrow { color: #6e6e73; font-size: 11px; letter-spacing: .04em; }
+.family-athlete-header h2 { margin: 7px 0; font-size: 28px; line-height: 1.2; letter-spacing: -.03em; overflow-wrap: anywhere; }
+.family-athlete-header p { margin-bottom: 0; color: #515154; font-size: 13px; line-height: 1.5; }
+.family-records { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.family-records article { display: grid; grid-template-columns: 22px 1fr; align-items: center; gap: 12px; padding: 23px; border-radius: 20px; background: #fff; }
+.family-records article span { color: #515154; font-size: 13px; }
+.family-records article strong { grid-column: 2; font-size: 25px; letter-spacing: -.03em; }
+.family-club-connect { padding: 24px; margin-top: 22px; border: 1px solid #d2d2d7; border-radius: 20px; }
+.family-club-connect h3 { display: flex; align-items: center; gap: 8px; font-size: 18px; }
+.family-club-connect p { color: #515154; font-size: 14px; line-height: 1.6; }
+.family-club-connect form { display: flex; align-items: flex-end; gap: 12px; margin: 20px 0; }
+.family-club-connect label { flex: 1; min-width: 0; }
+.family-club-connect label span { display: block; margin-bottom: 9px; }
+.family-club-connect form button { flex: 0 0 auto; min-height: 46px; }
+.family-club-list { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
+.family-club-list > span { display: flex; align-items: center; gap: 7px; border-radius: 9px; padding: 10px; background: #fff; font-size: 12px; }
+.family-month-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 24px 0; }
+.family-month-summary article { padding: 20px 16px; border-radius: 16px; background: #fff; }
+.family-month-summary strong { display: block; font-size: 23px; font-weight: 650; letter-spacing: -.03em; }
+.family-month-summary span { display: block; margin-top: 8px; color: #515154; font-size: 12px; }
+.family-calendar { padding: 26px; border-radius: 22px; background: #fff; margin: 24px 0; }
+.family-calendar header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px; margin-bottom: 18px; }
+.family-calendar h3 { display: flex; align-items: center; gap: 10px; font-size: 20px; margin: 0; }
+.family-calendar header > div { display: flex; gap: 8px; }
+.family-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.family-weekdays { margin-bottom: 10px; color: #6e6e73; font-size: 12px; text-align: center; }
+.family-accounts .family-calendar-grid button { flex-direction: column; gap: 5px; min-width: 0; min-height: 56px; padding: 9px 2px; border-color: transparent; border-radius: 10px; }
+.family-accounts .family-calendar-grid button.selected { background: #1d1d1f; color: #fff; }
+.family-calendar-grid button small { font-size: 10px; font-weight: 400; }
+.family-calendar > p { margin: 18px 0 0; color: #515154; font-size: 13px; line-height: 1.6; }
+.family-session-detail { min-width: 0; }
+.family-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.family-error, .family-notice { padding: 16px 18px; margin: 18px 0; border: 1px solid #d2d2d7; border-radius: 14px; background: #fff; color: #424245; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.family-error { border-color: #c84b46; color: #9c2320; }
+.family-accounts .family-fine-print, .family-invitation .family-fine-print { margin-top: 18px; color: #6e6e73; font-size: 12px; line-height: 1.65; }
+.family-remove { margin-top: 24px; }
+.family-remove p { margin-top: 10px; color: #6e6e73; font-size: 12px; line-height: 1.6; }
+.family-confirm { padding: 24px; margin: 20px 0; border: 1px solid #86868b; border-radius: 18px; background: #fff; }
+.family-confirm h3 { font-size: 18px; }
+.family-confirm p { color: #515154; font-size: 14px; line-height: 1.6; }
+.family-sharing { margin-top: 38px; }
+.family-sharing ul { list-style: none; padding: 0; margin: 18px 0 0; }
+.family-sharing li { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 0; border-bottom: 1px solid #d2d2d7; }
+.family-sharing li div { min-width: 0; }
+.family-sharing li strong, .family-sharing li span { display: block; overflow-wrap: anywhere; }
+.family-sharing li span { margin-top: 6px; color: #6e6e73; font-size: 12px; }
+.family-sharing li button { flex: 0 0 auto; }
+.family-archived { padding: 22px; margin-top: 30px; border: 1px solid #d2d2d7; border-radius: 18px; }
+.family-archived summary { min-height: 30px; font-weight: 600; cursor: pointer; }
+.family-archived .family-sharing { margin-top: 18px; }
+.family-archived p { color: #515154; font-size: 13px; line-height: 1.6; }
+.family-invitation-overlay { position: fixed; inset: 0; z-index: 1800; display: grid; place-items: center; overflow-y: auto; padding: max(24px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left)); background: rgb(0 0 0 / 45%); }
+.family-invitation { position: relative; width: min(100%, 540px); max-height: 100%; overflow-y: auto; padding: 38px; border-radius: 26px; background: #fff; box-shadow: 0 20px 90px rgb(0 0 0 / 20%); outline: none; }
+.family-invitation .family-close { position: absolute; right: 18px; top: 18px; }
+.family-invitation > svg { margin-bottom: 22px; }
+.family-invitation h2 { font-size: 29px; letter-spacing: -.03em; padding-right: 20px; }
+.family-invitation p { color: #515154; font-size: 15px; line-height: 1.7; }
+.family-signed-in { padding-bottom: 15px; border-bottom: 1px solid #d2d2d7; }
+.family-consent { display: flex; align-items: flex-start; gap: 12px; padding: 18px 0; color: #1d1d1f; font-size: 14px; font-weight: 500; line-height: 1.6; }
+.family-consent input[type="checkbox"] { flex: 0 0 21px; width: 21px; height: 21px; margin: 1px 0 0; accent-color: #1d1d1f; }
+@media (max-width: 1000px) { .family-profile-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } .family-setup-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 600px) {
+  .family-intro { gap: 10px; }
+  .family-intro p { font-size: 15px; }
+  .family-card { padding: 23px; }
+  .family-profile-list { grid-template-columns: minmax(0, 1fr); }
+  .family-privacy { padding: 18px; }
+  .family-records { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .family-month-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .family-athlete-header { gap: 12px; }
+  .family-athlete-header h2 { font-size: 23px; }
+  .family-club-connect { padding: 20px; }
+  .family-club-connect form { flex-direction: column; align-items: stretch; }
+  .family-calendar { padding: 18px 12px; }
+  .family-calendar-grid { gap: 2px; }
+  .family-calendar h3 { font-size: 17px; }
+  .family-sharing li { flex-direction: column; align-items: flex-start; }
+  .family-sharing li button { max-width: 100%; }
+  .family-invitation { padding: 28px 23px; }
+}

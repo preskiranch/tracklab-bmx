@@ -17,6 +17,14 @@ describe('startup Community landing', () => {
     )).toBe(true);
   });
 
+  it('opens information tabs publicly and keeps family consent links as direct handoffs', () => {
+    for (const hash of ['app-guide', 'beta-testing-info']) {
+      expect(shouldOpenCommunityHomeOnLaunch(`https://tracklab-bmx.onrender.com/#${hash}`)).toBe(true);
+      expect(shouldOpenCommunityHomeOnLaunch(`capacitor://localhost/#${hash}`)).toBe(true);
+    }
+    expect(shouldOpenCommunityHomeOnLaunch(`https://tracklab-bmx.onrender.com/#familyInvite=${'f'.repeat(43)}`)).toBe(false);
+  });
+
   it('keeps a selected track for Open App but starts the session from Community home', () => {
     expect(shouldOpenCommunityHomeOnLaunch(
       'https://tracklab-bmx.onrender.com/?track=chula-vista-elite-bmx',

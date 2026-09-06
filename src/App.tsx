@@ -34,6 +34,7 @@ import {
 import type { CloudUserDataStatus } from './components/DiagnosticsPanel';
 import type { ChatMessage } from './components/MultiplayerPanel';
 import { betaInviteTokenFromHref, clearBetaInvitationFromUrl } from './lib/betaAccess';
+import { familyInviteTokenFromHref, clearFamilyInviteFromUrl } from './lib/familyAccounts';
 import { publicLiveMultiplayerAvailable } from './lib/liveMultiplayerAvailability';
 import type {
   MonitorSprintArm,
@@ -444,13 +445,14 @@ const ReactionTestView = lazy(() => import('./components/ReactionTestView').then
 const loadMonitorView = () => import('./components/MonitorView')
   .then((module) => ({ default: module.MonitorView }));
 const MonitorView = lazy(loadMonitorView);
-const loadAccountProfileView = () => import('./components/AccountProfileView')
-  .then((module) => ({ default: module.AccountProfileView }));
+const loadAccountProfileView = () => import('./components/AccountProfileWorkspace')
+  .then((module) => ({ default: module.AccountProfileWorkspace }));
 const AccountProfileView = lazy(loadAccountProfileView);
 const loadAppSettingsView = () => import('./components/AppSettingsView')
   .then((module) => ({ default: module.AppSettingsView }));
 const AppSettingsView = lazy(loadAppSettingsView);
 const BetaTestingPanel = lazy(() => import('./components/BetaTestingPanel').then((module) => ({ default: module.BetaTestingPanel })));
+const FamilyInvitation = lazy(() => import('./components/FamilyAccounts').then((module) => ({ default: module.FamilyInvitation })));
 const BetaInviteDialog = lazy(() => import('./components/BetaInviteDialog').then((module) => ({ default: module.BetaInviteDialog })));
 const HeartRateSettingsCard = lazy(() => import('./components/HeartRateSettingsCard')
   .then((module) => ({ default: module.HeartRateSettingsCard })));
@@ -2261,6 +2263,9 @@ export default function App() {
   const [unitPreferencesSyncMessage, setUnitPreferencesSyncMessage] = useState('Loading saved display units.');
   const [chatDraft, setChatDraft] = useState('');
   const [sidebarMoreOpen, setSidebarMoreOpen] = useState(false);
+  const [familyOpen, setFamilyOpen] = useState(false);
+  const [familyInviteToken, setFamilyInviteToken] = useState(() => typeof window === 'undefined' ? '' : familyInviteTokenFromHref(window.location.href));
+  const [familyInviteOpen, setFamilyInviteOpen] = useState(Boolean(familyInviteToken));
   const [regularUserPreview, setRegularUserPreview] = useState(false);
   const clubTabletKioskMode = Boolean(clubTabletDevice);
   const heartRate = useHeartRate({
@@ -3242,6 +3247,27 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    setFamilyOpen(false);
+  }, [authUser?.id]);
+
+  useEffect(() => {
+    const syncFamilyInvite = () => {
+      const token = familyInviteTokenFromHref(window.location.href);
+      if (token) { setFamilyInviteToken(token); setFamilyInviteOpen(true); }
+    };
+    window.addEventListener('hashchange', syncFamilyInvite);
+    window.addEventListener('popstate', syncFamilyInvite);
+    return () => {
+      window.removeEventListener('hashchange', syncFamilyInvite);
+      window.removeEventListener('popstate', syncFamilyInvite);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (authUser && familyInviteToken) setFamilyInviteOpen(true);
+  }, [authUser?.id, familyInviteToken]);
+
+  useEffect(() => {
     const syncBetaInvite = () => {
       const token = betaInviteTokenFromHref(window.location.href);
       if (token) { setBetaInviteToken(token); setBetaInviteOpen(true); }
@@ -3298,6 +3324,11 @@ export default function App() {
           setHeartRateStudioInviteOpen(true);
         }, {
           onTrackLocator: () => !disposed && setShowMembershipLanding(true),
+          onFamilyInvite: (token) => {
+            if (disposed) return;
+            setFamilyInviteToken(token);
+            setFamilyInviteOpen(true);
+          },
           onBetaInvite: (token) => {
             if (disposed) return;
             setBetaInviteToken(token);
@@ -10482,6 +10513,15 @@ export default function App() {
     }, 0);
   }, [requireAccountProfile]);
 
+  const openInformationGuide = useCallback((beta = false) => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('locator');
+    url.hash = beta ? 'beta-testing-info' : 'app-guide';
+    window.history.pushState(window.history.state, '', url);
+    setShowMembershipLanding(true);
+    setSidebarMoreOpen(false);
+  }, []);
+
   const openBikeShopDirectory = useCallback(() => {
     const url = new URL(window.location.href);
     url.searchParams.delete('locator');
@@ -12575,6 +12615,22 @@ export default function App() {
       />
     </Suspense>
   ) : null;
+  const familyInvitation = !clubTabletKioskMode && familyInviteToken && familyInviteOpen ? (
+    <Suspense fallback={null}>
+      <FamilyInvitation
+        key={`${authUser?.id ?? 'signed-out'}:${familyInviteToken}`}
+        token={familyInviteToken}
+        accountId={authUser?.id ?? null}
+        accountName={authUser?.name}
+        onClose={() => { setFamilyInviteOpen(false); setFamilyInviteToken(''); clearFamilyInviteFromUrl(); }}
+        onSignIn={() => { setFamilyInviteOpen(false); setShowMembershipLanding(true); setAuthMode('login'); }}
+        onAccepted={() => {
+          setFamilyInviteOpen(false); setFamilyInviteToken(''); clearFamilyInviteFromUrl();
+          setShowMembershipLanding(false); setMappingMode(false); setFamilyOpen(true); setAppMode('profile');
+        }}
+      />
+    </Suspense>
+  ) : null;
   const betaInvitation = !clubTabletKioskMode && betaInviteToken ? (
     <Suspense fallback={null}>
       <BetaInviteDialog
@@ -12603,6 +12659,7 @@ export default function App() {
         {watchConnectCoordinator}
         {appleBillingCoordinator}
         {betaInvitation}
+        {familyInvitation}
         <Suspense fallback={lazyLoadingFallback}>
           <MembershipLanding
           membership={membership}
@@ -12727,6 +12784,7 @@ export default function App() {
       {watchConnectCoordinator}
       {appleBillingCoordinator}
       {betaInvitation}
+        {familyInvitation}
       {!clubTabletKioskMode && (
         raceViewFullscreen || mappingFullscreen || exploreRideFullscreen || utilityFullscreen
       ) && <div className="watch-connect-indicator-slot fullscreen" id="watch-connect-indicator-slot" />}
@@ -13385,6 +13443,9 @@ export default function App() {
           </button>
           {sidebarMoreOpen && (
             <div className="side-nav-more">
+              <button type="button" onClick={() => { setMappingMode(false); setAppMode('profile'); setFamilyOpen(true); setSidebarMoreOpen(false); }}>
+                <UserPlus size={17} /> Family
+              </button>
               <button type="button" onClick={handleHeartRateAccountBlockOpenSettings}>
                 <Settings size={17} /> Settings
               </button>
@@ -13392,6 +13453,12 @@ export default function App() {
                 setBetaSettingsFocusRequested(true);
                 handleHeartRateAccountBlockOpenSettings();
               }}><Mail size={17} /> Beta Testing</button>
+              <button type="button" onClick={() => openInformationGuide()}>
+                <span aria-hidden="true">ⓘ</span> App Guide
+              </button>
+              <button type="button" onClick={() => openInformationGuide(true)}>
+                <span aria-hidden="true">ⓘ</span> Beta Testing Info
+              </button>
               <button type="button" onClick={() => handleHeartRateAccountBlockOpenSettings(true)}>
                 Watch Connect
               </button>
@@ -13502,8 +13569,8 @@ export default function App() {
             <div className="explore-topbar-heading">
               <UserCircle size={20} />
               <span>
-                <strong>My Profile</strong>
-                <small>Your photo, calendar, sessions, and downloads</small>
+                <strong>{familyOpen ? 'Family' : 'My Profile'}</strong>
+                <small>{familyOpen ? 'Each athlete’s profile, records, and activity history' : 'Your photo, calendar, sessions, and downloads'}</small>
               </span>
             </div>
           ) : appMode === 'friends' ? (
@@ -13769,7 +13836,7 @@ export default function App() {
             </Suspense>
             {authUser && <div className="app-settings-view">
               <Suspense fallback={<p role="status">Loading beta testing…</p>}>
-                <BetaTestingPanel key={authUser.id} user={authUser} focusRequested={betaSettingsFocusRequested} onFocusHandled={handleBetaSettingsFocused} />
+                <BetaTestingPanel key={authUser.id} user={authUser} focusRequested={betaSettingsFocusRequested} onFocusHandled={handleBetaSettingsFocused} onOpenInfo={() => openInformationGuide(true)} />
               </Suspense>
               <div id="watch" style={{ display: 'grid', gap: 16 }}>
                 <div id="heart-rate-account-block-settings-slot" style={{ display: 'contents' }} />
@@ -13808,6 +13875,8 @@ export default function App() {
           <Suspense fallback={lazyLoadingFallback}>
           <AccountProfileView
             key={authUser.id}
+            familyOpen={familyOpen}
+            onFamilyOpenChange={setFamilyOpen}
             name={authUser.name}
             email={authUser.email}
             membershipLabel={membershipLabel}

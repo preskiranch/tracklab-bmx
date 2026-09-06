@@ -1,0 +1,5 @@
+.account-profile-workspace { display: grid; gap: 20px; min-width: 0; }
+.account-profile-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.account-profile-tabs button { min-height: 44px; padding: 10px 22px; border: 1px solid #d2d2d7; border-radius: 999px; background: #fff; color: #1d1d1f; font-size: 14px; font-weight: 600; }
+.account-profile-tabs button[aria-pressed="true"] { background: #1d1d1f; color: white; border-color: #1d1d1f; }
+.account-profile-tabs button:focus-visible { outline: 3px solid #0071e3; outline-offset: 3px; }

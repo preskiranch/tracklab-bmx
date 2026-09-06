@@ -192,3 +192,10 @@
   .membership-site-footer { gap: 18px; }
 }
 @media (prefers-reduced-motion: reduce) { .membership-hub-feature { transition: none; } .membership-hub-feature:hover { transform: none; } }
+
+/* Seven navigation destinations also fit tablet widths without clipping. */
+@media (min-width: 761px) and (max-width: 1050px) {
+  .membership-hub-sidebar { flex-wrap: wrap; gap: 8px 22px; }
+  .membership-hub-nav { order: 3; flex-basis: 100%; justify-content: flex-start; overflow-x: auto; }
+  .membership-hub-account, .membership-hub-signin { margin-left: auto; }
+}

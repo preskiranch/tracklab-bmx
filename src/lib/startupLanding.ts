@@ -15,7 +15,9 @@ export function shouldOpenCommunityHomeOnLaunch(href: string | null | undefined)
     const fragment = new URLSearchParams(url.hash.replace(/^#/, ''));
     const opensCommunityDirectory = url.searchParams.has('locator')
       || url.hash === '#track-locator'
-      || url.hash === '#bike-shop-directory';
+      || url.hash === '#bike-shop-directory'
+      || url.hash === '#app-guide'
+      || url.hash === '#beta-testing-info';
 
     if (opensCommunityDirectory) return true;
 
@@ -26,6 +28,7 @@ export function shouldOpenCommunityHomeOnLaunch(href: string | null | undefined)
       || (url.pathname === '/friends/invite' && url.searchParams.has('token'))
       || fragment.has('clubInvite')
       || fragment.has('betaInvite')
+      || fragment.has('familyInvite')
       || fragment.has('heartRateAccountBlock');
 
     return !opensWorkspace;

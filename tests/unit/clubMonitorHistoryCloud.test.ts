@@ -184,6 +184,10 @@ describe('owner-operated Monitor View athlete history', () => {
             '/': '/',
             '#': 'betaInvite=*',
             comment: 'Open a personal beta invitation without sending its token in the URL request.',
+          }, {
+            '/': '/',
+            '#': 'familyInvite=*',
+            comment: 'Open a family activity-sharing invitation for personal account approval.',
           }],
         }],
       },

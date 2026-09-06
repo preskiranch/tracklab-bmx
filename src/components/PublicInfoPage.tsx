@@ -469,6 +469,13 @@ function PrivacyPage() {
             <div>
               <h2>Club and youth use</h2>
               <p>
+                Family profiles let a signed-in parent or guardian create a separate managed athlete profile without
+                giving the child an email address or password. An existing account must approve an invitation before
+                its profile and training activity, including cycling power, can be viewed by the requesting parent.
+                Either account can remove that viewing permission. Family viewing does not grant account sign-in,
+                billing access, friend or message access, live location, or Apple Watch heart-rate access.
+              </p>
+              <p>
                 TrackLab includes studio riders and Club Connect, but the current build does not independently verify
                 a rider&apos;s age. When a rider is a minor, the club, studio, parent, or guardian is responsible for using
                 the service only with the authorization and supervision required in their location. Do not upload a

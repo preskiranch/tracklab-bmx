@@ -7,6 +7,8 @@ const schema = 'tracklab';
 const tables = [
   'profiles',
   'auth_users',
+  'family_children',
+  'family_link_invites',
   'reaction_test_bests',
   'auth_sessions',
   'billing_checkouts',

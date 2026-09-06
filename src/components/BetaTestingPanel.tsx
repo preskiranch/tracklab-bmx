@@ -12,8 +12,8 @@ function dateLabel(value: number) {
   return new Date(value).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-export function BetaTestingPanel({ user, focusRequested = false, onFocusHandled }: {
-  user: AuthUser; focusRequested?: boolean; onFocusHandled?: () => void;
+export function BetaTestingPanel({ user, focusRequested = false, onFocusHandled, onOpenInfo }: {
+  user: AuthUser; focusRequested?: boolean; onFocusHandled?: () => void; onOpenInfo?: () => void;
 }) {
   const [beta, setBeta] = useState<BetaGrant | null>(null);
   const [admin, setAdmin] = useState<BetaAdminState | null>(null);
@@ -91,6 +91,7 @@ export function BetaTestingPanel({ user, focusRequested = false, onFocusHandled 
         <div className="beta-access-summary"><strong>{beta.bikeSeats} Wattbike connection{beta.bikeSeats === 1 ? '' : 's'} included</strong><span>Beta access through {dateLabel(beta.expiresAt)}. No purchase required.</span></div>
       ) : !user.admin && <p>Beta Wattbike access is available by invitation. Open your personal invitation link to activate it.</p>}
       <a className="beta-action" href={betaFeedbackHref(typeof navigator === 'undefined' ? '' : navigator.userAgent, version)}><Mail size={17} /> Send beta feedback</a>
+      {onOpenInfo && <button className="beta-action" type="button" onClick={onOpenInfo}>Read Beta Testing Info</button>}
       <small>Your email app opens with a feedback template. You can review it and attach screenshots before sending.</small>
       {error && <p className="beta-error" role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
