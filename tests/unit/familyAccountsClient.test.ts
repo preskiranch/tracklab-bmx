@@ -253,6 +253,38 @@ describe('authenticated family requests', () => {
     expect(fetcher).toHaveBeenCalledTimes(3);
   });
 
+  it('splits an incomplete club pool even when projection returned no child records', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(reply({ ...profile, sessions: [], rangeComplete: false }))
+      .mockResolvedValueOnce(reply({ ...profile, sessions: [session], rangeComplete: true }))
+      .mockResolvedValueOnce(reply({ ...profile, sessions: [], rangeComplete: true }));
+    vi.stubGlobal('fetch', fetcher);
+    const history = await loadFamilyHistory(childId, 0, 3_000);
+    expect(history.sessions).toEqual([session]);
+    expect(history.totals.sessions).toBe(1);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it('rejects malformed completeness metadata', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply({ ...profile, sessions: [], rangeComplete: 'false' })));
+    await expect(loadFamilyHistory(childId, 0, 3_000)).rejects.toThrow('completeness could not be verified');
+  });
+
+  it('preserves sub-millisecond database timestamps between adjacent date windows', async () => {
+    const fetcher = vi.fn(async (path: string) => {
+      const query = new URL(path, 'https://tracklab.test').searchParams;
+      const from = Number(query.get('from'));
+      const to = Number(query.get('to'));
+      if (from === 0 && to === 3000) return reply({ ...profile, sessions: [], rangeComplete: false });
+      const storedTimestamp = 1500.5;
+      return reply({ ...profile, rangeComplete: true,
+        sessions: storedTimestamp >= from && storedTimestamp <= to ? [{ ...session, startedAt: 1500 }] : [] });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const history = await loadFamilyHistory(childId, 0, 3_000);
+    expect(history.sessions).toHaveLength(1);
+    expect(history.sessions[0].startedAt).toBe(1500);
+  });
+
   it('stops loading additional windows after cancellation', async () => {
     const abort = new AbortController();
     const fetcher = vi.fn(async () => {

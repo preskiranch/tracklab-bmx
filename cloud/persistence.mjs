@@ -11846,7 +11846,11 @@ function legacyRaceSessions(entries, profileKey) {
   });
 }
 
-export async function loadTrainingSessions(profileKey, { from = 0, to = Date.now(), limit = 1000 } = {}) {
+function noteTrainingRangeLimit(rowCount, limit, onRangeIncomplete) {
+  if (rowCount >= limit && typeof onRangeIncomplete === 'function') onRangeIncomplete();
+}
+
+export async function loadTrainingSessions(profileKey, { from = 0, to = Date.now(), limit = 1000, onRangeIncomplete } = {}) {
   const safeLimit = Math.max(1, Math.min(2000, Math.round(Number(limit) || 1000)));
   let sessions;
   let raceEntries;
@@ -11906,6 +11910,10 @@ export async function loadTrainingSessions(profileKey, { from = 0, to = Date.now
         ],
       ),
     ]);
+    // Report the bounded raw queries before projection, grouping, or dedup can
+    // reduce their result count and hide that older source rows were omitted.
+    noteTrainingRangeLimit(sessionResult?.rows?.length ?? 0, safeLimit, onRangeIncomplete);
+    noteTrainingRangeLimit(raceResult?.rows?.length ?? 0, safeLimit * 4, onRangeIncomplete);
     sessions = (sessionResult?.rows ?? []).map(trainingSessionFromRow).filter(Boolean);
     raceEntries = (raceResult?.rows ?? []).map((row) => ({
       dedupeKey: row.dedupe_key,
@@ -11921,22 +11929,25 @@ export async function loadTrainingSessions(profileKey, { from = 0, to = Date.now
       createdAt: new Date(row.created_at).toISOString(),
     }));
   }
+  noteTrainingRangeLimit(sessions.length, safeLimit, onRangeIncomplete);
+  noteTrainingRangeLimit(raceEntries.length, safeLimit * 4, onRangeIncomplete);
   const byId = new Map(sessions.map((session) => [session.id, session]));
   legacyRaceSessions(raceEntries, profileKey).forEach((session) => {
     if (!byId.has(session.id)) byId.set(session.id, session);
   });
-  return [...byId.values()]
-    .filter((session) => !isReactionTestSession(session))
+  const combined = [...byId.values()].filter((session) => !isReactionTestSession(session));
+  noteTrainingRangeLimit(combined.length, safeLimit, onRangeIncomplete);
+  return combined
     .sort((left, right) => right.startedAt - left.startedAt)
     .slice(0, safeLimit);
 }
 
-export async function loadClubTrainingSessions(ownerProfileKey, { from = 0, to = Date.now(), limit = 1000 } = {}) {
+export async function loadClubTrainingSessions(ownerProfileKey, { from = 0, to = Date.now(), limit = 1000, onRangeIncomplete } = {}) {
   const safeLimit = Math.max(1, Math.min(2000, Math.round(Number(limit) || 1000)));
   if (!pool) {
     const ownedClubId = memoryClubIdByOwner.get(ownerProfileKey);
     if (!ownedClubId) return [];
-    return [...memoryTrainingSessions.values()]
+    const sessions = [...memoryTrainingSessions.values()]
       .filter((session) => (
         session._clubId === ownedClubId
         && session._profileKey !== ownerProfileKey
@@ -11948,8 +11959,9 @@ export async function loadClubTrainingSessions(ownerProfileKey, { from = 0, to =
       .map((session) => cloneJson(trainingSessionWithPrivateHealthRemoved(
         enrichMemoryClubTrainingSession(session),
       ), session))
-      .sort((left, right) => right.startedAt - left.startedAt)
-      .slice(0, safeLimit);
+      .sort((left, right) => right.startedAt - left.startedAt);
+    noteTrainingRangeLimit(sessions.length, safeLimit, onRangeIncomplete);
+    return sessions.slice(0, safeLimit);
   }
   const result = await query(
     `SELECT sessions.*, clubs.name AS club_name, members.rider_name AS club_rider_name
@@ -11968,6 +11980,7 @@ export async function loadClubTrainingSessions(ownerProfileKey, { from = 0, to =
      ORDER BY sessions.started_at DESC LIMIT $4`,
     [ownerProfileKey, from, to, safeLimit],
   );
+  noteTrainingRangeLimit(result?.rows?.length ?? 0, safeLimit, onRangeIncomplete);
   return (result?.rows ?? []).map(trainingSessionFromRow).filter(Boolean);
 }
 

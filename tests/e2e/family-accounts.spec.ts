@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 
 const invitationToken = 'f'.repeat(43);
 const clubToken = 'c'.repeat(43);
@@ -19,6 +20,7 @@ async function fixture(page: Page, { signedIn = true, initialChildren = true } =
   let sharedWith: any[] = [];
   const blocked = new Set<string>();
   let rejectAcceptance = false;
+  let sparseCappedChild: string | null = null;
   let heldChild: string | null = null;
   let releaseHistory: (() => void) | null = null;
   const writes: Array<{ path: string; body: any; method: string }> = [];
@@ -100,7 +102,10 @@ async function fixture(page: Page, { signedIn = true, initialChildren = true } =
             riders: [{ playerId: 1, riderId: `studio-${childId}`, riderName: subject.name, resultStatus: 'finished', distanceMeters: 100, averageWatts: 300, peakWatts: 500, averageCadence: 100, peakCadence: 130 }],
             healthKit: { bpm: 199, device: 'Private health fixture must not appear' } },
         })) : [];
-        result = { child: subject, sessions, healthAvailable: false, totals: { sessions: 999 } };
+        const monthStart = new Date(date.getFullYear(), date.getMonth(), 1).getTime();
+        const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 1).getTime() - 1;
+        const rangeComplete = !(sparseCappedChild === childId && from <= monthStart && to >= monthEnd);
+        result = { child: subject, sessions: rangeComplete ? sessions : [], rangeComplete, healthAvailable: false, totals: { sessions: 999 } };
         if (heldChild === childId) {
           heldChild = null;
           await new Promise<void>((resolve) => { releaseHistory = resolve; });
@@ -130,6 +135,7 @@ async function fixture(page: Page, { signedIn = true, initialChildren = true } =
     historyIsHeld: () => releaseHistory != null,
     release: () => { releaseHistory?.(); releaseHistory = null; },
     rejectAcceptance: (value: boolean) => { rejectAcceptance = value; },
+    sparseCappedMonth: (id: string) => { sparseCappedChild = id; },
   };
 }
 
@@ -368,5 +374,40 @@ test('a family invitation survives athlete sign-in and still requires explicit a
   await dialog.getByRole('button', { name: 'Approve activity sharing', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Who can view my records', exact: true })).toContainText('Parent Guardian');
+  expect(state.errors).toEqual([]);
+});
+
+test('a sparse child response marked incomplete loads both date windows before showing or exporting records', async ({ page }, testInfo) => {
+  const state = await fixture(page);
+  state.sparseCappedMonth('child-one');
+  await page.goto('/');
+  await openFamily(page);
+  await page.getByRole('group', { name: 'Family profiles' }).getByRole('button', { name: /Avery/ }).click();
+  const history = page.getByRole('region', { name: "Avery's activity history", exact: true });
+  await expect(history.getByRole('region', { name: 'Training results spreadsheet' })).toContainText('5 saved sessions');
+  const windows = () => state.reads.filter((path) => path.includes('/child-one/training-sessions')).map((path) => {
+    const query = new URL(path, 'https://tracklab.test').searchParams;
+    return { from: Number(query.get('from')), to: Number(query.get('to')) };
+  });
+  const [whole, earlier, later] = windows();
+  expect(earlier.from).toBe(whole.from);
+  expect(earlier.to).toBe(later.from);
+  expect(later.to).toBe(whole.to);
+  expect(earlier.to).toBeLessThan(whole.to);
+  await history.getByRole('button', { name: 'View details', exact: true }).first().click();
+  const readsBeforeExport = windows().length;
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    history.getByRole('button', { name: 'JSON', exact: true }).click(),
+  ]);
+  expect(windows().length).toBeGreaterThanOrEqual(readsBeforeExport + 3);
+  const path = testInfo.outputPath('complete-family-record.json');
+  await download.saveAs(path);
+  const exported = JSON.parse(await readFile(path, 'utf8'));
+  expect(exported.id).toMatch(/^child-one-/);
+  expect(exported.title).toContain('Avery');
+  expect(JSON.stringify(exported)).not.toContain('Elliot');
+  expect(JSON.stringify(exported)).not.toContain('healthKit');
+  expect(JSON.stringify(exported)).not.toContain('Private health fixture');
   expect(state.errors).toEqual([]);
 });

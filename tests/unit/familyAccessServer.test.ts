@@ -180,6 +180,10 @@ describe('personal family access API', () => {
     const aHistory = await (await api(`/api/family/children/${a.id}/training-sessions?from=0`, parent)).json();
     const bHistory = await (await api(`/api/family/children/${b.id}/training-sessions?from=0`, parent)).json();
     expect(aHistory.sessions).toHaveLength(4);
+    expect(aHistory.rangeComplete).toBe(true);
+    const cappedHistory = await (await api(`/api/family/children/${a.id}/training-sessions?from=0&limit=1`, parent)).json();
+    expect(cappedHistory.sessions).toHaveLength(1);
+    expect(cappedHistory.rangeComplete).toBe(false);
     expect(bHistory.sessions).toHaveLength(0);
     expect(JSON.stringify(aHistory)).not.toContain('SIBLING SECRET');
     expect(aHistory.sessions.filter((entry: any) => entry.activityType !== 'explore')

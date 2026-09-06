@@ -239,13 +239,18 @@ export async function loadFamilyHistory(childId: string, from: number, to: numbe
     const raw = await request(`${path}?${query}`, { signal });
     signal?.throwIfAborted();
     const history = normalizeFamilyHistory(raw, childId);
+    if (raw.rangeComplete !== undefined && typeof raw.rangeComplete !== 'boolean') {
+      throw new Error('Family activity completeness could not be verified. Refresh and try again.');
+    }
     // A full response may omit older records. Split the inclusive date range
     // so the calendar and exports never silently present a truncated month.
-    if ((raw.sessions as unknown[]).length < 1000) return history;
-    if (start === end) throw new Error('These activity records could not be loaded completely. Please contact support.');
+    if (raw.rangeComplete !== false && (raw.sessions as unknown[]).length < 1000) return history;
+    if (end - start <= 1) throw new Error('These activity records could not be loaded completely. Please contact support.');
     const midpoint = start + Math.floor((end - start) / 2);
     const earlier = await loadWindow(start, midpoint);
-    const later = await loadWindow(midpoint + 1, end);
+    // Overlap at the boundary: PostgreSQL legacy timestamps can have finer
+    // precision than JavaScript milliseconds. Deduplicate the shared boundary.
+    const later = await loadWindow(midpoint, end);
     const sessions = [...new Map([...earlier.sessions, ...later.sessions].map((record) => [record.id, record])).values()]
       .sort((a, b) => b.startedAt - a.startedAt || a.id.localeCompare(b.id));
     return normalizeFamilyHistory({ ...later, sessions }, childId);

@@ -46,6 +46,10 @@ Busy monthly histories are loaded in smaller date windows when a response
 reaches its record limit. The client merges the complete results for the
 calendar and exports; an incomplete or revoked window fails the whole load
 instead of silently showing a partial month.
+The API reports `rangeComplete: false` when any underlying source reaches its
+cap, including before club-athlete filtering or deduplication. Adjacent client
+windows overlap at their boundary and merge by session ID to preserve legacy
+database timestamps with precision finer than one millisecond.
 
 `permissions.health` and `healthAvailable` are false. Family does not include
 private Watch summaries, raw heart-rate samples, pairing identifiers, Recovery

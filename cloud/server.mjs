@@ -5460,6 +5460,7 @@ async function loadTrainingSessionsForAccount(profileKey, options) {
     })
     : [];
   const byId = new Map([...ownSessions, ...clubSessions, ...ownedClubSessions].map((session) => [session.id, session]));
+  if (byId.size >= options.limit) options.onRangeIncomplete?.();
   return [...byId.values()]
     .sort((left, right) => right.startedAt - left.startedAt)
     .slice(0, options.limit);
@@ -5506,8 +5507,10 @@ async function familyTrainingHistory(child, options) {
         ? { ...projected, id: `club:${session._clubId}:${session.id}` } : projected;
     }).filter(Boolean)
   )))).flat();
-  return [...new Map([...own, ...historical].filter((item) => !isReactionTestSession(item))
-    .map((item) => [item.id, item])).values()]
+  const combined = [...new Map([...own, ...historical].filter((item) => !isReactionTestSession(item))
+    .map((item) => [item.id, item])).values()];
+  if (combined.length >= options.limit) options.onRangeIncomplete?.();
+  return combined
     .sort((a, b) => b.startedAt - a.startedAt).slice(0, options.limit);
 }
 
@@ -5602,8 +5605,10 @@ async function handleFamilyRequest(request, response, requestUrl) {
           const toValue = requestUrl.searchParams.get('to');
           const to = Math.max(from, toValue == null ? Date.now() : finiteNumber(toValue, Date.now()));
           const limit = Math.max(1, Math.min(2000, Math.round(finiteNumber(requestUrl.searchParams.get('limit'), 1000) || 1000)));
-          const sessions = await familyTrainingHistory(child, { from, to, limit });
-          result = { child: publicFamilyChild(child), sessions, totals: familyTrainingTotals(sessions), healthAvailable: false };
+          let rangeComplete = true;
+          const sessions = await familyTrainingHistory(child, { from, to, limit,
+            onRangeIncomplete: () => { rangeComplete = false; } });
+          result = { child: publicFamilyChild(child), sessions, totals: familyTrainingTotals(sessions), rangeComplete, healthAvailable: false };
         }
         // Re-check after asynchronous reads: an unlink or account deletion may
         // have happened while another child’s history was being assembled.
