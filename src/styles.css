@@ -1,11 +1,23 @@
 :root {
-  color-scheme: light;
+  color-scheme: dark;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #f1f1f1;
-  color: #181818;
+  background: #000;
+  color: #fff;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased; --panel: #fff; --panel-soft: #fafafa; --ink: #171717; --muted: #636363; --line: #e0e0e0; --line-strong: #a3a3a3; --lime: #d4d4d4; --blue: #737373; --amber: #a3a3a3; --red: #525252; --radius: 8px; --shadow: 0 12px 32px rgb(0 0 0 / 8%);
+  -webkit-font-smoothing: antialiased;
+  --panel: #000;
+  --panel-soft: #000;
+  --ink: #fff;
+  --muted: rgb(255 255 255 / 78%);
+  --line: rgb(255 255 255 / 18%);
+  --line-strong: rgb(255 255 255 / 42%);
+  --lime: #fff;
+  --blue: #fff;
+  --amber: #a3a3a3;
+  --red: #525252;
+  --radius: 8px;
+  --shadow: 0 12px 32px rgb(0 0 0 / 28%);
 }
 
 * {
@@ -23,7 +35,7 @@ body {
   overflow-x: clip;
   overscroll-behavior-x: none;
   -webkit-text-size-adjust: 100%;
-  text-size-adjust: 100%; background: #f5f5f5;
+  text-size-adjust: 100%; background: #000;
 }
 
 #root {
@@ -40,7 +52,7 @@ body.tracklab-race-active,
 body.tracklab-race-active #root {
   width: 100%;
   height: 100%;
-  background: #0e0e0e;
+  background: #000;
   overflow: hidden;
   overscroll-behavior: none;
 }
@@ -91,14 +103,14 @@ input[type="text"],
   min-height: 44px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
   color: var(--ink);
   outline: none;
 }
 
 select:focus,
 input:focus {
-  border-color: #818181;
+  border-color: rgb(255 255 255 / 26%);
   box-shadow: 0 0 0 3px rgba(129, 129, 129, 0.14);
 }
 
@@ -115,7 +127,7 @@ input:focus {
 .membership-page {
   min-height: 100vh;
   padding: 24px;
-  background: #f1f1f1;
+  background: #000;
 }
 
 .membership-nav {
@@ -148,26 +160,26 @@ input:focus {
 }
 
 .primary-button {
-  border: 1px solid #101010;
-  background: #101010;
-  color: #ffffff;
+  border: 1px solid #fff;
+  background: #fff;
+  color: #000;
 }
 
-.primary-button:hover { background: #333; border-color: #333;
+.primary-button:hover { background: #fff; border-color: #fff; color: #000;
 }
 
 .secondary-button,
 .membership-mini-card button {
   border: 1px solid var(--line);
-  background: #ffffff;
-  color: #181818;
+  background: #000;
+  color: #fff;
   text-decoration: none;
 }
 
 .secondary-button:hover,
 .membership-mini-card button:hover {
   border-color: var(--line-strong);
-  background: #fafafa;
+  background: #000;
 }
 
 .primary-button:disabled,
@@ -184,7 +196,7 @@ input:focus {
   padding: 0;
   border: 0;
   background: transparent;
-  color: #515151;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 700;
 }
@@ -214,13 +226,13 @@ input:focus {
   padding: 18px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.95);
+  background: rgb(0 0 0 / 95%);
   box-shadow: 0 10px 28px rgba(37, 37, 37, 0.06);
 }
 
 .profile-gate.complete {
-  border-color: rgba(178, 178, 178, 0.44);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(250, 250, 250, 0.92));
+  border-color: rgb(255 255 255 / 38%);
+  background: linear-gradient(180deg, rgb(0 0 0 / 96%), rgb(0 0 0 / 92%));
 }
 
 .profile-gate h2 {
@@ -249,7 +261,7 @@ input:focus {
 }
 
 .profile-gate-form label span {
-  color: #5f5f5f;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -262,21 +274,21 @@ input:focus {
   padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
-  color: #181818;
+  background: #000;
+  color: #fff;
   font-size: 13px;
   font-weight: 700;
 }
 
 .profile-gate-form input:focus {
-  border-color: #797979;
-  outline: 3px solid rgba(121, 121, 121, 0.16);
+  border-color: rgb(255 255 255 / 26%);
+  outline: 3px solid rgb(255 255 255 / 16%);
 }
 
 .profile-gate-note {
   grid-column: 1 / -1;
   margin: -2px 0 0;
-  color: #505050 !important;
+  color: rgb(255 255 255 / 78%) !important;
   font-weight: 700;
 }
 
@@ -291,19 +303,19 @@ input:focus {
   gap: 3px;
   min-height: 56px;
   padding: 12px;
-  border: 1px solid rgba(178, 178, 178, 0.5);
+  border: 1px solid rgb(255 255 255 / 38%);
   border-radius: 8px;
-  background: rgba(250, 250, 250, 0.92);
+  background: rgb(0 0 0 / 92%);
 }
 
 .account-ready-panel strong {
-  color: #1c1c1c;
+  color: #fff;
   font-size: 15px;
 }
 
 .account-ready-panel span {
   overflow: hidden;
-  color: #5f5f5f;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -323,7 +335,7 @@ input:focus {
 .membership-mini-card {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.95);
+  background: rgb(0 0 0 / 95%);
   box-shadow: 0 10px 28px rgba(37, 37, 37, 0.06);
 }
 
@@ -340,10 +352,10 @@ input:focus {
   width: fit-content;
   min-height: 30px;
   padding: 0 10px;
-  border: 1px solid rgba(178, 178, 178, 0.34);
+  border: 1px solid rgb(255 255 255 / 34%);
   border-radius: 999px;
-  background: rgba(178, 178, 178, 0.12);
-  color: #2b2b2b;
+  background: rgb(0 0 0 / 12%);
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
@@ -384,7 +396,7 @@ input:focus {
 
 .status-metric span {
   display: block;
-  color: #101010;
+  color: #fff;
   font-size: 36px;
   font-weight: 700;
   line-height: 1;
@@ -436,7 +448,7 @@ input:focus {
 .membership-card li {
   position: relative;
   padding-left: 18px;
-  color: #303030;
+  color: #fff;
   font-size: 13px;
   font-weight: 750;
 }
@@ -463,14 +475,14 @@ input:focus {
   height: 42px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fafafa;
-  color: #181818;
+  background: #000;
+  color: #fff;
 }
 
 .card-icon.accent {
-  border-color: rgba(121, 121, 121, 0.28);
-  background: rgba(121, 121, 121, 0.1);
-  color: #4f4f4f;
+  border-color: rgb(255 255 255 / 28%);
+  background: rgb(0 0 0 / 10%);
+  color: rgb(255 255 255 / 78%);
 }
 
 .seat-selector {
@@ -488,7 +500,7 @@ input:focus {
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
-  color: #484848;
+  color: rgb(255 255 255 / 78%);
   font-size: 14px;
   font-weight: 700;
 }
@@ -499,7 +511,7 @@ input:focus {
 }
 
 .checkout-message.error {
-  color: #3f3f3f;
+  color: rgb(255 255 255 / 78%);
   font-weight: 750;
 }
 
@@ -521,7 +533,7 @@ input:focus {
 
 .membership-mini-card small {
   overflow: hidden;
-  color: #646464;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 750;
   text-overflow: ellipsis;
@@ -543,7 +555,7 @@ input:focus {
   height: 100dvh;
   min-height: 0;
   overflow: hidden;
-  background: #080808;
+  background: #000;
 }
 
 .race-fullscreen .sidebar,
@@ -590,7 +602,7 @@ input:focus {
   border: 0;
   border-radius: 0;
   box-shadow: none;
-  background: #080808;
+  background: #000;
 }
 
 .race-fullscreen .earth-header,
@@ -609,7 +621,7 @@ input:focus {
 .platform-shell.race-review-mode {
   display: block;
   min-height: 100vh;
-  background: #f2f2f2;
+  background: #000;
 }
 
 .race-review-mode .sidebar,
@@ -630,13 +642,13 @@ input:focus {
   width: 100%;
   height: 100vh;
   overflow: hidden;
-  background: #f2f2f2;
+  background: #000;
 }
 
 .race-review-map {
   min-height: 0;
-  border-bottom: 1px solid #d7d7d7;
-  background: #181818;
+  border-bottom: 1px solid rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .race-review-map .earth-panel {
@@ -644,7 +656,7 @@ input:focus {
   height: 100%;
   border: 0;
   border-radius: 0;
-  background: #181818;
+  background: #000;
   box-shadow: none;
 }
 
@@ -666,7 +678,7 @@ input:focus {
   grid-template-rows: auto auto minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
-  background: #f9f9f9;
+  background: #000;
 }
 
 .race-review-header {
@@ -676,7 +688,7 @@ input:focus {
   gap: 18px;
   padding: 14px 18px;
   border-bottom: 1px solid var(--line);
-  background: #ffffff;
+  background: #000;
 }
 
 .race-review-header h2 {
@@ -709,27 +721,27 @@ input:focus {
   padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
-  color: #181818;
+  background: #000;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
 
 .race-review-timer {
-  background: #f5f5f5;
-  color: #2a2a2a;
+  background: #000;
+  color: #fff;
 }
 
 .race-review-timer span {
-  color: #676767;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   text-transform: uppercase;
 }
 
 .race-review-controls button.primary {
-  border-color: #181818;
-  background: #181818;
-  color: #ffffff;
+  border-color: #fff;
+  background: #fff;
+  color: #000;
 }
 
 .race-review-results {
@@ -748,7 +760,7 @@ input:focus {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
 }
 
 .race-review-rider-heading {
@@ -792,14 +804,14 @@ input:focus {
   gap: 2px;
   min-width: 0;
   padding: 7px;
-  border: 1px solid #eaeaea;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 6px;
-  background: #fafafa;
+  background: #000;
 }
 
 .race-review-rider-metrics strong {
   overflow: hidden;
-  color: #181818;
+  color: #fff;
   font-size: 13px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -807,7 +819,7 @@ input:focus {
 }
 
 .race-review-rider-metrics small {
-  color: #6e6e6e;
+  color: rgb(255 255 255 / 78%);
   font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
@@ -831,8 +843,8 @@ input:focus {
   top: 0;
   z-index: 1;
   padding: 10px;
-  background: #f9f9f9;
-  color: #5f5f5f;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
   text-align: left;
@@ -850,21 +862,21 @@ input:focus {
 
 .race-review-zone-table td {
   padding: 10px;
-  border-top: 1px solid #e4e4e4;
-  border-bottom: 1px solid #e4e4e4;
-  background: #ffffff;
-  color: #272727;
+  border-top: 1px solid rgb(255 255 255 / 22%);
+  border-bottom: 1px solid rgb(255 255 255 / 22%);
+  background: #000;
+  color: #fff;
   font-size: 12px;
   vertical-align: top;
 }
 
 .race-review-zone-table td:first-child {
-  border-left: 1px solid #e4e4e4;
+  border-left: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px 0 0 7px;
 }
 
 .race-review-zone-table td:last-child {
-  border-right: 1px solid #e4e4e4;
+  border-right: 1px solid rgb(255 255 255 / 22%);
   border-radius: 0 7px 7px 0;
 }
 
@@ -889,10 +901,10 @@ input:focus {
   gap: 8px;
   min-height: 42px;
   padding: 0 14px;
-  border: 1px solid rgba(255, 255, 255, 0.68);
+  border: 1px solid rgb(255 255 255 / 38%);
   border-radius: 7px;
-  background: rgba(23, 23, 23, 0.86);
-  color: #ffffff;
+  background: rgb(0 0 0 / 86%);
+  color: #fff;
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.26);
   font-size: 13px;
   font-weight: 700;
@@ -908,7 +920,7 @@ input:focus {
 }
 
 .race-cancel-overlay:hover {
-  background: rgba(62, 62, 62, 0.92);
+  background: rgb(0 0 0 / 92%);
 }
 
 .race-countdown-pause-overlay,
@@ -921,10 +933,10 @@ input:focus {
   gap: 8px;
   min-height: 42px;
   padding: 0 14px;
-  border: 1px solid rgba(255, 255, 255, 0.68);
+  border: 1px solid rgb(255 255 255 / 38%);
   border-radius: 7px;
-  background: rgba(23, 23, 23, 0.88);
-  color: #ffffff;
+  background: rgb(0 0 0 / 88%);
+  color: #fff;
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.26);
   font-size: 13px;
   font-weight: 700;
@@ -943,8 +955,8 @@ input:focus {
 
 .race-countdown-pause-overlay:hover,
 .race-countdown-pause-overlay.paused {
-  border-color: rgba(213, 213, 213, 0.82);
-  background: rgba(77, 77, 77, 0.92);
+  border-color: rgb(255 255 255 / 38%);
+  background: rgb(0 0 0 / 92%);
 }
 
 .race-camera-lock-overlay {
@@ -954,8 +966,8 @@ input:focus {
 
 .race-camera-lock-overlay:hover,
 .race-camera-lock-overlay.locked {
-  border-color: rgba(189, 189, 189, 0.76);
-  background: rgba(63, 63, 63, 0.92);
+  border-color: rgb(255 255 255 / 38%);
+  background: rgb(0 0 0 / 92%);
 }
 
 .platform-shell.map-fullscreen {
@@ -963,7 +975,7 @@ input:focus {
   width: 100vw;
   min-height: 100vh;
   overflow: hidden;
-  background: #080808;
+  background: #000;
 }
 
 .map-fullscreen .sidebar,
@@ -1013,9 +1025,9 @@ input:focus {
   width: min(380px, calc(100vw - 28px));
   max-height: calc(100vh - 28px);
   overflow: auto;
-  border: 1px solid rgba(255, 255, 255, 0.78);
+  border: 1px solid rgb(255 255 255 / 38%);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.96);
+  background: rgb(0 0 0 / 96%);
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
 }
 
@@ -1034,7 +1046,7 @@ input:focus {
 
 .map-fullscreen .mapping-section {
   border-bottom: 0;
-  background: rgba(251, 251, 251, 0.96);
+  background: rgb(0 0 0 / 96%);
   backdrop-filter: blur(12px);
 }
 
@@ -1066,7 +1078,7 @@ input:focus {
   min-width: 0;
   padding: 18px;
   border-right: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.92);
+  background: rgb(0 0 0 / 92%);
 }
 
 .brand-lockup,
@@ -1119,7 +1131,7 @@ input:focus {
   width: 42px;
   height: 42px;
   border-radius: 7px;
-  border: 1px solid rgba(24, 24, 24, 0.12); background: #171717; color: #fff; border-color: #171717;
+  border: 1px solid rgb(255 255 255 / 12%); background: #000; color: #fff; border-color: rgb(255 255 255 / 26%);
 }
 
 .brand-lockup p,
@@ -1151,7 +1163,7 @@ input:focus {
 .monitor-panel {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.95);
+  background: rgb(0 0 0 / 95%);
   box-shadow: 0 10px 28px rgba(37, 37, 37, 0.06);
 }
 
@@ -1198,25 +1210,25 @@ input:focus {
   gap: 7px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fafafa;
-  color: #535353;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
 }
 
 .connection-source-switch button.selected {
-  border-color: #171717;
-  background: #171717;
-  color: #ffffff;
+  border-color: #fff;
+  background: #000;
+  color: #fff;
   box-shadow: 0 7px 16px rgba(23, 23, 23, 0.12);
 }
 
 .bluetooth-connect-button {
   width: 100%;
   margin-top: 9px;
-  border-color: #c9c9c9;
-  background: linear-gradient(135deg, #c8c8c8, #b5b5b5);
-  color: #171717;
+  border-color: rgb(255 255 255 / 22%);
+  background: linear-gradient(135deg, #000, #000);
+  color: #fff;
 }
 
 .bluetooth-connect-button:disabled {
@@ -1245,14 +1257,14 @@ input:focus {
 }
 
 .bridge-control-button.start {
-  background: #171717;
-  color: #ffffff;
+  background: #000;
+  color: #fff;
 }
 
 .bridge-control-button.stop {
-  border-color: #dadada;
-  background: #f7f7f7;
-  color: #515151;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .bridge-control-button:disabled {
@@ -1268,7 +1280,7 @@ input:focus {
   padding: 0 9px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: #f8f8f8;
+  background: #000;
   color: var(--muted);
   font-size: 10px;
   font-weight: 700;
@@ -1276,24 +1288,24 @@ input:focus {
 }
 
 .bridge-live-pill.waiting {
-  border-color: #e3e3e3;
-  background: #f8f8f8;
-  color: #696969;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .bridge-live-pill.live {
-  border-color: #dadada;
-  background: #f7f7f7;
-  color: #626262;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .bridge-prompt {
   margin-top: 9px;
   padding: 8px 9px;
-  border: 1px solid #e5e5e5;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #fbfbfb;
-  color: #535353;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 750;
   line-height: 1.35;
@@ -1324,9 +1336,9 @@ input:focus {
   display: grid;
   gap: 9px;
   padding: 12px;
-  border: 1px solid #e6e6e6;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: var(--radius);
-  background: linear-gradient(180deg, #fefefe 0%, #f9f9f9 100%);
+  background: linear-gradient(180deg, #000 0%, #000 100%);
   box-shadow: 0 10px 24px rgba(84, 84, 84, 0.06);
 }
 
@@ -1338,7 +1350,7 @@ input:focus {
 }
 
 .workflow-heading span {
-  color: #2a2a2a;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -1347,7 +1359,7 @@ input:focus {
 
 .workflow-heading small {
   overflow: hidden;
-  color: #6a6a6a;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -1368,38 +1380,38 @@ input:focus {
   padding: 7px 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
   text-align: left;
 }
 
 .workflow-step:hover {
-  border-color: #d9d9d9;
-  background: #fbfbfb;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .workflow-step.complete {
-  border-color: #dfdfdf;
+  border-color: rgb(255 255 255 / 22%);
 }
 
 .workflow-step.ghost-selected {
-  border-color: #a4a4a4;
-  background: #f1f1f1;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
   box-shadow: inset 3px 0 0 #a4a4a4;
 }
 
 .workflow-step.next {
-  border-color: #bbbbbb;
-  background: #f7f7f7;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
   box-shadow: inset 3px 0 0 #a7a7a7;
 }
 
-.workflow-step.primary-action { background: #171717; color: #fff; border-color: #171717; box-shadow: none;
+.workflow-step.primary-action { background: #fff; color: #000; border-color: #fff; box-shadow: none;
 }
 
-.workflow-step.primary-action:hover { background: #333; border-color: #333;
+.workflow-step.primary-action:hover { background: #fff; border-color: #fff; color: #000;
 }
 
-.workflow-step.primary-action .workflow-index { background: #fff; color: #171717;
+.workflow-step.primary-action .workflow-index { background: #fff; color: #000;
 }
 
 .workflow-step.primary-action .workflow-copy strong,
@@ -1413,25 +1425,25 @@ input:focus {
   width: 28px;
   height: 28px;
   border-radius: 7px;
-  background: #f1f1f1;
-  color: #404040;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 700;
 }
 
 .workflow-step.complete .workflow-index {
-  background: #eeeeee;
-  color: #4c4c4c;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .workflow-step.ghost-selected .workflow-index {
-  background: #7e7e7e;
-  color: #ffffff;
+  background: #000;
+  color: #fff;
 }
 
 .workflow-step.next .workflow-index {
-  background: #171717;
-  color: #ffffff;
+  background: #000;
+  color: #fff;
 }
 
 .workflow-copy {
@@ -1448,13 +1460,13 @@ input:focus {
 }
 
 .workflow-copy strong {
-  color: #202020;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
 
 .workflow-copy small {
-  color: #6f6f6f;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 780;
 }
@@ -1478,20 +1490,20 @@ input:focus {
   width: 28px;
   height: 28px;
   padding: 0;
-  border: 1px solid #d3d3d3;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 6px;
-  background: #ffffff;
-  color: #202020;
+  background: #000;
+  color: #fff;
 }
 
 .workflow-lap-controls button:disabled {
-  color: #adadad;
-  background: #f5f5f5;
+  color: rgb(255 255 255 / 78%);
+  background: #000;
 }
 
 .workflow-lap-controls > span {
   overflow: hidden;
-  color: #4e4e4e;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
   text-align: center;
@@ -1500,7 +1512,7 @@ input:focus {
 }
 
 .workflow-lap-controls b {
-  color: #202020;
+  color: #fff;
   font-size: 13px;
   font-weight: 700;
 }
@@ -1509,9 +1521,9 @@ input:focus {
   display: grid;
   gap: 8px;
   padding: 9px;
-  border: 1px solid #e6e6e6;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.86);
+  background: rgb(0 0 0 / 86%);
 }
 
 .workflow-race-entry-heading {
@@ -1522,7 +1534,7 @@ input:focus {
 }
 
 .workflow-race-entry-heading span {
-  color: #2a2a2a;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -1531,7 +1543,7 @@ input:focus {
 
 .workflow-race-entry-heading small {
   overflow: hidden;
-  color: #6a6a6a;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -1547,14 +1559,14 @@ input:focus {
   display: grid;
   gap: 6px;
   padding: 6px;
-  border: 1px solid #e3e3e3;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
 }
 
 .race-entry-card.entered {
-  border-color: #c2c2c2;
-  background: #f9f9f9;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
   box-shadow: inset 3px 0 0 #b7b7b7;
 }
 
@@ -1566,20 +1578,20 @@ input:focus {
   width: 100%;
   min-height: 42px;
   padding: 6px 7px;
-  border: 1px solid #e3e3e3;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
   text-align: left;
 }
 
 .race-entry-row:hover {
-  border-color: #d9d9d9;
-  background: #fbfbfb;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .race-entry-row.entered {
-  border-color: #c2c2c2;
-  background: #f7f7f7;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
   box-shadow: inset 3px 0 0 #b7b7b7;
 }
 
@@ -1592,7 +1604,7 @@ input:focus {
 }
 
 .race-entry-card .race-entry-row:hover {
-  background: rgba(183, 183, 183, 0.08);
+  background: rgb(0 0 0 / 8%);
 }
 
 .race-entry-row:disabled {
@@ -1614,7 +1626,7 @@ input:focus {
 }
 
 .race-entry-copy .race-entry-bike-name {
-  color: #5c5c5c;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
 }
@@ -1624,7 +1636,7 @@ input:focus {
   gap: 2px;
   align-items: start;
   min-width: 0;
-  color: #202020;
+  color: #fff;
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
@@ -1637,7 +1649,7 @@ input:focus {
 }
 
 .race-entry-monitor-id b {
-  color: #171717;
+  color: #fff;
   font-size: 18px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -1658,16 +1670,16 @@ input:focus {
   min-height: 26px;
   padding: 0 7px;
   border-radius: 999px;
-  background: #f1f1f1;
-  color: #606060;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
 }
 
 .race-entry-status.entered {
-  background: #171717;
-  color: #ffffff;
+  background: #000;
+  color: #fff;
 }
 
 .race-entry-rider-select {
@@ -1676,11 +1688,11 @@ input:focus {
   align-items: center;
   gap: 7px;
   padding-top: 5px;
-  border-top: 1px solid #ececec;
+  border-top: 1px solid rgb(255 255 255 / 22%);
 }
 
 .race-entry-rider-select > span {
-  color: #6e6e6e;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -1690,10 +1702,10 @@ input:focus {
   min-width: 0;
   min-height: 34px;
   padding: 0 24px 0 8px;
-  border: 1px solid #dddddd;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 6px;
-  background: #ffffff;
-  color: #202020;
+  background: #000;
+  color: #fff;
   font: inherit;
   font-size: 12px;
   font-weight: 700;
@@ -1709,11 +1721,11 @@ input:focus {
 
 .race-entry-empty,
 .studio-rider-empty {
-  color: #6f6f6f;
+  color: rgb(255 255 255 / 78%);
 }
 
 .studio-rider-error {
-  color: #414141;
+  color: rgb(255 255 255 / 78%);
   font-weight: 700;
 }
 
@@ -1725,17 +1737,17 @@ input:focus {
 
 .race-entry-actions button {
   min-height: 28px;
-  border: 1px solid #e3e3e3;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #ffffff;
-  color: #3f3f3f;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
 }
 
 .race-entry-actions button:hover {
-  border-color: #d9d9d9;
-  background: #fbfbfb;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .race-entry-actions button:disabled {
@@ -1744,7 +1756,7 @@ input:focus {
 }
 
 .studio-rider-manager {
-  border-top: 1px solid #e6e6e6;
+  border-top: 1px solid rgb(255 255 255 / 22%);
   padding-top: 7px;
 }
 
@@ -1754,7 +1766,7 @@ input:focus {
   justify-content: space-between;
   gap: 8px;
   min-height: 28px;
-  color: #3f3f3f;
+  color: rgb(255 255 255 / 78%);
   cursor: pointer;
   font-size: 10px;
   font-weight: 700;
@@ -1778,8 +1790,8 @@ input:focus {
   min-width: 21px;
   min-height: 21px;
   border-radius: 50%;
-  background: #f1f1f1;
-  color: #4f4f4f;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 9px;
 }
 
@@ -1802,7 +1814,7 @@ input:focus {
 }
 
 .studio-rider-add label > span {
-  color: #6e6e6e;
+  color: rgb(255 255 255 / 78%);
   font-size: 9px;
   font-weight: 700;
 }
@@ -1813,10 +1825,10 @@ input:focus {
   min-width: 0;
   min-height: 31px;
   padding: 0 8px;
-  border: 1px solid #dddddd;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 6px;
-  background: #ffffff;
-  color: #202020;
+  background: #000;
+  color: #fff;
   font: inherit;
   font-size: 10px;
   font-weight: 700;
@@ -1829,15 +1841,15 @@ input:focus {
   justify-content: center;
   width: 32px;
   min-height: 31px;
-  border: 1px solid #dddddd;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 6px;
-  background: #ffffff;
-  color: #3f3f3f;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .studio-rider-add button:hover {
-  border-color: #c2c2c2;
-  background: #f7f7f7;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .studio-rider-list {
@@ -1851,9 +1863,9 @@ input:focus {
   display: grid;
   gap: 6px;
   padding: 7px;
-  border: 1px solid #e7e7e7;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #fafafa;
+  background: #000;
 }
 
 .studio-rider-row-main {
@@ -1864,18 +1876,18 @@ input:focus {
 }
 
 .studio-rider-row-main small {
-  color: #6e6e6e;
+  color: rgb(255 255 255 / 78%);
   font-size: 9px;
   font-weight: 700;
 }
 
 .studio-rider-row-main button {
-  color: #414141;
+  color: rgb(255 255 255 / 78%);
 }
 
 .studio-rider-row-main button:hover {
-  border-color: #c0c0c0;
-  background: #f6f6f6;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .race-entry-rider-photo {
@@ -1883,8 +1895,8 @@ input:focus {
   align-items: center;
   gap: 7px;
   padding-top: 5px;
-  border-top: 1px solid #ececec;
-  color: #6e6e6e;
+  border-top: 1px solid rgb(255 255 255 / 22%);
+  color: rgb(255 255 255 / 78%);
   font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
@@ -1920,7 +1932,7 @@ input:focus {
 }
 
 .workflow-split-choice-heading span {
-  color: #2a2a2a;
+  color: #fff;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -1929,7 +1941,7 @@ input:focus {
 
 .workflow-split-choice-heading small {
   overflow: hidden;
-  color: #6a6a6a;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -1945,9 +1957,9 @@ input:focus {
   display: grid;
   gap: 6px;
   padding: 7px;
-  border: 1px solid #e6e6e6;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.82);
+  background: rgb(0 0 0 / 82%);
 }
 
 .workflow-split-choice-rider {
@@ -1959,7 +1971,7 @@ input:focus {
 
 .workflow-split-choice-rider strong {
   min-width: 0;
-  color: #202020;
+  color: #fff;
   font-size: 11px;
   font-weight: 700;
   line-height: 1.25;
@@ -1979,18 +1991,18 @@ input:focus {
   justify-content: center;
   min-height: 28px;
   padding: 0 6px;
-  border: 1px solid #e3e3e3;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 6px;
-  background: #ffffff;
-  color: #3f3f3f;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
 }
 
 .workflow-split-choice-buttons button.selected {
-  border-color: #171717;
-  background: #171717;
-  color: #ffffff;
+  border-color: #fff;
+  background: #000;
+  color: #fff;
 }
 
 .workflow-split-choice-buttons button:disabled {
@@ -2000,7 +2012,7 @@ input:focus {
 
 .side-nav {
   display: grid;
-  gap: 4px; background: #171717; padding: 8px; border-radius: 10px;
+  gap: 4px; background: #000; padding: 8px; border-radius: 10px;
 }
 
 .side-nav button {
@@ -2012,14 +2024,14 @@ input:focus {
   border-radius: 7px;
   background: transparent;
   font-weight: 700;
-  position: relative; color: #d4d4d4;
+  position: relative; color: rgb(255 255 255 / 86%);
 }
 
-.side-nav button.selected { background: #fff; color: #171717; border-color: #fff;
+.side-nav button.selected { background: #000; color: #fff; border-color: #fff;
 }
 
 .side-nav button:hover {
-  border-color: var(--line); background: #333; color: #fff;
+  border-color: var(--line); background: #000; color: #fff;
 }
 
 .friends-online,
@@ -2052,15 +2064,15 @@ input:focus {
 }
 
 .friends-online {
-  background: #f4f4f4;
-  border: 1px solid #cbcbcb;
-  color: #4f4f4f;
+  background: #000;
+  border: 1px solid rgb(255 255 255 / 22%);
+  color: rgb(255 255 255 / 78%);
   gap: 4px;
 }
 
 .friends-online::before {
-  background: #9c9c9c;
-  border: 1px solid #797979;
+  background: #000;
+  border: 1px solid rgb(255 255 255 / 26%);
   border-radius: 50%;
   content: '';
   height: 7px;
@@ -2070,8 +2082,8 @@ input:focus {
 .side-nav-count + .friends-online { margin-left: 0; }
 
 .side-nav-count {
-  background: #717171;
-  color: #ffffff;
+  background: #000;
+  color: #fff;
 }
 
 .side-nav-more {
@@ -2081,7 +2093,7 @@ input:focus {
   padding: 5px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #f9f9f9;
+  background: #000;
 }
 
 .watch-connect-indicator-slot {
@@ -2097,10 +2109,10 @@ input:focus {
   min-width: 0;
   min-height: 44px;
   padding: 6px 9px;
-  border: 1px solid #d4d4d4;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 8px;
-  background: #f7f7f7;
-  color: #4e4e4e;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font: inherit;
   font-size: 11px;
   font-weight: 700;
@@ -2115,7 +2127,7 @@ input:focus {
   height: 28px;
   place-items: center;
   border-radius: 50%;
-  background: #e5e5e5;
+  background: #000;
 }
 
 .watch-connect-indicator-icon b {
@@ -2143,43 +2155,43 @@ input:focus {
   margin-left: auto;
   place-items: center;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.74);
+  background: rgb(0 0 0 / 74%);
   font-size: 13px;
   line-height: 1;
 }
 
 .watch-connect-indicator.live,
 .watch-connect-indicator.connected {
-  border-color: #aeaeae;
-  background: #f2f2f2;
-  color: #545454;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .watch-connect-indicator.live .watch-connect-indicator-icon,
 .watch-connect-indicator.connected .watch-connect-indicator-icon {
-  background: #e1e1e1;
+  background: #000;
 }
 
 .watch-connect-indicator.disconnected {
-  border-color: #b0b0b0;
-  background: #f3f3f3;
-  color: #3c3c3c;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .watch-connect-indicator.disconnected .watch-connect-indicator-icon {
-  background: #dcdcdc;
+  background: #000;
 }
 
 .watch-connect-indicator.connecting,
 .watch-connect-indicator.syncing {
-  border-color: #c2c2c2;
-  background: #f7f7f7;
-  color: #535353;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .watch-connect-indicator.connecting .watch-connect-indicator-icon,
 .watch-connect-indicator.syncing .watch-connect-indicator-icon {
-  background: #e6e6e6;
+  background: #000;
 }
 
 .watch-connect-indicator:hover {
@@ -2187,7 +2199,7 @@ input:focus {
 }
 
 .watch-connect-indicator:focus-visible {
-  outline: 3px solid #565656;
+  outline: 3px solid rgb(255 255 255 / 26%);
   outline-offset: 2px;
 }
 
@@ -2253,7 +2265,7 @@ input:focus {
 
 .platform-main .heart-rate-account-block:focus,
 .platform-main .heart-rate-account-block:focus-visible {
-  outline: 3px solid #565656;
+  outline: 3px solid rgb(255 255 255 / 26%);
   outline-offset: 3px;
 }
 
@@ -2275,31 +2287,31 @@ input:focus {
   gap: 8px;
   align-items: center;
   padding: 8px;
-  border: 1px solid #323232;
+  border: 1px solid rgb(255 255 255 / 26%);
   border-radius: 9px;
-  background: #171717;
-  color: #d4d4d4;
+  background: #000;
+  color: rgb(255 255 255 / 86%);
 }
 
 .race-readiness-strip span {
   padding: 5px 9px;
-  border-right: 1px solid #404040;
+  border-right: 1px solid rgb(255 255 255 / 26%);
   font-size: 12px;
   font-weight: 700;
 }
 
 .race-readiness-strip span.ready {
-  color: #d4d4d4;
+  color: rgb(255 255 255 / 86%);
 }
 
 .race-readiness-strip button {
   min-height: 30px;
   margin-left: auto;
   padding: 0 12px;
-  border: 1px solid #6c6c6c;
+  border: 1px solid rgb(255 255 255 / 26%);
   border-radius: 6px;
-  background: #2e2e2e;
-  color: #e4e4e4;
+  background: #000;
+  color: rgb(255 255 255 / 86%);
   font-weight: 700;
 }
 
@@ -2340,13 +2352,13 @@ input:focus {
   padding: 5px 9px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
   cursor: pointer;
 }
 
 .developer-preview-toggle.active {
-  border-color: #bdbdbd;
-  background: #f7f7f7;
+  border-color: #fff;
+  background: #000;
 }
 
 .developer-preview-toggle input {
@@ -2370,7 +2382,7 @@ input:focus {
 }
 
 .developer-preview-toggle b {
-  color: #717171;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
 }
 
@@ -2412,7 +2424,7 @@ input:focus {
 .eyebrow {
   gap: 6px;
   margin-bottom: 5px;
-  color: #606060;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -2433,8 +2445,8 @@ input:focus {
   padding: 0 9px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: #fafafa;
-  color: #4b4b4b;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 750;
   text-decoration: none;
@@ -2444,12 +2456,12 @@ input:focus {
   position: relative;
   min-height: 530px;
   overflow: hidden;
-  background: #e5e5e5;
+  background: #000;
   border-bottom: 1px solid var(--line);
 }
 
 .earth-stage.google-enabled {
-  background: #202020;
+  background: #000;
 }
 
 .google-map-layer {
@@ -2462,7 +2474,7 @@ input:focus {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  background: #202020;
+  background: #000;
 }
 
 .google-map-3d-layer {
@@ -2481,10 +2493,10 @@ input:focus {
   z-index: 5;
   min-height: 34px;
   padding: 9px 11px;
-  border: 1px solid rgba(255, 255, 255, 0.78);
+  border: 1px solid rgb(255 255 255 / 38%);
   border-radius: 7px;
-  background: rgba(24, 24, 24, 0.82);
-  color: #ffffff;
+  background: rgb(0 0 0 / 82%);
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
   backdrop-filter: blur(10px);
@@ -2506,22 +2518,22 @@ input:focus {
   gap: 7px;
   min-height: 36px;
   padding: 0 11px;
-  border: 1px solid rgba(255, 255, 255, 0.78);
+  border: 1px solid rgb(255 255 255 / 38%);
   border-radius: 7px;
-  background: rgba(24, 24, 24, 0.82);
-  color: #ffffff;
+  background: rgb(0 0 0 / 82%);
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
   backdrop-filter: blur(10px);
 }
 
 .map-edit-toolbar button:hover {
-  background: rgba(24, 24, 24, 0.94);
+  background: rgb(0 0 0 / 94%);
 }
 
 .map-edit-toolbar button.active {
-  border-color: #e9e9e9;
-  background: rgba(79, 79, 79, 0.94);
+  border-color: #fff;
+  background: rgb(0 0 0 / 94%);
 }
 
 .map-fullscreen .map-edit-toolbar {
@@ -2541,8 +2553,8 @@ input:focus {
   padding: 18px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.93);
-  color: #181818;
+  background: rgb(0 0 0 / 93%);
+  color: #fff;
   text-align: center;
   transform: translate(-50%, -50%);
   box-shadow: 0 18px 44px rgba(24, 24, 24, 0.16);
@@ -2561,10 +2573,10 @@ input:focus {
   gap: 7px;
   min-height: 36px;
   padding: 0 11px;
-  border: 1px solid #181818;
+  border: 1px solid rgb(255 255 255 / 26%);
   border-radius: 6px;
-  background: #181818;
-  color: #ffffff;
+  background: #000;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
@@ -2613,11 +2625,11 @@ input:focus {
 }
 
 .map-3d-junction-marker.split {
-  background: #4a4a4a;
+  background: #000;
 }
 
 .map-3d-junction-marker.merge {
-  background: #6d6d6d;
+  background: #000;
 }
 
 .map-3d-landmark-marker {
@@ -2645,10 +2657,10 @@ input:focus {
   max-width: min(720px, calc(100% - 310px));
   min-height: 38px;
   padding: 6px 8px 6px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.78);
+  border: 1px solid rgb(255 255 255 / 38%);
   border-radius: 7px;
-  background: rgba(24, 24, 24, 0.88);
-  color: #ffffff;
+  background: rgb(0 0 0 / 88%);
+  color: #fff;
   font-size: 11px;
   font-weight: 750;
   backdrop-filter: blur(10px);
@@ -2669,16 +2681,16 @@ input:focus {
   gap: 5px;
   min-height: 32px;
   padding: 0 9px;
-  border: 1px solid rgba(255, 255, 255, 0.42);
+  border: 1px solid rgb(255 255 255 / 38%);
   border-radius: 5px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #ffffff;
+  background: rgb(0 0 0 / 8%);
+  color: #fff;
   font-size: 10px;
   font-weight: 700;
 }
 
 .map-3d-edit-console button:hover {
-  background: rgba(255, 255, 255, 0.18);
+  background: rgb(0 0 0 / 18%);
 }
 
 .race-rider-overlay {
@@ -2693,11 +2705,11 @@ input:focus {
   max-height: calc(100% - 24px);
   display: block;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.24);
+  border: 1px solid rgb(255 255 255 / 24%);
   border-radius: 8px;
-  background: rgba(13, 13, 13, 0.78);
+  background: rgb(0 0 0 / 78%);
   box-shadow: 0 14px 32px rgba(0, 0, 0, 0.34);
-  color: #ffffff;
+  color: #fff;
   font-size: var(--rr-font, 16px);
   pointer-events: auto;
   touch-action: none;
@@ -2711,8 +2723,8 @@ input:focus {
   align-items: center;
   justify-content: space-between;
   min-height: 34px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(6, 6, 6, 0.42);
+  border-bottom: 1px solid rgb(255 255 255 / 14%);
+  background: rgb(0 0 0 / 42%);
 }
 
 .race-rider-overlay-handle {
@@ -2723,7 +2735,7 @@ input:focus {
   align-items: center;
   gap: 7px;
   padding: 0 10px;
-  color: rgba(255, 255, 255, 0.76);
+  color: rgb(255 255 255 / 76%);
   cursor: move;
   font-size: 0.75em;
   font-weight: 700;
@@ -2733,7 +2745,7 @@ input:focus {
 
 .race-rider-overlay-handle small {
   overflow: hidden;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgb(255 255 255 / 50%);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0;
@@ -2755,18 +2767,18 @@ input:focus {
   gap: 5px;
   margin-right: 5px;
   padding: 0 8px;
-  border: 1px solid rgba(255, 255, 255, 0.28);
+  border: 1px solid rgb(255 255 255 / 28%);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.1);
-  color: #ffffff;
+  background: rgb(0 0 0 / 10%);
+  color: #fff;
   font-size: 0.75em;
   font-weight: 700;
 }
 
 .race-rider-overlay-lock:hover,
 .race-rider-overlay-lock[aria-pressed='true'] {
-  background: rgba(189, 189, 189, 0.2);
-  border-color: rgba(189, 189, 189, 0.64);
+  background: rgb(0 0 0 / 20%);
+  border-color: rgb(255 255 255 / 38%);
 }
 
 .race-rider-overlay-grid {
@@ -2786,15 +2798,15 @@ input:focus {
   gap: 4px;
   overflow: hidden;
   padding: 5px 7px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid rgb(255 255 255 / 16%);
   border-left: 4px solid var(--player-color);
   border-radius: 7px;
-  background: rgba(23, 23, 23, 0.84);
+  background: rgb(0 0 0 / 84%);
 }
 
 .race-rider-overlay-card-ghost {
   border-style: dashed;
-  background: rgba(41, 41, 41, 0.78);
+  background: rgb(0 0 0 / 78%);
 }
 
 .race-rider-overlay-card.positions-pending {
@@ -2815,7 +2827,7 @@ input:focus {
   padding: 0 5px;
   border-radius: 6px;
   background: var(--player-color);
-  color: #101010;
+  color: #fff;
   font-size: 0.75em;
   font-weight: 700;
 }
@@ -2856,7 +2868,7 @@ input:focus {
 
 .race-rider-overlay-identity strong {
   min-width: 0;
-  color: #ffffff;
+  color: #fff;
   font-size: 1em;
   line-height: 1.05;
   overflow-wrap: anywhere;
@@ -2865,7 +2877,7 @@ input:focus {
 
 .race-rider-overlay-identity > span {
   overflow: hidden;
-  color: rgba(255, 255, 255, 0.86);
+  color: rgb(255 255 255 / 86%);
   font-size: 0.875em;
   font-weight: 700;
   line-height: 1.15;
@@ -2883,7 +2895,7 @@ input:focus {
   overflow: hidden;
   border-radius: 6px;
   background: var(--player-color);
-  color: #101010;
+  color: #fff;
 }
 
 .race-rider-overlay-place strong {
@@ -2911,9 +2923,9 @@ input:focus {
   width: 48px;
   height: 48px;
   place-items: center;
-  border: 2px solid #e9e9e9;
-  background: #101010;
-  color: #e9e9e9;
+  border: 2px solid rgb(255 255 255 / 22%);
+  background: #000;
+  color: rgb(255 255 255 / 86%);
   cursor: nwse-resize;
 }
 
@@ -2997,9 +3009,9 @@ input:focus {
   gap: 16px;
   padding: 24px;
   background:
-    linear-gradient(180deg, rgba(23, 23, 23, 0.76), rgba(23, 23, 23, 0.86)),
-    #202020;
-  color: #ffffff;
+    linear-gradient(180deg, rgb(0 0 0 / 76%), rgb(0 0 0 / 86%)),
+    #000;
+  color: #fff;
   text-align: center;
 }
 
@@ -3016,7 +3028,7 @@ input:focus {
 }
 
 .google-key-required span {
-  color: rgba(255, 255, 255, 0.78);
+  color: rgb(255 255 255 / 78%);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -3028,10 +3040,10 @@ input:focus {
   gap: 7px;
   min-height: 38px;
   padding: 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.72);
+  border: 1px solid rgb(255 255 255 / 38%);
   border-radius: 7px;
-  background: #ffffff;
-  color: #181818;
+  background: #000;
+  color: #fff;
   font-size: 13px;
   font-weight: 700;
   text-decoration: none;
@@ -3067,10 +3079,10 @@ input:focus {
   place-items: center;
   width: 42px;
   height: 30px;
-  border: 2px solid #ffffff;
+  border: 2px solid rgb(255 255 255 / 34%);
   border-radius: 999px;
   background: var(--player-color);
-  color: #131313;
+  color: #fff;
   transform: rotate(calc(var(--rider-heading, 0deg) + var(--rider-pitch)));
   box-shadow: 0 8px 18px rgba(24, 24, 24, 0.18);
 }
@@ -3078,8 +3090,8 @@ input:focus {
 .rider-label,
 .rider-speed {
   border-radius: 5px;
-  background: #181818;
-  color: #ffffff;
+  background: #000;
+  color: #fff;
   font-weight: 700;
 }
 
@@ -3103,10 +3115,10 @@ input:focus {
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.8);
+  border: 1px solid rgb(255 255 255 / 38%);
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.86);
-  color: #1f1f1f;
+  background: rgb(0 0 0 / 86%);
+  color: #fff;
   box-shadow: 0 10px 24px rgba(24, 24, 24, 0.11);
   backdrop-filter: blur(10px);
 }
@@ -3137,9 +3149,9 @@ input:focus {
   gap: 8px;
   width: clamp(54px, 5.8vw, 68px);
   padding: 11px 9px;
-  border: 2px solid rgba(255, 255, 255, 0.82);
+  border: 2px solid rgb(255 255 255 / 38%);
   border-radius: 9px;
-  background: linear-gradient(180deg, rgba(10, 10, 10, 0.96), rgba(22, 22, 22, 0.94));
+  background: linear-gradient(180deg, rgb(0 0 0 / 96%), rgb(0 0 0 / 94%));
   box-shadow: 0 18px 46px rgba(0, 0, 0, 0.38);
   pointer-events: none;
   transform: translateX(-50%) scale(clamp(1.85, 1.25vw + 1.35, 2.25));
@@ -3161,10 +3173,10 @@ input:focus {
   min-width: 220px;
   gap: 2px;
   padding: 12px 18px;
-  border: 1px solid rgba(255, 255, 255, 0.72);
+  border: 1px solid rgb(255 255 255 / 38%);
   border-radius: 8px;
-  background: rgba(12, 12, 12, 0.94);
-  color: #ffffff;
+  background: rgb(0 0 0 / 94%);
+  color: #fff;
   box-shadow: 0 18px 46px rgba(0, 0, 0, 0.38);
   text-align: center;
   pointer-events: none;
@@ -3250,9 +3262,9 @@ input:focus {
   grid-template-rows: repeat(3, 34px);
   gap: 4px;
   padding: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.78);
+  border: 1px solid rgb(255 255 255 / 38%);
   border-radius: 8px;
-  background: rgba(24, 24, 24, 0.76);
+  background: rgb(0 0 0 / 76%);
   backdrop-filter: blur(10px);
   box-shadow: 0 14px 28px rgba(24, 24, 24, 0.24);
 }
@@ -3263,14 +3275,14 @@ input:focus {
   justify-content: center;
   width: 34px;
   height: 34px;
-  border: 1px solid rgba(255, 255, 255, 0.64);
+  border: 1px solid rgb(255 255 255 / 38%);
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.94);
-  color: #181818;
+  background: rgb(0 0 0 / 94%);
+  color: #fff;
 }
 
 .map-camera-pad button:hover {
-  background: #ffffff;
+  background: #000;
 }
 
 .map-camera-pad button:disabled {
@@ -3341,23 +3353,23 @@ input:focus {
   min-width: 0;
   min-height: 146px;
   padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--player-color) 55%, #323232);
+  border: 1px solid color-mix(in srgb, var(--player-color) 55%, rgb(255 255 255 / 26%));
   border-left: 4px solid var(--player-color);
   border-radius: 9px;
-  background: #191919;
-  color: #ffffff;
+  background: #000;
+  color: #fff;
 }
 
 .rider-stat.remote {
   border-style: dashed;
   border-left: 3px solid var(--player-color);
-  background: #1d1d1d;
+  background: #000;
 }
 
 .rider-stat.ghost {
   border-style: dashed;
   border-left: 3px solid var(--player-color);
-  background: #1f1f1f;
+  background: #000;
 }
 
 .rider-stat div {
@@ -3384,7 +3396,7 @@ input:focus {
   justify-self: end;
   margin-left: auto;
   gap: 4px;
-  color: #bbbbbb;
+  color: rgb(255 255 255 / 86%);
   font-size: 10px;
 }
 
@@ -3398,7 +3410,7 @@ input:focus {
   grid-area: place;
   align-self: end;
   padding-top: 5px;
-  border-top: 1px solid #393939;
+  border-top: 1px solid rgb(255 255 255 / 26%);
   color: var(--player-color);
   font-size: 28px !important;
   font-weight: 700;
@@ -3406,7 +3418,7 @@ input:focus {
 }
 
 .rider-card-place.ready {
-  color: #bbbbbb;
+  color: rgb(255 255 255 / 86%);
   font-size: 18px !important;
 }
 
@@ -3436,8 +3448,8 @@ input:focus {
   overflow: hidden;
   border: 2px solid var(--rider-avatar-accent);
   border-radius: 50%;
-  background: #303030;
-  color: #ffffff;
+  background: #000;
+  color: #fff;
   box-shadow: 0 2px 7px rgba(23, 23, 23, 0.18);
   font-size: 13px;
   font-weight: 700;
@@ -3459,9 +3471,9 @@ input:focus {
   align-items: center;
   min-width: 0;
   padding: 7px;
-  border: 1px solid #e4e4e4;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
 }
 
 .rider-photo-actions {
@@ -3479,10 +3491,10 @@ input:focus {
   justify-content: center;
   gap: 5px;
   padding: 0 8px;
-  border: 1px solid #d8d8d8;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 6px;
-  background: #fafafa;
-  color: #3f3f3f;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   cursor: pointer;
   font: inherit;
   font-size: 10px;
@@ -3495,8 +3507,8 @@ input:focus {
 
 .rider-photo-actions label:hover,
 .rider-photo-actions button:hover {
-  border-color: #b8b8b8;
-  background: #f7f7f7;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .rider-photo-actions label.disabled,
@@ -3521,18 +3533,18 @@ input:focus {
 }
 
 .rider-photo-editor > small.success {
-  color: #5d5d5d;
+  color: rgb(255 255 255 / 78%);
 }
 
 .rider-photo-editor > small.error {
-  color: #414141;
+  color: rgb(255 255 255 / 78%);
 }
 
 .track-rider-marker-label {
   padding: 2px 6px;
-  border: 2px solid #ffffff;
+  border: 2px solid rgb(255 255 255 / 34%);
   border-radius: 5px;
-  background: rgba(24, 24, 24, 0.92);
+  background: rgb(0 0 0 / 92%);
   box-shadow: 0 2px 7px rgba(24, 24, 24, 0.35);
   line-height: 1.2;
   letter-spacing: 0;
@@ -3540,24 +3552,24 @@ input:focus {
 }
 
 .track-rider-marker-label-p1 {
-  border-color: #bdbdbd;
+  border-color: rgb(255 255 255 / 22%);
 }
 
 .track-rider-marker-label-p2 {
-  border-color: #979797;
+  border-color: rgb(255 255 255 / 26%);
 }
 
 .track-rider-marker-label-p3 {
-  border-color: #727272;
+  border-color: rgb(255 255 255 / 26%);
 }
 
 .track-rider-marker-label-p4 {
-  border-color: #d5d5d5;
+  border-color: rgb(255 255 255 / 22%);
 }
 
 .track-rider-marker-label-ghost {
   border-style: dashed;
-  border-color: #828282;
+  border-color: rgb(255 255 255 / 26%);
   opacity: 0.9;
 }
 
@@ -3581,8 +3593,8 @@ input:focus {
 
 .race-announcer-section {
   background:
-    radial-gradient(circle at 100% 0, rgba(121, 121, 121, 0.1), transparent 46%),
-    #ffffff;
+    radial-gradient(circle at 100% 0, rgb(0 0 0 / 10%), transparent 46%),
+    #000;
 }
 
 .straight-sprint-air-picker > div {
@@ -3598,7 +3610,7 @@ input:focus {
 }
 
 .straight-sprint-air-picker button.selected {
-  background: #bdbdbd;
+  background: #000;
 }
 
 .announcer-enable-row,
@@ -3614,7 +3626,7 @@ input:focus {
   padding: 9px 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #f9f9f9;
+  background: #000;
 }
 
 .announcer-enable-row > span {
@@ -3644,10 +3656,10 @@ input:focus {
   display: grid;
   gap: 3px;
   padding: 9px 10px;
-  border: 1px solid #b5b5b5;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #f8f8f8;
-  color: #4c4c4c;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .announcer-service-status strong {
@@ -3664,9 +3676,9 @@ input:focus {
   display: grid;
   gap: 8px;
   padding: 10px;
-  border: 1px solid #cacaca;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #f6f6f6;
+  background: #000;
 }
 
 .ambient-admin-heading {
@@ -3677,7 +3689,7 @@ input:focus {
 }
 
 .ambient-admin-heading > span {
-  color: #464646;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -3687,28 +3699,28 @@ input:focus {
 .ambient-admin-heading button {
   min-height: 28px;
   padding: 0 9px;
-  border: 1px solid #797979;
+  border: 1px solid rgb(255 255 255 / 26%);
   border-radius: 6px;
-  background: #ffffff;
-  color: #636363;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
 }
 
 .ambient-admin-heading button.locked {
-  border-color: #5a5a5a;
-  background: #f3f3f3;
-  color: #5a5a5a;
+  border-color: rgb(255 255 255 / 26%);
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .ambient-admin-controls > small {
-  color: #5f5f5f;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   line-height: 1.35;
 }
 
 .announcer-volume-row > span {
-  color: #5f5f5f;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -3740,7 +3752,7 @@ input:focus {
 }
 
 .angle-value {
-  color: #181818;
+  color: #fff;
   font-size: 13px;
   font-weight: 700;
 }
@@ -3753,7 +3765,7 @@ input:focus {
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #f7f7f7;
+  background: #000;
 }
 
 .segmented-control.compact {
@@ -3796,19 +3808,19 @@ input:focus {
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: #565656;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 700;
 }
 
 .segmented-control button.selected {
-  background: #181818;
-  color: #ffffff;
+  background: #000;
+  color: #fff;
 }
 
 .panel-helper {
   margin: -2px 0 0;
-  color: #565656;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 750;
   line-height: 1.35;
@@ -3826,7 +3838,7 @@ input:focus {
   padding: 9px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fafafa;
+  background: #000;
 }
 
 .split-choice-rider {
@@ -3838,7 +3850,7 @@ input:focus {
 
 .split-choice-rider strong {
   min-width: 0;
-  color: #181818;
+  color: #fff;
   font-size: 13px;
   font-weight: 700;
   line-height: 1.25;
@@ -3854,19 +3866,19 @@ input:focus {
 
 .split-choice-note {
   margin: 0;
-  color: #565656;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 750;
   line-height: 1.35;
 }
 
 .ghost-section {
-  background: linear-gradient(180deg, #ffffff 0%, #fafafa 100%);
+  background: linear-gradient(180deg, #000 0%, #000 100%);
 }
 
 .ghost-race-setup {
   align-content: start;
-  background: linear-gradient(180deg, #ffffff 0%, #f7f7f7 100%);
+  background: linear-gradient(180deg, #000 0%, #000 100%);
 }
 
 .ghost-setup-summary {
@@ -3885,15 +3897,15 @@ input:focus {
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  color: #363636;
-  background: #ffffff;
+  color: #fff;
+  background: #000;
   font-size: 11px;
   font-weight: 700;
 }
 
 .ghost-setup-summary button:disabled {
-  color: #a4a4a4;
-  background: #f4f4f4;
+  color: rgb(255 255 255 / 78%);
+  background: #000;
 }
 
 .ghost-setup-state {
@@ -3903,10 +3915,10 @@ input:focus {
   gap: 10px;
   min-height: 48px;
   padding: 11px;
-  border: 1px dashed #c4c4c4;
+  border: 1px dashed rgb(255 255 255 / 22%);
   border-radius: 9px;
-  color: #606060;
-  background: #fdfdfd;
+  color: rgb(255 255 255 / 78%);
+  background: #000;
   font-size: 11px;
   font-weight: 750;
   line-height: 1.4;
@@ -3914,9 +3926,9 @@ input:focus {
 
 .ghost-setup-state.error {
   border-style: solid;
-  border-color: rgba(84, 84, 84, 0.35);
-  color: #3a3a3a;
-  background: #f9f9f9;
+  border-color: rgb(255 255 255 / 35%);
+  color: #fff;
+  background: #000;
 }
 
 .ghost-setup-options {
@@ -3934,15 +3946,15 @@ input:focus {
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  color: #272727;
-  background: #ffffff;
+  color: #fff;
+  background: #000;
   text-align: left;
 }
 
 .ghost-setup-options > button.selected {
-  border-color: #828282;
+  border-color: #fff;
   box-shadow: inset 3px 0 0 #828282;
-  background: #f9f9f9;
+  background: #000;
 }
 
 .ghost-setup-options > button:disabled {
@@ -3950,7 +3962,7 @@ input:focus {
 }
 
 .ghost-setup-rank {
-  color: #707070;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
 }
@@ -3960,10 +3972,10 @@ input:focus {
   width: 32px;
   height: 32px;
   place-items: center;
-  border: 2px solid #828282;
+  border: 2px solid rgb(255 255 255 / 26%);
   border-radius: 50%;
-  color: #ffffff;
-  background: #1f1f1f;
+  color: #fff;
+  background: #000;
   font-size: 10px;
   font-weight: 700;
 }
@@ -3984,18 +3996,18 @@ input:focus {
 
 .ghost-setup-copy small {
   margin-top: 2px;
-  color: #7c7c7c;
+  color: rgb(255 255 255 / 78%);
   font-size: 9px;
 }
 
 .ghost-setup-options b {
-  color: #616161;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
 }
 
 .loop-race-section {
   align-content: start;
-  background: #f9f9f9;
+  background: #000;
 }
 
 .lap-stepper {
@@ -4012,12 +4024,12 @@ input:focus {
   place-items: center;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #ffffff;
-  color: #181818;
+  background: #000;
+  color: #fff;
 }
 
 .lap-stepper > button:disabled {
-  color: #acacac;
+  color: rgb(255 255 255 / 78%);
 }
 
 .lap-stepper label {
@@ -4029,7 +4041,7 @@ input:focus {
   min-height: 38px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #ffffff;
+  background: #000;
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
@@ -4041,7 +4053,7 @@ input:focus {
   padding: 0 5px;
   border: 0;
   background: transparent;
-  color: #181818;
+  color: #fff;
   font-size: 17px;
   font-weight: 700;
   text-align: center;
@@ -4070,14 +4082,14 @@ input:focus {
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #ffffff;
-  color: #181818;
+  background: #000;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
 
 .ghost-summary-row button:disabled {
-  color: #a2a2a2;
+  color: rgb(255 255 255 / 78%);
 }
 
 .ghost-picker {
@@ -4114,7 +4126,7 @@ input:focus {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fafafa;
+  background: #000;
 }
 
 .ghost-rank-dropdown > summary,
@@ -4124,7 +4136,7 @@ input:focus {
   justify-content: space-between;
   gap: 10px;
   padding: 10px 12px;
-  color: #1f1f1f;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
@@ -4149,7 +4161,7 @@ input:focus {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
 }
 
 .route-layout-card {
@@ -4158,7 +4170,7 @@ input:focus {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
 }
 
 .route-layout-heading {
@@ -4167,7 +4179,7 @@ input:focus {
 }
 
 .route-layout-heading span {
-  color: #181818;
+  color: #fff;
   font-size: 13px;
   font-weight: 700;
 }
@@ -4190,7 +4202,7 @@ input:focus {
   padding: 7px 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #fafafa;
+  background: #000;
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
@@ -4198,9 +4210,9 @@ input:focus {
 }
 
 .route-layout-saved-row span.saved {
-  border-color: #b5b5b5;
-  background: #f7f7f7;
-  color: #545454;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .zone-picker {
@@ -4216,23 +4228,23 @@ input:focus {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
   text-align: left;
 }
 
 .zone-picker button.selected {
-  border-color: #b5b5b5;
-  background: #f7f7f7;
+  border-color: #fff;
+  background: #000;
 }
 
 .zone-picker button.recovery {
-  border-color: #d6d6d6;
-  background: #f8f8f8;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .zone-picker button.recovery.selected {
-  border-color: #b4b4b4;
-  background: #f0f0f0;
+  border-color: #fff;
+  background: #000;
 }
 
 .zone-picker span {
@@ -4258,7 +4270,7 @@ input:focus {
 }
 
 .mapping-section {
-  background: #fbfbfb;
+  background: #000;
 }
 
 .mapping-status-row {
@@ -4281,8 +4293,8 @@ input:focus {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
-  color: #434343;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 700;
   text-align: center;
@@ -4291,33 +4303,33 @@ input:focus {
 .mapping-hint {
   margin: 0;
   padding: 8px 9px;
-  border: 1px solid #d2d2d2;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #f5f5f5;
-  color: #353535;
+  background: #000;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
   line-height: 1.35;
 }
 
 .mapping-hint.pedal-zone {
-  border-color: #c9c9c9;
-  background: #f7f7f7;
-  color: #4f4f4f;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .mapping-race-view-card {
   display: grid;
   gap: 9px;
   padding: 10px;
-  border: 1px solid #b6b6b6;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 8px;
-  background: #f8f8f8;
+  background: #000;
 }
 
 .mapping-race-view-card p {
   margin: 0;
-  color: #616161;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
   line-height: 1.4;
@@ -4331,10 +4343,10 @@ input:focus {
   width: 100%;
   min-height: 64px;
   padding: 10px 12px;
-  border: 1px solid #b6b6b6;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 8px;
-  background: #f8f8f8;
-  color: #343434;
+  background: #000;
+  color: #fff;
   text-align: left;
 }
 
@@ -4350,7 +4362,7 @@ input:focus {
 }
 
 .mapping-obstacle-view-toggle small {
-  color: #747474;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 750;
   line-height: 1.35;
@@ -4362,26 +4374,26 @@ input:focus {
   min-width: 42px;
   min-height: 28px;
   border-radius: 999px;
-  background: #e2e2e2;
-  color: #606060;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
 }
 
 .mapping-obstacle-view-toggle.active {
-  border-color: #9e9e9e;
-  background: #f6f6f6;
-  color: #4a4a4a;
+  border-color: #fff;
+  background: #000;
+  color: #fff;
   box-shadow: 0 0 0 2px rgb(165 165 165 / 13%);
 }
 
 .mapping-obstacle-view-toggle.active small {
-  color: #5e5e5e;
+  color: #fff;
 }
 
 .mapping-obstacle-view-toggle.active b {
-  background: #a5a5a5;
-  color: #252525;
+  background: #000;
+  color: #fff;
 }
 
 .zone-type-editor {
@@ -4390,7 +4402,7 @@ input:focus {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
 }
 
 .zone-route-card {
@@ -4399,7 +4411,7 @@ input:focus {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
 }
 
 .zone-route-steps {
@@ -4416,10 +4428,10 @@ input:focus {
   min-width: 0;
   min-height: 48px;
   padding: 6px 5px;
-  border: 1px solid #d0d0d0;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 6px;
-  background: #f7f7f7;
-  color: #4b4b4b;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   text-align: center;
 }
 
@@ -4433,14 +4445,14 @@ input:focus {
 }
 
 .zone-route-steps > .active {
-  border-color: #a5a5a5;
+  border-color: #fff;
   box-shadow: 0 0 0 2px rgb(165 165 165 / 18%);
 }
 
 .zone-route-steps > .complete {
-  border-color: #bcbcbc;
-  background: #f7f7f7;
-  color: #4f4f4f;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .zone-route-steps strong,
@@ -4474,27 +4486,27 @@ input:focus {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fafafa;
+  background: #000;
   text-align: left;
 }
 
 .zone-type-button.pedal {
-  border-color: #c9c9c9;
-  background: #f7f7f7;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .zone-type-button.recovery {
-  border-color: #bbbbbb;
-  background: #f8f8f8;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .zone-type-button.pending {
-  border-color: #d4d4d4;
-  background: #fafafa;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .zone-type-button strong {
-  color: #202020;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
@@ -4522,20 +4534,20 @@ input:focus {
   width: 24px;
   height: 24px;
   padding: 0;
-  border: 1px solid #d3d3d3;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 6px;
-  background: #ffffff;
-  color: #434343;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .zone-delete-button:hover {
-  border-color: #c1c1c1;
-  background: #f3f3f3;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .zone-type-button span,
 .zone-type-button small {
-  color: #565656;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
 }
@@ -4547,10 +4559,10 @@ input:focus {
   min-width: 154px;
   min-height: 48px;
   padding: 7px 11px;
-  border: 1px solid rgba(255, 255, 255, 0.78);
+  border: 1px solid rgb(255 255 255 / 38%);
   border-radius: 8px;
-  background: rgba(24, 24, 24, 0.94);
-  color: #ffffff;
+  background: rgb(0 0 0 / 94%);
+  color: #fff;
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
 }
 
@@ -4578,13 +4590,13 @@ input:focus {
 }
 
 .mapping-tools-toggle-button small {
-  color: rgba(255, 255, 255, 0.72);
+  color: rgb(255 255 255 / 72%);
   font-size: 10px;
   font-weight: 700;
 }
 
 .mapping-tools-toggle-button:hover {
-  background: rgba(40, 40, 40, 0.96);
+  background: rgb(0 0 0 / 96%);
 }
 
 .number-field {
@@ -4596,12 +4608,12 @@ input:focus {
   padding: 7px 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
 }
 
 .number-field span,
 .number-field small {
-  color: #4b4b4b;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 700;
 }
@@ -4612,7 +4624,7 @@ input:focus {
   height: 28px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  color: #181818;
+  color: #fff;
   font-size: 13px;
   font-weight: 700;
   text-align: center;
@@ -4624,7 +4636,7 @@ input:focus {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fafafa;
+  background: #000;
 }
 
 .split-tool-header {
@@ -4642,7 +4654,7 @@ input:focus {
 
 .split-tool-header strong {
   overflow: hidden;
-  color: #181818;
+  color: #fff;
   font-size: 13px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -4651,12 +4663,12 @@ input:focus {
 
 .split-tool-header svg {
   flex: 0 0 auto;
-  color: #565656;
+  color: rgb(255 255 255 / 78%);
 }
 
 .split-tool-card p {
   margin: 0;
-  color: #565656;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 750;
   line-height: 1.35;
@@ -4675,12 +4687,12 @@ input:focus {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #ffffff;
+  background: #000;
 }
 
 .split-measurements div.ready {
-  border-color: rgba(173, 173, 173, 0.55);
-  background: #fafafa;
+  border-color: rgb(255 255 255 / 38%);
+  background: #000;
 }
 
 .split-measurements strong,
@@ -4692,19 +4704,19 @@ input:focus {
 }
 
 .split-measurements strong {
-  color: #181818;
+  color: #fff;
   font-size: 11px;
   font-weight: 700;
 }
 
 .split-measurements span {
-  color: #181818;
+  color: #fff;
   font-size: 13px;
   font-weight: 700;
 }
 
 .split-measurements small {
-  color: #6e6e6e;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
 }
@@ -4727,7 +4739,7 @@ input:focus {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
 }
 
 .split-row div {
@@ -4744,7 +4756,7 @@ input:focus {
 }
 
 .split-row strong {
-  color: #181818;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
@@ -4764,13 +4776,13 @@ input:focus {
   height: 32px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
-  color: #474747;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .split-row button:hover {
-  border-color: #c4c4c4;
-  background: #f7f7f7;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .text-field {
@@ -4779,7 +4791,7 @@ input:focus {
 }
 
 .text-field span {
-  color: #4b4b4b;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 700;
 }
@@ -4790,7 +4802,7 @@ input:focus {
   min-height: 36px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  color: #181818;
+  color: #fff;
   font-size: 13px;
   font-weight: 700;
 }
@@ -4806,9 +4818,9 @@ input:focus {
   max-height: 186px;
   overflow: auto;
   padding: 5px;
-  border: 1px solid #e1e1e1;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 8px;
-  background: #ffffff;
+  background: #000;
   box-shadow: 0 12px 28px rgba(36, 36, 36, 0.13);
 }
 
@@ -4820,15 +4832,15 @@ input:focus {
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
-  color: #181818;
+  color: #fff;
   text-align: left;
   cursor: pointer;
 }
 
 .location-suggestions button:hover,
 .location-suggestions button.selected {
-  border-color: #cdcdcd;
-  background: #f7f7f7;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .location-suggestions strong {
@@ -4841,7 +4853,7 @@ input:focus {
 
 .location-suggestions small {
   overflow: hidden;
-  color: #696969;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 750;
   text-overflow: ellipsis;
@@ -4850,7 +4862,7 @@ input:focus {
 
 .autocomplete-status {
   margin: 0;
-  color: #676767;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
   line-height: 1.35;
@@ -4859,10 +4871,10 @@ input:focus {
 .field-status {
   margin: 0;
   padding: 9px 10px;
-  border: 1px solid #e3e3e3;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #fafafa;
-  color: #4f4f4f;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 750;
   line-height: 1.35;
@@ -4874,7 +4886,7 @@ input:focus {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #f9f9f9;
+  background: #000;
 }
 
 .custom-route-list-header,
@@ -4886,7 +4898,7 @@ input:focus {
 }
 
 .custom-route-list-header {
-  color: #676767;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -4899,8 +4911,8 @@ input:focus {
   min-width: 22px;
   height: 22px;
   border-radius: 999px;
-  background: #ededed;
-  color: #393939;
+  background: #000;
+  color: #fff;
   font-size: 11px;
 }
 
@@ -4914,14 +4926,14 @@ input:focus {
 
 .custom-route-row {
   padding: 4px;
-  border: 1px solid #e6e6e6;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
 }
 
 .custom-route-row.selected {
-  border-color: #b7b7b7;
-  background: #f7f7f7;
+  border-color: #fff;
+  background: #000;
 }
 
 .custom-route-open,
@@ -4937,13 +4949,13 @@ input:focus {
   gap: 2px;
   min-width: 0;
   padding: 5px 7px;
-  color: #181818;
+  color: #fff;
   text-align: left;
 }
 
 .custom-route-open:hover,
 .custom-route-delete:hover {
-  background: #f3f3f3;
+  background: #000;
 }
 
 .custom-route-open:disabled {
@@ -4952,7 +4964,7 @@ input:focus {
 }
 
 .custom-route-row.selected .custom-route-open:hover {
-  background: #f2f2f2;
+  background: #000;
 }
 
 .custom-route-open strong,
@@ -4968,7 +4980,7 @@ input:focus {
 }
 
 .custom-route-open span {
-  color: #696969;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 750;
 }
@@ -4978,11 +4990,11 @@ input:focus {
   place-items: center;
   width: 32px;
   height: 32px;
-  color: #3a3a3a;
+  color: #fff;
 }
 
 .custom-route-delete:hover {
-  background: #f3f3f3;
+  background: #000;
 }
 
 .custom-route-confirm {
@@ -4996,25 +5008,25 @@ input:focus {
   padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #ffffff;
-  color: #272727;
+  background: #000;
+  color: #fff;
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
 }
 
 .custom-route-confirm button:hover {
-  background: #f9f9f9;
+  background: #000;
 }
 
 .custom-route-confirm button.danger {
-  border-color: #616161;
-  background: #f3f3f3;
-  color: #3a3a3a;
+  border-color: rgb(255 255 255 / 26%);
+  background: #000;
+  color: #fff;
 }
 
 .custom-route-confirm button.danger:hover {
-  background: #e7e7e7;
+  background: #000;
 }
 
 .mapping-actions {
@@ -5041,8 +5053,8 @@ input:focus {
   padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
-  color: #272727;
+  background: #000;
+  color: #fff;
   font-size: 11px;
   font-weight: 700;
 }
@@ -5061,7 +5073,7 @@ input:focus {
 
 .mapping-lifecycle-actions button strong {
   overflow: hidden;
-  color: #202020;
+  color: #fff;
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5069,7 +5081,7 @@ input:focus {
 
 .mapping-lifecycle-actions button small {
   overflow: hidden;
-  color: #767676;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -5082,23 +5094,23 @@ input:focus {
   justify-content: center;
   gap: 7px;
   min-height: 36px;
-  border: 1px solid #d3d3d3;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #181818;
-  color: #ffffff;
+  background: #000;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
 
 .mapping-fullscreen-button:hover {
-  background: #282828;
+  background: #000;
 }
 
 .mapping-actions button:hover,
 .mapping-lifecycle-actions button:hover,
 .file-button:hover {
   border-color: var(--line-strong);
-  background: #f9f9f9;
+  background: #000;
 }
 
 .mapping-actions button:disabled,
@@ -5126,37 +5138,37 @@ input:focus {
 }
 
 .zone-chip.pedal {
-  background: #f4f4f4;
-  color: #4f4f4f;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .zone-chip.technical {
-  background: #f0f0f0;
-  color: #444444;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .zone-chip.recovery {
-  background: #f8f8f8;
-  color: #474747;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .start-gate-status {
   display: grid;
   gap: 3px;
   padding: 10px;
-  border: 1px solid #c9c9c9;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #f7f7f7;
+  background: #000;
 }
 
 .start-gate-status strong {
-  color: #181818;
+  color: #fff;
   font-size: 16px;
   font-weight: 700;
 }
 
 .start-gate-status span {
-  color: #585858;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 700;
 }
@@ -5174,7 +5186,7 @@ input:focus {
   padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
 }
 
 .metric-option input {
@@ -5203,7 +5215,7 @@ input:focus {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #4b4b4b;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 700;
 }
@@ -5225,19 +5237,19 @@ input:focus {
 }
 
 .action-button.primary {
-  border: 1px solid #a4a4a4;
-  background: #b7b7b7;
-  color: #131313;
+  border: 1px solid #fff;
+  background: #fff;
+  color: #000;
 }
 
 .action-button.danger {
-  border: 1px solid #616161;
-  background: #f3f3f3;
-  color: #3a3a3a;
+  border: 1px solid rgb(255 255 255 / 26%);
+  background: #000;
+  color: #fff;
 }
 
 .action-button.danger:hover {
-  background: #e7e7e7;
+  background: #000;
 }
 
 .action-button.secondary,
@@ -5245,8 +5257,8 @@ input:focus {
 .clear-button,
 .room-actions button {
   border: 1px solid var(--line);
-  background: #ffffff;
-  color: #272727;
+  background: #000;
+  color: #fff;
 }
 
 .action-button.secondary:hover,
@@ -5254,7 +5266,7 @@ input:focus {
 .clear-button:hover,
 .room-actions button:hover {
   border-color: var(--line-strong);
-  background: #f9f9f9;
+  background: #000;
 }
 
 .square-button:disabled,
@@ -5310,10 +5322,10 @@ input:focus {
   align-items: center;
   margin: 0 10px;
   padding: 8px 9px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #f6f6f6;
-  color: #404040;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
   line-height: 1.3;
@@ -5330,8 +5342,8 @@ input:focus {
   min-width: 20px;
   height: 20px;
   border-radius: 999px;
-  background: #171717;
-  color: #ffffff;
+  background: #000;
+  color: #fff;
   font-size: 11px;
 }
 
@@ -5340,9 +5352,9 @@ input:focus {
   gap: 8px;
   margin: 10px 10px 0;
   padding: 10px;
-  border: 1px solid #d9d9d9;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 8px;
-  background: #f9f9f9;
+  background: #000;
 }
 
 .demo-rider-count-control > div:first-child {
@@ -5353,13 +5365,13 @@ input:focus {
 }
 
 .demo-rider-count-control strong {
-  color: #202020;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
 
 .demo-rider-count-control span {
-  color: #585858;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
 }
@@ -5376,12 +5388,12 @@ input:focus {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fafafa;
+  background: #000;
 }
 
 .pair-card.online {
-  border-color: #d9d9d9;
-  background: #fafafa;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .pair-card-header {
@@ -5404,7 +5416,7 @@ input:focus {
   padding: 0;
   border: 0;
   background: transparent;
-  color: #181818;
+  color: #fff;
   font: inherit;
   font-size: 13px;
   font-weight: 700;
@@ -5422,7 +5434,7 @@ input:focus {
 
 .select-label {
   gap: 6px;
-  color: #606060;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -5441,8 +5453,8 @@ input:focus {
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
-  color: #303030;
+  background: #000;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
@@ -5463,7 +5475,7 @@ input:focus {
   padding: 12px;
   border: 1px dashed var(--line-strong);
   border-radius: 7px;
-  background: #fafafa;
+  background: #000;
   color: var(--muted);
   font-size: 12px;
 }
@@ -5474,7 +5486,7 @@ input:focus {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fafafa;
+  background: #000;
 }
 
 .room-card div {
@@ -5499,16 +5511,16 @@ input:focus {
   padding: 9px 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fafafa;
+  background: #000;
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
 }
 
 .multiplayer-status.online {
-  border-color: #e7e7e7;
-  background: #fafafa;
-  color: #515151;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .latency-card {
@@ -5518,8 +5530,8 @@ input:focus {
   padding: 9px 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fafafa;
-  color: #505050;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .latency-card div {
@@ -5529,7 +5541,7 @@ input:focus {
 }
 
 .latency-card strong {
-  color: #181818;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
@@ -5544,18 +5556,18 @@ input:focus {
 }
 
 .latency-card.good {
-  border-color: #e7e7e7;
-  background: #fafafa;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .latency-card.ok {
-  border-color: #e4e4e4;
-  background: #fbfbfb;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .latency-card.poor {
-  border-color: #d5d5d5;
-  background: #f5f5f5;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .profile-card {
@@ -5564,7 +5576,7 @@ input:focus {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fcfcfc;
+  background: #000;
 }
 
 .profile-key-row {
@@ -5616,10 +5628,10 @@ input:focus {
   gap: 7px;
   min-height: 36px;
   padding: 0 12px;
-  border: 1px solid #1e1e1e;
+  border: 1px solid rgb(255 255 255 / 26%);
   border-radius: 7px;
-  background: #181818;
-  color: #ffffff;
+  background: #000;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
@@ -5627,8 +5639,8 @@ input:focus {
 .primary-inline-button:disabled,
 .voice-card button:disabled {
   border-color: var(--line);
-  background: #f1f1f1;
-  color: #969696;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .vote-candidate-list {
@@ -5645,14 +5657,14 @@ input:focus {
   padding: 9px 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
-  color: #202020;
+  background: #000;
+  color: #fff;
   text-align: left;
 }
 
 .vote-candidate.selected {
-  border-color: #d4d4d4;
-  background: #fafafa;
+  border-color: #fff;
+  background: #000;
   box-shadow: inset 0 0 0 1px #e7e7e7;
 }
 
@@ -5685,8 +5697,8 @@ input:focus {
   width: 30px;
   height: 30px;
   border-radius: 999px;
-  background: #181818;
-  color: #ffffff;
+  background: #000;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
@@ -5698,14 +5710,14 @@ input:focus {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fcfcfc;
+  background: #000;
 }
 
 .route-vote-card > div:first-child {
   display: flex;
   align-items: center;
   gap: 7px;
-  color: #181818;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
@@ -5714,9 +5726,9 @@ input:focus {
   justify-content: space-between;
   gap: 8px;
   padding: 9px;
-  border: 1px solid #e4e4e4;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #fbfbfb;
+  background: #000;
 }
 
 .challenge-card div,
@@ -5728,7 +5740,7 @@ input:focus {
 
 .challenge-card strong,
 .online-rider-row strong {
-  color: #181818;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
@@ -5752,8 +5764,8 @@ input:focus {
   padding: 0 9px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
-  color: #181818;
+  background: #000;
+  color: #fff;
   font-size: 11px;
   font-weight: 700;
 }
@@ -5769,9 +5781,9 @@ input:focus {
   gap: 10px;
   align-items: center;
   padding: 10px;
-  border: 1px solid #dddddd;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #f9f9f9;
+  background: #000;
 }
 
 .match-builder-copy {
@@ -5781,14 +5793,14 @@ input:focus {
 }
 
 .match-builder-card strong {
-  color: #1f1f1f;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
 
 .match-builder-card span {
   overflow: hidden;
-  color: #595959;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -5804,7 +5816,7 @@ input:focus {
 }
 
 .studio-seat-selector b {
-  color: #595959;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -5814,24 +5826,24 @@ input:focus {
   min-width: 28px;
   min-height: 26px;
   padding: 0 8px;
-  border: 1px solid #dddddd;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #ffffff;
-  color: #343434;
+  background: #000;
+  color: #fff;
   font-size: 11px;
   font-weight: 700;
 }
 
 .studio-seat-selector button.active {
-  border-color: #181818;
-  background: #181818;
-  color: #ffffff;
+  border-color: #fff;
+  background: #000;
+  color: #fff;
 }
 
 .selected-mini-button {
-  border-color: #d4d4d4 !important;
-  background: #f4f4f4 !important;
-  color: #515151 !important;
+  border-color: #fff !important;
+  background: #000 !important;
+  color: #fff !important;
 }
 
 .online-rider-row,
@@ -5841,7 +5853,7 @@ input:focus {
   padding: 9px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fcfcfc;
+  background: #000;
 }
 
 .online-rider-row {
@@ -5860,9 +5872,9 @@ input:focus {
   gap: 7px;
   align-items: center;
   padding: 8px;
-  border: 1px solid #d8d8d8;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #f5f5f5;
+  background: #000;
 }
 
 .social-request-row div,
@@ -5875,7 +5887,7 @@ input:focus {
 .social-request-row strong,
 .social-mini-row strong {
   overflow: hidden;
-  color: #181818;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -5899,8 +5911,8 @@ input:focus {
   padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
-  color: #181818;
+  background: #000;
+  color: #fff;
   font-size: 11px;
   font-weight: 700;
 }
@@ -5916,7 +5928,7 @@ input:focus {
   padding: 9px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fcfcfc;
+  background: #000;
 }
 
 .social-mini-row {
@@ -5940,8 +5952,8 @@ input:focus {
   padding: 0 9px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
-  color: #202020;
+  background: #000;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
@@ -5953,18 +5965,18 @@ input:focus {
   padding: 7px 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
   text-align: left;
 }
 
 .group-row.selected {
-  border-color: #c9c9c9;
-  background: #f7f7f7;
+  border-color: #fff;
+  background: #000;
 }
 
 .group-row strong {
   overflow: hidden;
-  color: #181818;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -5993,7 +6005,7 @@ input:focus {
 }
 
 .room-telemetry-row strong {
-  color: #181818;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
@@ -6007,11 +6019,11 @@ input:focus {
   padding: 9px;
   border: 1px dashed var(--line-strong);
   border-radius: 7px;
-  background: #fafafa;
+  background: #000;
 }
 
 .open-room-list span {
-  color: #202020;
+  color: #fff;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -6023,8 +6035,8 @@ input:focus {
   padding: 6px 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #ffffff;
-  color: #555555;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
   text-align: left;
@@ -6032,8 +6044,8 @@ input:focus {
 
 .open-room-link:hover:not(:disabled) {
   border-color: var(--line-strong);
-  background: #f3f3f3;
-  color: #202020;
+  background: #000;
+  color: #fff;
 }
 
 .selected-track-note {
@@ -6064,7 +6076,7 @@ input:focus {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fafafa;
+  background: #000;
 }
 
 .roster-row div {
@@ -6091,7 +6103,7 @@ input:focus {
   display: grid;
   gap: 4px;
   padding: 8px 0;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid rgb(255 255 255 / 34%);
 }
 
 .chat-message > div {
@@ -6100,7 +6112,7 @@ input:focus {
 }
 
 .chat-message p {
-  color: #383838;
+  color: #fff;
   font-size: 12px;
   line-height: 1.45;
 }
@@ -6134,9 +6146,9 @@ input:focus {
   gap: 12px;
   margin: 0 12px 12px;
   padding: 10px 12px;
-  border: 1px solid #e4e4e4;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #f9f9f9;
+  background: #000;
 }
 
 .capture-export-card > div:first-child {
@@ -6147,12 +6159,12 @@ input:focus {
 }
 
 .capture-export-card strong {
-  color: #1f1f1f;
+  color: #fff;
   font-size: 13px;
 }
 
 .capture-export-card small {
-  color: #646464;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 750;
   text-transform: uppercase;
@@ -6197,8 +6209,8 @@ input:focus {
   padding: 0 11px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
-  color: #181818;
+  background: #000;
+  color: #fff;
   font-size: 11px;
   font-weight: 700;
 }
@@ -6210,7 +6222,7 @@ input:focus {
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
 }
 
 .race-summary-stats {
@@ -6224,14 +6236,14 @@ input:focus {
   gap: 3px;
   min-width: 0;
   padding: 10px;
-  border: 1px solid #e7e7e7;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #fafafa;
+  background: #000;
 }
 
 .race-summary-stats span,
 .race-summary-stats small {
-  color: #707070;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -6239,7 +6251,7 @@ input:focus {
 
 .race-summary-stats strong {
   overflow: hidden;
-  color: #181818;
+  color: #fff;
   font-size: 15px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -6259,8 +6271,8 @@ input:focus {
 .race-summary-table th,
 .race-summary-table td {
   padding: 9px 10px;
-  border-bottom: 1px solid #f0f0f0;
-  color: #272727;
+  border-bottom: 1px solid rgb(255 255 255 / 34%);
+  color: #fff;
   font-size: 12px;
   text-align: left;
   vertical-align: middle;
@@ -6268,7 +6280,7 @@ input:focus {
 }
 
 .race-summary-table th {
-  color: #646464;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -6285,8 +6297,8 @@ input:focus {
   min-width: 42px;
   height: 28px;
   border-radius: 7px;
-  background: #181818;
-  color: #ffffff;
+  background: #000;
+  color: #fff;
   font-weight: 700;
 }
 
@@ -6331,7 +6343,7 @@ input:focus {
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
 }
 
 .zone-table-card {
@@ -6347,13 +6359,13 @@ input:focus {
 .zone-table th,
 .zone-table td {
   padding: 9px 8px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid rgb(255 255 255 / 34%);
   text-align: left;
   vertical-align: top;
 }
 
 .zone-table th {
-  color: #646464;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -6371,7 +6383,7 @@ input:focus {
 }
 
 .zone-table td {
-  color: #272727;
+  color: #fff;
   font-size: 11px;
 }
 
@@ -6407,7 +6419,7 @@ input:focus {
 }
 
 .table-metric small {
-  color: #737373;
+  color: rgb(255 255 255 / 78%);
   font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
@@ -6415,7 +6427,7 @@ input:focus {
 
 .table-metric strong {
   overflow-wrap: anywhere;
-  color: #181818;
+  color: #fff;
   font-size: 11px;
   font-weight: 700;
 }
@@ -6437,7 +6449,7 @@ input:focus {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fafafa;
+  background: #000;
 }
 
 .ghost-leaderboard-entry {
@@ -6456,8 +6468,8 @@ input:focus {
 }
 
 .ghost-leaderboard-entry.selected {
-  border-color: #b5b5b5;
-  background: #f7f7f7;
+  border-color: #fff;
+  background: #000;
   box-shadow: inset 3px 0 0 #b8b8b8;
 }
 
@@ -6519,7 +6531,7 @@ input:focus {
   min-width: 29px;
   height: 25px;
   border-radius: 999px;
-  background: #ededed;
+  background: #000;
   font-size: 11px;
   font-weight: 700;
 }
@@ -6553,7 +6565,7 @@ input:focus {
 .diagnostic-card {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.95);
+  background: rgb(0 0 0 / 95%);
   box-shadow: 0 10px 28px rgba(37, 37, 37, 0.06);
 }
 
@@ -6565,13 +6577,13 @@ input:focus {
   min-height: 132px;
   padding: 18px;
   background:
-    linear-gradient(135deg, rgba(247, 247, 247, 0.96), rgba(255, 255, 255, 0.96)),
-    #ffffff;
+    linear-gradient(135deg, rgb(0 0 0 / 96%), rgb(0 0 0 / 96%)),
+    #000;
 }
 
 .diagnostics-hero p {
   margin-top: 6px;
-  color: #606060;
+  color: rgb(255 255 255 / 78%);
   font-size: 13px;
   font-weight: 760;
 }
@@ -6582,14 +6594,14 @@ input:focus {
   flex: 0 0 auto;
   width: 112px;
   height: 112px;
-  border: 10px solid #cbcbcb;
+  border: 10px solid rgb(255 255 255 / 22%);
   border-radius: 50%;
-  background: #ffffff;
-  color: #181818;
+  background: #000;
+  color: #fff;
 }
 
 .readiness-ring.ready {
-  border-color: #c5c5c5;
+  border-color: rgb(255 255 255 / 22%);
 }
 
 .readiness-ring strong {
@@ -6598,7 +6610,7 @@ input:focus {
 }
 
 .readiness-ring span {
-  color: #6b6b6b;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -6615,19 +6627,19 @@ input:focus {
   gap: 8px;
   min-height: 138px;
   padding: 12px;
-  border-left: 4px solid #a1a1a1;
+  border-left: 4px solid rgb(255 255 255 / 22%);
 }
 
 .diagnostic-card.ready {
-  border-left-color: #a4a4a4;
+  border-left-color: rgb(255 255 255 / 22%);
 }
 
 .diagnostic-card.warning {
-  border-left-color: #bababa;
+  border-left-color: rgb(255 255 255 / 22%);
 }
 
 .diagnostic-card.blocked {
-  border-left-color: #6b6b6b;
+  border-left-color: rgb(255 255 255 / 26%);
 }
 
 .diagnostic-card-head {
@@ -6642,34 +6654,34 @@ input:focus {
   width: 32px;
   height: 32px;
   border-radius: 7px;
-  background: #f2f2f2;
-  color: #181818;
+  background: #000;
+  color: #fff;
 }
 
 .diagnostic-card.ready .diagnostic-card-head span {
-  background: #f7f7f7;
-  color: #616161;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .diagnostic-card.warning .diagnostic-card-head span {
-  background: #f8f8f8;
-  color: #696969;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .diagnostic-card.blocked .diagnostic-card-head span {
-  background: #f3f3f3;
-  color: #434343;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .diagnostic-card strong {
-  color: #181818;
+  color: #fff;
   font-size: 13px;
   font-weight: 700;
 }
 
 .diagnostic-card small,
 .diagnostic-card em {
-  color: #6c6c6c;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-style: normal;
   font-weight: 780;
@@ -6678,7 +6690,7 @@ input:focus {
 
 .diagnostic-card em {
   align-self: end;
-  color: #414141;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -6714,26 +6726,26 @@ input:focus {
   gap: 10px;
   min-height: 34px;
   padding: 8px 9px;
-  border: 1px solid #e8e8e8;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #fafafa;
-  color: #606060;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 700;
 }
 
 .diagnostic-stat-list strong {
-  color: #181818;
+  color: #fff;
   font-size: 13px;
   font-weight: 700;
 }
 
 .diagnostic-note {
   padding: 9px 10px;
-  border: 1px solid #e4e4e4;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #fafafa;
-  color: #505050;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 760;
   line-height: 1.4;
@@ -6759,8 +6771,8 @@ input:focus {
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #ffffff;
-  color: #181818;
+  background: #000;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
@@ -6768,13 +6780,13 @@ input:focus {
 .diagnostic-actions button:hover,
 .profile-key-card button:hover {
   border-color: var(--line-strong);
-  background: #f9f9f9;
+  background: #000;
 }
 
 .diagnostic-minor {
   display: grid;
   gap: 4px;
-  color: #6e6e6e;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 780;
 }
@@ -6783,19 +6795,19 @@ input:focus {
   display: grid;
   gap: 5px;
   padding: 11px;
-  border: 1px solid #e8e8e8;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #fcfcfc;
+  background: #000;
 }
 
 .diagnostic-track-card strong {
-  color: #181818;
+  color: #fff;
   font-size: 14px;
   font-weight: 700;
 }
 
 .diagnostic-track-card span {
-  color: #6b6b6b;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 780;
 }
@@ -6810,8 +6822,8 @@ input:focus {
   min-height: 24px;
   padding: 5px 7px;
   border-radius: 999px;
-  background: #f2f2f2;
-  color: #434343;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -6823,14 +6835,14 @@ input:focus {
   gap: 5px 8px;
   align-items: center;
   padding: 10px;
-  border: 1px solid #e8e8e8;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #fafafa;
+  background: #000;
 }
 
 .profile-key-card span {
   grid-column: 1 / -1;
-  color: #6e6e6e;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -6839,7 +6851,7 @@ input:focus {
 .profile-key-card strong {
   min-width: 0;
   overflow: hidden;
-  color: #181818;
+  color: #fff;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 13px;
   font-weight: 700;
@@ -6864,10 +6876,10 @@ input:focus {
   align-items: center;
   min-height: 32px;
   padding: 7px 8px;
-  border: 1px solid #e8e8e8;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
-  background: #ffffff;
-  color: #313131;
+  background: #000;
+  color: #fff;
   font-size: 12px;
   font-style: normal;
   font-weight: 700;
@@ -6881,7 +6893,7 @@ input:focus {
 }
 
 .diagnostic-bike-list small {
-  color: #6f6f6f;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
 }
@@ -6905,7 +6917,7 @@ input:focus {
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fafafa;
+  background: #000;
   font-size: 12px;
   font-weight: 700;
 }
@@ -6932,15 +6944,15 @@ input:focus {
   border: 1px solid var(--line);
   border-left: 5px solid var(--player-color);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
 }
 
 .monitor-card.idle {
-  border-left-color: #a1a1a1;
+  border-left-color: rgb(255 255 255 / 22%);
 }
 
 .monitor-card.idle .monitor-live {
-  color: #727272;
+  color: rgb(255 255 255 / 78%);
 }
 
 .monitor-card-head {
@@ -6960,14 +6972,14 @@ input:focus {
 }
 
 .monitor-bike-id {
-  color: #181818;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
 
 .monitor-card-head small {
   display: block;
-  color: #727272;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 750;
 }
@@ -6975,7 +6987,7 @@ input:focus {
 .monitor-live {
   gap: 5px;
   margin-left: auto;
-  color: #4e4e4e;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 700;
 }
@@ -6988,7 +7000,7 @@ input:focus {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fafafa;
+  background: #000;
 }
 
 .monitor-primary span {
@@ -7008,19 +7020,19 @@ input:focus {
   padding: 11px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fcfcfc;
+  background: #000;
 }
 
 .monitor-sprint-result.empty {
   place-items: center;
-  color: #727272;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 700;
 }
 
 .monitor-sprint-result.capturing {
-  border-color: #e7e7e7;
-  background: #fafafa;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .monitor-sprint-head {
@@ -7031,14 +7043,14 @@ input:focus {
 }
 
 .monitor-sprint-head strong {
-  color: #202020;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
 }
 
 .monitor-sprint-head span {
-  color: #545454;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 700;
 }
@@ -7055,20 +7067,20 @@ input:focus {
   gap: 3px;
   min-height: 44px;
   padding: 7px 5px;
-  border: 1px solid #ececec;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 6px;
-  background: #ffffff;
+  background: #000;
 }
 
 .monitor-sprint-grid span {
-  color: #181818;
+  color: #fff;
   font-size: 23px;
   font-weight: 700;
   line-height: 1;
 }
 
 .monitor-sprint-grid small {
-  color: #656565;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
   text-align: center;
@@ -7088,7 +7100,7 @@ input:focus {
 .developer-error {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.96);
+  background: rgb(0 0 0 / 96%);
   box-shadow: 0 10px 28px rgba(37, 37, 37, 0.06);
 }
 
@@ -7098,19 +7110,19 @@ input:focus {
   justify-content: space-between;
   gap: 18px;
   padding: 18px;
-  background: linear-gradient(135deg, #f7f7f7, #ffffff 62%);
+  background: linear-gradient(135deg, #000, #000 62%);
 }
 
 .developer-tools-header h1 {
   margin-top: 3px;
-  color: #171717;
+  color: #fff;
   font-size: 25px;
   letter-spacing: 0;
 }
 
 .developer-tools-header p {
   margin-top: 5px;
-  color: #676767;
+  color: rgb(255 255 255 / 78%);
   font-size: 13px;
   font-weight: 720;
 }
@@ -7134,22 +7146,22 @@ input:focus {
 }
 
 .developer-admin-badge {
-  border: 1px solid #d8d8d8;
-  background: #f7f7f7;
-  color: #525252;
+  border: 1px solid rgb(255 255 255 / 22%);
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .developer-tools-actions button,
 .developer-error button {
-  border: 1px solid #d7d7d7;
-  background: #ffffff;
-  color: #202020;
+  border: 1px solid rgb(255 255 255 / 22%);
+  background: #000;
+  color: #fff;
 }
 
 .developer-tools-actions button:hover,
 .developer-error button:hover {
-  border-color: #b7b7b7;
-  background: #f9f9f9;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .developer-tools-actions button:disabled {
@@ -7170,13 +7182,13 @@ input:focus {
   align-items: center;
   gap: 10px;
   padding: 12px 14px;
-  border-left: 4px solid #5c5c5c;
-  color: #343434;
+  border-left: 4px solid rgb(255 255 255 / 26%);
+  color: #fff;
 }
 
 .developer-error span {
   flex: 1;
-  color: #4d4d4d;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 720;
 }
@@ -7209,7 +7221,7 @@ input:focus {
 }
 
 .developer-usage-summary strong {
-  color: #171717;
+  color: #fff;
   font-size: 36px;
   font-weight: 700;
   line-height: 1;
@@ -7218,7 +7230,7 @@ input:focus {
 .developer-usage-summary > span:last-child,
 .developer-usage-meter small,
 .developer-usage-stat span {
-  color: #707070;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 780;
 }
@@ -7228,7 +7240,7 @@ input:focus {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  color: #404040;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 700;
 }
@@ -7257,7 +7269,7 @@ input:focus {
 }
 
 .developer-usage-stat strong {
-  color: #171717;
+  color: #fff;
   font-size: 27px;
   font-weight: 700;
 }
@@ -7281,12 +7293,12 @@ input:focus {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  color: #575757;
+  color: rgb(255 255 255 / 78%);
 }
 
 .developer-section-heading h2 {
   margin-top: 3px;
-  color: #181818;
+  color: #fff;
   font-size: 16px;
   letter-spacing: 0;
 }
@@ -7294,7 +7306,7 @@ input:focus {
 .developer-context-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  border: 1px solid #e6e6e6;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
   overflow: hidden;
 }
@@ -7304,8 +7316,8 @@ input:focus {
   gap: 8px;
   min-width: 0;
   padding: 12px;
-  border-right: 1px solid #e6e6e6;
-  background: #fafafa;
+  border-right: 1px solid rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .developer-context-grid > div:last-child {
@@ -7317,13 +7329,13 @@ input:focus {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  color: #666666;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
 }
 
 .developer-context-grid strong {
-  color: #171717;
+  color: #fff;
   font-size: 22px;
   font-weight: 700;
 }
@@ -7347,7 +7359,7 @@ input:focus {
 }
 
 .developer-daily-column strong {
-  color: #6a6a6a;
+  color: rgb(255 255 255 / 78%);
   font-size: 9px;
 }
 
@@ -7357,18 +7369,18 @@ input:focus {
   min-height: 6px;
   margin: 0 auto;
   border-radius: 3px 3px 1px 1px;
-  background: #a5a5a5;
+  background: #000;
 }
 
 .developer-daily-column small {
-  color: #7e7e7e;
+  color: rgb(255 255 255 / 78%);
   font-size: 9px;
   font-weight: 700;
 }
 
 .developer-track-table {
   display: grid;
-  border: 1px solid #e6e6e6;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 7px;
   overflow: hidden;
 }
@@ -7380,8 +7392,8 @@ input:focus {
   align-items: center;
   min-height: 40px;
   padding: 7px 10px;
-  border-bottom: 1px solid #ececec;
-  color: #5c5c5c;
+  border-bottom: 1px solid rgb(255 255 255 / 22%);
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
 }
 
@@ -7392,8 +7404,8 @@ input:focus {
 .developer-track-table .developer-track-table-head {
   grid-template-columns: minmax(0, 1fr) auto;
   min-height: 34px;
-  background: #f5f5f5;
-  color: #737373;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -7409,8 +7421,8 @@ input:focus {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: #f1f1f1;
-  color: #525252;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
 }
@@ -7418,7 +7430,7 @@ input:focus {
 .developer-track-table strong {
   min-width: 0;
   overflow: hidden;
-  color: #202020;
+  color: #fff;
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -7428,7 +7440,7 @@ input:focus {
   display: grid;
   place-items: center;
   min-height: 104px;
-  color: #757575;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 750;
   text-align: center;
@@ -7438,8 +7450,8 @@ input:focus {
   display: flex;
   gap: 11px;
   padding: 15px;
-  border-left: 4px solid #9c9c9c;
-  color: #5f5f5f;
+  border-left: 4px solid rgb(255 255 255 / 26%);
+  color: rgb(255 255 255 / 78%);
 }
 
 .developer-tools-note > div {
@@ -7448,13 +7460,13 @@ input:focus {
 }
 
 .developer-tools-note strong {
-  color: #282828;
+  color: #fff;
   font-size: 13px;
 }
 
 .developer-tools-note p,
 .developer-tools-note small {
-  color: #676767;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 720;
   line-height: 1.45;
@@ -7465,7 +7477,7 @@ input:focus {
   align-items: center;
   gap: 5px;
   width: fit-content;
-  color: #565656;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
 }
@@ -7665,7 +7677,7 @@ input:focus {
     overflow-x: hidden;
     overflow-x: clip;
     border-bottom: 1px solid var(--line);
-    background: #ffffff;
+    background: #000;
   }
 
   .side-nav > * {
@@ -7943,7 +7955,7 @@ input:focus {
   min-height: 520px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #ffffff;
+  background: #000;
   color: var(--muted);
   font-size: 13px;
   font-weight: 700;
@@ -7954,8 +7966,8 @@ input:focus {
   width: 38px;
   height: 38px;
   border-radius: 10px;
-  background: #171717;
-  color: #d4d4d4;
+  background: #000;
+  color: rgb(255 255 255 / 86%);
 }
 
 .explore-topbar-heading span {
@@ -7989,12 +8001,12 @@ input:focus {
   gap: 20px;
   padding: 22px 24px;
   overflow: hidden;
-  border: 1px solid #323232;
+  border: 1px solid rgb(255 255 255 / 26%);
   border-radius: 14px;
   background:
-    radial-gradient(circle at 82% 10%, rgba(178, 178, 178, 0.2), transparent 32%),
-    linear-gradient(135deg, #171717, #272727);
-  color: #ffffff;
+    radial-gradient(circle at 82% 10%, rgb(0 0 0 / 20%), transparent 32%),
+    linear-gradient(135deg, #000, #000);
+  color: #fff;
 }
 
 .explore-hero h2 {
@@ -8004,12 +8016,12 @@ input:focus {
 
 .explore-hero p {
   margin-top: 5px;
-  color: #d4d4d4;
+  color: rgb(255 255 255 / 86%);
   font-size: 13px;
 }
 
 .explore-hero .eyebrow {
-  color: #d4d4d4;
+  color: rgb(255 255 255 / 86%);
 }
 
 .explore-mode-switch,
@@ -8023,7 +8035,7 @@ input:focus {
 
 .explore-mode-switch {
   flex: 0 0 auto;
-  background: rgba(9, 9, 9, 0.56);
+  background: rgb(0 0 0 / 56%);
 }
 
 .explore-mode-switch button,
@@ -8042,12 +8054,12 @@ input:focus {
 }
 
 .explore-mode-switch button {
-  color: #d4d4d4;
+  color: rgb(255 255 255 / 86%);
 }
 
 .explore-mode-switch button.selected {
-  background: #ffffff;
-  color: #181818;
+  background: #000;
+  color: #fff;
 }
 
 .explore-demo-banner {
@@ -8055,15 +8067,15 @@ input:focus {
   align-items: center;
   gap: 9px;
   padding: 11px 14px;
-  border: 1px solid #cbcbcb;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 10px;
-  background: #f7f7f7;
-  color: #3c3c3c;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
 }
 
 .explore-demo-banner span {
-  color: #5f5f5f;
+  color: rgb(255 255 255 / 78%);
 }
 
 .explore-layout {
@@ -8096,7 +8108,7 @@ input:focus {
 
 .explore-room-card {
   border-bottom: 1px solid var(--line);
-  background: #f8f8f8;
+  background: #000;
 }
 
 .explore-room-card strong {
@@ -8120,8 +8132,8 @@ input:focus {
   padding: 0 12px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: #ffffff;
-  color: #222222;
+  background: #000;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
@@ -8129,7 +8141,7 @@ input:focus {
 .explore-route-builder label {
   display: grid;
   gap: 6px;
-  color: #484848;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
 }
@@ -8152,41 +8164,41 @@ input:focus {
 
 .explore-travel-mode {
   border: 1px solid var(--line);
-  background: #f6f6f6;
+  background: #000;
 }
 
 .explore-travel-mode button {
-  color: #606060;
+  color: rgb(255 255 255 / 78%);
 }
 
 .explore-travel-mode button.selected {
-  background: #171717;
-  color: #ffffff;
+  background: #000;
+  color: #fff;
   box-shadow: 0 3px 9px rgba(23, 23, 23, 0.18);
 }
 
 .explore-route-builder .explore-create-route,
 .explore-controls button.primary {
-  border-color: #a3a3a3;
-  background: linear-gradient(135deg, #c2c2c2, #a9a9a9);
-  color: #222222;
+  border-color: rgb(255 255 255 / 22%);
+  background: linear-gradient(135deg, #000, #000);
+  color: #fff;
 }
 
 .explore-route-message {
   padding: 9px 10px;
   border-radius: 7px;
-  background: #f4f4f4;
-  color: #505050;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
 }
 
 .explore-route-message.error {
-  background: #f3f3f3;
-  color: #4a4a4a;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .explore-route-warning {
-  color: #5d5d5d;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   line-height: 1.45;
 }
@@ -8246,7 +8258,7 @@ input:focus {
   padding: 7px 9px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #f9f9f9;
+  background: #000;
 }
 
 .explore-route-summary dt {
@@ -8273,7 +8285,7 @@ input:focus {
   min-height: 460px;
   overflow: hidden;
   border-radius: 10px;
-  background: #1e1e1e;
+  background: #000;
 }
 
 .explore-map-grid.single {
@@ -8312,8 +8324,8 @@ input:focus {
   padding: 0 10px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: #ffffff;
-  color: #212121;
+  background: #000;
+  color: #fff;
   font-size: 11px;
   font-weight: 700;
 }
@@ -8324,7 +8336,7 @@ input:focus {
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: #f5f5f5;
+  background: #000;
 }
 
 .explore-camera-toolbar .explore-toolbar-toggle button {
@@ -8344,9 +8356,9 @@ input:focus {
 
 .explore-camera-toolbar .explore-map-labels-toggle.active,
 .explore-camera-toolbar .explore-toolbar-toggle button.active {
-  border-color: #9f9f9f;
-  background: #f5f5f5;
-  color: #292929;
+  border-color: #fff;
+  background: #000;
+  color: #fff;
 }
 
 .explore-camera-position-toggle svg.behind {
@@ -8362,12 +8374,12 @@ input:focus {
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #f9f9f9;
+  background: #000;
 }
 
 .explore-camera-toolbar label span,
 .explore-camera-toolbar label small {
-  color: #4f4f4f;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
   white-space: nowrap;
@@ -8375,7 +8387,7 @@ input:focus {
 
 .explore-camera-toolbar label small {
   min-width: 52px;
-  color: #767676;
+  color: rgb(255 255 255 / 78%);
   text-align: right;
 }
 
@@ -8389,7 +8401,7 @@ input:focus {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: #282828;
+  background: #000;
 }
 
 .explore-map-canvas {
@@ -8405,8 +8417,8 @@ input:focus {
   max-width: calc(100% - 30px);
   padding: 9px 12px;
   border-radius: 8px;
-  background: rgba(20, 20, 20, 0.84);
-  color: #ffffff;
+  background: rgb(0 0 0 / 84%);
+  color: #fff;
   font-size: 11px;
   font-weight: 700;
   text-align: center;
@@ -8414,7 +8426,7 @@ input:focus {
 }
 
 .explore-map-status.error {
-  background: rgba(56, 56, 56, 0.9);
+  background: rgb(0 0 0 / 90%);
 }
 
 .explore-map-group-label {
@@ -8426,10 +8438,10 @@ input:focus {
   gap: 1px;
   max-width: calc(100% - 20px);
   padding: 7px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid rgb(255 255 255 / 20%);
   border-radius: 8px;
-  background: rgba(16, 16, 16, 0.86);
-  color: #ffffff;
+  background: rgb(0 0 0 / 86%);
+  color: #fff;
   backdrop-filter: blur(6px);
 }
 
@@ -8441,7 +8453,7 @@ input:focus {
 }
 
 .explore-map-group-label span {
-  color: #c5c5c5;
+  color: rgb(255 255 255 / 86%);
   font-size: 9px;
 }
 
@@ -8452,10 +8464,10 @@ input:focus {
   gap: 8px;
   min-height: 38px;
   padding: 8px 12px;
-  border: 1px solid #d0d0d0;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 9px;
-  background: #f7f7f7;
-  color: #3b3b3b;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   line-height: 1.35;
   text-align: center;
@@ -8479,10 +8491,10 @@ input:focus {
   width: min(500px, calc(100% - 20px));
   max-height: min(620px, calc(100% - 36px));
   overflow: auto;
-  border: 1px solid rgba(255, 255, 255, 0.24);
+  border: 1px solid rgb(255 255 255 / 24%);
   border-radius: 16px;
-  background: rgba(251, 251, 251, 0.98);
-  color: #1f1f1f;
+  background: rgb(0 0 0 / 98%);
+  color: #fff;
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
   pointer-events: auto;
   backdrop-filter: blur(14px);
@@ -8497,15 +8509,15 @@ input:focus {
   justify-content: space-between;
   gap: 14px;
   padding: 13px 15px;
-  border-bottom: 1px solid #e3e3e3;
-  background: rgba(248, 248, 248, 0.98);
+  border-bottom: 1px solid rgb(255 255 255 / 22%);
+  background: rgb(0 0 0 / 98%);
 }
 
 .explore-landmark-dialog > header > span {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  color: #525252;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -8517,10 +8529,10 @@ input:focus {
   place-items: center;
   width: 38px;
   height: 38px;
-  border: 1px solid #d4d4d4;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 9px;
-  background: #ffffff;
-  color: #222222;
+  background: #000;
+  color: #fff;
 }
 
 .explore-landmark-loading,
@@ -8536,8 +8548,8 @@ input:focus {
 .explore-landmark-spinner {
   width: 34px;
   height: 34px;
-  border: 4px solid #e0e0e0;
-  border-top-color: #afafaf;
+  border: 4px solid rgb(255 255 255 / 22%);
+  border-top-color: rgb(255 255 255 / 22%);
   border-radius: 50%;
   animation: explore-landmark-spin 0.8s linear infinite;
 }
@@ -8550,7 +8562,7 @@ input:focus {
 
 .explore-landmark-error p {
   margin: 0;
-  color: #737373;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -8560,8 +8572,8 @@ input:focus {
   padding: 0 16px;
   border: 0;
   border-radius: 8px;
-  background: #222222;
-  color: #ffffff;
+  background: #000;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
 }
@@ -8578,7 +8590,7 @@ input:focus {
 }
 
 .explore-landmark-title > span {
-  color: #767676;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -8593,7 +8605,7 @@ input:focus {
 
 .explore-landmark-title p {
   margin: 0;
-  color: #6e6e6e;
+  color: rgb(255 255 255 / 78%);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -8611,28 +8623,28 @@ input:focus {
   gap: 5px;
   min-height: 34px;
   padding: 6px 10px;
-  border: 1px solid #dfdfdf;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 999px;
-  background: #f7f7f7;
-  color: #4f4f4f;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 750;
 }
 
 .explore-landmark-facts > span:first-child svg {
-  color: #aaaaaa;
+  color: rgb(255 255 255 / 78%);
 }
 
 .explore-landmark-facts > span.open {
-  border-color: #d1d1d1;
-  background: #f7f7f7;
-  color: #5d5d5d;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .explore-landmark-facts > span.closed {
-  border-color: #cccccc;
-  background: #f5f5f5;
-  color: #4f4f4f;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .explore-landmark-actions {
@@ -8649,29 +8661,29 @@ input:focus {
   gap: 7px;
   min-height: 42px;
   padding: 0 14px;
-  border: 1px solid #cbcbcb;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 9px;
-  background: #f7f7f7;
-  color: #3c3c3c;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 700;
   text-decoration: none;
 }
 
 .explore-landmark-actions button {
-  border-color: #222222;
-  background: #222222;
-  color: #ffffff;
+  border-color: rgb(255 255 255 / 26%);
+  background: #000;
+  color: #fff;
 }
 
 .explore-landmark-actions a:last-child {
-  border-color: #d4d4d4;
-  background: #ffffff;
-  color: #2d2d2d;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
+  color: #fff;
 }
 
 .explore-landmark-details > small {
-  color: #7e7e7e;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
 }
 
@@ -8680,7 +8692,7 @@ input:focus {
   z-index: 60;
   inset: 0;
   overflow: hidden;
-  background: #181818;
+  background: #000;
 }
 
 .explore-street-view-canvas {
@@ -8698,10 +8710,10 @@ input:focus {
   gap: 12px;
   max-width: calc(100% - 24px);
   padding: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.24);
+  border: 1px solid rgb(255 255 255 / 24%);
   border-radius: 12px;
-  background: rgba(12, 12, 12, 0.9);
-  color: #ffffff;
+  background: rgb(0 0 0 / 90%);
+  color: #fff;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
   backdrop-filter: blur(9px);
 }
@@ -8716,8 +8728,8 @@ input:focus {
   padding: 0 13px;
   border: 0;
   border-radius: 8px;
-  background: #ffffff;
-  color: #202020;
+  background: #000;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
@@ -8730,7 +8742,7 @@ input:focus {
 
 .explore-street-view-overlay > header span,
 .explore-street-view-overlay > header small {
-  color: #c8c8c8;
+  color: rgb(255 255 255 / 86%);
   font-size: 9px;
 }
 
@@ -8752,15 +8764,15 @@ input:focus {
   width: min(430px, calc(100% - 28px));
   padding: 24px;
   border-radius: 13px;
-  background: rgba(14, 14, 14, 0.92);
-  color: #ffffff;
+  background: rgb(0 0 0 / 92%);
+  color: #fff;
   text-align: center;
   transform: translate(-50%, -50%);
 }
 
 .explore-street-view-status p {
   margin: 0;
-  color: #cccccc;
+  color: rgb(255 255 255 / 86%);
   font-size: 12px;
 }
 
@@ -8779,8 +8791,8 @@ input:focus {
   max-width: calc(100% - 24px);
   padding: 8px 11px;
   border-radius: 8px;
-  background: rgba(12, 12, 12, 0.82);
-  color: #ffffff;
+  background: rgb(0 0 0 / 82%);
+  color: #fff;
   font-size: 10px;
   text-align: right;
   pointer-events: none;
@@ -8788,7 +8800,7 @@ input:focus {
 }
 
 .explore-street-view-overlay > footer span {
-  color: #cccccc;
+  color: rgb(255 255 255 / 86%);
   font-size: 9px;
 }
 
@@ -8808,7 +8820,7 @@ input:focus {
   border: 1px solid var(--line);
   border-left: 4px solid var(--player-color);
   border-radius: 8px;
-  background: #f9f9f9;
+  background: #000;
 }
 
 .explore-rider-strip img,
@@ -8819,8 +8831,8 @@ input:focus {
   height: 44px;
   border: 2px solid var(--player-color);
   border-radius: 50%;
-  background: #171717;
-  color: #ffffff;
+  background: #000;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
   object-fit: cover;
@@ -8887,14 +8899,14 @@ input:focus {
   padding: 7px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
+  background: #000;
   color: var(--ink);
   text-align: left;
 }
 
 .explore-demo-rider-picker button.selected {
-  border-color: #bdbdbd;
-  background: #fafafa;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
 }
 
 .explore-demo-rider-picker button > img,
@@ -8903,10 +8915,10 @@ input:focus {
   place-items: center;
   width: 30px;
   height: 30px;
-  border: 2px solid var(--player-color, #bdbdbd);
+  border: 2px solid var(--player-color, rgb(255 255 255 / 22%));
   border-radius: 50%;
-  background: #171717;
-  color: #ffffff;
+  background: #000;
+  color: #fff;
   font-size: 9px;
   font-weight: 700;
   object-fit: cover;
@@ -8934,7 +8946,7 @@ input:focus {
 }
 
 .explore-demo-rider-picker button.selected b {
-  color: #666666;
+  color: rgb(255 255 255 / 78%);
 }
 
 .explore-controls {
@@ -8949,9 +8961,9 @@ input:focus {
   justify-content: space-between;
   gap: 14px;
   padding: 12px;
-  border: 1px solid #cccccc;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 10px;
-  background: #f7f7f7;
+  background: #000;
 }
 
 .explore-completion-actions > div {
@@ -8961,7 +8973,7 @@ input:focus {
 }
 
 .explore-completion-actions > div:first-child {
-  color: #484848;
+  color: rgb(255 255 255 / 78%);
 }
 
 .explore-completion-actions span {
@@ -8974,7 +8986,7 @@ input:focus {
 }
 
 .explore-completion-actions small {
-  color: #686868;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
 }
 
@@ -8985,10 +8997,10 @@ input:focus {
   gap: 7px;
   min-height: 40px;
   padding: 0 12px;
-  border: 1px solid #ababab;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 8px;
-  background: #ffffff;
-  color: #333333;
+  background: #000;
+  color: #fff;
   font-size: 11px;
   font-weight: 700;
 }
@@ -9005,7 +9017,7 @@ input:focus {
   gap: 9px;
   min-height: 620px;
   padding: 30px;
-  color: #5f5f5f;
+  color: rgb(255 255 255 / 78%);
   text-align: center;
 }
 
@@ -9014,8 +9026,8 @@ input:focus {
   width: 70px;
   height: 70px;
   border-radius: 20px;
-  background: #f3f3f3;
-  color: #9b9b9b;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .explore-empty-state h3 {
@@ -9174,7 +9186,7 @@ input:focus {
   display: block;
   min-height: 0;
   overflow: hidden;
-  background: #080808;
+  background: #000;
 }
 
 .explore-fullscreen .sidebar,
@@ -9212,7 +9224,7 @@ input:focus {
   overflow: hidden;
   border: 0;
   border-radius: 0;
-  background: #080808;
+  background: #000;
   box-shadow: none;
 }
 
@@ -9263,9 +9275,9 @@ input:focus {
   justify-content: flex-start;
   padding: 6px 8px;
   overflow-x: auto;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid rgb(255 255 255 / 20%);
   border-radius: 0;
-  background: rgba(12, 12, 12, 0.88);
+  background: rgb(0 0 0 / 88%);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
   backdrop-filter: blur(8px);
 }
@@ -9281,25 +9293,25 @@ input:focus {
 .explore-fullscreen .explore-camera-toolbar button,
 .explore-fullscreen .explore-camera-toolbar label,
 .explore-fullscreen .explore-toolbar-toggle {
-  border-color: rgba(255, 255, 255, 0.18);
-  background: rgba(38, 38, 38, 0.94);
-  color: #ffffff;
+  border-color: rgb(255 255 255 / 18%);
+  background: rgb(0 0 0 / 94%);
+  color: #fff;
 }
 
 .explore-fullscreen .explore-camera-toolbar label span,
 .explore-fullscreen .explore-camera-toolbar label small {
-  color: #dedede;
+  color: rgb(255 255 255 / 86%);
 }
 
 .explore-fullscreen .explore-camera-toolbar .explore-map-labels-toggle.active {
-  border-color: #cdcdcd;
-  background: #f2f2f2;
-  color: #292929;
+  border-color: #fff;
+  background: #000;
+  color: #fff;
 }
 
 .explore-fullscreen .explore-camera-toolbar .explore-toolbar-toggle button.active {
-  background: #f2f2f2;
-  color: #292929;
+  background: #000;
+  color: #fff;
 }
 
 .explore-fullscreen .explore-session-actions {
@@ -9310,13 +9322,13 @@ input:focus {
   gap: 5px;
   flex: none;
   margin-left: auto;
-  background: #0c0c0c;
+  background: #000;
 }
 
 .explore-fullscreen .explore-camera-toolbar .explore-exit-fullscreen {
   padding-inline: 12px;
-  background: #ffffff;
-  color: #171717;
+  background: #000;
+  color: #fff;
   white-space: nowrap;
 }
 
@@ -9325,9 +9337,9 @@ input:focus {
 }
 
 .explore-fullscreen .explore-session-actions > .explore-resume-ride {
-  border-color: #bbbbbb;
-  background: #ededed;
-  color: #292929;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
+  color: #fff;
 }
 
 .explore-fullscreen .explore-destination-overlay {
@@ -9338,12 +9350,12 @@ input:focus {
   min-width: 140px;
   max-width: 340px;
   margin-right: auto;
-  color: #ffffff;
+  color: #fff;
   pointer-events: none;
 }
 
 .explore-fullscreen .explore-destination-overlay small {
-  color: #c6c6c6;
+  color: rgb(255 255 255 / 86%);
   font-size: 9px;
 }
 
@@ -9364,9 +9376,9 @@ input:focus {
   left: 50%;
   width: max-content;
   max-width: calc(100% - 24px);
-  border-color: rgba(242, 242, 242, 0.8);
-  background: rgba(17, 17, 17, 0.9);
-  color: #f5f5f5;
+  border-color: rgb(255 255 255 / 38%);
+  background: rgb(0 0 0 / 90%);
+  color: #fff;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
   transform: translateX(-50%);
   backdrop-filter: blur(8px);
@@ -9379,22 +9391,22 @@ input:focus {
   grid-template-columns: repeat(4, minmax(190px, 1fr));
   padding: 7px;
   overflow-x: auto;
-  border: 1px solid rgba(255, 255, 255, 0.19);
+  border: 1px solid rgb(255 255 255 / 19%);
   border-radius: 10px;
-  background: rgba(12, 12, 12, 0.88);
+  background: rgb(0 0 0 / 88%);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.32);
   backdrop-filter: blur(8px);
 }
 
 .explore-fullscreen .explore-rider-strip article {
-  border-color: rgba(255, 255, 255, 0.14);
+  border-color: rgb(255 255 255 / 14%);
   border-left-color: var(--player-color);
-  background: rgba(32, 32, 32, 0.96);
-  color: #ffffff;
+  background: rgb(0 0 0 / 96%);
+  color: #fff;
 }
 
 .explore-fullscreen .explore-rider-strip article span {
-  color: #c9c9c9;
+  color: rgb(255 255 255 / 86%);
 }
 
 @media (max-width: 1000px) {
@@ -9532,3 +9544,34 @@ input:focus {
 
 /* Shared neutral interface tokens, following Tool Track's restrained SaaS surfaces. */
 button:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+
+/* Black-and-white surfaces use borders and white actions for hierarchy. */
+.primary-button,
+.action-button.primary,
+.workflow-step.primary-action {
+  background: #fff;
+  color: #000;
+  border-color: #fff;
+}
+
+.primary-button:hover,
+.action-button.primary:hover,
+.workflow-step.primary-action:hover {
+  background: #fff;
+  color: #000;
+  border-color: #fff;
+  box-shadow: 0 0 0 3px rgb(255 255 255 / 16%);
+}
+
+.workflow-step.primary-action :is(.workflow-copy, .workflow-copy small, .workflow-index) {
+  color: #000;
+}
+
+:where(button, input, select, textarea, a):focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+
+button:focus-visible { outline-color: #fff; }
+
+::selection { background: #fff; color: #000; }

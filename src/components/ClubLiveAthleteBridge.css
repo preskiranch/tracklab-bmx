@@ -8,11 +8,11 @@
   gap: 7px;
   max-width: min(260px, calc(100vw - 20px));
   padding: 7px 10px;
-  border: 1px solid rgb(212 212 212 / 65%);
+  border: 1px solid rgb(255 255 255 / 38%);
   border-radius: 999px;
-  background: rgb(14 14 14 / 88%);
+  background: rgb(0 0 0 / 88%);
   box-shadow: 0 4px 18px rgb(0 0 0 / 25%);
-  color: #fcfcfc;
+  color: #fff;
   font-size: clamp(11px, 1.25vw, 13px);
   font-weight: 800;
   line-height: 1.2;

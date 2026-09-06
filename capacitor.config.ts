@@ -4,11 +4,11 @@ const config: CapacitorConfig = {
   appId: 'com.preskilranch.tracklabbmx',
   appName: 'TrackLab BMX',
   webDir: 'dist',
-  backgroundColor: '#05080c',
+  backgroundColor: '#000000',
   appendUserAgent: ' TrackLabBMX-iOS',
   ios: {
     allowsLinkPreview: false,
-    backgroundColor: '#05080c',
+    backgroundColor: '#000000',
     contentInset: 'never',
     preferredContentMode: 'mobile',
     scrollEnabled: true,

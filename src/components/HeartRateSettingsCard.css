@@ -1,6 +1,6 @@
 .heart-rate-settings-card {
-  background: #ffffff;
-  border: 1px solid #d1d1d1;
+  background: #000;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 16px;
   box-shadow: 0 10px 28px rgba(27, 27, 27, .06);
   padding: clamp(18px, 3vw, 28px);
@@ -8,15 +8,15 @@
 
 .heart-rate-settings-card > header {
   align-items: center;
-  border-bottom: 1px solid #e6e6e6;
-  color: #434343;
+  border-bottom: 1px solid rgb(255 255 255 / 22%);
+  color: rgb(255 255 255 / 78%);
   display: flex;
   justify-content: space-between;
   padding-bottom: 16px;
 }
 
 .heart-rate-settings-card h2 {
-  color: #171717;
+  color: #fff;
   margin: 3px 0 0;
 }
 
@@ -35,7 +35,7 @@
 
 .heart-rate-settings-state span,
 .heart-rate-settings-state small {
-  color: #6f6f6f;
+  color: rgb(255 255 255 / 78%);
   line-height: 1.45;
 }
 
@@ -48,10 +48,10 @@
 .heart-rate-settings-actions button,
 .heart-rate-settings-actions a {
   align-items: center;
-  background: #f5f5f5;
-  border: 1px solid #d0d0d0;
+  background: #000;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 10px;
-  color: #3f3f3f;
+  color: rgb(255 255 255 / 78%);
   display: inline-flex;
   font-weight: 800;
   gap: 7px;
@@ -62,31 +62,31 @@
 
 .heart-rate-settings-actions button.primary,
 .heart-rate-settings-actions a.primary {
-  background: #474747;
-  border-color: #474747;
-  color: #ffffff;
+  background: #fff;
+  border-color: #fff;
+  color: #000;
 }
 
 .heart-rate-settings-actions a:focus-visible {
-  outline: 3px solid #565656;
+  outline: 3px solid rgb(255 255 255 / 26%);
   outline-offset: 2px;
 }
 
 .heart-rate-settings-install-help {
-  color: #6f6f6f;
+  color: rgb(255 255 255 / 78%);
   flex-basis: 100%;
   line-height: 1.45;
 }
 
 .heart-rate-settings-actions button.danger {
-  color: #414141;
+  color: rgb(255 255 255 / 78%);
 }
 
 .heart-rate-relay-summary {
-  background: #f9f9f9;
-  border: 1px solid #d4d4d4;
+  background: #000;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 12px;
-  color: #4b4b4b;
+  color: rgb(255 255 255 / 78%);
   display: grid;
   gap: 3px;
   margin-top: 14px;
@@ -94,9 +94,9 @@
 }
 
 .heart-rate-relay-summary.warning {
-  background: #f9f9f9;
-  border-color: #cbcbcb;
-  color: #505050;
+  background: #000;
+  border-color: rgb(255 255 255 / 22%);
+  color: rgb(255 255 255 / 78%);
 }
 
 .heart-rate-relay-summary span {
@@ -106,10 +106,10 @@
 
 .heart-rate-settings-privacy {
   align-items: flex-start;
-  background: #f8f8f8;
-  border: 1px solid #dcdcdc;
+  background: #000;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 12px;
-  color: #3a3a3a;
+  color: #fff;
   display: flex;
   gap: 9px;
   margin-top: 16px;
@@ -128,8 +128,8 @@
 }
 
 .heart-rate-studio-consent {
-  background: #fafafa;
-  border: 1px solid #dbdbdb;
+  background: #000;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 12px;
   display: grid;
   gap: 10px;
@@ -138,14 +138,14 @@
 }
 
 .heart-rate-studio-consent legend {
-  color: #2e2e2e;
+  color: #fff;
   font-size: 13px;
   font-weight: 900;
   padding: 0 5px;
 }
 
 .heart-rate-studio-consent > p {
-  color: #646464;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   line-height: 1.45;
   margin: 0;
@@ -171,7 +171,7 @@
 }
 
 .heart-rate-studio-consent label small {
-  color: #767676;
+  color: rgb(255 255 255 / 78%);
   line-height: 1.4;
 }
 

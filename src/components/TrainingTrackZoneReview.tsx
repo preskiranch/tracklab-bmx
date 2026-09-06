@@ -36,11 +36,11 @@ export type TrainingTrackZoneReviewProps = {
 };
 
 const colors = { pedal: '#65a30d', recovery: '#f97316', technical: '#0ea5e9' } as const;
-const panel: CSSProperties = { border: '1px solid #d8e0e8', borderRadius: 14, background: '#fff', overflow: 'hidden' };
+const panel: CSSProperties = { border: '1px solid var(--line)', borderRadius: 14, background: 'var(--panel)', overflow: 'hidden' };
 const mapFrame: CSSProperties = { position: 'relative', minHeight: 240, height: 'clamp(240px,32vw,360px)', background: '#0f172a', overflow: 'hidden' };
 const fill: CSSProperties = { position: 'absolute', inset: 0, width: '100%', height: '100%' };
 const badge: CSSProperties = { position: 'absolute', left: 10, top: 10, zIndex: 3, margin: 0, padding: '5px 8px', borderRadius: 999, color: '#fff', background: 'rgba(15,23,42,.88)', fontSize: 11, fontWeight: 800 };
-const tableCell: CSSProperties = { padding: '7px 8px', borderBottom: '1px solid #d8e0e8', whiteSpace: 'nowrap', fontSize: 12, textAlign: 'right' };
+const tableCell: CSSProperties = { padding: '7px 8px', borderBottom: '1px solid var(--line)', whiteSpace: 'nowrap', fontSize: 12, textAlign: 'right' };
 
 function zoneTypeLabel(zone: TrainingTrackReviewZone) {
   return zone.type === 'technical' ? 'Technical' : zone.type === 'recovery' ? 'Recovery' : 'Pedal';
@@ -48,8 +48,8 @@ function zoneTypeLabel(zone: TrainingTrackReviewZone) {
 
 function zoneButtonStyle(zone: TrainingTrackReviewZone, selected: boolean): CSSProperties {
   return {
-    minHeight: 44, minWidth: 150, padding: '5px 7px', borderRadius: 8, border: selected ? '2px solid #111827' : '1px solid #d8e0e8',
-    borderLeft: `6px solid ${colors[zone.type]}`, background: selected ? '#f1f8e9' : '#fff', color: '#111827', textAlign: 'left', cursor: 'pointer',
+    minHeight: 44, minWidth: 150, padding: '5px 7px', borderRadius: 8, border: selected ? '2px solid #fff' : '1px solid var(--line)',
+    borderLeft: `6px solid ${colors[zone.type]}`, background: 'var(--panel)', color: 'var(--ink)', textAlign: 'left', cursor: 'pointer',
   };
 }
 
@@ -456,7 +456,7 @@ export function TrainingTrackZoneReview({
   }, []);
 
   if (loadError) return <p role="alert" style={{ margin: 0, padding: 12, borderRadius: 10, background: '#fff4e5', color: '#7c2d12' }}>{loadError}</p>;
-  if (!review) return <p role="status" style={{ margin: 0, padding: 12, color: '#64748b' }}>Loading track and zone review…</p>;
+  if (!review) return <p role="status" style={{ margin: 0, padding: 12, color: 'var(--muted)' }}>Loading track and zone review…</p>;
 
   const selected = review.zones.find((zone) => zone.id === effectiveSelectedId);
   const riderNames = new Map(raceSummaries.map((summary) => [String(summary.playerId), summary.riderName?.trim() || `Rider ${summary.playerId}`]));
@@ -472,9 +472,9 @@ export function TrainingTrackZoneReview({
   const satelliteVisible = satelliteState === 'ready';
   return (
     <section className={`training-zone-review ${className}`.trim()} aria-label={`Track and zone review for ${session.trackName ?? session.title}`} style={panel}>
-      <header style={{ padding: '10px 12px', borderBottom: '1px solid #d8e0e8' }}>
-        <strong style={{ display: 'block', color: '#111827' }}>Track + zone review</strong>
-        <small style={{ color: '#64748b' }}>{review.track?.name ?? session.trackName ?? 'Historical track'}</small>
+      <header style={{ padding: '10px 12px', borderBottom: '1px solid var(--line)' }}>
+        <strong style={{ display: 'block', color: 'var(--ink)' }}>Track + zone review</strong>
+        <small style={{ color: 'var(--muted)' }}>{review.track?.name ?? session.trackName ?? 'Historical track'}</small>
       </header>
       <div className="training-zone-review__layout" style={{ padding: 12 }}>
         <figure className="training-zone-review__map-figure" style={{ margin: 0, minWidth: 0 }} aria-label={mapLabel(review, selected)}>
@@ -487,15 +487,15 @@ export function TrainingTrackZoneReview({
                 ? 'Loading satellite map…'
                 : review.status === 'ready' ? 'Current route schematic' : 'Track geometry unavailable'}</p>
           </div>
-          <figcaption style={{ paddingTop: 7, color: '#64748b', fontSize: 12 }}>{review.note}</figcaption>
+          <figcaption style={{ paddingTop: 7, color: 'var(--muted)', fontSize: 12 }}>{review.note}</figcaption>
         </figure>
         <div className="training-zone-review__data" role="region" tabIndex={0} aria-label="Recorded track zone spreadsheet">
           {review.zones.length > 0 ? (
             <table style={{ borderCollapse: 'separate', borderSpacing: 0, minWidth: 1240, width: '100%', fontVariantNumeric: 'tabular-nums' }}>
-              <caption style={{ padding: 8, textAlign: 'left', fontWeight: 800, color: '#111827' }}>Recorded zone data · select a zone to review it on the map when current geometry supports placement</caption>
+              <caption style={{ padding: 8, textAlign: 'left', fontWeight: 800, color: 'var(--ink)' }}>Recorded zone data · select a zone to review it on the map when current geometry supports placement</caption>
               <thead>
                 <tr>{['Zone', 'Type / saved range', 'Rider', 'Entry', 'Exit', 'Zone time', 'Points', `Avg / peak ${speedUnitLabel(speedUnit)}`, 'Avg / peak cadence', 'Avg / peak power', 'Private avg / peak heart rate', 'Heart-rate coverage / status'].map((label) => (
-                  <th key={label} scope="col" style={{ ...tableCell, position: 'sticky', top: 0, zIndex: 2, background: '#eef2f7', color: '#475569', fontWeight: 800 }}>{label}</th>
+                  <th key={label} scope="col" style={{ ...tableCell, position: 'sticky', top: 0, zIndex: 2, background: 'var(--panel)', color: 'var(--muted)', fontWeight: 800 }}>{label}</th>
                 ))}</tr>
               </thead>
               <tbody>
@@ -520,8 +520,8 @@ export function TrainingTrackZoneReview({
                       expectedWindow,
                     );
                     return (
-                      <tr key={`${zone.id}:${rider?.playerId ?? riderIndex}`} style={{ background: active ? '#f7fee7' : '#fff' }}>
-                        <th scope="row" style={{ ...tableCell, textAlign: 'left', position: 'sticky', left: 0, zIndex: 1, background: active ? '#f7fee7' : '#fff' }}>
+                      <tr key={`${zone.id}:${rider?.playerId ?? riderIndex}`} style={{ background: 'var(--panel)' }}>
+                        <th scope="row" style={{ ...tableCell, textAlign: 'left', position: 'sticky', left: 0, zIndex: 1, background: 'var(--panel)' }}>
                           <button type="button" aria-pressed={active} aria-label={`Zone ${zone.number}: ${zone.name}${zone.placeable ? '' : '. Saved data only; not placed on the current route.'}`} onClick={() => chooseZone(zone.id)} style={zoneButtonStyle(zone, active)}>
                             <strong>{zone.number}. {zone.name}</strong>
                           </button>
@@ -546,7 +546,7 @@ export function TrainingTrackZoneReview({
                 })}
               </tbody>
             </table>
-          ) : <p style={{ margin: 0, padding: 12, color: '#64748b' }}>No zone samples were saved for this session.</p>}
+          ) : <p style={{ margin: 0, padding: 12, color: 'var(--muted)' }}>No zone samples were saved for this session.</p>}
         </div>
       </div>
     </section>

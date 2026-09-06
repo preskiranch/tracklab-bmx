@@ -1635,7 +1635,7 @@ export function PublicBikeShopDirectory({
             {myClaimsAccountId === accountId && myClaimsError && <div className="public-bike-shop-directory__error" role="alert" style={{ marginTop: 10, border: '1px solid #eb9a9a' }}>{myClaimsError}</div>}
             <div role="list">
               {visibleMyClaims.map((claim) => (
-                <article key={claim.id} role="listitem" style={{ padding: 12, border: '1px solid var(--line)', borderRadius: 8, background: '#f8fafb' }}>
+                <article key={claim.id} role="listitem" style={{ padding: 12, border: '1px solid var(--line)', borderRadius: 8, background: 'var(--panel)' }}>
                   <div className="public-bike-shop-directory__result-title">
                     <strong>{claim.shopName}</strong>
                     <b>{claim.status}</b>
@@ -1661,7 +1661,7 @@ export function PublicBikeShopDirectory({
               <select aria-label="Claim review status" value={adminClaimFilter} onChange={(event) => {
                 setAdminClaimOffset(0);
                 setAdminClaimFilter(event.currentTarget.value as BikeShopClaimStatus | 'all');
-              }} style={{ maxWidth: '100%', minHeight: 44, padding: '6px 10px', border: '1px solid var(--line-strong)', borderRadius: 8, background: '#fff', fontWeight: 800 }}>
+              }} style={{ maxWidth: '100%', minHeight: 44, padding: '6px 10px', border: '1px solid var(--line-strong)', borderRadius: 8, background: 'var(--panel)', color: 'var(--ink)', fontWeight: 800 }}>
                 <option value="pending">Pending</option>
                 <option value="approved">Approved</option>
                 <option value="rejected">Rejected</option>
@@ -1672,7 +1672,7 @@ export function PublicBikeShopDirectory({
             {adminClaimsQueryKey === currentAdminClaimsQueryKey && adminClaimsError && <div className="public-bike-shop-directory__error" role="alert" style={{ marginTop: 10, border: '1px solid #eb9a9a' }}>{adminClaimsError}</div>}
             <div role="list">
               {visibleAdminClaims.map((claim) => (
-                <article key={claim.id} role="listitem" style={{ display: 'grid', gap: 8, padding: 12, border: '1px solid var(--line)', borderRadius: 8, background: '#f8fafb' }}>
+                <article key={claim.id} role="listitem" style={{ display: 'grid', gap: 8, padding: 12, border: '1px solid var(--line)', borderRadius: 8, background: 'var(--panel)' }}>
                   <div className="public-bike-shop-directory__result-title">
                     <strong>{claim.shopName}</strong>
                     <b>{claim.status}</b>

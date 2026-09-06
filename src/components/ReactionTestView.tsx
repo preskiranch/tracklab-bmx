@@ -25,6 +25,7 @@ import { ReactionLeaderboard } from './ReactionLeaderboard';
 import { flushReactionPersonalBest, localReactionPersonalBest, type ReactionRecordOwner } from '../lib/reactionTestCloud';
 import './ReactionTestView.css';
 import { ReactionTree } from './ReactionTree';
+import { prepareReactionGateAirSounds } from '../lib/reactionGateAudio';
 
 type ReactionTestRunState = 'ready' | 'arming' | 'waiting' | 'running' | 'finished';
 
@@ -80,6 +81,8 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
   const personalBestRef = useRef(displayedPersonalBestMs);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const sceneFrameRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => { void prepareReactionGateAirSounds(); }, []);
 
   useLayoutEffect(() => {
     const stage = stageRef.current;
@@ -294,7 +297,10 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
 
     // Runs inside the direct user gesture path so iOS allows the existing UCI
     // voice file and tone context to play with no first-cue permissions lag.
-    await primeAudioCues().catch(() => undefined);
+    await Promise.all([
+      primeAudioCues().catch(() => undefined),
+      prepareReactionGateAirSounds(),
+    ]);
     if (generation !== generationRef.current) return;
 
     const voice = await playUciRandomStartVoice().catch(() => null);
@@ -408,7 +414,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
             <div className="reaction-scene-frame" ref={sceneFrameRef}>
               <img
                 className="reaction-scene-background"
-                src="/assets/reaction-test-bmx-scene.jpg"
+                src="/assets/reaction-test-bmx-approved-4k.jpg"
                 alt="BMX starting hill with a four-lamp signal tree, starting platform, trackside spectators and canopies"
                 draggable={false}
               />

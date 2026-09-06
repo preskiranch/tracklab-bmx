@@ -148,7 +148,7 @@ function PrivateHeartRateCell({
     <span style={{ display: 'grid', gap: 2, minWidth: 112 }}>
       {visible ? visible.map((projection, index) => (
         <span style={{ display: 'grid' }} key={`${projection.canonicalSessionId}:${projection.playerId ?? 'rider'}:${index}`}>
-          {visible.length > 1 && <small style={{ color: '#667085', fontSize: 9, fontWeight: 700 }}>Watch segment {index + 1}</small>}
+          {visible.length > 1 && <small style={{ color: 'var(--muted)', fontSize: 9, fontWeight: 700 }}>Watch segment {index + 1}</small>}
           {heartRateProjectionLabel(projection, metricKind)}
         </span>
       )) : <span>{resolution.emptyLabel}</span>}
@@ -530,7 +530,7 @@ export function TrainingResultsSpreadsheet({
           {onExportWorkbook && <button type="button" disabled={sessions.length === 0} onClick={onExportWorkbook}><Download size={16} /> {exportLabel}</button>}
           {onExportPrivateWorkbook && <button
             type="button"
-            style={{ borderColor: '#b7a1dc', background: '#f6f0ff', color: '#43217b' }}
+            style={{ borderColor: 'var(--line-strong)', background: 'var(--panel)', color: 'var(--ink)' }}
             disabled={sessions.length === 0 || privateExportDisabled}
             aria-label={`${privateExportLabel}${privateExportDisabled ? '. Unavailable while private heart-rate data is loading or syncing.' : ''}`}
             title={privateExportDisabled ? 'Wait for private heart-rate data to finish loading and syncing.' : undefined}

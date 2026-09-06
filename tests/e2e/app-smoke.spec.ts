@@ -644,11 +644,16 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
   const sceneFrame = sceneStack.locator('.reaction-scene-frame');
   const sceneBackground = sceneFrame.locator('.reaction-scene-background');
   const gateLayer = sceneFrame.locator('.reaction-gate-layer');
-  const gateSvg = gateLayer.locator('svg');
+  const gateSvg = gateLayer.locator('.reaction-gate-svg');
   const gateMesh = gateSvg.locator('[data-gate-part="mesh"]');
   const gateBody = gateSvg.locator('[data-gate-part="body"]');
   const gateCap = gateSvg.locator('[data-gate-part="cap"]');
   const fixedDeck = gateSvg.locator('[data-gate-part="fixed"]');
+  const revealPhoto = gateLayer.locator('img[data-gate-photo="reveal"]');
+  const capPhoto = gateLayer.locator('img[data-gate-photo="cap"]');
+  const meshPhoto = gateLayer.locator('img[data-gate-photo="mesh"]');
+  const capPhotoClip = gateLayer.locator('[data-gate-photo-clip="cap"]');
+  const meshPhotoClip = gateLayer.locator('[data-gate-photo-clip="mesh"]');
   await expect(sceneStack).toBeVisible();
   await expect(sceneFrame.locator('.reaction-scene-image')).toHaveCount(0);
   await expect(sceneFrame.locator('.reaction-scene-mid-drop')).toHaveCount(0);
@@ -656,26 +661,116 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
   await expect.poll(() => sceneBackground.evaluate((image) => {
     const frame = image as HTMLImageElement;
     return { complete: frame.complete, height: frame.naturalHeight, width: frame.naturalWidth };
-  })).toEqual({ complete: true, height: 941, width: 1671 });
+  })).toEqual({ complete: true, height: 2160, width: 3840 });
+  await expect(sceneBackground).toHaveAttribute('src', '/assets/reaction-test-bmx-approved-4k.jpg');
   await expect(gateLayer).toHaveAttribute('data-gate-motion', 'rigid-quarter-cylinder');
-  await expect(gateLayer).toHaveAttribute('data-gate-renderer', 'native-svg');
+  await expect(gateLayer).toHaveAttribute('data-gate-renderer', 'photo-projective-svg');
   await expect(gateSvg).toBeVisible();
   await expect(gateSvg).toHaveAttribute('viewBox', '0 0 1672 941');
-  await expect(gateLayer.locator('canvas, img')).toHaveCount(0);
-  await expect(gateMesh).toBeVisible();
+  await expect(gateLayer.locator('canvas')).toHaveCount(0);
+  await expect(gateLayer.locator('img')).toHaveCount(3);
+  for (const photo of [revealPhoto, capPhoto, meshPhoto]) await expect(photo).toHaveCount(1);
+  await expect(revealPhoto).toHaveAttribute('src', '/assets/reaction-test-bmx-gate-reveal.jpg');
+  for (const photo of [capPhoto, meshPhoto]) {
+    await expect(photo).toHaveAttribute('src', '/assets/reaction-test-bmx-approved-4k.jpg');
+  }
+  await expect.poll(() => gateLayer.locator('img').evaluateAll((images) => images.every((image) => {
+    const photo = image as HTMLImageElement;
+    return photo.complete && photo.naturalWidth > 0 && photo.naturalHeight > 0;
+  }))).toBe(true);
+  const verifyPhotoProjections = async () => {
+    for (const photo of [capPhoto, meshPhoto]) {
+      const projection = await photo.evaluate((element) => {
+        const image = element as HTMLImageElement;
+        const style = getComputedStyle(image);
+        return {
+          src: image.currentSrc,
+          width: image.naturalWidth,
+          height: image.naturalHeight,
+          sourceClip: style.clipPath,
+          transform: image.style.transform,
+          origin: style.transformOrigin,
+          coordinateWidth: Number.parseFloat(style.width),
+          coordinateHeight: Number.parseFloat(style.height),
+        };
+      });
+      expect(projection.src).toBe(await sceneBackground.evaluate((image) => (image as HTMLImageElement).currentSrc));
+      expect(projection).toMatchObject({ width: 3840, height: 2160, origin: '0px 0px', coordinateWidth: 1672, coordinateHeight: 941 });
+      expect(projection.sourceClip).toMatch(/^(?:path|polygon)\(.+\)$/);
+      expect(projection.transform).toMatch(/^matrix3d\(.+\)$/);
+      const coefficients = projection.transform.slice('matrix3d('.length, -1).split(',').map(Number);
+      expect(coefficients).toHaveLength(16);
+      expect(coefficients.every(Number.isFinite)).toBe(true);
+    }
+  };
+  await verifyPhotoProjections();
+  // The photo layers paint the gate; the transparent SVG retains its exact
+  // geometry for projection and responsive framing throughout the movement.
+  await expect(gateMesh).toHaveCount(1);
   await expect(gateMesh).toHaveAttribute('data-gate-quad', (await gateLayer.getAttribute('data-gate-upright-quad'))!);
-  await expect(gateBody).toBeVisible();
-  await expect(gateCap).toBeVisible();
-  await expect(fixedDeck).toBeVisible();
+  for (const group of [gateBody, gateCap, fixedDeck]) {
+    await expect(group).toHaveCount(1);
+    const bounds = await group.evaluate((element) => {
+      const { width, height } = (element as SVGGraphicsElement).getBBox();
+      return { width, height };
+    });
+    expect(bounds.width).toBeGreaterThan(0);
+    expect(bounds.height).toBeGreaterThan(0);
+  }
   const uprightMeshBounds = await gateMesh.evaluate((element) => {
     const { x, y, width, height } = (element as SVGGraphicsElement).getBBox();
     return { x, y, width, height };
   });
   expect(uprightMeshBounds.width).toBeGreaterThan(100);
   expect(uprightMeshBounds.height).toBeGreaterThan(100);
+  const revealFootprint = await revealPhoto.evaluate((element) => {
+    const clip = getComputedStyle(element).clipPath;
+    const pathData = /^path\(["'](.+)["']\)$/.exec(clip)?.[1];
+    if (!pathData) return { clip, mask: null, gate: null };
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    const path = document.createElementNS(svg.namespaceURI, 'path') as SVGPathElement;
+    svg.setAttribute('width', '0');
+    svg.setAttribute('height', '0');
+    svg.style.position = 'absolute';
+    path.setAttribute('d', pathData);
+    svg.append(path);
+    document.body.append(svg);
+    try {
+      const { x, y, width, height } = path.getBBox();
+      const parts = [...element.closest('.reaction-gate-layer')!.querySelectorAll<SVGGraphicsElement>(
+        '[data-gate-part="mesh"], [data-gate-part="body"]',
+      )].map((part) => part.getBBox());
+      return {
+        clip,
+        mask: { left: x, top: y, right: x + width, bottom: y + height, width, height },
+        gate: {
+          left: Math.min(...parts.map((part) => part.x)),
+          top: Math.min(...parts.map((part) => part.y)),
+          right: Math.max(...parts.map((part) => part.x + part.width)),
+          bottom: Math.max(...parts.map((part) => part.y + part.height)),
+        },
+      };
+    } finally {
+      svg.remove();
+    }
+  });
+  expect(revealFootprint.clip).toMatch(/^path\(.+\)$/);
+  expect(revealFootprint.mask).not.toBeNull();
+  expect(revealFootprint.gate).not.toBeNull();
+  expect(revealFootprint.mask!.width).toBeGreaterThan(0);
+  expect(revealFootprint.mask!.height).toBeGreaterThan(0);
+  expect(revealFootprint.mask!.width * revealFootprint.mask!.height).toBeLessThan(1672 * 941 * 0.25);
+  // Permit a narrow photographed rim without locking the hand-traced mask.
+  // Its extent must follow the gate, never the surrounding full-frame photo.
+  for (const edge of ['left', 'top', 'right', 'bottom'] as const) {
+    expect(Math.abs(revealFootprint.mask![edge] - revealFootprint.gate![edge])).toBeLessThan(32);
+  }
   const immutableDeck = await fixedDeck.innerHTML();
   await expect.poll(() => gateLayer.getAttribute('data-gate-progress')).toBe('0.000');
   await expect(sceneStack).toHaveAttribute('data-gate-state', 'upright');
+  for (const overlay of [gateSvg, revealPhoto, capPhotoClip, meshPhotoClip]) {
+    await expect(overlay).toHaveCSS('opacity', '0');
+  }
   await sceneStack.evaluate((element) => {
     const layer = element.querySelector<HTMLElement>('.reaction-gate-layer')!;
     const gateWindow = window as typeof window & {
@@ -756,7 +851,7 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
         const scene = element.querySelector<HTMLElement>('.reaction-scene-frame')?.getBoundingClientRect();
         const background = element.querySelector<HTMLImageElement>('.reaction-scene-background');
         const gateLayer = element.querySelector<HTMLElement>('.reaction-gate-layer');
-        const gateSvg = gateLayer?.querySelector<SVGSVGElement>('svg');
+        const gateSvg = gateLayer?.querySelector<SVGSVGElement>('.reaction-gate-svg');
         const parseQuad = (value: string) => value.trim().split(' ').map((pair) => {
           const [x, y] = pair.split(',').map(Number);
           return { x, y };
@@ -860,7 +955,7 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
         };
       });
       // Photographic lamps scale with the hill; no separate labels or checkmark.
-      expect(geometry.bulbWidth).toBeCloseTo(Number(geometry.sceneRect?.width) * 68 / 1671, 1);
+      expect(geometry.bulbWidth).toBeCloseTo(Number(geometry.sceneRect?.width) * 75 / 1672, 1);
       expect(geometry.lightLabels).toHaveLength(0);
       expect(geometry.personalRecord.fontSize).toBeGreaterThanOrEqual(16);
       expect(geometry.personalRecord.fits).toBe(true);
@@ -895,7 +990,7 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
         expect(Number(geometry.panelRect?.top)).toBeCloseTo(Number(geometry.stageRect?.bottom), 1);
       }
       expect(geometry.panelRect?.bottom).toBeCloseTo(viewport.height, 1);
-      expect(geometry.background).toMatchObject({ naturalHeight: 941, naturalWidth: 1671 });
+      expect(geometry.background).toMatchObject({ naturalHeight: 2160, naturalWidth: 3840 });
       expect(geometry.background?.rect).toEqual(geometry.sceneRect);
       expect(Number(geometry.background?.rect.width) / Number(geometry.background?.rect.height)).toBeCloseTo(1672 / 941, 2);
       expect(geometry.gateSvg?.viewBox).toEqual({ x: 0, y: 0, width: 1672, height: 941 });
@@ -1014,7 +1109,26 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
   await expect(sceneStack).toHaveAttribute('data-gate-state', 'settled', { timeout: 1_500 });
   await expect(gateLayer).toHaveAttribute('data-gate-progress', '1.000');
   await expect(gateLayer).toHaveAttribute('data-gate-projection', 'fixed-hinge-world-rotation');
-  await expect(gateLayer).toHaveAttribute('data-gate-renderer', 'native-svg');
+  await expect(gateLayer).toHaveAttribute('data-gate-renderer', 'photo-projective-svg');
+  await expect(revealPhoto).toHaveCSS('opacity', '1');
+  await expect(meshPhotoClip).toHaveCSS('opacity', '1');
+  await verifyPhotoProjections();
+  const collapsedCap = await capPhotoClip.evaluate((element) => {
+    const clip = getComputedStyle(element).clipPath;
+    const values = clip.match(/[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi)?.map(Number) ?? [];
+    const points = Array.from({ length: Math.floor(values.length / 2) }, (_, index) => ({
+      x: values[index * 2], y: values[index * 2 + 1],
+    }));
+    const area = Math.abs(points.reduce((sum, point, index) => {
+      const next = points[(index + 1) % points.length];
+      return sum + point.x * next.y - point.y * next.x;
+    }, 0)) / 2;
+    return { clip, points, area };
+  });
+  expect(collapsedCap.clip).toMatch(/^polygon\(.+\)$/);
+  expect(collapsedCap.points.length).toBeGreaterThanOrEqual(3);
+  expect(collapsedCap.points.every(({ x, y }) => Number.isFinite(x) && Number.isFinite(y))).toBe(true);
+  expect(collapsedCap.area).toBe(0);
   const gateTransitions = await page.evaluate(() => (
     window as typeof window & {
       __reactionGateTransitions?: Array<{ at: number; progress: number; state: string | null }>;
@@ -1052,7 +1166,7 @@ test('Reaction Test is a full-screen activity with a rigid eight-lane gate, UCI 
   expect(turns.every((turn) => turn > 0) || turns.every((turn) => turn < 0)).toBe(true);
   expect(Math.hypot(flushQuad[0].x - flushQuad[3].x, flushQuad[0].y - flushQuad[3].y)).toBeGreaterThan(30);
   expect(Math.hypot(flushQuad[1].x - flushQuad[2].x, flushQuad[1].y - flushQuad[2].y)).toBeGreaterThan(150);
-  await expect(gateMesh).toBeVisible();
+  await expect(gateMesh).toHaveCount(1);
   await expect(gateMesh).toHaveAttribute('data-gate-quad', (await gateLayer.getAttribute('data-gate-flush-quad'))!);
   const settledMeshBounds = await gateMesh.evaluate((element) => {
     const { x, y, width, height } = (element as SVGGraphicsElement).getBBox();

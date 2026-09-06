@@ -112,10 +112,10 @@ describe('Reaction Test native gate geometry', () => {
 
   it('uses the corrected photograph anchors and keeps both projected hinges stationary', () => {
     const expected = [
-      { x: 855.4494382022472, y: 403.0449438202247 },
-      { x: 1004, y: 584 },
-      { x: 949, y: 801 },
-      { x: 840, y: 464 },
+      { x: 852, y: 395 },
+      { x: 983, y: 577 },
+      { x: 955, y: 806 },
+      { x: 847, y: 472 },
     ];
     REACTION_GATE_SOURCE_QUAD.forEach((point, i) => {
       expect(point.x).toBeCloseTo(expected[i].x, 9);
@@ -138,7 +138,7 @@ describe('Reaction Test native gate geometry', () => {
           const world = reactionGateWorldPoint(8 * fraction, startRadius + (endRadius - startRadius) * fraction, progress);
           const homogeneous = projectReactionGateWorldPointHomogeneous(world);
           expect(Object.values(homogeneous).every(Number.isFinite)).toBe(true);
-          expect(homogeneous.w).toBeCloseTo(1 + 0.32 * world.across, 12);
+          expect(homogeneous.w).toBeCloseTo(1 + 0.2739156133490952 * world.across - 0.09193416386287169 * world.upright, 12);
           expect(homogeneous.w).toBeGreaterThan(0);
           const point = projectReactionGateWorldPoint(world);
           const deviation = Math.abs((end.x - start.x) * (point.y - start.y)
@@ -161,8 +161,8 @@ describe('Reaction Test native gate geometry', () => {
         expect(reactionGateWorldPoint(across, radius, 1)).toEqual({ across, downhill: radius, upright: 0 });
       }
     }
-    const expected = [{ x: 903.2022471910112, y: 479.44943820224717 },
-      { x: 1174, y: 856 }, { x: 949, y: 801 }, { x: 840, y: 464 }];
+    const expected = [{ x: 910.9232939165123, y: 484.53397919931615 },
+      { x: 1159, y: 846 }, { x: 955, y: 806 }, { x: 847, y: 472 }];
     REACTION_GATE_FLUSH_QUAD.forEach((point, i) => {
       expect(point.x).toBeCloseTo(expected[i].x, 9);
       expect(point.y).toBeCloseTo(expected[i].y, 9);

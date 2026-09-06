@@ -14,7 +14,7 @@
 
 .monitor-secondary .monitor-heart-rate.live svg,
 .monitor-secondary .monitor-heart-rate.live span {
-  color: #545454;
+  color: rgb(255 255 255 / 78%);
 }
 
 .monitor-history-status {
@@ -24,18 +24,18 @@
 
 .monitor-history-status.authorizing,
 .monitor-history-status.saving {
-  background: rgba(183, 183, 183, 0.16);
-  color: #5e5e5e;
+  background: rgb(0 0 0 / 16%);
+  color: rgb(255 255 255 / 78%);
 }
 
 .monitor-history-status.saved {
-  background: rgba(166, 166, 166, 0.18);
-  color: #545454;
+  background: rgb(0 0 0 / 18%);
+  color: rgb(255 255 255 / 78%);
 }
 
 .monitor-history-status.error {
-  background: rgba(103, 103, 103, 0.16);
-  color: #3f3f3f;
+  background: rgb(0 0 0 / 16%);
+  color: rgb(255 255 255 / 78%);
 }
 
 .monitor-card-actions {
@@ -53,10 +53,10 @@
   gap: 5px;
   min-height: 27px;
   padding: 4px 8px;
-  border: 1px solid rgba(84, 84, 84, 0.3);
+  border: 1px solid rgb(255 255 255 / 30%);
   border-radius: 999px;
-  background: rgba(238, 238, 238, 0.9);
-  color: #3e3e3e;
+  background: rgb(0 0 0 / 90%);
+  color: rgb(255 255 255 / 78%);
   font: inherit;
   font-size: 9px;
   font-weight: 800;
@@ -67,21 +67,21 @@
 .monitor-watch-button.waiting-athlete,
 .monitor-watch-button.waiting-watch,
 .monitor-watch-button.inviting {
-  border-color: rgba(116, 116, 116, 0.35);
-  background: rgba(243, 243, 243, 0.94);
-  color: #535353;
+  border-color: rgb(255 255 255 / 35%);
+  background: rgb(0 0 0 / 94%);
+  color: rgb(255 255 255 / 78%);
 }
 
 .monitor-watch-button.watch-ready {
-  border-color: rgba(109, 109, 109, 0.36);
-  background: rgba(242, 242, 242, 0.95);
-  color: #545454;
+  border-color: rgb(255 255 255 / 36%);
+  background: rgb(0 0 0 / 95%);
+  color: rgb(255 255 255 / 78%);
 }
 
 .monitor-watch-button.error {
-  border-color: rgba(63, 63, 63, 0.35);
-  background: rgba(236, 236, 236, 0.95);
-  color: #3f3f3f;
+  border-color: rgb(255 255 255 / 35%);
+  background: rgb(0 0 0 / 95%);
+  color: rgb(255 255 255 / 78%);
 }
 
 .monitor-watch-button:disabled {
@@ -96,7 +96,7 @@
   display: grid;
   place-items: center;
   padding: max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
-  background: rgba(11, 11, 11, 0.72);
+  background: rgb(0 0 0 / 72%);
   backdrop-filter: blur(7px);
 }
 
@@ -116,10 +116,10 @@
   z-index: 2;
   min-height: 30px;
   padding: 5px 9px;
-  border: 1px solid #d0d0d0;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 999px;
-  background: #ffffff;
-  color: #272727;
+  background: #000;
+  color: #fff;
   font: inherit;
   font-size: 10px;
   font-weight: 800;

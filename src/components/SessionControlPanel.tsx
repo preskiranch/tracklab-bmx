@@ -1649,7 +1649,7 @@ export function SessionControlPanel({
             aria-disabled="true"
             style={heartRateMetricState === 'connected'
               ? undefined
-              : { color: 'var(--muted)', background: '#f2f4f6', opacity: 0.66 }}
+              : { color: 'var(--muted)', background: 'var(--panel)', opacity: 0.66 }}
             title={heartRateMetricState === 'connected'
               ? 'Apple Watch heart rate is connected and will be saved privately.'
               : heartRateMetricState === 'checking'

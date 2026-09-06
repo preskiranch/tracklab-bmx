@@ -1,35 +1,35 @@
 .reaction-record-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.reaction-leaderboard-trigger { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #5c5c5c; border-radius: 999px; background: #1e1e1e; color: #f8f8f8; padding: 7px 10px; font-size: .75rem; font-weight: 750; cursor: pointer; }
+.reaction-leaderboard-trigger { display: inline-flex; align-items: center; gap: 5px; border: 1px solid rgb(255 255 255 / 26%); border-radius: 999px; background: #000; color: #fff; padding: 7px 10px; font-size: .75rem; font-weight: 750; cursor: pointer; }
 .reaction-leaderboard-trigger:disabled { opacity: .45; cursor: default; }
-.reaction-leaderboard-dialog { box-sizing: border-box; width: min(620px, calc(100vw - max(16px, var(--reaction-safe-left), var(--reaction-safe-right)) - max(16px, var(--reaction-safe-left), var(--reaction-safe-right)))); max-height: calc(100dvh - var(--reaction-safe-top) - var(--reaction-safe-bottom) - 32px); padding: 0; border: 1px solid #636363; border-radius: 12px; overflow: hidden; cursor: auto; user-select: text; color-scheme: light; background: #fff; color: #171717; border-color: #d4d4d4; box-shadow: 0 24px 80px rgb(0 0 0 / 28%); }
+.reaction-leaderboard-dialog { box-sizing: border-box; width: min(620px, calc(100vw - max(16px, var(--reaction-safe-left), var(--reaction-safe-right)) - max(16px, var(--reaction-safe-left), var(--reaction-safe-right)))); max-height: calc(100dvh - var(--reaction-safe-top) - var(--reaction-safe-bottom) - 32px); padding: 0; border: 1px solid rgb(255 255 255 / 26%); border-radius: 12px; overflow: hidden; cursor: auto; user-select: text; color-scheme: dark; background: #000; color: #fff; border-color: rgb(255 255 255 / 22%); box-shadow: 0 24px 80px rgb(0 0 0 / 28%); }
 .reaction-leaderboard-dialog[open] { display: flex; flex-direction: column; }
-.reaction-leaderboard-dialog::backdrop { background: rgb(6 6 6 / 80%); }
-.reaction-leaderboard-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 20px; border-bottom: 1px solid #3d3d3d; flex: 0 0 auto; background: #fff; border-color: #e5e5e5; }
-.reaction-leaderboard-eyebrow { font-size: .65rem; font-weight: 700; letter-spacing: .08em; color: #737373; }
+.reaction-leaderboard-dialog::backdrop { background: rgb(0 0 0 / 80%); }
+.reaction-leaderboard-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 20px; border-bottom: 1px solid rgb(255 255 255 / 26%); flex: 0 0 auto; background: #000; border-color: rgb(255 255 255 / 22%); }
+.reaction-leaderboard-eyebrow { font-size: .65rem; font-weight: 700; letter-spacing: .08em; color: rgb(255 255 255 / 78%); }
 .reaction-leaderboard-dialog h2 { font-size: 1.3rem; margin: 4px 0 0; font-weight: 650; letter-spacing: -.025em; }
-.reaction-leaderboard-close { flex: 0 0 42px; height: 42px; display: grid; place-items: center; border: 1px solid #5c5c5c; cursor: pointer; background: #fafafa; border-color: #d4d4d4; color: #171717; border-radius: 8px; }
+.reaction-leaderboard-close { flex: 0 0 42px; height: 42px; display: grid; place-items: center; border: 1px solid rgb(255 255 255 / 26%); cursor: pointer; background: #000; border-color: rgb(255 255 255 / 22%); color: #fff; border-radius: 8px; }
 .reaction-leaderboard-scroll { padding: 18px 20px 22px; overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
 .reaction-leaderboard-toolbar { display: flex; align-items: center; gap: 16px; justify-content: space-between; margin-bottom: 16px; }
-.reaction-leaderboard-dialog p { color: #c8c8c8; font-size: .85rem; line-height: 1.45; margin: 0; }
-.reaction-leaderboard-toolbar label { display: grid; gap: 4px; color: #c8c8c8; font-size: .75rem; flex: 0 0 105px; }
-.reaction-leaderboard-dialog select, .reaction-leaderboard-dialog input { box-sizing: border-box; border: 1px solid #6e6e6e; border-radius: 8px; min-height: 44px; padding: 8px 10px; font: inherit; background: #fff; color: #171717; border-color: #a3a3a3; }
+.reaction-leaderboard-dialog p { color: rgb(255 255 255 / 86%); font-size: .85rem; line-height: 1.45; margin: 0; }
+.reaction-leaderboard-toolbar label { display: grid; gap: 4px; color: rgb(255 255 255 / 86%); font-size: .75rem; flex: 0 0 105px; }
+.reaction-leaderboard-dialog select, .reaction-leaderboard-dialog input { box-sizing: border-box; border: 1px solid rgb(255 255 255 / 26%); border-radius: 8px; min-height: 44px; padding: 8px 10px; font: inherit; background: #000; color: #fff; border-color: rgb(255 255 255 / 22%); }
 .reaction-leaderboard-dialog input { font-size: 16px; }
 .reaction-leaderboard-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
-.reaction-leaderboard-table th, .reaction-leaderboard-table td { padding: 12px 8px; border-bottom: 1px solid #373737; text-align: left; border-color: #e5e5e5; }
-.reaction-leaderboard-table thead th { font-size: .7rem; text-transform: uppercase; color: #525252; font-weight: 600; letter-spacing: .04em; }
+.reaction-leaderboard-table th, .reaction-leaderboard-table td { padding: 12px 8px; border-bottom: 1px solid rgb(255 255 255 / 26%); text-align: left; border-color: rgb(255 255 255 / 22%); }
+.reaction-leaderboard-table thead th { font-size: .7rem; text-transform: uppercase; color: rgb(255 255 255 / 78%); font-weight: 600; letter-spacing: .04em; }
 .reaction-leaderboard-table th:nth-child(2) { overflow-wrap: anywhere; }
 .reaction-leaderboard-table td:last-child, .reaction-leaderboard-table th:last-child { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.reaction-leaderboard-table .is-you { background: #f0f0f0; color: #171717; }
+.reaction-leaderboard-table .is-you { background: #000; color: #fff; }
 .reaction-leaderboard-empty { padding: 24px 8px; }
-.reaction-leaderboard-participation { margin-top: 22px; padding: 16px; border: 1px solid #444444; background: #fafafa; border-color: #e5e5e5; border-radius: 8px; }
+.reaction-leaderboard-participation { margin-top: 22px; padding: 16px; border: 1px solid rgb(255 255 255 / 26%); background: #000; border-color: rgb(255 255 255 / 22%); border-radius: 8px; }
 .reaction-leaderboard-participation h3 { margin: 0 0 6px; font-size: 1rem; }
 .reaction-leaderboard-participation p + p { margin-top: 8px; }
-.reaction-leaderboard-participation small { font-size: .72rem; color: #525252; line-height: 1.5; }
+.reaction-leaderboard-participation small { font-size: .72rem; color: rgb(255 255 255 / 78%); line-height: 1.5; }
 .reaction-leaderboard-form-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
-.reaction-leaderboard-form-actions button { padding: 10px 14px; min-height: 44px; border: 1px solid #6d6d6d; font-weight: 650; cursor: pointer; background: #171717; color: #fff; border-color: #171717; border-radius: 8px; }
-.reaction-leaderboard-form-actions button + button { background: #fff; color: #171717; border-color: #d4d4d4; }
+.reaction-leaderboard-form-actions button { padding: 10px 14px; min-height: 44px; border: 1px solid #fff; font-weight: 650; cursor: pointer; background: #fff; color: #000; border-color: #fff; border-radius: 8px; }
+.reaction-leaderboard-form-actions button + button { background: #000; color: #fff; border-color: rgb(255 255 255 / 22%); }
 .reaction-leaderboard-form-actions button:disabled { opacity: .5; cursor: default; }
-.reaction-leaderboard-dialog .reaction-leaderboard-error { margin: 12px 0; color: #171717; font-weight: 600; }
+.reaction-leaderboard-dialog .reaction-leaderboard-error { margin: 12px 0; color: #fff; font-weight: 600; }
 .reaction-leaderboard-error button { color: inherit; background: transparent; text-decoration: underline; border: 0; cursor: pointer; }
 @media (max-width: 420px) { .reaction-leaderboard-dialog > header { padding: 14px; } .reaction-leaderboard-dialog h2 { font-size: 1.1rem; } .reaction-leaderboard-scroll { padding: 14px; } .reaction-leaderboard-participation { padding: 12px; } }
 @media (max-height: 480px) { .reaction-leaderboard-trigger { padding: 4px 8px; font-size: .68rem; } }
@@ -41,5 +41,12 @@
 }
 
 /* Neutral SaaS dialog: clear table hierarchy and readable account controls. */
-.reaction-leaderboard-dialog p, .reaction-leaderboard-toolbar label { color: #525252; }
-.reaction-leaderboard-dialog :is(button, select, input):focus-visible { outline: 2px solid #171717; outline-offset: 3px; }
+.reaction-leaderboard-dialog p, .reaction-leaderboard-toolbar label { color: rgb(255 255 255 / 78%); }
+.reaction-leaderboard-dialog :is(button, select, input):focus-visible { outline: 2px solid rgb(255 255 255 / 26%); outline-offset: 3px; }
+
+.reaction-leaderboard-table .is-you td:first-child {
+  box-shadow: inset 2px 0 #fff;
+}
+.reaction-leaderboard-table .is-you td { font-weight: 750; }
+.reaction-leaderboard-form-actions button:first-child { background: #fff; color: #000; border-color: #fff; }
+.reaction-leaderboard-dialog :is(button, select, input):focus-visible { outline-color: #fff; }

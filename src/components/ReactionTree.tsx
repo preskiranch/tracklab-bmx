@@ -3,15 +3,15 @@ import type { ReactionTestStage, ReactionTestResult } from '../lib/reactionTest'
 import { reactionTreeLampState, type ReactionTreeLamp } from '../lib/reactionTree';
 import './ReactionTree.css';
 
-const scene = '/assets/reaction-test-bmx-scene.jpg';
-const photoWidth = 1671;
-// Lens bounds in the approved 1671 × 941 photograph. Each lens samples the same
+const scene = '/assets/reaction-test-bmx-approved-4k.jpg';
+const photoWidth = 1672;
+// Lens bounds in the logical 1672 × 941 coordinate space of the approved 4K photograph. Each lens samples the same
 // photograph, preserving its LEDs and metal housing instead of drawing a new lamp.
 const lamps: { stage: ReactionTreeLamp; label: string; x: number; y: number; width: number; height: number; glow: string }[] = [
-  { stage: 'red', label: 'red', x: 450, y: 96, width: 68, height: 67, glow: '#ff293c' },
-  { stage: 'yellow-1', label: 'first yellow', x: 451, y: 194, width: 67, height: 70, glow: '#ffc52b' },
-  { stage: 'yellow-2', label: 'second yellow', x: 451, y: 292, width: 68, height: 68, glow: '#ffc52b' },
-  { stage: 'green', label: 'green', x: 451, y: 389, width: 67, height: 67, glow: '#25ed6b' },
+  { stage: 'red', label: 'red', x: 452, y: 90, width: 75, height: 71, glow: '#ff293c' },
+  { stage: 'yellow-1', label: 'first yellow', x: 454, y: 191, width: 72, height: 73, glow: '#ffc52b' },
+  { stage: 'yellow-2', label: 'second yellow', x: 454, y: 289, width: 73, height: 72, glow: '#ffc52b' },
+  { stage: 'green', label: 'green', x: 455, y: 384, width: 71, height: 70, glow: '#25ed6b' },
 ];
 
 export function ReactionTree({ activeStage, stoppedStage }: { activeStage: ReactionTestStage; stoppedStage: ReactionTestResult['stage'] | null }) {

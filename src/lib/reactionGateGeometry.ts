@@ -70,12 +70,13 @@ export function reactionGateBodySection(progress: number, across = 0, segments =
   return arc.length ? [{ across, downhill: 0, upright: 0 }, ...arc] : [];
 }
 
-/** One shared camera aligns the entire assembly with the approved pad/hill seam. */
+/** One shared camera fits the approved 4K photograph: both hinge corners, both
+ * upright free corners, and the near end of the flush receiving surface. */
 export function projectReactionGateWorldPointHomogeneous(point: ReactionGateWorldPoint): ReactionGateHomogeneousPoint {
   return {
-    w: 1 + (0.32 * point.across),
-    x: 949 + (255.175 * point.across) + (225 * point.downhill) + (55 * point.upright),
-    y: 801 + (106.355 * point.across) + (55 * point.downhill) - (217 * point.upright),
+    w: 1 + (0.2739156133490952 * point.across) - (0.09193416386287169 * point.upright),
+    x: 955 + (218.5065245066836 * point.across) + (204 * point.downhill) - (62.37128307720286 * point.upright),
+    y: 806 + (87.53816950077294 * point.across) + (40 * point.downhill) - (282.046012548877 * point.upright),
   };
 }
 

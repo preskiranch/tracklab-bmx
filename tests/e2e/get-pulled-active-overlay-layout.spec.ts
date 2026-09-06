@@ -70,7 +70,7 @@ test('keeps active Get Pulled status and session actions clear at every supporte
   await page.addStyleTag({ content: getPulledFullscreenStyles });
   await page.addStyleTag({ content: `
     html,body,.platform-shell{width:100%;height:100%;margin:0;overflow:hidden}
-    .platform-shell.utility-fullscreen{position:fixed;inset:0;z-index:2147480000;display:block;width:100vw;height:100vh;height:100dvh;min-height:0;overflow:hidden;background:#0e0e0e}
+    .platform-shell.utility-fullscreen{position:fixed;inset:0;z-index:2147480000;display:block;width:100vw;height:100vh;height:100dvh;min-height:0;overflow:hidden;background:#000}
     .utility-fullscreen .platform-main{width:100%;height:100%;min-height:0;padding:0;overflow:auto}
     .utility-fullscreen .pull-sled-scene{position:relative;width:100%;height:420px;min-height:420px;overflow:hidden;border-radius:22px;background:#425d45}
   ` });
@@ -241,7 +241,7 @@ test('keeps active Get Pulled status and session actions clear at every supporte
         mainContained: true,
         metricCardsContained: true,
         metricCardOverflows: [],
-        metricCardSurfaces: Array(5).fill('rgb(34, 34, 34)'),
+        metricCardSurfaces: Array(5).fill('rgb(0, 0, 0)'),
         metricColumns: viewport.columns,
         metricOverlaps: [],
         metricRows: Math.ceil(6 / viewport.columns),
@@ -249,10 +249,10 @@ test('keeps active Get Pulled status and session actions clear at every supporte
         phaseHandled: true,
         sceneDominatesMetrics: true,
         sceneWithinView: true,
-        sessionSurface: 'rgb(14, 14, 14)',
+        sessionSurface: 'rgb(0, 0, 0)',
         timerTextContained: true,
         viewContained: true,
-        viewportSurfaces: ['rgb(14, 14, 14)', 'rgb(14, 14, 14)'],
+        viewportSurfaces: ['rgb(0, 0, 0)', 'rgb(0, 0, 0)'],
       });
       expect(layout.dashboardBottomGap, `${context} keeps the dashboard bottom-anchored`).toBeLessThanOrEqual(12.5);
       const phone = Math.min(viewport.width, viewport.height) <= 430;

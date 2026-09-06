@@ -9,7 +9,7 @@
   padding: 28px 24px;
   overflow-x: clip;
   border-block: 1px solid var(--line);
-  background: #f8f8f8;
+  background: #000;
   color: var(--ink);
 }
 
@@ -52,10 +52,10 @@
   align-items: center;
   gap: 7px;
   padding: 8px 10px;
-  border: 1px solid rgba(178, 178, 178, 0.42);
+  border: 1px solid rgb(255 255 255 / 38%);
   border-radius: 8px;
-  background: rgba(178, 178, 178, 0.1);
-  color: #484848;
+  background: rgb(0 0 0 / 10%);
+  color: rgb(255 255 255 / 78%);
   font-size: 13px;
   font-weight: 850;
 }
@@ -69,7 +69,7 @@
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 10px 10px 0 0;
-  background: #ffffff;
+  background: #000;
 }
 
 .public-bike-shop-directory__search-mode {
@@ -83,7 +83,7 @@
 
 .public-bike-shop-directory__search-mode > span {
   margin-right: 3px;
-  color: #5f5f5f;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 900;
   letter-spacing: 0.08em;
@@ -95,15 +95,15 @@
   padding: 6px 11px;
   border: 1px solid var(--line-strong);
   border-radius: 999px;
-  background: #ffffff;
-  color: #505050;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 13px;
 }
 
 .public-bike-shop-directory__search-mode button.selected {
-  border-color: rgba(178, 178, 178, 0.72);
-  background: #f7f7f7;
-  color: #484848;
+  border-color: #fff;
+  background: #000;
+  color: #fff;
   box-shadow: inset 0 0 0 1px rgba(178, 178, 178, 0.18);
 }
 
@@ -114,7 +114,7 @@
 }
 
 .public-bike-shop-directory__search label > span {
-  color: #5f5f5f;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 900;
   letter-spacing: 0.08em;
@@ -130,8 +130,8 @@
   padding: 0 11px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: #ffffff;
-  color: #6e6e6e;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .public-bike-shop-directory__location {
@@ -150,7 +150,7 @@
   overflow: hidden;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: #ffffff;
+  background: #000;
   box-shadow: 0 12px 28px rgba(24, 24, 24, 0.18);
 }
 
@@ -161,14 +161,14 @@
   padding: 8px 9px;
   border: 0;
   border-radius: 5px;
-  background: #ffffff;
+  background: #000;
   color: var(--ink);
   text-align: left;
 }
 
 .public-bike-shop-directory__location-suggestions button:hover,
 .public-bike-shop-directory__location-suggestions button:focus-visible {
-  background: #f6f6f6;
+  background: #000;
   outline: 0;
 }
 
@@ -198,7 +198,7 @@
 
 .public-bike-shop-directory__location > div:focus-within,
 .public-bike-shop-directory__radius select:focus-visible {
-  border-color: #818181;
+  border-color: rgb(255 255 255 / 26%);
   box-shadow: 0 0 0 3px rgba(129, 129, 129, 0.14);
   outline: 0;
 }
@@ -220,7 +220,7 @@
   padding: 0 10px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: #ffffff;
+  background: #000;
   color: var(--ink);
   font-size: 16px;
   font-weight: 800;
@@ -245,13 +245,13 @@
 }
 
 .public-bike-shop-directory__submit {
-  background: var(--lime);
-  color: #1d1d1d;
+  background: #fff;
+  color: #000;
 }
 
 .public-bike-shop-directory__locate {
   border-color: var(--line-strong) !important;
-  background: #ffffff;
+  background: #000;
   color: var(--ink);
 }
 
@@ -262,18 +262,18 @@
 
 .public-bike-shop-directory__error {
   padding: 11px 14px;
-  border-inline: 1px solid #ababab;
-  background: #f5f5f5;
-  color: #3a3a3a;
+  border-inline: 1px solid rgb(255 255 255 / 22%);
+  background: #000;
+  color: #fff;
   font-size: 14px;
   font-weight: 750;
 }
 
 .public-bike-shop-directory__notice {
   padding: 11px 14px;
-  border-inline: 1px solid #c9c9c9;
-  background: #f8f8f8;
-  color: #555555;
+  border-inline: 1px solid rgb(255 255 255 / 22%);
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 14px;
   font-weight: 750;
 }
@@ -287,7 +287,7 @@
   border: 1px solid var(--line);
   border-top: 0;
   border-radius: 0 0 10px 10px;
-  background: #ffffff;
+  background: #000;
 }
 
 .public-bike-shop-directory__map-panel {
@@ -295,7 +295,7 @@
   min-width: 0;
   min-height: 560px;
   border-right: 1px solid var(--line);
-  background: #ededed;
+  background: #000;
 }
 
 .public-bike-shop-map {
@@ -304,7 +304,7 @@
   height: 100%;
   min-height: 560px;
   overflow: hidden;
-  background: #e5e5e5;
+  background: #000;
 }
 
 .public-bike-shop-map__canvas {
@@ -324,10 +324,10 @@
   max-width: calc(100% - 28px);
   min-height: 42px;
   padding: 9px 13px;
-  border: 1px solid rgba(32, 32, 32, 0.25);
+  border: 1px solid rgb(255 255 255 / 25%);
   border-radius: 999px;
-  background: rgba(25, 25, 25, 0.92);
-  color: #ffffff;
+  background: rgb(0 0 0 / 92%);
+  color: #fff;
   box-shadow: 0 7px 24px rgba(16, 16, 16, 0.2);
   font-size: 13px;
   font-weight: 850;
@@ -338,8 +338,8 @@
 }
 
 .public-bike-shop-map__status--error {
-  border-color: rgba(67, 67, 67, 0.38);
-  background: rgba(46, 46, 46, 0.94);
+  border-color: rgb(255 255 255 / 38%);
+  background: rgb(0 0 0 / 94%);
 }
 
 .public-bike-shop-map__spinner {
@@ -357,7 +357,7 @@
   min-width: 0;
   min-height: 0;
   max-height: 760px;
-  background: #ffffff;
+  background: #000;
 }
 
 .public-bike-shop-directory__results-heading {
@@ -375,8 +375,8 @@
   padding: 6px 9px;
   border: 1px solid var(--line-strong);
   border-radius: 7px;
-  background: #ffffff;
-  color: #555555;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 850;
 }
@@ -404,14 +404,14 @@
   gap: 9px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
-  background: #f9f9f9;
+  background: #000;
 }
 
 .public-bike-shop-directory__hierarchy > span {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #636363;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 850;
 }
@@ -430,7 +430,7 @@
 }
 
 .public-bike-shop-directory__hierarchy label > span {
-  color: #6f6f6f;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.04em;
@@ -444,7 +444,7 @@
   padding: 5px 8px;
   border: 1px solid var(--line-strong);
   border-radius: 7px;
-  background: #ffffff;
+  background: #000;
   color: var(--ink);
   font-size: 14px;
   font-weight: 750;
@@ -455,7 +455,7 @@
 }
 
 .public-bike-shop-directory__hierarchy-error {
-  color: #3a3a3a;
+  color: #fff;
   font-size: 12px;
   font-weight: 750;
   line-height: 1.4;
@@ -464,9 +464,9 @@
 .public-bike-shop-directory__truncated {
   margin: 0;
   padding: 9px 13px;
-  border-bottom: 1px solid #c9c9c9;
-  background: #f8f8f8;
-  color: #555555;
+  border-bottom: 1px solid rgb(255 255 255 / 22%);
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 750;
   line-height: 1.4;
@@ -496,19 +496,19 @@
   padding: 11px;
   border: 1px solid transparent;
   border-radius: 8px;
-  background: #f7f7f7;
+  background: #000;
   color: var(--ink);
   text-align: left;
 }
 
 .public-bike-shop-directory__result-list > li > button:hover {
   border-color: var(--line-strong);
-  background: #ffffff;
+  background: #000;
 }
 
 .public-bike-shop-directory__result-list > li > button.selected {
-  border-color: rgba(178, 178, 178, 0.65);
-  background: #f7f7f7;
+  border-color: #fff;
+  background: #000;
   box-shadow: inset 3px 0 0 var(--lime);
 }
 
@@ -528,7 +528,7 @@
 
 .public-bike-shop-directory__result-title b {
   flex: 0 0 auto;
-  color: #5d5d5d;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
 }
 
@@ -549,7 +549,7 @@
 }
 
 .public-bike-shop-directory__result-list > li > button small {
-  color: #5e5e5e;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 750;
 }
@@ -579,10 +579,10 @@
 .public-bike-shop-directory__load-more button {
   min-height: 42px;
   padding: 8px 12px;
-  border: 1px solid rgba(178, 178, 178, 0.62);
+  border: 1px solid rgb(255 255 255 / 38%);
   border-radius: 8px;
-  background: #f6f6f6;
-  color: #484848;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 13px;
   font-weight: 850;
 }
@@ -599,14 +599,14 @@
   gap: 14px;
   min-width: 0;
   margin-top: 14px;
-  background: #f9f9f9;
+  background: #000;
 }
 
 .public-bike-shop-directory__detail-placeholder {
   grid-column: 1 / -1;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #ffffff;
+  background: #000;
 }
 
 .public-bike-shop-directory__shop-card,
@@ -615,7 +615,7 @@
   padding: 18px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #ffffff;
+  background: #000;
 }
 
 .public-bike-shop-directory__shop-intro h3 {
@@ -652,10 +652,10 @@
   gap: 5px;
   min-width: 0;
   padding: 6px 9px;
-  border: 1px solid rgba(178, 178, 178, 0.42);
+  border: 1px solid rgb(255 255 255 / 38%);
   border-radius: 999px;
-  background: #f8f8f8;
-  color: #4d4d4d;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 800;
 }
@@ -679,7 +679,7 @@
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  color: #606060;
+  color: rgb(255 255 255 / 78%);
   font-size: 13px;
   font-weight: 850;
 }
@@ -697,7 +697,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: #5c5c5c;
+  color: rgb(255 255 255 / 78%);
   font-weight: 800;
 }
 
@@ -710,16 +710,16 @@
 
 .public-bike-shop-directory__map-links a {
   border-color: var(--line-strong);
-  background: #f9f9f9;
+  background: #000;
   color: var(--ink);
 }
 
 .public-bike-shop-directory__claim {
   width: 100%;
   margin-top: 10px;
-  border-color: rgba(178, 178, 178, 0.55);
-  background: #f6f6f6;
-  color: #484848;
+  border-color: rgb(255 255 255 / 38%);
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .public-bike-shop-directory__tracks header {
@@ -739,7 +739,7 @@
   flex: 0 0 auto;
   padding: 5px 8px;
   border-radius: 999px;
-  background: #f0f0f0;
+  background: #000;
   font-size: 13px;
 }
 
@@ -759,14 +759,14 @@
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fafafa;
+  background: #000;
   color: var(--ink);
   text-decoration: none;
 }
 
 .public-bike-shop-directory__tracks > div > a:hover {
-  border-color: rgba(178, 178, 178, 0.65);
-  background: #f7f7f7;
+  border-color: rgb(255 255 255 / 38%);
+  background: #000;
 }
 
 .public-bike-shop-directory__tracks a > span {
@@ -792,7 +792,7 @@
   flex: 0 0 auto;
   align-items: center;
   gap: 3px;
-  color: #5d5d5d;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
 }
 
@@ -801,9 +801,9 @@
   gap: 4px;
   min-width: 0;
   padding: 10px;
-  border: 1px solid #e1e1e1;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 8px;
-  background: #ffffff;
+  background: #000;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.4;
@@ -832,7 +832,7 @@
 }
 
 .public-bike-shop-directory__attribution a {
-  color: #555555;
+  color: rgb(255 255 255 / 78%);
   font-weight: 750;
 }
 
@@ -847,7 +847,7 @@
   display: grid;
   place-items: center;
   padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
-  background: rgba(11, 11, 11, 0.7);
+  background: rgb(0 0 0 / 70%);
 }
 
 .public-bike-shop-claim-dialog {
@@ -857,7 +857,7 @@
   overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: 14px;
-  background: #ffffff;
+  background: #000;
   color: var(--ink);
   box-shadow: 0 24px 80px rgba(11, 11, 11, 0.34);
   outline: 0;
@@ -889,7 +889,7 @@
   padding: 8px 13px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: #ffffff;
+  background: #000;
   color: var(--ink);
   font-size: 14px;
   font-weight: 900;
@@ -918,9 +918,9 @@
 .public-bike-shop-claim-dialog form > p {
   margin: 0;
   padding: 10px;
-  border: 1px solid #e1e1e1;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 8px;
-  background: #f9f9f9;
+  background: #000;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.45;
@@ -933,7 +933,7 @@
 }
 
 .public-bike-shop-claim-dialog label > span {
-  color: #5f5f5f;
+  color: rgb(255 255 255 / 78%);
   font-size: 12px;
   font-weight: 900;
   letter-spacing: 0.07em;
@@ -949,7 +949,7 @@
   padding: 8px 10px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: #ffffff;
+  background: #000;
   color: var(--ink);
   font: inherit;
   font-size: 16px;
@@ -963,17 +963,17 @@
 .public-bike-shop-claim-dialog input:focus-visible,
 .public-bike-shop-claim-dialog select:focus-visible,
 .public-bike-shop-claim-dialog textarea:focus-visible {
-  border-color: #818181;
+  border-color: rgb(255 255 255 / 26%);
   box-shadow: 0 0 0 3px rgba(129, 129, 129, 0.14);
   outline: 0;
 }
 
 .public-bike-shop-claim-error {
   padding: 10px;
-  border: 1px solid #b1b1b1;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 8px;
-  background: #f5f5f5;
-  color: #3a3a3a;
+  background: #000;
+  color: #fff;
   font-size: 13px;
   font-weight: 750;
 }
@@ -986,9 +986,9 @@
 
 .public-bike-shop-claim-actions button[type="submit"],
 .public-bike-shop-claim-success button {
-  border-color: #292929;
+  border-color: rgb(255 255 255 / 26%);
   background: var(--lime);
-  color: #1d1d1d;
+  color: #000;
 }
 
 .public-bike-shop-claim-success {
@@ -996,7 +996,7 @@
   justify-items: center;
   gap: 8px;
   padding: 30px 16px 12px;
-  color: #4d4d4d;
+  color: rgb(255 255 255 / 78%);
   text-align: center;
 }
 

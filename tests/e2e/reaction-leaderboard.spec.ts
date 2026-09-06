@@ -202,6 +202,108 @@ async function recordValidRun(page: Page, view: Locator, reactionDelayMs: number
   await expect(retry).toBeVisible();
 }
 
+for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+  test(`gate air sounds follow movement and keep the return quiet (${reducedMotion})`, async ({ page }) => {
+    await mockReactionAccount(page);
+    await preparePredictableCadence(page);
+    await page.emulateMedia({ reducedMotion });
+    await page.addInitScript(() => {
+      const soundWindow = window as typeof window & {
+        __gateAirSounds?: Array<{ duration: number; peak: number }>;
+      };
+      soundWindow.__gateAirSounds = [];
+      const originalStart = AudioBufferSourceNode.prototype.start;
+      AudioBufferSourceNode.prototype.start = function (...args) {
+        const duration = this.buffer?.duration ?? 0;
+        if (Math.abs(duration - 1) < 0.001 || Math.abs(duration - 2) < 0.001) {
+          const samples = this.buffer!.getChannelData(0);
+          let peak = 0;
+          for (const sample of samples) peak = Math.max(peak, Math.abs(sample));
+          soundWindow.__gateAirSounds!.push({ duration, peak });
+        }
+        return Reflect.apply(originalStart, this, args);
+      };
+    });
+    const sounds = () => page.evaluate(() => (
+      window as typeof window & { __gateAirSounds: Array<{ duration: number; peak: number }> }
+    ).__gateAirSounds);
+    const view = await openReactionTest(page);
+    const gate = view.locator('.reaction-gate-layer');
+    await expect(gate).toHaveAttribute('data-gate-progress', '0.000');
+    expect(await sounds()).toEqual([]);
+
+    await recordValidRun(page, view, 120);
+    await expect(gate).toHaveAttribute('data-gate-progress', '1.000');
+    await expect(gate.locator('[data-gate-photo-clip=mesh]')).toHaveCSS('opacity', '1');
+    await expect(gate.locator('[data-gate-photo=reveal]')).toHaveCSS('opacity', '1');
+    await expect(gate.locator('[data-gate-photo=mesh]')).toHaveJSProperty('naturalWidth', 3840);
+    expect(await sounds()).toHaveLength(1);
+    expect((await sounds())[0].duration).toBeCloseTo(1, 3);
+
+    // Observe real geometry, not rounded progress: "0.000" can appear just
+    // before the eased rise has actually reached its upright endpoint.
+    const uprightQuad = await gate.getAttribute('data-gate-upright-quad');
+    expect(uprightQuad).not.toBeNull();
+    await gate.evaluate((element) => {
+      const trace = { startedAt: 0, frames: [] as Array<{ elapsed: number; progress: number; settled: boolean; photoVisible: boolean }> };
+      (window as typeof window & { __gateRaiseTrace?: typeof trace }).__gateRaiseTrace = trace;
+      const originalQuad = element.getAttribute('data-gate-upright-quad');
+      const record = () => {
+        if (!trace.startedAt) return;
+        const settled = element.querySelector('[data-gate-part="mesh"]')?.getAttribute('data-gate-quad') === originalQuad;
+        trace.frames.push({
+          elapsed: performance.now() - trace.startedAt,
+          progress: Number(element.getAttribute('data-gate-progress')),
+          settled,
+          photoVisible: getComputedStyle(element.querySelector('[data-gate-photo-clip=mesh]')!).opacity === '1'
+            && getComputedStyle(element.querySelector('[data-gate-photo=mesh]')!).transform.startsWith('matrix3d(')
+            && (element.querySelector('[data-gate-photo=mesh]') as HTMLImageElement).naturalWidth === 3840,
+        });
+        if (settled) observer.disconnect();
+      };
+      const observer = new MutationObserver(record);
+      observer.observe(element, { attributes: true, subtree: true, attributeFilter: ['data-gate-progress', 'data-gate-quad'] });
+      const retry = element.closest('.reaction-test-view')!.querySelector<HTMLButtonElement>('.reaction-primary-action')!;
+      retry.addEventListener('click', () => {
+        trace.startedAt = performance.now();
+        record();
+      }, { once: true });
+    });
+    await view.getByRole('button', { name: 'Try Again', exact: true }).click();
+    await expect(gate.locator('[data-gate-part="mesh"]')).toHaveAttribute('data-gate-quad', uprightQuad!);
+    await expect(gate).toHaveAttribute('data-gate-progress', '0.000');
+    const riseFrames = await page.evaluate(() => (
+      window as typeof window & { __gateRaiseTrace: { frames: Array<{ elapsed: number; progress: number; settled: boolean; photoVisible: boolean }> } }
+    ).__gateRaiseTrace.frames);
+    const settledFrame = riseFrames.find((frame) => frame.settled);
+    expect(settledFrame, 'The return must finish at the exact upright gate geometry.').toBeDefined();
+    if (reducedMotion === 'no-preference') {
+      expect(riseFrames.some((frame) => frame.elapsed >= 750 && frame.elapsed <= 1_250 && frame.progress > 0 && frame.progress < 1 && frame.photoVisible),
+        'The gate must still be physically rising midway through its two-second return.').toBe(true);
+      expect(settledFrame!.elapsed).toBeGreaterThanOrEqual(2_000);
+      expect(settledFrame!.elapsed).toBeLessThan(2_500);
+    } else {
+      expect(riseFrames.every((frame) => frame.progress === 0 || frame.progress === 1),
+        'Reduced motion must skip intermediate gate positions.').toBe(true);
+      expect(settledFrame!.elapsed).toBeLessThan(500);
+    }
+    await expect(gate.locator('[data-gate-photo-clip=mesh]')).toHaveCSS('opacity', '0');
+    await expect(gate.locator('[data-gate-photo=reveal]')).toHaveCSS('opacity', '0');
+    const completed = await sounds();
+    expect(completed).toHaveLength(2);
+    expect(completed[1].duration).toBeCloseTo(2, 3);
+    expect(completed[1].peak / completed[0].peak).toBeCloseTo(10 ** (-18 / 20), 3);
+
+    // A false start never releases the gate, so its retry must stay silent.
+    await view.getByRole('button', { name: 'Start Reaction Test', exact: true }).click();
+    await view.locator('.reaction-race-surface').click({ position: { x: 500, y: 300 } });
+    await expect(view.getByText('TOO EARLY / FALSE START', { exact: true })).toBeVisible();
+    await view.getByRole('button', { name: 'Try Again', exact: true }).click();
+    await expect(gate).toHaveAttribute('data-gate-progress', '0.000');
+    expect(await sounds()).toHaveLength(2);
+  });
+}
+
 for (const tier of ['racer', 'spectator'] as const) {
   test(`${tier} account automatically posts its best valid run under its existing name`, async ({ page }) => {
     test.setTimeout(90_000);
@@ -489,7 +591,7 @@ for (const [cueNumber, stoppedStage] of ['red', 'yellow-1', 'yellow-2', 'green']
     }, cueNumber);
     await page.setViewportSize({ width: 1180, height: 820 });
     const view = await openReactionTest(page);
-    await expect(view.locator('.reaction-scene-background')).toHaveJSProperty('naturalWidth', 1671);
+    await expect(view.locator('.reaction-scene-background')).toHaveJSProperty('naturalWidth', 3840);
     await expect(view.locator('[data-lamp-state="dim"]')).toHaveCount(4);
     await view.getByRole('button', { name: 'Start Reaction Test', exact: true }).click();
     await expect(view.locator(`[data-reaction-stage="${stoppedStage}"]`)).toHaveAttribute('data-lamp-state', 'stopped');

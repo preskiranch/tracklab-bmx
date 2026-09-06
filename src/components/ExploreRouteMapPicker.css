@@ -4,14 +4,14 @@
   padding: 0 11px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: #ffffff;
-  color: #222222;
+  background: #000;
+  color: #fff;
   font: inherit;
 }
 
 .explore-route-builder select:disabled {
-  color: #8e8e8e;
-  background: #f5f5f5;
+  color: rgb(255 255 255 / 78%);
+  background: #000;
 }
 
 .explore-smart-route,
@@ -19,16 +19,16 @@
   display: grid;
   gap: 9px;
   padding: 11px;
-  border: 1px solid #d1d1d1;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 10px;
-  background: linear-gradient(145deg, #fcfcfc, #fafafa);
+  background: linear-gradient(145deg, #000, #000);
 }
 
 .explore-smart-route > div {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #464646;
+  color: rgb(255 255 255 / 78%);
 }
 
 .explore-smart-route > div span {
@@ -37,7 +37,7 @@
 
 .explore-smart-route > div small,
 .explore-smart-route-result p {
-  color: #717171;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   line-height: 1.4;
 }
@@ -49,8 +49,8 @@
   padding: 10px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: #ffffff;
-  color: #222222;
+  background: #000;
+  color: #fff;
   font: inherit;
   line-height: 1.45;
 }
@@ -61,10 +61,10 @@
   justify-content: center;
   gap: 7px;
   min-height: 40px;
-  border: 1px solid #a3a3a3;
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 8px;
-  background: #b4b4b4;
-  color: #2a2a2a;
+  background: #000;
+  color: #fff;
   font-size: 11px;
   font-weight: 900;
 }
@@ -79,7 +79,7 @@
 }
 
 .explore-smart-route-result > div > span {
-  color: #5f5f5f;
+  color: rgb(255 255 255 / 78%);
   font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.07em;
@@ -90,7 +90,7 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  color: #535353;
+  color: rgb(255 255 255 / 78%);
   font-size: 10px;
   font-weight: 800;
   text-decoration: none;
@@ -100,7 +100,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #8e8e8e;
+  color: rgb(255 255 255 / 78%);
   font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.08em;
@@ -116,9 +116,9 @@
 }
 
 .explore-route-builder .explore-map-route-button {
-  border-color: #bababa;
-  background: #f7f7f7;
-  color: #454545;
+  border-color: rgb(255 255 255 / 22%);
+  background: #000;
+  color: rgb(255 255 255 / 78%);
 }
 
 .explore-map-picker-layer {
@@ -128,7 +128,7 @@
   display: grid;
   place-items: center;
   padding: 18px;
-  background: rgba(8, 8, 8, 0.76);
+  background: rgb(0 0 0 / 76%);
   backdrop-filter: blur(8px);
 }
 
@@ -139,9 +139,9 @@
   width: min(1080px, 100%);
   height: min(820px, calc(100dvh - 36px));
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 18px;
-  background: #f9f9f9;
+  background: #000;
   box-shadow: 0 30px 90px rgba(0, 0, 0, 0.5);
 }
 
@@ -151,8 +151,8 @@
   justify-content: space-between;
   gap: 18px;
   padding: 18px 20px;
-  background: #171717;
-  color: #ffffff;
+  background: #000;
+  color: #fff;
 }
 
 .explore-map-picker > header h3 {
@@ -161,7 +161,7 @@
 }
 
 .explore-map-picker > header p {
-  color: #c5c5c5;
+  color: rgb(255 255 255 / 86%);
   font-size: 11px;
 }
 
@@ -171,10 +171,10 @@
   width: 40px;
   height: 40px;
   place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.09);
-  color: #ffffff;
+  background: rgb(0 0 0 / 9%);
+  color: #fff;
 }
 
 .explore-map-picker-mode {
@@ -183,7 +183,7 @@
   gap: 8px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--line);
-  background: #ffffff;
+  background: #000;
 }
 
 .explore-map-picker-mode button {
@@ -194,21 +194,21 @@
   padding: 0 12px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: #ffffff;
-  color: #424242;
+  background: #000;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 900;
 }
 
 .explore-map-picker-mode button.selected {
-  border-color: #b0b0b0;
-  background: #f5f5f5;
-  color: #2e2e2e;
+  border-color: #fff;
+  background: #000;
+  color: #fff;
 }
 
 .explore-map-picker-mode > span {
   margin-left: auto;
-  color: #6b6b6b;
+  color: rgb(255 255 255 / 78%);
   font-size: 11px;
   font-weight: 750;
 }
@@ -216,7 +216,7 @@
 .explore-map-picker-canvas {
   width: 100%;
   min-height: 340px;
-  background: #222222;
+  background: #000;
 }
 
 .explore-map-picker-status {
@@ -226,14 +226,14 @@
   translate: -50% -50%;
   padding: 11px 14px;
   border-radius: 9px;
-  background: rgba(19, 19, 19, 0.9);
-  color: #ffffff;
+  background: rgb(0 0 0 / 90%);
+  color: #fff;
   font-size: 12px;
   font-weight: 850;
 }
 
 .explore-map-picker-status.error {
-  background: #434343;
+  background: #000;
 }
 
 .explore-map-picker-points {
@@ -242,7 +242,7 @@
   gap: 8px;
   padding: 10px 14px;
   border-top: 1px solid var(--line);
-  background: #ffffff;
+  background: #000;
 }
 
 .explore-map-picker-points > div {
@@ -253,15 +253,15 @@
   padding: 9px 11px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: #f9f9f9;
+  background: #000;
 }
 
 .explore-map-picker-points > div:first-child svg {
-  color: #999999;
+  color: rgb(255 255 255 / 78%);
 }
 
 .explore-map-picker-points > div:last-child svg {
-  color: #212121;
+  color: #fff;
 }
 
 .explore-map-picker-points span {
@@ -270,7 +270,7 @@
 }
 
 .explore-map-picker-points small {
-  color: #7e7e7e;
+  color: rgb(255 255 255 / 78%);
   font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.07em;
@@ -279,7 +279,7 @@
 
 .explore-map-picker-points strong {
   overflow: hidden;
-  color: #222222;
+  color: #fff;
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -291,7 +291,7 @@
   gap: 8px;
   padding: 12px 14px;
   border-top: 1px solid var(--line);
-  background: #f4f4f4;
+  background: #000;
 }
 
 .explore-map-picker > footer button {
@@ -303,16 +303,16 @@
   padding: 0 15px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: #ffffff;
-  color: #2f2f2f;
+  background: #000;
+  color: #fff;
   font-size: 11px;
   font-weight: 900;
 }
 
 .explore-map-picker > footer button.primary {
-  border-color: #a3a3a3;
-  background: linear-gradient(135deg, #c2c2c2, #a9a9a9);
-  color: #222222;
+  border-color: rgb(255 255 255 / 22%);
+  background: linear-gradient(135deg, #000, #000);
+  color: #fff;
 }
 
 .explore-map-picker > footer button:disabled {

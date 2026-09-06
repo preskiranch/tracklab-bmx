@@ -12652,7 +12652,7 @@ export default function App() {
       ref={raceShellRef}
     >
       {utilityFullscreen && <style>{`
-        .platform-shell.utility-fullscreen{position:fixed;inset:0;z-index:2147480000;display:block;width:100vw;height:100vh;height:100dvh;min-height:0;overflow:hidden;background:#07100b}
+        .platform-shell.utility-fullscreen{position:fixed;inset:0;z-index:2147480000;display:block;width:100vw;height:100vh;height:100dvh;min-height:0;overflow:hidden;background:#000}
         .utility-fullscreen .sidebar,.utility-fullscreen .platform-topbar{display:none}
         .utility-fullscreen .platform-main{width:100%;height:100%;min-height:0;padding:0;overflow:auto}
         .utility-fullscreen .monitor-panel,.utility-fullscreen .club-live-monitor{width:100%;min-height:100%;box-sizing:border-box}
