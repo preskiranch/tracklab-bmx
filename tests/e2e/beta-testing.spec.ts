@@ -99,7 +99,9 @@ for (const viewport of [{ name: 'iPad', width: 1280, height: 960 }, { name: 'iPh
     await panel.screenshot({ path: testInfo.outputPath(`beta-admin-${viewport.name}.png`) });
     await panel.getByRole('button', { name: `Revoke invitation for ${invite.email}` }).click();
     await expect(panel.getByText(/Revoked · 4 bikes/)).toBeVisible();
-    expect(state.writes.at(-1)?.path).toBe('/api/admin/beta-access/revoke');
+    expect(state.writes.filter((write) => write.path === '/api/admin/beta-access/revoke')).toEqual([
+      { path: '/api/admin/beta-access/revoke', body: { inviteId: invite.id } },
+    ]);
     expect(state.errors).toEqual([]);
   });
 }
