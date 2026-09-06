@@ -11,6 +11,7 @@ import {
 import { buildReactionGateFrame, REACTION_GATE_FIXED_PATHS, type ReactionGatePath } from '../lib/reactionGateRendering';
 import { playReactionGateAirSound, reactionGateAirProfiles } from '../lib/reactionGateAudio';
 import { createReactionGatePhotoWarp } from '../lib/reactionGatePhotoWarp';
+import { buildReactionGatePhotoShell, REACTION_GATE_CAP_OUTLINE } from '../lib/reactionGatePhotoShell';
 import { REACTION_SCENE_IMAGE } from '../lib/reactionScene';
 
 export {
@@ -31,9 +32,9 @@ const REVEAL = '/assets/reaction-test-bmx-original-gate-reveal.png';
 // Reveal the hidden surface only where the original raised gate occluded it.
 // Feather the outer safety margin to avoid a cut-out edge; the ready photo and
 // all other background pixels stay fixed.
-const originalPath = (points: number[][]) => points.map(([x, y], index) =>
+const originalPath = (points: ReadonlyArray<readonly number[]>) => points.map(([x, y], index) =>
   `${index ? 'L' : 'M'}${x * SCENE_WIDTH / 1280},${y * SCENE_HEIGHT / 720}`).join(' ') + ' Z';
-const CAP_OUTLINE = originalPath([[764,460],[794,461],[810,478],[826,499],[841,523],[852,548],[861,577],[867,604],[869,628],[867,650],[713,612]]);
+const CAP_OUTLINE = originalPath(REACTION_GATE_CAP_OUTLINE);
 const OCCLUSION_PATH = originalPath([[651,294],[669,297],[803,458],[817,474],[834,496],[849,521],[860,547],[869,576],[874,604],[875,632],[871,653],[710,614],[636,356]]);
 const OCCLUSION_MASK = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="1672" height="941"><defs><filter id="edge" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation="1.6"/></filter></defs><path d="${OCCLUSION_PATH}" fill="white" filter="url(#edge)"/></svg>`)}")`;
 // Clip the rotating photographed end cap at the actual receiving plane.
@@ -83,6 +84,7 @@ export function ReactionGateLayer({ released, onSettled }: ReactionGateLayerProp
   const flatMeshWarp = useMemo(() => createReactionGatePhotoWarp(FLAT_GRATING_SOURCE, frame.quad), [frame.quad]);
   const flatMeshOpacity = Math.max(0, Math.min(1, (progress - 0.65) / 0.35));
   const capWarp = useMemo(() => createReactionGatePhotoWarp(SOURCE_CAP_PLANE, capPlane(progress)), [progress]);
+  const photoShell = useMemo(() => buildReactionGatePhotoShell(progress), [progress]);
 
   useEffect(() => { onSettledRef.current = onSettled; }, [onSettled]);
 
@@ -200,7 +202,7 @@ export function ReactionGateLayer({ released, onSettled }: ReactionGateLayerProp
           </defs>
           <g data-gate-part="fixed" opacity="0"><GatePaths paths={REACTION_GATE_FIXED_PATHS} prefix={prefix} /></g>
           <g className="reaction-gate-body" data-gate-part="body" data-gate-body-visible={progress < 1}>
-            {progress < 1 && <GatePaths paths={frame.shell.map(part => part.fill.startsWith('rgb(')
+            {progress < 1 && <GatePaths paths={(capWarp ? photoShell : frame.shell).map(part => part.fill.startsWith('rgb(')
               ? { ...part, fill: '@shell-metal' }
               : { ...part, stroke: '#8c8a80' })} prefix={prefix} />}
             {progress < 1 && !capWarp && <>
