@@ -495,6 +495,22 @@ describe('cloud API trust boundaries', () => {
     });
   });
 
+  it('serves the gate fallback samples as playable WAV audio', async () => {
+    for (const [filename, durationSeconds] of [
+      ['reaction-gate-rb26-drop-1s.wav', 1],
+      ['reaction-gate-rb26-raise-2s.wav', 2],
+    ] as const) {
+      const response = await fetch(`${baseUrl}/assets/${filename}`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toBe('audio/wav');
+      const bytes = Buffer.from(await response.arrayBuffer());
+      expect(bytes.subarray(0, 4).toString()).toBe('RIFF');
+      expect(bytes.subarray(8, 12).toString()).toBe('WAVE');
+      expect(bytes.readUInt32LE(40) / bytes.readUInt32LE(28)).toBe(durationSeconds);
+      expect(Number(response.headers.get('content-length'))).toBe(bytes.length);
+    }
+  });
+
   it('enforces one account-wide Wattbike allocation across reconnects and auth sessions', async () => {
     const originalCookie = cookie;
     const registration = await api('/api/auth/register', {

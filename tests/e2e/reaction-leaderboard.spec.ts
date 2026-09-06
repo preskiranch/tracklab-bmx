@@ -304,6 +304,63 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
   });
 }
 
+for (const interruption of ['suspend', 'close'] as const) {
+  test(`gate return restores real audio after context ${interruption}`, async ({ page }) => {
+    await mockReactionAccount(page);
+    await preparePredictableCadence(page);
+    await page.addInitScript(() => {
+      const probe = { context: null as AudioContext | null, signals: [] as Array<{ duration: number; peak: number; ended: boolean }> };
+      (window as typeof window & { __gateSignal?: typeof probe }).__gateSignal = probe;
+      const originalStart = AudioBufferSourceNode.prototype.start;
+      AudioBufferSourceNode.prototype.start = function (...args) {
+        if (this.buffer?.duration === 1 || this.buffer?.duration === 2) {
+          probe.context = this.context as AudioContext;
+          const signal = { duration: this.buffer.duration, peak: 0, ended: false };
+          probe.signals.push(signal);
+          // Tap the real source graph; never replace source.start or the WAV.
+          const analyser = this.context.createAnalyser();
+          const silent = this.context.createGain();
+          silent.gain.value = 0;
+          this.connect(analyser);
+          analyser.connect(silent);
+          silent.connect(this.context.destination);
+          const samples = new Float32Array(analyser.fftSize);
+          const interval = window.setInterval(() => {
+            analyser.getFloatTimeDomainData(samples);
+            for (const sample of samples) signal.peak = Math.max(signal.peak, Math.abs(sample));
+          }, 20);
+          this.addEventListener('ended', () => {
+            signal.ended = true;
+            window.clearInterval(interval);
+            analyser.disconnect();
+            silent.disconnect();
+          }, { once: true });
+        }
+        return Reflect.apply(originalStart, this, args);
+      };
+    });
+    const view = await openReactionTest(page);
+    await recordValidRun(page, view, 120);
+    await page.waitForFunction(() => (window as typeof window & {
+      __gateSignal: { signals: Array<{ duration: number; ended: boolean }> };
+    }).__gateSignal.signals.some(signal => signal.duration === 1 && signal.ended));
+    await page.evaluate(async action => {
+      const context = (window as typeof window & { __gateSignal: { context: AudioContext } }).__gateSignal.context;
+      await context[action]();
+    }, interruption);
+    await view.getByRole('button', { name: 'Try Again', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => (window as typeof window & {
+      __gateSignal: { signals: Array<{ duration: number; peak: number; ended: boolean }> };
+    }).__gateSignal.signals.find(signal => signal.duration === 2))).toMatchObject({ duration: 2, ended: true });
+    const returnPeak = await page.evaluate(() => (window as typeof window & {
+      __gateSignal: { signals: Array<{ duration: number; peak: number }> };
+    }).__gateSignal.signals.find(signal => signal.duration === 2)!.peak);
+    expect(returnPeak).toBeGreaterThan(0.025);
+    expect(returnPeak).toBeLessThan(0.036);
+    await expect(view.locator('.reaction-gate-layer')).toHaveAttribute('data-gate-progress', '0.000');
+  });
+}
+
 for (const tier of ['racer', 'spectator'] as const) {
   test(`${tier} account automatically posts its best valid run under its existing name`, async ({ page }) => {
     test.setTimeout(90_000);

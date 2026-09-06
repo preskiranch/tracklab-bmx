@@ -1,4 +1,4 @@
-import { getTrackLabAudioContext } from './audioCues';
+import { getTrackLabAudioContext, startGateMediaUnlockUrl } from './audioCues';
 
 export type ReactionGateAirDirection = 'drop' | 'raise';
 
@@ -11,6 +11,111 @@ export const reactionGateAirProfiles = Object.freeze({
 type GateAirBuffers = Record<ReactionGateAirDirection, AudioBuffer>;
 const buffers = new WeakMap<AudioContext, GateAirBuffers>();
 const pending = new WeakMap<AudioContext, Promise<boolean>>();
+type GateAirMedia = { audio: HTMLAudioElement; primed: boolean; generation: number };
+const media = new Map<ReactionGateAirDirection, GateAirMedia>();
+let mediaPriming: Promise<boolean> | null = null;
+
+function within<T>(task: Promise<T>, milliseconds: number, fallback: T): Promise<T> {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => resolve(fallback), milliseconds);
+    task.then(resolve, () => resolve(fallback)).finally(() => clearTimeout(timer));
+  });
+}
+
+/** Prime the actual fallback elements during a click, using zero PCM at full
+ * volume. iOS does not transfer media permission from the starter's elements,
+ * and some WKWebViews ignore element.volume. The final WAV levels are baked in.
+ */
+function primeGateAirMedia(): Promise<boolean> {
+  if (mediaPriming) return mediaPriming;
+  if (typeof Audio === 'undefined') return Promise.resolve(false);
+  const tasks = (['drop', 'raise'] as const).map(async direction => {
+    let entry = media.get(direction);
+    if (!entry) {
+      const audio = new Audio();
+      audio.preload = 'auto';
+      audio.setAttribute('playsinline', '');
+      entry = { audio, primed: false, generation: 0 };
+      media.set(direction, entry);
+    }
+    if (entry.primed) return true;
+    const { audio } = entry;
+    audio.src = startGateMediaUnlockUrl;
+    audio.muted = false;
+    audio.volume = 1;
+    audio.load();
+    const primed = await within(audio.play().then(() => true), 700, false);
+    audio.pause();
+    audio.src = reactionGateAirProfiles[direction].url;
+    audio.load();
+    entry.primed = primed;
+    return primed;
+  });
+  mediaPriming = Promise.all(tasks).then(results => results.every(Boolean))
+    .catch(() => false).finally(() => { mediaPriming = null; });
+  return mediaPriming;
+}
+
+/** Call directly from Start or Try Again. A context may have been suspended or
+ * replaced since the previous attempt, so both permission and buffers matter.
+ */
+export async function primeReactionGateAirSounds(): Promise<boolean> {
+  let resumed: Promise<boolean> = Promise.resolve(false);
+  try {
+    const context = getTrackLabAudioContext();
+    if (context) {
+      resumed = context.state === 'running' ? Promise.resolve(true)
+        : within(context.resume().then(() => context.state === 'running'), 700, false);
+    }
+  } catch {
+    // The separately primed media path can still carry the decorative cue.
+  }
+  // Start play() before the first await, while browser user activation is live.
+  const mediaReady = primeGateAirMedia();
+  const [running, decoded, fallbackReady] = await Promise.all([
+    resumed, prepareReactionGateAirSounds(), mediaReady,
+  ]);
+  return (running && decoded) || fallbackReady;
+}
+
+function playGateAirMedia(direction: ReactionGateAirDirection): () => void {
+  const entry = media.get(direction);
+  if (!entry?.primed) return () => undefined;
+  const { audio } = entry;
+  const generation = ++entry.generation;
+  const startedAt = performance.now();
+  let cancelled = false;
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  const dispose = () => {
+    if (deadline) clearTimeout(deadline);
+    audio.removeEventListener('playing', onPlaying);
+    audio.removeEventListener('ended', dispose);
+    audio.removeEventListener('error', cancel);
+  };
+  const cancel = () => {
+    if (cancelled) return;
+    cancelled = true;
+    dispose();
+    if (generation === entry.generation) audio.pause();
+  };
+  const onPlaying = () => {
+    if (performance.now() - startedAt > 250) cancel();
+    else if (deadline) clearTimeout(deadline);
+  };
+  audio.addEventListener('playing', onPlaying);
+  audio.addEventListener('ended', dispose);
+  audio.addEventListener('error', cancel);
+  try {
+    audio.currentTime = 0;
+    deadline = setTimeout(cancel, 250);
+    void audio.play().then(() => {
+      if (cancelled && generation === entry.generation) audio.pause();
+    }, cancel);
+  } catch {
+    cancel();
+  }
+  return cancel;
+}
 
 /**
  * Load the exact auditioned samples before the UCI cadence. Decoding in the
@@ -57,9 +162,9 @@ function gateAirBuffer(context: AudioContext, direction: ReactionGateAirDirectio
 }
 
 /**
- * Start beside the visual gate movement without awaiting unlock, downloading,
- * or changing the cadence clock. A suspended/unsupported context stays silent;
- * it must never replay a stale movement when the device later resumes audio.
+ * Start beside the visual gate movement without changing the cadence clock.
+ * Use the already-primed media fallback when Web Audio is unavailable. A late
+ * media start expires rather than replaying a stale movement after an unlock.
  */
 export function playReactionGateAirSound(direction: ReactionGateAirDirection): () => void {
   let context: AudioContext | null = null;
@@ -94,9 +199,9 @@ export function playReactionGateAirSound(direction: ReactionGateAirDirection): (
 
   try {
     context = getTrackLabAudioContext();
-    if (!context || context.state !== 'running') return cancel;
+    if (!context || context.state !== 'running') return playGateAirMedia(direction);
     const buffer = gateAirBuffer(context, direction);
-    if (!buffer) return cancel;
+    if (!buffer) return playGateAirMedia(direction);
     source = context.createBufferSource();
     source.buffer = buffer;
     source.onended = disconnect;
@@ -109,6 +214,7 @@ export function playReactionGateAirSound(direction: ReactionGateAirDirection): (
     }
   } catch {
     cancel();
+    return playGateAirMedia(direction);
   }
 
   return cancel;

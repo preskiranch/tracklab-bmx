@@ -25,7 +25,7 @@ import { ReactionLeaderboard } from './ReactionLeaderboard';
 import { flushReactionPersonalBest, localReactionPersonalBest, type ReactionRecordOwner } from '../lib/reactionTestCloud';
 import './ReactionTestView.css';
 import { ReactionTree } from './ReactionTree';
-import { prepareReactionGateAirSounds } from '../lib/reactionGateAudio';
+import { prepareReactionGateAirSounds, primeReactionGateAirSounds } from '../lib/reactionGateAudio';
 
 type ReactionTestRunState = 'ready' | 'arming' | 'waiting' | 'running' | 'finished';
 
@@ -77,6 +77,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
   const timerStartedAtEpochRef = useRef<number | null>(null);
   const cadencePlanRef = useRef<ReactionTestCadencePlan | null>(null);
   const resultCapturedRef = useRef(false);
+  const retryPreparingRef = useRef(false);
   const runStateRef = useRef<ReactionTestRunState>('ready');
   const personalBestRef = useRef(displayedPersonalBestMs);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -299,7 +300,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
     // voice file and tone context to play with no first-cue permissions lag.
     await Promise.all([
       primeAudioCues().catch(() => undefined),
-      prepareReactionGateAirSounds(),
+      primeReactionGateAirSounds(),
     ]);
     if (generation !== generationRef.current) return;
 
@@ -376,6 +377,19 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
   const startButtonDisabled = runState !== 'ready';
   const retryAvailable = result != null && (result.falseStart || gateSettled);
   const handleGateSettled = useCallback(() => setGateSettled(true), []);
+  const retryAttempt = useCallback(async () => {
+    if (retryPreparingRef.current) return;
+    retryPreparingRef.current = true;
+    const generation = ++generationRef.current;
+    try {
+      // iOS can suspend or replace the context while the result is onscreen.
+      // Unlock in this click and finish decoding before the return starts.
+      await primeReactionGateAirSounds();
+      if (generation === generationRef.current) resetAttempt();
+    } finally {
+      retryPreparingRef.current = false;
+    }
+  }, [resetAttempt]);
 
 
   return (
@@ -481,7 +495,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
               className="reaction-primary-action reaction-control-action"
               type="button"
               onPointerDown={(event) => event.stopPropagation()}
-              onClick={resetAttempt}
+              onClick={retryAttempt}
             >
               <RotateCcw size={20} /> Try Again
             </button>
