@@ -2,7 +2,7 @@
 
 The ready view uses `public/assets/reaction-test-bmx-original-dirt-fixed.png`, the user's original 1280×720 photograph with only the small dirt gap beside the near gate cap corrected. Its SHA-256 is `2a2c8f30757fc24da55c416b882266a2f2668dc636524f11a030ae5b037f3ea5`. This restores the selected original detail and exposure; it is not described as a native 4K photograph. The later recreated 4K scene is no longer the active reaction background.
 
-The original gate, tree, background and camera remain unchanged while ready. All four original lenses are visible while ready. Starting the test activates the existing dim/illuminated states; the captured lamp remains brighter after the attempt, without a checkmark. The shared photographic coordinate system keeps the full tree and gate visible on tested portrait and landscape viewports.
+The original gate, tree, background and camera remain unchanged while ready. All four original lenses are visible while ready. Starting the test activates the existing dim/illuminated states; the captured lens remains brighter after the attempt, without an outer glow, added ring, or checkmark. The shared photographic coordinate system keeps the full tree and gate visible on tested portrait and landscape viewports.
 
 The animated gate uses a fixed hinge, one radius for both height and receiving depth, and a 90-degree world rotation. Its grille finishes at ground height zero across its full width. The photographed cap rotates in the same world plane and is clipped at the receiving surface; it is completely hidden when down. Near the flat position, another patch of the original photograph's flat grating supplies texture detail under the same projection. No generated metal gate substitutes for the original upright gate.
 

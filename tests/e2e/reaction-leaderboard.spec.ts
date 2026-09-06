@@ -695,9 +695,22 @@ test('original reaction scene keeps the full tree and gate clear in ready and dr
           };
           const controls = ['.reaction-title', '.reaction-exit-action', '.reaction-result-stack', '.reaction-primary-action']
             .map(selector => ({ selector, rect: element.querySelector(selector)!.getBoundingClientRect() }));
-          const recordStack = element.querySelector('.reaction-result-stack')!.getBoundingClientRect();
+          const recordStackElement = element.querySelector('.reaction-result-stack')!;
+          const recordStack = recordStackElement.getBoundingClientRect();
           const recordChildren = [...element.querySelectorAll<HTMLElement>('.reaction-result-stack *')]
             .filter(child => child.getBoundingClientRect().width > 0 && !child.closest('dialog'));
+          const outsideCard = (rect: DOMRect) => rect.left < recordStack.left - 1 || rect.right > recordStack.right + 1
+            || rect.top < recordStack.top - 1 || rect.bottom > recordStack.bottom + 1;
+          const recordTextOverflow: string[] = [];
+          const textNodes = document.createTreeWalker(recordStackElement, NodeFilter.SHOW_TEXT);
+          for (let node = textNodes.nextNode(); node; node = textNodes.nextNode()) {
+            if (!node.textContent?.trim() || node.parentElement?.closest('dialog')) continue;
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            if ([...range.getClientRects()].some(rect => rect.width > 0 && rect.height > 0 && outsideCard(rect))) {
+              recordTextOverflow.push(node.textContent.trim());
+            }
+          }
           const intersects = (a: Pick<DOMRect, 'left' | 'right' | 'top' | 'bottom'>, b: Pick<DOMRect, 'left' | 'right' | 'top' | 'bottom'>) => (
             Math.min(a.right, b.right) > Math.max(a.left, b.left) + 1 && Math.min(a.bottom, b.bottom) > Math.max(a.top, b.top) + 1
           );
@@ -707,9 +720,15 @@ test('original reaction scene keeps the full tree and gate clear in ready and dr
             collisions: controls.filter(control => intersects(control.rect, tree) || intersects(control.rect, gateBounds)).map(control => control.selector),
             recordOverflow: recordChildren.filter(child => {
               const rect = child.getBoundingClientRect();
-              return rect.left < recordStack.left - 1 || rect.right > recordStack.right + 1
-                || child.scrollWidth > child.clientWidth + 1;
+              const style = getComputedStyle(child);
+              // Visible content may use a flex wrapper's surrounding card
+              // padding. scrollWidth alone does not mean that content is clipped.
+              const clips = (overflow: string) => /^(hidden|clip|auto|scroll)$/.test(overflow);
+              return outsideCard(rect)
+                || (clips(style.overflowX) && child.scrollWidth > child.clientWidth + 1)
+                || (clips(style.overflowY) && child.scrollHeight > child.clientHeight + 1);
             }).map(child => `${child.tagName}.${child.className}`),
+            recordTextOverflow,
             controls: controls.map(control => ({ selector: control.selector, ...control.rect.toJSON() })),
             scene: scene.toJSON(), layer: gateLayer.getBoundingClientRect().toJSON(),
             overflow: document.documentElement.scrollWidth > innerWidth,
@@ -719,6 +738,7 @@ test('original reaction scene keeps the full tree and gate clear in ready and dr
         expect(framing.overflow).toBe(false);
         expect(framing.collisions, `${state} ${viewport.label}: floating controls must leave the original subjects visible`).toEqual([]);
         expect(framing.recordOverflow, `${state} ${viewport.label}: record text and controls must stay inside their card`).toEqual([]);
+        expect(framing.recordTextOverflow, `${state} ${viewport.label}: rendered record text must remain inside its card`).toEqual([]);
         for (const subject of [framing.tree, framing.gateBounds]) {
           expect(subject.left).toBeGreaterThanOrEqual(0);
           expect(subject.top).toBeGreaterThanOrEqual(0);
@@ -770,6 +790,8 @@ for (const [cueNumber, stoppedStage] of ['red', 'yellow-1', 'yellow-2', 'green']
     await expect(view.locator('[data-lamp-state="stopped"]')).toHaveCount(1);
     await expect(view.locator('[data-lamp-state="dim"]')).toHaveCount(3);
     await expect(view.locator('.reaction-light-stop-marker')).toHaveCount(0);
+    await expect(view.locator(`[data-reaction-stage="${stoppedStage}"]`)).toHaveCSS('box-shadow', 'none');
+    await expect(view.locator(`[data-reaction-stage="${stoppedStage}"]`)).toHaveCSS('outline-style', 'none');
     await expect(view.locator(`[data-reaction-stage="${stoppedStage}"] .reaction-light-bulb`)).toHaveCSS('filter', 'brightness(1.65) saturate(1.2)');
     await page.screenshot({ path: testInfo.outputPath(`tree-${stoppedStage}-tablet.png`) });
     await page.setViewportSize({ width: 390, height: 844 });

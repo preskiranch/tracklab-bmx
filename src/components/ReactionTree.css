@@ -9,5 +9,5 @@
 /* The ready view shows the original lenses directly, without repainting them. */
 .reaction-tree.is-ready .reaction-light-bulb { visibility: hidden; }
 .reaction-light.is-lit .reaction-light-bulb { filter: brightness(1); }
-.reaction-light.is-stopped { box-shadow: 0 0 10px 3px var(--lamp-glow), 0 0 22px 6px var(--lamp-glow); }
+/* Brighten only the photographed lens; keep the housing free of halos/rings. */
 .reaction-light.is-stopped .reaction-light-bulb { filter: brightness(1.65) saturate(1.2); }
