@@ -1,3 +1,4 @@
+import { childDeviceTokenFromHref } from './lib/childDevices';
 import {
   lazy,
   Suspense,
@@ -452,6 +453,8 @@ const loadAppSettingsView = () => import('./components/AppSettingsView')
   .then((module) => ({ default: module.AppSettingsView }));
 const AppSettingsView = lazy(loadAppSettingsView);
 const BetaTestingPanel = lazy(() => import('./components/BetaTestingPanel').then((module) => ({ default: module.BetaTestingPanel })));
+const ClubClaimWelcome = lazy(() => import('./components/ClubClaimWelcome'));
+const ChildDeviceInvitation = lazy(() => import('./components/ChildPhoneSetup').then((module) => ({ default: module.ChildDeviceInvitation })));
 const FamilyInvitation = lazy(() => import('./components/FamilyAccounts').then((module) => ({ default: module.FamilyInvitation })));
 const BetaInviteDialog = lazy(() => import('./components/BetaInviteDialog').then((module) => ({ default: module.BetaInviteDialog })));
 const HeartRateSettingsCard = lazy(() => import('./components/HeartRateSettingsCard')
@@ -2264,6 +2267,9 @@ export default function App() {
   const [chatDraft, setChatDraft] = useState('');
   const [sidebarMoreOpen, setSidebarMoreOpen] = useState(false);
   const [familyOpen, setFamilyOpen] = useState(false);
+  const [childDeviceToken, setChildDeviceToken] = useState(() => childDeviceTokenFromHref(window.location.href));
+  const [onboardingClaimRole, setOnboardingClaimRole] = useState<'athlete' | 'parent' | undefined>();
+  const [clubClaimWelcomeOpen, setClubClaimWelcomeOpen] = useState(() => /[?#&]clubInvite=/.test(window.location.href));
   const [familyInviteToken, setFamilyInviteToken] = useState(() => typeof window === 'undefined' ? '' : familyInviteTokenFromHref(window.location.href));
   const [familyInviteOpen, setFamilyInviteOpen] = useState(Boolean(familyInviteToken));
   const [regularUserPreview, setRegularUserPreview] = useState(false);
@@ -3252,6 +3258,9 @@ export default function App() {
 
   useEffect(() => {
     const syncFamilyInvite = () => {
+      const childToken = childDeviceTokenFromHref(window.location.href);
+      if (childToken) setChildDeviceToken(childToken);
+      if (/[?#&]clubInvite=/.test(window.location.href)) setClubClaimWelcomeOpen(true);
       const token = familyInviteTokenFromHref(window.location.href);
       if (token) { setFamilyInviteToken(token); setFamilyInviteOpen(true); }
     };
@@ -3324,6 +3333,14 @@ export default function App() {
           setHeartRateStudioInviteOpen(true);
         }, {
           onTrackLocator: () => !disposed && setShowMembershipLanding(true),
+          onChildDevice: (token) => { if (!disposed) setChildDeviceToken(token); },
+          onClubInvite: (token) => {
+            if (disposed) return;
+            const url = new URL(window.location.href); url.hash = new URLSearchParams({ clubInvite: token }).toString();
+            window.history.replaceState(window.history.state, '', url);
+            window.dispatchEvent(new HashChangeEvent('hashchange'));
+            setClubClaimWelcomeOpen(true); setAppMode('profile'); setShowMembershipLanding(false);
+          },
           onFamilyInvite: (token) => {
             if (disposed) return;
             setFamilyInviteToken(token);
@@ -12615,6 +12632,25 @@ export default function App() {
       />
     </Suspense>
   ) : null;
+  const childPhoneInvitation = !clubTabletKioskMode && childDeviceToken ? <Suspense fallback={null}>
+    <ChildDeviceInvitation key={childDeviceToken} token={childDeviceToken} user={authUser} loading={authStatus === 'loading'}
+      onClose={() => { setChildDeviceToken(''); const url = new URL(window.location.href); const hash = new URLSearchParams(url.hash.slice(1)); hash.delete('childDevice'); url.hash = hash.toString(); window.history.replaceState(window.history.state, '', url); }}
+      onSignOut={() => { void handleSignOut(); }}
+      onAccepted={async (user) => {
+        await clearNativeRecoveryBoundary();
+        setAuthUser(user); setAuthStatus('signed-in'); setMembership(user.membership);
+        setProfileNameDraft(user.name); setProfileEmailDraft(user.email); setAuthPasswordDraft('');
+        setChildDeviceToken(''); window.history.replaceState(window.history.state, '', window.location.pathname);
+        setShowMembershipLanding(false); setMappingMode(false); setAppMode('profile');
+      }} />
+  </Suspense> : null;
+  const clubClaimWelcome = !clubTabletKioskMode && !authUser && clubClaimWelcomeOpen && !childDeviceToken ? <Suspense fallback={null}>
+    <ClubClaimWelcome onClose={() => setClubClaimWelcomeOpen(false)} onChoose={(role) => {
+      try { sessionStorage.setItem('tracklab-club-claim-role', role); } catch { /* UI preference only. */ }
+      setOnboardingClaimRole(role); setClubClaimWelcomeOpen(false); setShowMembershipLanding(true); setAuthMode('register');
+      window.setTimeout(() => document.getElementById('free-account-gate')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50);
+    }} />
+  </Suspense> : null;
   const familyInvitation = !clubTabletKioskMode && familyInviteToken && familyInviteOpen ? (
     <Suspense fallback={null}>
       <FamilyInvitation
@@ -12660,8 +12696,11 @@ export default function App() {
         {appleBillingCoordinator}
         {betaInvitation}
         {familyInvitation}
+        {childPhoneInvitation}
+        {clubClaimWelcome}
         <Suspense fallback={lazyLoadingFallback}>
           <MembershipLanding
+          clubClaimRole={onboardingClaimRole}
           membership={membership}
           bikeSeats={appleConnectionCount}
           appleStoreAvailable={appleStoreAvailable}
@@ -12785,6 +12824,8 @@ export default function App() {
       {appleBillingCoordinator}
       {betaInvitation}
         {familyInvitation}
+        {childPhoneInvitation}
+        {clubClaimWelcome}
       {!clubTabletKioskMode && (
         raceViewFullscreen || mappingFullscreen || exploreRideFullscreen || utilityFullscreen
       ) && <div className="watch-connect-indicator-slot fullscreen" id="watch-connect-indicator-slot" />}
@@ -13443,9 +13484,9 @@ export default function App() {
           </button>
           {sidebarMoreOpen && (
             <div className="side-nav-more">
-              <button type="button" onClick={() => { setMappingMode(false); setAppMode('profile'); setFamilyOpen(true); setSidebarMoreOpen(false); }}>
+              {!authUser?.managedChild && <button type="button" onClick={() => { setMappingMode(false); setAppMode('profile'); setFamilyOpen(true); setSidebarMoreOpen(false); }}>
                 <UserPlus size={17} /> Family
-              </button>
+              </button>}
               <button type="button" onClick={handleHeartRateAccountBlockOpenSettings}>
                 <Settings size={17} /> Settings
               </button>

@@ -66,7 +66,7 @@ import {
 import { AppleBillingError, createAppleBillingService } from './appleBilling.mjs';
 import { wattbikeMembershipForAccount } from './appleMembership.mjs';
 import { betaInvitationPolicy, publicBetaAccessStatus } from './betaAccess.mjs';
-import { familyChildName, validFamilyToken, publicFamilyChild, publicFamilyInvitation, familyTrainingTotals } from './familyAccess.mjs';
+import { familyChildName, validFamilyToken, publicFamilyChild, publicFamilyInvitation, familyTrainingTotals, managedChildId, accountTrainingProfileKey, trainingProfileAccountId } from './familyAccess.mjs';
 import {
   applyNativeAppCors,
   applySecurityHeaders,
@@ -1306,8 +1306,7 @@ function kickAppleBillingReconciliation(delayMs = 0) {
 }
 
 function authUserIdFromProfileKey(profileKey) {
-  const match = /^user:(.+)$/.exec(String(profileKey || ''));
-  return match?.[1] || '';
+  return trainingProfileAccountId(profileKey);
 }
 
 async function clubBikeAccessForOwnerProfileKey(ownerProfileKey) {
@@ -1601,8 +1600,9 @@ function publicAuthUser(user) {
   const membership = membershipForAccount(user);
   return {
     id: user.id,
-    profileKey: `user:${user.id}`,
-    email: user.email,
+    profileKey: accountTrainingProfileKey(user),
+    email: managedChildId(user.id) ? '' : user.email,
+    ...(managedChildId(user.id) ? { managedChild: true } : {}),
     name: user.displayName,
     username: user.username,
     admin: isAdminEmail(user.email),
@@ -1925,7 +1925,16 @@ async function createSignedInResponse(request, response, user, statusCode = 200)
 
 async function currentAuthSessionByHash(hash, sessionCache = authSessionLookups) {
   if (!/^[a-f0-9]{64}$/u.test(String(hash || ''))) return null;
-  const session = await sessionCache.load(hash, persistence.findAuthSession);
+  let session = await sessionCache.load(hash, persistence.findAuthSession);
+  if (managedChildId(session?.user?.id)) {
+    // Revalidate every managed-device request, even while ordinary sessions are
+    // cached. Revocation/archival must take effect on every server instance.
+    const [fresh, child] = await Promise.all([
+      persistence.findAuthSession(hash), persistence.loadManagedDeviceChild(session.user.id),
+    ]);
+    session = fresh && child ? fresh : null;
+    if (!session) sessionCache.forget(hash);
+  }
   if (!session?.user) {
     return null;
   }
@@ -2244,7 +2253,7 @@ async function requireClubMonitorOwnerSession(request, response) {
 }
 
 function authProfileKey(user) {
-  return `user:${user.id}`;
+  return accountTrainingProfileKey(user);
 }
 
 function sanitizeAccountProfileId(value) {
@@ -5514,6 +5523,31 @@ async function familyTrainingHistory(child, options) {
     .sort((a, b) => b.startedAt - a.startedAt).slice(0, options.limit);
 }
 
+async function handleChildDeviceRequest(request, response, requestUrl) {
+  if (!['/api/auth/child-device/preview', '/api/auth/child-device/accept'].includes(requestUrl.pathname)) return false;
+  const reply = (status, body) => writeJson(response, status, body, { 'Cache-Control': 'no-store' });
+  if (request.method !== 'POST') { reply(405, { error: 'Method not allowed' }); return true; }
+  if (!enforceNoStoreRateLimit(request, response, authRateLimiter, 20, 'child-device-setup')) return true;
+  const body = await readJsonBody(request, 8_000);
+  if (!validFamilyToken(body?.token)) { reply(400, { error: 'Ask your parent for a new child-phone setup link.' }); return true; }
+  const hash = tokenHash(body.token);
+  const preview = await persistence.previewFamilyDeviceInvitation(hash);
+  if (!preview) { reply(409, { error: 'This setup link expired, was used, or was canceled. Ask your parent for a new link in Family.' }); return true; }
+  if (requestUrl.pathname.endsWith('/preview')) { reply(200, preview); return true; }
+  if (body.confirm !== true) { reply(400, { error: 'Confirm this phone is for the named athlete.' }); return true; }
+  if (await currentAuthSession(request)) { reply(409, { error: 'Sign out of the current account before setting up the child’s phone.' }); return true; }
+  const token = createSessionToken();
+  const user = await persistence.acceptFamilyDeviceInvitation(hash, {
+    id: randomUUID(), tokenHash: tokenHash(token),
+    expiresAt: new Date(Date.now() + authSessionMaxAgeSeconds * 1000).toISOString(),
+  });
+  if (!user) { reply(409, { error: 'The setup link is no longer available. Ask your parent for a new link.' }); return true; }
+  const native = requestIsNativeApp(request);
+  if (!native) setAuthCookie(response, request, token);
+  reply(200, { user: publicAuthUser(user), ...(native ? { nativeSessionToken: token } : {}) });
+  return true;
+}
+
 async function handleFamilyRequest(request, response, requestUrl) {
   const pathname = requestUrl.pathname;
   if (pathname !== '/api/family' && !pathname.startsWith('/api/family/')) return false;
@@ -5525,9 +5559,10 @@ async function handleFamilyRequest(request, response, requestUrl) {
   const session = await currentAuthSession(request, personalAuthSessions);
   if (!session?.user) { reply(401, { error: 'Sign in to manage family access.' }); return true; }
   const userId = session.user.id;
+  if (managedChildId(userId)) { reply(403, { error: 'Ask your parent to manage Family from their account.' }); return true; }
   if (!enforceNoStoreRateLimit(request, response, betaAccessRateLimiter,
     request.method === 'GET' ? 600 : 100, `family:${userId}:${request.method === 'GET' ? 'read' : 'write'}`)) return true;
-  const childMatch = /^\/api\/family\/children\/([a-zA-Z0-9-]{1,100})(?:\/(profile|training-sessions|club-claim|restore))?$/u.exec(pathname);
+  const childMatch = /^\/api\/family\/children\/([a-zA-Z0-9-]{1,100})(?:\/(profile|training-sessions|club-claim|restore|device-invite|devices))?$/u.exec(pathname);
   try {
     if (pathname === '/api/family' && request.method === 'GET') {
       const state = await persistence.loadFamilyAccess(userId);
@@ -5544,6 +5579,16 @@ async function handleFamilyRequest(request, response, requestUrl) {
       reply(200, { children: authorizedChildren, archivedChildren: current.archivedChildren.map((child) => publicFamilyChild(child)), invitations: current.invitations.map(publicFamilyInvitation),
         sharedWith: current.sharedWith.map((item) => ({ id: item.id, parentName: item.parentName,
           createdAt: item.createdAt, permissions: { activity: true, health: false } })) });
+    } else if (pathname === '/api/family/club-claim' && request.method === 'POST') {
+      const body = await readJsonBody(request, 8_000);
+      if (body?.guardianConsent !== true || !validFamilyToken(body?.token)
+        || (!body.childId && !familyChildName(body?.name))) {
+        reply(400, { error: 'Confirm you are the parent or guardian and enter the child’s name.' }); return true;
+      }
+      const claimed = await persistence.claimFamilyClubInvitation(userId, body.childId || null, tokenHash(body.token), Date.now(), body.name);
+      if (!claimed) { reply(409, { error: 'This invitation expired or was already claimed. For an existing athlete account, use a Family permission link. Ask the studio for a new invitation if this one expired.' }); return true; }
+      const child = await persistence.loadFamilyChild(userId, claimed.childId);
+      reply(201, { child: publicFamilyChild(child) });
     } else if (pathname === '/api/family/children' && request.method === 'POST') {
       const body = await readJsonBody(request, 8_000);
       const name = familyChildName(body?.name);
@@ -5584,6 +5629,17 @@ async function handleFamilyRequest(request, response, requestUrl) {
       if (!action && request.method === 'DELETE') {
         const removed = await persistence.revokeFamilyAccess(userId, childId);
         reply(removed ? 200 : 404, removed ? { ok: true } : { error: 'This child profile is unavailable.' });
+      } else if (action === 'device-invite' && request.method === 'POST') {
+        await readJsonBody(request, 8_000);
+        const origin = publicRequestOrigin(request);
+        if (!origin) { reply(503, { error: 'The public TrackLab address is unavailable.' }); return true; }
+        const token = createSessionToken();
+        const invite = await persistence.createFamilyDeviceInvitation(userId, childId, tokenHash(token));
+        reply(invite ? 201 : 404, invite ? { ...invite, url: `${origin}/#childDevice=${encodeURIComponent(token)}` } : { error: 'Choose an active parent-managed child.' });
+      } else if (action === 'devices' && request.method === 'DELETE') {
+        const removed = await persistence.revokeFamilyDevices(userId, childId);
+        authSessionLookups.forgetUser(`child-${childId}`); personalAuthSessions.forgetUser(`child-${childId}`);
+        reply(removed ? 200 : 404, removed ? { ok: true } : { error: 'Child profile unavailable.' });
       } else if (action === 'club-claim' && request.method === 'POST') {
         const body = await readJsonBody(request, 8_000);
         if (child.kind !== 'managed' || !validFamilyToken(body?.token)) {
@@ -10227,7 +10283,7 @@ async function reactionTestResponse(access) {
   const claimedUserId = tablet && access.identity.member.status === 'claimed'
     ? authUserIdFromProfileKey(access.identity.profileKey) : '';
   const [measured, data, claimedData, claimedMeasured] = await Promise.all([
-    persistence.loadReactionTestBest(profileKey.slice(5), tablet?.studioRiderId || ''),
+    persistence.loadReactionTestBest(trainingProfileAccountId(profileKey), tablet?.studioRiderId || ''),
     persistence.loadUserData(profileKey),
     tablet && access.identity.member.status === 'claimed'
       ? persistence.loadUserData(access.identity.profileKey) : null,
@@ -10264,7 +10320,7 @@ async function saveReactionTestForAccess(access, result, { legacy = false, autoJ
     // Managed children have private profile records but no auth user. Their
     // measured club result remains keyed to the owner and exact roster rider.
     const targetUserId = authUserIdFromProfileKey(target.profileKey);
-    if (measuredMs != null && targetUserId) await persistence.saveReactionTestBest(
+    if (measuredMs != null && targetUserId && (!managedChildId(targetUserId) || await persistence.findAuthUserById(targetUserId))) await persistence.saveReactionTestBest(
       targetUserId, measuredMs, target.studioRiderId || '',
       { autoJoinDisplayName: autoJoinLeaderboard && access.authSession && !access.tabletSession
         ? reactionLeaderboardAccountName(access.authSession.user.displayName) : '' },
@@ -16974,7 +17030,7 @@ async function handleHeartRateWatchConnectApi(request, response, requestUrl) {
     if (
       !identity
       || identity.member.status !== 'claimed'
-      || !String(identity.member.athleteProfileKey || '').startsWith('user:')
+      || !trainingProfileAccountId(identity.member.athleteProfileKey)
       || identity.member.athleteProfileKey !== identity.profileKey
     ) {
       writeJson(response, 403, {
@@ -17064,7 +17120,7 @@ async function handleHeartRateWatchConnectApi(request, response, requestUrl) {
     if (
       !identity
       || identity.member.status !== 'claimed'
-      || !String(identity.member.athleteProfileKey || '').startsWith('user:')
+      || !trainingProfileAccountId(identity.member.athleteProfileKey)
       || identity.member.athleteProfileKey !== identity.profileKey
     ) {
       writeJson(response, 403, {
@@ -17827,7 +17883,7 @@ async function handleHeartRateStudioInvitationApi(request, response, requestUrl)
     const member = (ownedClub.members ?? []).find((candidate) => (
       candidate.studioRiderId === studioRiderId
       && candidate.status === 'claimed'
-      && String(candidate.athleteProfileKey || '').startsWith('user:')
+      && Boolean(trainingProfileAccountId(candidate.athleteProfileKey))
     ));
     if (!member) {
       writeJson(response, 409, { error: 'That studio rider must claim their TrackLab account before heart-rate pairing.' });
@@ -19588,6 +19644,14 @@ async function serveStatic(request, response) {
             comment: 'Open a personal beta invitation without sending its token in the URL request.',
           }, {
             '/': '/',
+            '#': 'childDevice=*',
+            comment: 'Open a one-use parent-approved child phone setup link.',
+          }, {
+            '/': '/',
+            '#': 'clubInvite=*',
+            comment: 'Choose adult athlete or parent and claim the studio athlete record.',
+          }, {
+            '/': '/',
             '#': 'familyInvite=*',
             comment: 'Open a family activity-sharing invitation for personal account approval.',
           }],
@@ -20810,6 +20874,7 @@ async function serveStatic(request, response) {
     return;
   }
 
+  if (await handleChildDeviceRequest(request, response, requestUrl)) return;
   if (await handleFamilyRequest(request, response, requestUrl)) return;
 
   if (['/api/beta-access', '/api/beta-access/accept', '/api/admin/beta-access',
@@ -22322,6 +22387,11 @@ async function serveStatic(request, response) {
 
     if (request.method === 'GET') {
       const userData = await persistence.loadUserData(profileKey);
+      if (managedChildId(session.user.id)) {
+        const child = await persistence.loadManagedDeviceChild(session.user.id);
+        if (!child) { writeJson(response, 401, { error: 'This child sign-in has ended.' }); return; }
+        userData.accountProfile = (await familyProfilePayload(child)).accountProfile;
+      }
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
       response.end(JSON.stringify(publicUserData(userData, session.user)));
       return;
@@ -23147,8 +23217,8 @@ async function serveStatic(request, response) {
           riderName: athlete.riderName,
           athleteName: athlete.athleteName,
           photoUrl: athlete.photoUrl,
-          profileId: member.status === 'claimed' && String(member.athleteProfileKey || '').startsWith('user:')
-            ? sanitizeAccountProfileId(String(member.athleteProfileKey).slice(5))
+          profileId: member.status === 'claimed' && trainingProfileAccountId(member.athleteProfileKey)
+            ? sanitizeAccountProfileId(trainingProfileAccountId(member.athleteProfileKey))
             : '',
           bikeDeviceId,
           billingOwnerUserId: clubBikeAccess.ownerUserId,

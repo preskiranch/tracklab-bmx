@@ -13,9 +13,9 @@ export function AccountProfileWorkspace({ familyOpen, onFamilyOpenChange, ...pro
   return <div className="account-profile-workspace">
     <div className="account-profile-tabs" role="group" aria-label="Choose profile workspace">
       <button type="button" aria-pressed={!familyOpen} onClick={() => onFamilyOpenChange(false)}>My profile</button>
-      <button type="button" aria-pressed={familyOpen} onClick={() => onFamilyOpenChange(true)}>Family</button>
+      {!profile.profileId.startsWith('child-') && <button type="button" aria-pressed={familyOpen} onClick={() => onFamilyOpenChange(true)}>Family</button>}
     </div>
-    {familyOpen ? <Suspense fallback={<p role="status">Loading your family…</p>}>
+    {familyOpen && !profile.profileId.startsWith('child-') ? <Suspense fallback={<p role="status">Loading your family…</p>}>
       <FamilyAccounts key={profile.profileId} accountId={profile.profileId} accountName={profile.name} speedUnit={profile.speedUnit} distanceUnit={profile.distanceUnit} />
     </Suspense> : <AccountProfileView {...profile} />}
   </div>;

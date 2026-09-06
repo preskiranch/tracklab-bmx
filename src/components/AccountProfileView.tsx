@@ -1,3 +1,4 @@
+import { ParentAthleteClaim } from './ParentAthleteClaim';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   Activity,
@@ -800,7 +801,13 @@ export function AccountProfileView({
   const [clubState, setClubState] = useState<ClubConnectState>(emptyClubState);
   const [clubStatus, setClubStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [clubMessage, setClubMessage] = useState('Loading Club Connect…');
+  const [clubClaimRole, setClubClaimRole] = useState<'athlete' | 'parent' | ''>(() => { try { const role = sessionStorage.getItem('tracklab-club-claim-role'); return role === 'parent' || role === 'athlete' ? role : ''; } catch { return ''; } });
   const [clubInviteToken, setClubInviteToken] = useState(clubInviteTokenFromUrl);
+  useEffect(() => {
+    const sync = () => { const token = clubInviteTokenFromUrl(); if (token) setClubInviteToken(token); };
+    window.addEventListener('hashchange', sync);
+    return () => window.removeEventListener('hashchange', sync);
+  }, []);
   const [clubFullNameDraft, setClubFullNameDraft] = useState(initialAccountName.fullName);
   const [clubNicknameDraft, setClubNicknameDraft] = useState(initialAccountName.nickname);
   const [clubPhotoDraft, setClubPhotoDraft] = useState(profile.photoUrl);
@@ -1271,7 +1278,7 @@ export function AccountProfileView({
         />
       </section>
 
-      <AccountDeletionPanel email={email} accountId={profileId} />
+      {profileId.startsWith('child-') ? <section className="family-card"><h2>My athlete account</h2><p>You’re signed in as {name}. Your parent manages your device access from their Family account. Your training is saved to your own profile.</p></section> : <AccountDeletionPanel email={email} accountId={profileId} />}
 
       {canManagePersonalRecords && clubState.canManageClub && onPersonalRecordChange && visibleStudioRiders.length > 0 && (
         <section className="athlete-personal-records" aria-labelledby="athlete-personal-records-title">
@@ -1342,6 +1349,13 @@ export function AccountProfileView({
 
           {clubInviteToken && (
             <div className="club-profile-setup">
+              <h3>Who is claiming this athlete profile?</h3>
+              <div className="club-claim-choices" role="group" aria-label="Who is claiming this athlete profile?">
+                <button type="button" aria-pressed={clubClaimRole === 'athlete'} onClick={() => setClubClaimRole('athlete')}>I’m the athlete</button>
+                <button type="button" aria-pressed={clubClaimRole === 'parent'} onClick={() => setClubClaimRole('parent')}>I’m the parent or guardian</button>
+              </div>
+              {clubClaimRole === 'parent' && <ParentAthleteClaim token={clubInviteToken} onClaimed={() => { clearClubInviteFromUrl(); refreshClub(); }} />}
+              {clubClaimRole === 'athlete' && <>
               <div className="club-profile-setup-copy">
                 <strong>Complete your Club Athlete profile</strong>
                 <p>Add the name and photo you want displayed throughout TrackLab. This will not change or disconnect your studio records.</p>
@@ -1381,6 +1395,7 @@ export function AccountProfileView({
               <button className="club-profile-complete" type="button" disabled={clubBusyId === 'claim' || !clubFullNameDraft.trim()} onClick={acceptInvitation}>
                 <UserPlus size={17} /> {clubBusyId === 'claim' ? 'Connecting…' : 'Complete profile and connect'}
               </button>
+              </>}
             </div>
           )}
 

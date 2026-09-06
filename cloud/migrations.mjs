@@ -2394,6 +2394,22 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
         `CREATE INDEX idx_family_link_invites_parent ON ${schema}.family_link_invites(parent_user_id, created_at DESC)`,
       ],
     },
+    {
+      version: 49,
+      name: 'add parent-approved child device setup invitations',
+      statements: [
+        `CREATE TABLE ${schema}.family_device_invites (
+          id TEXT PRIMARY KEY,
+          child_id TEXT NOT NULL REFERENCES ${schema}.family_children(id) ON DELETE CASCADE,
+          token_hash TEXT UNIQUE NOT NULL,
+          expires_at TIMESTAMPTZ NOT NULL,
+          claimed_at TIMESTAMPTZ,
+          revoked_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`,
+        `CREATE INDEX idx_family_device_invites_child ON ${schema}.family_device_invites(child_id)`,
+      ],
+    },
   ];
 }
 

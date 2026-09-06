@@ -54,6 +54,7 @@ export type AppleSubscriptionOffer = {
 };
 
 type MembershipLandingProps = {
+  clubClaimRole?: 'athlete' | 'parent';
   membership: MembershipState;
   bikeSeats: number;
   appleStoreAvailable: boolean | null;
@@ -93,6 +94,7 @@ type MembershipLandingProps = {
 };
 
 export function MembershipLanding({
+  clubClaimRole,
   membership,
   bikeSeats,
   appleStoreAvailable,
@@ -482,7 +484,8 @@ export function MembershipLanding({
       <section id="free-account-gate" className={`profile-gate ${profileComplete ? 'complete' : ''}`} aria-label="Required profile">
         <div>
           <span className="eyebrow">Your TrackLab account</span>
-          <h2>{profileComplete ? 'Account ready' : creatingAccount ? 'Create your free TrackLab account' : 'Sign in to TrackLab'}</h2>
+          <h2>{profileComplete ? 'Account ready' : clubClaimRole === 'parent' ? (creatingAccount ? 'Create your parent account' : 'Sign in to your parent account') : creatingAccount ? 'Create your free TrackLab account' : 'Sign in to TrackLab'}</h2>
+          {clubClaimRole === 'parent' && !profileComplete && <p>Use your own name and email here. In the next step, you’ll claim your child’s studio profile and set up their phone separately. Already have a parent account? Choose Sign in below.</p>}
           <p>
             Browse BMX tracks and bike shops without signing in. A free account adds the Reaction Test, favorites,
             and community features. Racer or invited beta access unlocks connected Wattbike training and recorded ghost racing.
@@ -509,7 +512,7 @@ export function MembershipLanding({
                 autoComplete="name"
                 disabled={authLoading}
                 onChange={(event) => onProfileNameChange(event.target.value)}
-                placeholder="Rider or studio name"
+                placeholder={clubClaimRole === 'parent' ? 'Parent or guardian name' : 'Rider or studio name'}
                 type="text"
                 value={profileName}
               />

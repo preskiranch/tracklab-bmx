@@ -1,3 +1,4 @@
+import { childDeviceTokenFromHref } from './childDevices';
 import { App as CapacitorApp, type URLOpenListenerEvent } from '@capacitor/app';
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { normalizeHeartRateAccountBlockCode } from './heartRateAccountBlock';
@@ -71,6 +72,8 @@ export async function listenForHeartRateStudioInviteAppLinks(
     onTrackLocator?: (trackId: string) => void;
     onBetaInvite?: (token: string) => void;
     onFamilyInvite?: (token: string) => void;
+    onChildDevice?: (token: string) => void;
+    onClubInvite?: (token: string) => void;
   } = {},
 ): Promise<PluginListenerHandle> {
   const isNativePlatform = options.isNativePlatform ?? (() => Capacitor.isNativePlatform());
@@ -80,8 +83,15 @@ export async function listenForHeartRateStudioInviteAppLinks(
   let lastDisposition = '';
   let lastBetaDispositionAt = 0;
   let lastFamilyDispositionAt = 0;
+  let lastChildDispositionAt = 0;
+  let lastClubDispositionAt = 0;
   let lastTrackDispositionAt = 0;
   const handleUrl = (value: unknown) => {
+    const url = productionAppLink(value);
+    const childToken = url ? childDeviceTokenFromHref(url.href) : '';
+    const clubToken = url ? new URLSearchParams(url.hash.slice(1)).get('clubInvite') || url.searchParams.get('clubInvite') || '' : '';
+    if (childToken && options.onChildDevice) { const now = Date.now(); if (lastDisposition !== `child:${childToken}` || now - lastChildDispositionAt >= 1000) { lastDisposition = `child:${childToken}`; lastChildDispositionAt = now; options.onChildDevice(childToken); } return; }
+    if (/^[A-Za-z0-9_-]{43}$/.test(clubToken) && options.onClubInvite) { const now = Date.now(); if (lastDisposition !== `club:${clubToken}` || now - lastClubDispositionAt >= 1000) { lastDisposition = `club:${clubToken}`; lastClubDispositionAt = now; options.onClubInvite(clubToken); } return; }
     const familyToken = familyInviteTokenFromAppLink(value);
     if (familyToken && options.onFamilyInvite) {
       const now = Date.now();

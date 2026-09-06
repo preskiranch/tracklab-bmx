@@ -28,7 +28,7 @@ export default defineConfig({
   webServer: process.env.PLAYWRIGHT_BASE_URL
     ? undefined
     : {
-      command: `PORT=${port} VITE_WATTBIKE_BRIDGE_URL=${bridgeUrl} npm run cloud`,
+      command: `TRACKLAB_ADMIN_EMAILS=onboarding-club@tracklab.test PORT=${port} VITE_WATTBIKE_BRIDGE_URL=${bridgeUrl} npm run cloud`,
       url: baseURL,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,

@@ -7,6 +7,7 @@ export type AuthUser = {
   email: string;
   name: string;
   admin: boolean;
+  managedChild?: boolean;
   membership: MembershipState;
 };
 
@@ -35,7 +36,7 @@ function normalizeMembership(value: Partial<MembershipState> | null | undefined)
 }
 
 function normalizeAuthUser(value: Partial<AuthUser> | null | undefined): AuthUser | null {
-  if (!value?.id || !value.email || !value.name || !value.profileKey) {
+  if (!value?.id || (!value.email && value.managedChild !== true) || !value.name || !value.profileKey) {
     return null;
   }
 
@@ -45,6 +46,7 @@ function normalizeAuthUser(value: Partial<AuthUser> | null | undefined): AuthUse
     email: String(value.email),
     name: String(value.name),
     admin: Boolean(value.admin),
+    ...(value.managedChild === true ? { managedChild: true } : {}),
     membership: normalizeMembership(value.membership),
   };
 }
@@ -137,4 +139,10 @@ export async function deleteAuthAccount(password: string, confirmation: 'DELETE'
     clearLocalReactionAccount(accountId);
   }
   await clearNativeAuthToken();
+}
+
+export async function acceptChildDevice(token: string) {
+  return authFetch('/api/auth/child-device/accept', {
+    method: 'POST', body: JSON.stringify({ token, confirm: true }),
+  });
 }

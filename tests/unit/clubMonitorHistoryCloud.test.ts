@@ -186,6 +186,14 @@ describe('owner-operated Monitor View athlete history', () => {
             comment: 'Open a personal beta invitation without sending its token in the URL request.',
           }, {
             '/': '/',
+            '#': 'childDevice=*',
+            comment: 'Open a one-use parent-approved child phone setup link.',
+          }, {
+            '/': '/',
+            '#': 'clubInvite=*',
+            comment: 'Choose adult athlete or parent and claim the studio athlete record.',
+          }, {
+            '/': '/',
             '#': 'familyInvite=*',
             comment: 'Open a family activity-sharing invitation for personal account approval.',
           }],

@@ -203,3 +203,26 @@ describe('TrackLab native universal links', () => {
     } finally { now.mockRestore(); }
   });
 });
+
+describe('child phone and adult/parent club native links', () => {
+  it('handles only trusted production links and suppresses immediate repeated child prompts', async () => {
+    const token = 'd'.repeat(43);
+    let receive: ((event: { url: string }) => void) | undefined;
+    const onChildDevice = vi.fn(); const onClubInvite = vi.fn();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(10000);
+    try {
+      await listenForHeartRateStudioInviteAppLinks(vi.fn(), { isNativePlatform: () => true,
+        addListener: async (_event, callback) => { receive = callback; return { remove: async () => undefined }; },
+        getLaunchUrl: async () => ({ url: `https://tracklab-bmx.onrender.com/#childDevice=${token}` }), onChildDevice, onClubInvite });
+      await Promise.resolve();
+      expect(onChildDevice).toHaveBeenCalledWith(token);
+      receive?.({ url: `https://tracklab-bmx.onrender.com/#childDevice=${token}` });
+      expect(onChildDevice).toHaveBeenCalledTimes(1);
+      receive?.({ url: `https://tracklab-bmx.onrender.com.evil.test/#childDevice=${token}` });
+      receive?.({ url: `https://tracklab-bmx.onrender.com/?childDevice=${token}` });
+      expect(onChildDevice).toHaveBeenCalledTimes(1);
+      receive?.({ url: `https://tracklab-bmx.onrender.com/#clubInvite=${token}` });
+      expect(onClubInvite).toHaveBeenCalledWith(token);
+    } finally { now.mockRestore(); }
+  });
+});

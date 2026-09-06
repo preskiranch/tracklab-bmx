@@ -44,3 +44,21 @@ export function familyTrainingTotals(sessions) {
     durationMs: sessions.reduce((sum, item) => sum + (Number(item.durationMs) || 0), 0),
   };
 }
+
+// Managed auth identities never use a parent's email or a child's invented email
+// for sign-in. The reserved internal ID maps to the existing, unmoved data key.
+export function managedChildId(userId) {
+  const match = /^child-([a-f0-9-]{36})$/u.exec(String(userId || ''));
+  return match?.[1] ?? null;
+}
+export function accountTrainingProfileKey(user) {
+  const childId = managedChildId(user?.id);
+  return childId ? `family-child:${childId}` : `user:${user.id}`;
+}
+
+export function trainingProfileAccountId(profileKey) {
+  const key = String(profileKey || '');
+  if (key.startsWith('user:')) return key.slice(5);
+  const match = /^family-child:([a-f0-9-]{36})$/u.exec(key);
+  return match ? `child-${match[1]}` : '';
+}

@@ -9,6 +9,7 @@ import {
 import { FamilyAthleteHistory } from './FamilyAthleteHistory';
 import { RiderAvatar } from './RiderAvatar';
 import './FamilyAccounts.css';
+import { ChildPhoneSetup } from './ChildPhoneSetup';
 
 type FamilyAccountsProps = {
   accountId: string;
@@ -204,6 +205,7 @@ function FamilyAccountsContent({ accountId, accountName, speedUnit, distanceUnit
         {family.children.length === 0 ? <div className="family-empty"><Users size={26} /><p>Your family profiles will appear here after you create a child profile or an athlete approves your permission link.</p></div> : <div className="family-profile-list" role="group" aria-label="Family profiles">{family.children.map((child) => <button key={child.id} type="button" className={selectedId === child.id ? 'family-profile selected' : 'family-profile'} aria-pressed={selectedId === child.id} onClick={() => { setSelectedId(child.id); setConfirmation(null); setNotice(''); }}><RiderAvatar name={child.name} photoUrl={child.photoUrl} accent="#1d1d1f" /><span><strong>{child.name}</strong><small>{child.kind === 'managed' ? 'Parent-managed' : 'Linked account'}</small></span>{selectedId === child.id && <Check size={19} aria-hidden="true" />}</button>)}</div>}
       </section>
       {selectedChild ? <>
+        {selectedChild.kind === 'managed' && <ChildPhoneSetup key={selectedChild.id} childId={selectedChild.id} name={selectedChild.name} />}
         <FamilyAthleteHistory key={`${accountId}:${selectedChild.id}`} accountId={accountId} child={selectedChild} speedUnit={speedUnit} distanceUnit={distanceUnit} onAccessLost={() => { setSelectedId(''); setNotice('Family access changed. These records have been cleared.'); void refresh(); }} onFamilyChanged={() => { void refresh(); }} />
         <div className="family-remove"><button type="button" disabled={Boolean(busy)} onClick={() => setConfirmation({ kind: 'child', id: selectedChild.id })}>{selectedChild.kind === 'managed' ? `Archive ${selectedChild.name}’s profile` : `Remove ${selectedChild.name} from family`}</button><p>{selectedChild.kind === 'managed' ? 'Stored activity records are preserved. You can restore this profile from Archived child profiles.' : 'Ends your access to this athlete. Their account and records are preserved.'}</p></div>
       </> : family.children.length > 0 && <p className="family-notice">Choose a child above to view their own profile and activity calendar.</p>}

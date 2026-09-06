@@ -125,3 +125,9 @@
   .family-sharing li button { max-width: 100%; }
   .family-invitation { padding: 28px 23px; }
 }
+
+.child-setup-overlay { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / 45%); }
+.child-setup-dialog { background: #fff; color: #1d1d1f; max-width: 560px; max-height: 90dvh; overflow: auto; padding: 28px; border-radius: 24px; box-shadow: 0 12px 50px rgb(0 0 0 / 18%); }
+.club-claim-choices { display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0; }
+.club-claim-choices button { border: 1px solid #b8b8bd; border-radius: 14px; padding: 14px 20px; background: #fff; color: #1d1d1f; cursor: pointer; }
+.club-claim-choices button[aria-pressed=true] { background: #1d1d1f; color: #fff; }
