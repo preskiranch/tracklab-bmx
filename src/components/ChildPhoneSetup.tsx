@@ -22,7 +22,7 @@ export function ChildPhoneSetup({ childId, name }: { childId: string; name: stri
   return <section className="family-card" aria-label={`${name} phone setup`}>
     <h2>Set up {name}’s phone</h2>
     <p>The child gets their own profile, training history, and recording identity. No child email or parent password is needed. Studio records stay connected.</p>
-    <p>Install the TrackLab beta through TestFlight on each iPhone, then open the setup link on the child’s phone. TestFlight access is separate from this account link.</p>
+    <p>For an eligible iOS beta tester, install TrackLab through TestFlight before opening the setup link. Apple requires testers to be at least 13 or the local equivalent minimum age. The parent account does not bypass that requirement. Younger athletes can use supported website features; native Watch access needs a suitable iOS distribution.</p>
     <button type="button" className="family-primary" disabled={busy} onClick={() => void perform(false)}>Create child-phone setup link</button>
     {link && <div className="family-created-link"><label>Private child-phone setup link<input readOnly value={link} onFocus={(event) => event.target.select()} /></label><button type="button" onClick={() => { void navigator.clipboard.writeText(link).then(() => setNotice('Setup link copied. Open it on the child’s phone.'), () => setNotice('Select and copy the link above.')); }}>Copy setup link</button></div>}
     <p>The child’s phone records as {name}. Your Family view shows their synced training. On the child’s iPhone, use Watch Connect for their paired Apple Watch, then approve studio sharing when training at the club.</p>

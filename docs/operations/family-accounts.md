@@ -37,6 +37,11 @@ Records refresh while the Family calendar is open and sync while online. Club
 attribution and Wattbike seat authorization retain their existing rules; device
 setup is not a beta grant, subscription, or TestFlight enrollment.
 
+Apple’s TestFlight terms exclude testers under 13 or the local equivalent minimum
+age. Parent credentials are not a workaround. Supported web features remain
+available; native Watch access for younger athletes needs a suitable distribution
+path. See https://www.apple.com/legal/internet-services/itunes/testflight/.
+
 Watch Connect supports this same managed profile when the Watch is paired to
 the child's own iPhone. Studio sharing still requires the exact claimed roster
 membership and explicit live/session consent. Tablet reads use the selected
