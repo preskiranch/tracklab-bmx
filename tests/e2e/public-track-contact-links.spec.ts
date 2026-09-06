@@ -135,12 +135,12 @@ test('track contacts and map actions stay clear, callable, and responsive', asyn
     };
   });
   expect(desktopGeometry.mapHeight).toBeGreaterThanOrEqual(460);
-  // The 1,240–1,519px membership rail gives Save & Share its own row and now
-  // includes the compact nearby-shop rail; keep the complete fixture bounded.
+  // The horizontal website navigation leaves room for one desktop contact row.
+  // Keep the entire map, actions and nearby-shop content within the preview.
   expect(desktopGeometry.layoutHeight).toBeLessThanOrEqual(930);
   expect(desktopGeometry.layoutFits).toBe(true);
   expect(desktopGeometry.previewFits).toBe(true);
-  expect(desktopGeometry.officialLinkRows).toBe(2);
+  expect(desktopGeometry.officialLinkRows).toBe(1);
   expect(desktopGeometry.officialLinkHeights.every((height) => height === 44)).toBe(true);
   expect(desktopGeometry.actionControlRows.every(({ rows }) => rows === 1)).toBe(true);
   expect(desktopGeometry.detailsBottom).toBeLessThanOrEqual(desktopGeometry.previewBottom + 1);
