@@ -165,6 +165,13 @@ export function createRateLimiter({
 }
 
 export function staticCacheControl(pathname) {
+  // Keep the approved scene pixels intact when image CDNs negotiate WebP.
+  // These stable filenames must also revalidate rather than remain immutable.
+  if (pathname === '/assets/reaction-test-bmx-original-dirt-fixed.png'
+    || pathname === '/assets/reaction-test-bmx-original-gate-reveal.png') {
+    return 'no-cache, no-transform';
+  }
+
   if (/^\/assets\/[^/]+-[A-Za-z0-9_-]{8,}\.(?:css|js|mjs|png|webp|svg)$/.test(pathname)) {
     return 'public, max-age=31536000, immutable';
   }

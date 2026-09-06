@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { request as httpRequest } from 'node:http';
 import { createServer } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -508,6 +509,26 @@ describe('cloud API trust boundaries', () => {
       expect(bytes.subarray(8, 12).toString()).toBe('WAVE');
       expect(bytes.readUInt32LE(40) / bytes.readUInt32LE(28)).toBe(durationSeconds);
       expect(Number(response.headers.get('content-length'))).toBe(bytes.length);
+    }
+  });
+
+  it('preserves approved reaction images for browser negotiation and revalidation', async () => {
+    for (const scene of ['dirt-fixed', 'gate-reveal']) {
+      const pathname = `/assets/reaction-test-bmx-original-${scene}.png`;
+      const headers = { Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8' };
+      const response = await fetch(`${baseUrl}${pathname}`, { headers });
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toBe('image/png');
+      expect(response.headers.get('cache-control')).toBe('no-cache, no-transform');
+      expect(Buffer.from(await response.arrayBuffer())).toEqual(await readFile(`public${pathname}`));
+      const etag = response.headers.get('etag');
+      expect(etag).toBeTruthy();
+      const cached = await fetch(`${baseUrl}${pathname}`, {
+        headers: { ...headers, 'If-None-Match': etag! },
+      });
+      expect(cached.status).toBe(304);
+      expect(cached.headers.get('cache-control')).toBe('no-cache, no-transform');
+      expect((await cached.arrayBuffer()).byteLength).toBe(0);
     }
   });
 

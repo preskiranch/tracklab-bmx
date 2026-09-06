@@ -85,6 +85,10 @@ describe('HTTP security policy', () => {
     expect(staticCacheControl('/assets/index-BC9umi0p.js')).toContain('immutable');
     expect(staticCacheControl('/data/track-database.json')).toBe('no-cache');
     expect(staticCacheControl('/manifest.webmanifest')).toBe('no-cache');
+    for (const scene of ['dirt-fixed', 'gate-reveal']) {
+      expect(staticCacheControl(`/assets/reaction-test-bmx-original-${scene}.png`))
+        .toBe('no-cache, no-transform');
+    }
   });
 
   it('prevents resolved paths from escaping the static directory', () => {
