@@ -5,6 +5,7 @@ import { cloudTelemetry } from './telemetry.mjs';
 import { isReactionTestSession, reactionLeaderboardDisplayName } from './reactionTest.mjs';
 import { appleAppAccountTokenLineageHash } from './appleBilling.mjs';
 import { betaInvitationPolicy, betaInvitationDurationMs, publicBetaAccessStatus } from './betaAccess.mjs';
+import { familyChildName, familyInvitationDurationMs, familyMaximumChildren } from './familyAccess.mjs';
 import {
   maximumAcceptedTrainingSpeedKph,
   maximumAcceptedTrainingSpeedMph,
@@ -64,6 +65,8 @@ const memoryAuthSessionsByToken = new Map();
 const memoryBetaInvitesById = new Map();
 const memoryBetaGrantsById = new Map();
 const memoryBetaAudit = [];
+const memoryFamilyChildren = new Map();
+const memoryFamilyInvites = new Map();
 const memoryAppleSubscriptionsByOriginalTransactionId = new Map();
 const memoryAppleTransactionsById = new Map();
 const memoryAppleNotificationsByUuid = new Map();
@@ -739,6 +742,331 @@ function memoryBetaGrantForUser(userId) {
     .sort((a, b) => Number(b.revokedAt == null) - Number(a.revokedAt == null)
       || b.createdAt - a.createdAt || b.id.localeCompare(a.id));
   return grants[0] ? { ...grants[0] } : null;
+}
+
+function familyStorageError() {
+  const error = new Error('Family account storage is temporarily unavailable.');
+  error.code = 'TRACKLAB_FAMILY_STORAGE_UNAVAILABLE';
+  return error;
+}
+
+async function familyQuery(statement, parameters = []) {
+  if (!pool && databaseConfigured) throw familyStorageError();
+  const result = await query(statement, parameters);
+  if (!result) throw familyStorageError();
+  return result;
+}
+
+async function withFamilyLock(operation, memoryOperation) {
+  if (!pool && databaseConfigured) throw familyStorageError();
+  if (!pool) return withMemoryPersistenceLock('family-access', memoryOperation);
+  const result = await withPersistenceLock('family-access', async (client) => ({ value: await operation(client) }));
+  if (!result) throw familyStorageError();
+  return result.value;
+}
+
+// A tablet completion may already be in flight when its parent deletes the
+// account. Serialize managed-key writes with deletion so they cannot recreate
+// erased child data. Archived children retain their existing club identity.
+async function withManagedFamilyWrite(profileKey, operation) {
+  if (!String(profileKey).startsWith('family-child:')) return operation(query);
+  return withFamilyLock(async (client) => {
+    const child = await client.query(`SELECT id FROM ${schema}.family_children
+      WHERE profile_key=$1 AND kind='managed'`, [profileKey]);
+    return child.rows[0] ? operation(client.query.bind(client)) : null;
+  }, () => {
+    const exists = [...memoryFamilyChildren.values()].some((child) => child.kind === 'managed'
+      && child.profileKey === profileKey && memoryAuthUsersById.has(child.parentUserId));
+    return exists ? operation(query) : null;
+  });
+}
+
+function familyChildFromRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id, parentUserId: row.parent_user_id, profileKey: row.profile_key,
+    linkedUserId: row.linked_user_id ?? null, kind: row.kind,
+    name: row.linked_name || row.display_name, parentName: row.parent_name,
+    createdAt: new Date(row.created_at).getTime(), updatedAt: new Date(row.updated_at).getTime(),
+    revokedAt: row.revoked_at == null ? null : new Date(row.revoked_at).getTime(),
+  };
+}
+
+function familyInviteFromRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id, parentUserId: row.parent_user_id, parentName: row.parent_name,
+    createdAt: new Date(row.created_at).getTime(), expiresAt: new Date(row.expires_at).getTime(),
+    claimedAt: row.claimed_at == null ? null : new Date(row.claimed_at).getTime(),
+    revokedAt: row.revoked_at == null ? null : new Date(row.revoked_at).getTime(),
+  };
+}
+
+function memoryFamilyChild(value, includeArchived = false) {
+  if (!value || (!includeArchived && value.revokedAt != null) || !memoryAuthUsersById.has(value.parentUserId)
+    || (value.linkedUserId && !memoryAuthUsersById.has(value.linkedUserId))) return null;
+  return { ...value, name: memoryAuthUsersById.get(value.linkedUserId)?.displayName || value.name,
+    parentName: memoryAuthUsersById.get(value.parentUserId)?.displayName || '' };
+}
+
+export async function loadFamilyAccess(userId) {
+  if (!pool && databaseConfigured) throw familyStorageError();
+  if (!pool) {
+    const children = [...memoryFamilyChildren.values()].map((item) => memoryFamilyChild(item, true)).filter(Boolean);
+    return { children: children.filter((item) => item.parentUserId === userId && item.revokedAt == null),
+      archivedChildren: children.filter((item) => item.parentUserId === userId && item.kind === 'managed' && item.revokedAt != null),
+      sharedWith: children.filter((item) => item.linkedUserId === userId && item.revokedAt == null),
+      invitations: [...memoryFamilyInvites.values()].filter((item) => item.parentUserId === userId)
+        .map(({ tokenHash: _tokenHash, ...item }) => ({ ...item })) };
+  }
+  const [children, invites] = await Promise.all([
+    familyQuery(`SELECT children.*, users.display_name AS linked_name, parents.display_name AS parent_name
+      FROM ${schema}.family_children AS children
+      JOIN ${schema}.auth_users AS parents ON parents.id=children.parent_user_id
+      LEFT JOIN ${schema}.auth_users AS users ON users.id=children.linked_user_id
+      WHERE (children.parent_user_id=$1 OR children.linked_user_id=$1)
+        AND (children.revoked_at IS NULL OR (children.parent_user_id=$1 AND children.kind='managed'))
+      ORDER BY children.created_at, children.id`, [userId]),
+    familyQuery(`SELECT * FROM ${schema}.family_link_invites WHERE parent_user_id=$1 ORDER BY created_at DESC LIMIT 100`, [userId]),
+  ]);
+  const values = children.rows.map(familyChildFromRow);
+  return { children: values.filter((item) => item.parentUserId === userId && item.revokedAt == null),
+    archivedChildren: values.filter((item) => item.parentUserId === userId && item.kind === 'managed' && item.revokedAt != null),
+    sharedWith: values.filter((item) => item.linkedUserId === userId && item.revokedAt == null), invitations: invites.rows.map(familyInviteFromRow) };
+}
+
+export async function loadFamilyChild(parentUserId, childId) {
+  if (!pool && databaseConfigured) throw familyStorageError();
+  if (!pool) {
+    const child = memoryFamilyChild(memoryFamilyChildren.get(childId));
+    return child?.parentUserId === parentUserId ? child : null;
+  }
+  const result = await familyQuery(`SELECT children.*, users.display_name AS linked_name
+    FROM ${schema}.family_children AS children
+    LEFT JOIN ${schema}.auth_users AS users ON users.id=children.linked_user_id
+    WHERE children.id=$1 AND children.parent_user_id=$2 AND children.revoked_at IS NULL`, [childId, parentUserId]);
+  return familyChildFromRow(result.rows[0]);
+}
+
+export async function createFamilyChild(parentUserId, nameValue, now = Date.now()) {
+  const name = familyChildName(nameValue);
+  if (!name) return null;
+  const id = randomUUID();
+  const profileKey = `family-child:${id}`;
+  return withFamilyLock(async (client) => {
+    const parent = await client.query(`SELECT id FROM ${schema}.auth_users WHERE id=$1 FOR KEY SHARE`, [parentUserId]);
+    if (!parent.rows[0]) return null;
+    const count = await client.query(`SELECT count(*) FROM ${schema}.family_children WHERE parent_user_id=$1 AND revoked_at IS NULL`, [parentUserId]);
+    if (Number(count.rows[0].count) >= familyMaximumChildren) return null;
+    const result = await client.query(`INSERT INTO ${schema}.family_children
+      (id,parent_user_id,kind,profile_key,display_name,activity_consent_at,created_at,updated_at)
+      VALUES ($1,$2,'managed',$3,$4,to_timestamp($5/1000.0),to_timestamp($5/1000.0),to_timestamp($5/1000.0)) RETURNING *`,
+    [id, parentUserId, profileKey, name, now]);
+    return familyChildFromRow(result.rows[0]);
+  }, () => {
+    if (!memoryAuthUsersById.has(parentUserId)
+      || [...memoryFamilyChildren.values()].filter((item) => item.parentUserId === parentUserId && item.revokedAt == null).length >= familyMaximumChildren) return null;
+    const child = { id, parentUserId, kind: 'managed', profileKey, linkedUserId: null, name,
+      createdAt: now, updatedAt: now, revokedAt: null };
+    memoryFamilyChildren.set(id, child);
+    return { ...child };
+  });
+}
+
+export async function createFamilyLinkInvitation(parentUserId, tokenHash, now = Date.now()) {
+  const invite = { id: randomUUID(), parentUserId, tokenHash, createdAt: now,
+    expiresAt: now + familyInvitationDurationMs, claimedAt: null, revokedAt: null };
+  return withFamilyLock(async (client) => {
+    const parent = await client.query(`SELECT id FROM ${schema}.auth_users WHERE id=$1 FOR KEY SHARE`, [parentUserId]);
+    if (!parent.rows[0]) return null;
+    const count = await client.query(`SELECT count(*) FROM ${schema}.family_link_invites
+      WHERE parent_user_id=$1 AND claimed_at IS NULL AND revoked_at IS NULL AND expires_at>to_timestamp($2/1000.0)`, [parentUserId, now]);
+    if (Number(count.rows[0].count) >= familyMaximumChildren) return null;
+    const result = await client.query(`INSERT INTO ${schema}.family_link_invites
+      (id,parent_user_id,token_hash,created_at,expires_at) VALUES ($1,$2,$3,to_timestamp($4/1000.0),to_timestamp($5/1000.0)) RETURNING *`,
+    [invite.id, parentUserId, tokenHash, now, invite.expiresAt]);
+    return familyInviteFromRow(result.rows[0]);
+  }, () => {
+    if (!memoryAuthUsersById.has(parentUserId)
+      || [...memoryFamilyInvites.values()].filter((item) => item.parentUserId === parentUserId
+        && item.claimedAt == null && item.revokedAt == null && item.expiresAt > now).length >= familyMaximumChildren) return null;
+    memoryFamilyInvites.set(invite.id, invite);
+    const { tokenHash: _tokenHash, ...safe } = invite;
+    return safe;
+  });
+}
+
+export async function previewFamilyLinkInvitation(tokenHash, now = Date.now()) {
+  if (!pool && databaseConfigured) throw familyStorageError();
+  if (!pool) {
+    const invite = [...memoryFamilyInvites.values()].find((item) => item.tokenHash === tokenHash);
+    if (!invite || invite.claimedAt != null || invite.revokedAt != null || invite.expiresAt <= now
+      || !memoryAuthUsersById.has(invite.parentUserId)) return null;
+    const { tokenHash: _tokenHash, ...safe } = invite;
+    return { ...safe, parentName: memoryAuthUsersById.get(invite.parentUserId).displayName };
+  }
+  const result = await familyQuery(`SELECT invites.*, parents.display_name AS parent_name
+    FROM ${schema}.family_link_invites AS invites JOIN ${schema}.auth_users AS parents ON parents.id=invites.parent_user_id
+    WHERE token_hash=$1 AND claimed_at IS NULL AND revoked_at IS NULL AND expires_at>to_timestamp($2/1000.0)`, [tokenHash, now]);
+  return familyInviteFromRow(result.rows[0]);
+}
+
+export async function acceptFamilyLinkInvitation(tokenHash, childUserId, activityConsent, now = Date.now()) {
+  if (activityConsent !== true) return null;
+  return withFamilyLock(async (client) => {
+    const selected = await client.query(`SELECT * FROM ${schema}.family_link_invites
+      WHERE token_hash=$1 AND claimed_at IS NULL AND revoked_at IS NULL AND expires_at>to_timestamp($2/1000.0) FOR UPDATE`, [tokenHash, now]);
+    const invite = selected.rows[0];
+    if (!invite || invite.parent_user_id === childUserId) return null;
+    const users = await client.query(`SELECT id,display_name FROM ${schema}.auth_users WHERE id=ANY($1::text[]) ORDER BY id FOR KEY SHARE`, [[invite.parent_user_id, childUserId]]);
+    if (users.rows.length !== 2) return null;
+    const count = await client.query(`SELECT count(*) FROM ${schema}.family_children WHERE parent_user_id=$1 AND revoked_at IS NULL AND profile_key<>$2`, [invite.parent_user_id, `user:${childUserId}`]);
+    if (Number(count.rows[0].count) >= familyMaximumChildren) return null;
+    const child = users.rows.find((user) => user.id === childUserId);
+    const result = await client.query(`INSERT INTO ${schema}.family_children
+      (id,parent_user_id,kind,profile_key,linked_user_id,display_name,activity_consent_at,created_at,updated_at)
+      VALUES ($1,$2,'linked',$3,$4,$5,to_timestamp($6/1000.0),to_timestamp($6/1000.0),to_timestamp($6/1000.0))
+      ON CONFLICT (parent_user_id,profile_key) DO UPDATE SET revoked_at=NULL,activity_consent_at=EXCLUDED.activity_consent_at,
+        display_name=EXCLUDED.display_name,updated_at=EXCLUDED.updated_at RETURNING *`,
+    [randomUUID(), invite.parent_user_id, `user:${childUserId}`, childUserId, child.display_name, now]);
+    await client.query(`UPDATE ${schema}.family_link_invites SET claimed_at=to_timestamp($2/1000.0),claimed_by_user_id=$3 WHERE id=$1`, [invite.id, now, childUserId]);
+    return { ...familyChildFromRow(result.rows[0]), parentName: users.rows.find((user) => user.id === invite.parent_user_id).display_name };
+  }, () => {
+    const invite = [...memoryFamilyInvites.values()].find((item) => item.tokenHash === tokenHash);
+    const childUser = memoryAuthUsersById.get(childUserId);
+    if (!invite || !childUser || !memoryAuthUsersById.has(invite.parentUserId)
+      || invite.parentUserId === childUserId || invite.claimedAt != null || invite.revokedAt != null || invite.expiresAt <= now) return null;
+    const children = [...memoryFamilyChildren.values()];
+    const previous = children.find((item) => item.parentUserId === invite.parentUserId && item.linkedUserId === childUserId);
+    if (children.filter((item) => item.parentUserId === invite.parentUserId && item.revokedAt == null && item.id !== previous?.id).length >= familyMaximumChildren) return null;
+    const child = { id: previous?.id ?? randomUUID(), parentUserId: invite.parentUserId, profileKey: `user:${childUserId}`,
+      linkedUserId: childUserId, kind: 'linked', name: childUser.displayName, createdAt: previous?.createdAt ?? now, updatedAt: now, revokedAt: null };
+    memoryFamilyChildren.set(child.id, child);
+    invite.claimedAt = now;
+    invite.claimedByUserId = childUserId;
+    return memoryFamilyChild(child);
+  });
+}
+
+export async function revokeFamilyAccess(actorUserId, childId, asChild = false, now = Date.now()) {
+  return withFamilyLock(async (client) => {
+    const result = await client.query(`UPDATE ${schema}.family_children SET revoked_at=to_timestamp($3/1000.0),updated_at=to_timestamp($3/1000.0)
+      WHERE id=$1 AND ${asChild ? 'linked_user_id' : 'parent_user_id'}=$2 AND revoked_at IS NULL RETURNING id`, [childId, actorUserId, now]);
+    return Boolean(result.rows[0]);
+  }, () => {
+    const child = memoryFamilyChildren.get(childId);
+    if (!child || child[asChild ? 'linkedUserId' : 'parentUserId'] !== actorUserId || child.revokedAt != null) return false;
+    child.revokedAt = now; child.updatedAt = now;
+    return true;
+  });
+}
+
+export async function restoreManagedFamilyChild(parentUserId, childId, now = Date.now()) {
+  return withFamilyLock(async (client) => {
+    const count = await client.query(`SELECT count(*) FROM ${schema}.family_children WHERE parent_user_id=$1 AND revoked_at IS NULL`, [parentUserId]);
+    if (Number(count.rows[0].count) >= familyMaximumChildren) return null;
+    const result = await client.query(`UPDATE ${schema}.family_children SET revoked_at=NULL,updated_at=to_timestamp($3/1000.0)
+      WHERE id=$1 AND parent_user_id=$2 AND kind='managed' AND revoked_at IS NOT NULL RETURNING *`, [childId, parentUserId, now]);
+    return familyChildFromRow(result.rows[0]);
+  }, () => {
+    const child = memoryFamilyChild(memoryFamilyChildren.get(childId), true);
+    if (!child || child.parentUserId !== parentUserId || child.kind !== 'managed' || child.revokedAt == null
+      || [...memoryFamilyChildren.values()].filter((item) => item.parentUserId === parentUserId && item.revokedAt == null).length >= familyMaximumChildren) return null;
+    const stored = memoryFamilyChildren.get(childId);
+    stored.revokedAt = null; stored.updatedAt = now;
+    return memoryFamilyChild(stored);
+  });
+}
+
+export async function revokeFamilyInvitation(parentUserId, inviteId, now = Date.now()) {
+  return withFamilyLock(async (client) => {
+    const result = await client.query(`UPDATE ${schema}.family_link_invites SET revoked_at=to_timestamp($3/1000.0)
+      WHERE id=$1 AND parent_user_id=$2 AND claimed_at IS NULL AND revoked_at IS NULL RETURNING id`, [inviteId, parentUserId, now]);
+    return Boolean(result.rows[0]);
+  }, () => {
+    const invite = memoryFamilyInvites.get(inviteId);
+    if (!invite || invite.parentUserId !== parentUserId || invite.claimedAt != null || invite.revokedAt != null) return false;
+    invite.revokedAt = now;
+    return true;
+  });
+}
+
+export async function claimFamilyClubInvitation(parentUserId, childId, tokenHash, now = Date.now()) {
+  return withFamilyLock(async (client) => {
+    const children = await client.query(`SELECT * FROM ${schema}.family_children
+      WHERE id=$1 AND parent_user_id=$2 AND kind='managed' AND revoked_at IS NULL FOR UPDATE`, [childId, parentUserId]);
+    const child = children.rows[0];
+    if (!child) return null;
+    const result = await client.query(`SELECT invites.id,invites.club_id,invites.studio_rider_id
+      FROM ${schema}.club_invites AS invites JOIN ${schema}.club_members AS members
+      ON members.club_id=invites.club_id AND members.studio_rider_id=invites.studio_rider_id
+      WHERE invites.token_hash=$1 AND invites.claimed_at IS NULL AND invites.revoked_at IS NULL
+      AND invites.expires_at>to_timestamp($2/1000.0) AND members.athlete_profile_key IS NULL AND members.status='unclaimed'
+      FOR UPDATE OF invites,members`, [tokenHash, now]);
+    const invite = result.rows[0];
+    if (!invite) return null;
+    await client.query(`UPDATE ${schema}.club_invites SET claimed_at=to_timestamp($2/1000.0),claimed_by_profile_key=$3 WHERE id=$1`, [invite.id, now, child.profile_key]);
+    await client.query(`UPDATE ${schema}.club_members SET athlete_profile_key=$3,status='claimed',claimed_at=to_timestamp($4/1000.0),revoked_at=NULL,updated_at=to_timestamp($4/1000.0)
+      WHERE club_id=$1 AND studio_rider_id=$2`, [invite.club_id, invite.studio_rider_id, child.profile_key, now]);
+    // Other outstanding tokens for the roster entry must not retarget it.
+    await client.query(`UPDATE ${schema}.club_invites SET revoked_at=to_timestamp($3/1000.0)
+      WHERE club_id=$1 AND studio_rider_id=$2 AND claimed_at IS NULL AND revoked_at IS NULL`, [invite.club_id, invite.studio_rider_id, now]);
+    return { clubId: invite.club_id, studioRiderId: invite.studio_rider_id };
+  }, () => {
+    const child = memoryFamilyChild(memoryFamilyChildren.get(childId));
+    const invite = memoryClubInvitesByHash.get(tokenHash);
+    const member = invite && memoryClubMembers.get(clubMemberKey(invite.clubId, invite.studioRiderId));
+    if (!child || child.parentUserId !== parentUserId || child.kind !== 'managed' || !invite || !member
+      || invite.claimedAt != null || invite.revokedAt != null || invite.expiresAt <= now
+      || member.athleteProfileKey || member.status !== 'unclaimed') return null;
+    invite.claimedAt = now; invite.claimedByProfileKey = child.profileKey;
+    member.athleteProfileKey = child.profileKey; member.athleteName = child.name;
+    member.status = 'claimed'; member.claimedAt = now; member.revokedAt = null; member.updatedAt = now;
+    for (const other of memoryClubInvitesByHash.values()) {
+      if (other.clubId === invite.clubId && other.studioRiderId === invite.studioRiderId && other.claimedAt == null && other.revokedAt == null) other.revokedAt = now;
+    }
+    return { clubId: invite.clubId, studioRiderId: invite.studioRiderId };
+  });
+}
+
+async function deleteFamilyAccountData(client, userId) {
+  if (!client) {
+    const keys = new Set([...memoryFamilyChildren.values()]
+      .filter((child) => child.parentUserId === userId && child.kind === 'managed').map((child) => child.profileKey));
+    for (const key of keys) memoryUserDataByGuestKey.delete(key);
+    deleteMemoryEntries(memoryTrainingSessions, (item) => keys.has(item._profileKey));
+    deleteMemoryEntries(memoryGhostLaps, (item) => keys.has(item.owner_key));
+    deleteMemoryEntries(memoryLocalRaceResults, (item) => keys.has(item.guestKey));
+    deleteMemoryEntries(memoryClubTabletResultAuthorizationsByTokenHash, (item) => keys.has(item.recordingAthleteProfileKey));
+    deleteMemoryEntries(memoryClubMonitorSprintAuthorizations, (item) => keys.has(item.athleteProfileKey));
+    deleteMemoryEntries(memoryClubGroupTrainingAuthorizations, (item) => (item.assignments ?? []).some((assignment) => keys.has(assignment.athleteProfileKey)));
+    for (const member of memoryClubMembers.values()) {
+      if (!keys.has(member.athleteProfileKey)) continue;
+      member.athleteProfileKey = null; member.athleteName = null; member.status = 'unclaimed'; member.claimedAt = null;
+      member.updatedAt = Date.now();
+    }
+    deleteMemoryEntries(memoryClubInvitesByHash, (invite) => keys.has(invite.claimedByProfileKey));
+    deleteMemoryEntries(memoryFamilyChildren, (child) => child.parentUserId === userId || child.linkedUserId === userId);
+    deleteMemoryEntries(memoryFamilyInvites, (invite) => invite.parentUserId === userId || invite.claimedByUserId === userId);
+    return;
+  }
+  const children = await client.query(`SELECT profile_key FROM ${schema}.family_children WHERE parent_user_id=$1 AND kind='managed'`, [userId]);
+  const keys = children.rows.map((child) => child.profile_key);
+  if (keys.length) {
+    await client.query(`DELETE FROM ${schema}.club_tablet_result_authorizations WHERE recording_athlete_profile_key=ANY($1::text[])`, [keys]);
+    await client.query(`DELETE FROM ${schema}.club_monitor_sprint_authorizations WHERE athlete_profile_key=ANY($1::text[])`, [keys]);
+    await client.query(`DELETE FROM ${schema}.club_group_training_authorizations WHERE id IN
+      (SELECT authorization_id FROM ${schema}.club_group_training_assignments WHERE athlete_profile_key=ANY($1::text[]))`, [keys]);
+    await client.query(`DELETE FROM ${schema}.club_invites WHERE claimed_by_profile_key=ANY($1::text[])`, [keys]);
+    await client.query(`UPDATE ${schema}.club_members SET athlete_profile_key=NULL,status='unclaimed',claimed_at=NULL,updated_at=now()
+      WHERE athlete_profile_key=ANY($1::text[])`, [keys]);
+    for (const [table, column] of [['training_sessions', 'profile_key'], ['ghost_laps', 'owner_key'],
+      ['race_results', 'guest_key'], ['user_data', 'guest_key'], ['profiles', 'guest_key']]) {
+      await client.query(`DELETE FROM ${schema}.${table} WHERE ${column}=ANY($1::text[])`, [keys]);
+    }
+  }
+  await client.query(`DELETE FROM ${schema}.family_children WHERE parent_user_id=$1 OR linked_user_id=$1`, [userId]);
+  await client.query(`DELETE FROM ${schema}.family_link_invites WHERE parent_user_id=$1 OR claimed_by_user_id=$1`, [userId]);
 }
 
 function betaStorageError() {
@@ -1429,10 +1757,11 @@ async function deleteMemoryAuthUserAccount(userId) {
   // Beta claims can replace an existing grant across an audit write. Serialize
   // deletion with those claims so an in-flight replacement cannot re-create a
   // grant after its account and invitation have already been erased.
-  return withMemoryPersistenceLock('beta-access', () => withMemoryPersistenceLock(`account-delete:${userId}`, async () => {
+  return withMemoryPersistenceLock('family-access', () => withMemoryPersistenceLock('beta-access', () => withMemoryPersistenceLock(`account-delete:${userId}`, async () => {
     const user = memoryAuthUsersById.get(userId);
     if (!user) return { deleted: false, profileKey: `user:${userId}`, clubIds: [] };
     const profileKey = `user:${userId}`;
+    await deleteFamilyAccountData(null, userId);
     const ownedClubIds = [...memoryClubsById.values()]
       .filter((club) => club.ownerProfileKey === profileKey)
       .map((club) => club.id);
@@ -1525,7 +1854,7 @@ async function deleteMemoryAuthUserAccount(userId) {
     memoryUserDataByGuestKey.delete(profileKey);
     deleteMemoryEntries(memoryReactionTestBests, (record) => record.userId === userId);
     deleteMemoryEntries(memoryLocalRaceResults, (result) => result.guestKey === profileKey);
-    deleteMemoryEntries(memoryGhostLaps, (ghost) => ghost.ownerKey === profileKey);
+    deleteMemoryEntries(memoryGhostLaps, (ghost) => ghost.owner_key === profileKey);
     deleteMemoryEntries(memoryTrainingSessions, (session, key) => (
       session._profileKey === profileKey || String(key).startsWith(`${profileKey}:`)
     ));
@@ -1710,11 +2039,12 @@ async function deleteMemoryAuthUserAccount(userId) {
       clubIds: ownedClubIds,
       authSessionTokenHashes,
     };
-  }));
+  })));
 }
 
 async function deletePostgresAuthUserAccount(userId) {
   return withPersistenceLock(`account-delete:${userId}`, async (client) => {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['family-access']);
     const userResult = await client.query(
       `SELECT id, email FROM ${schema}.auth_users WHERE id = $1 FOR UPDATE`,
       [userId],
@@ -1723,6 +2053,7 @@ async function deletePostgresAuthUserAccount(userId) {
       return { deleted: false, profileKey: `user:${userId}`, clubIds: [] };
     }
     const profileKey = `user:${userId}`;
+    await deleteFamilyAccountData(client, userId);
     await client.query(`DELETE FROM ${schema}.beta_access_invites WHERE email=$1`, [authEmailKey(userResult.rows[0].email)]);
     const sessionResult = await client.query(
       `SELECT token_hash FROM ${schema}.auth_sessions WHERE user_id = $1 FOR UPDATE`,
@@ -3654,6 +3985,10 @@ export async function loadUserData(guestKey) {
 }
 
 export async function saveUserData(guestKey, patch) {
+  return withManagedFamilyWrite(guestKey, (writeQuery) => saveUserDataWithQuery(guestKey, patch, writeQuery));
+}
+
+async function saveUserDataWithQuery(guestKey, patch, writeQuery) {
   const trackMappings = patch.trackMappings && typeof patch.trackMappings === 'object'
     ? patch.trackMappings
     : null;
@@ -3689,7 +4024,7 @@ export async function saveUserData(guestKey, patch) {
     return cloneJson(next, next);
   }
 
-  const result = await query(
+  const result = await writeQuery(
     userDataUpsertStatement(),
     [
       guestKey,
@@ -3876,6 +4211,15 @@ export async function loadReactionTestLeaderboard(userId = '', limit = 5) {
 }
 
 export async function saveTrainingSession(profileKey, session) {
+  const stored = await withManagedFamilyWrite(profileKey,
+    (writeQuery) => saveTrainingSessionWithQuery(profileKey, session, writeQuery));
+  if (stored && !String(profileKey).startsWith('family-child:')) {
+    await linkHeartRateStreamsToTrainingSession(profileKey, session.id);
+  }
+  return stored;
+}
+
+async function saveTrainingSessionWithQuery(profileKey, session, writeQuery) {
   const safeSession = trainingSessionWithPrivateHealthRemoved(session);
   if (!storedBikeMetricsAreAccepted(safeSession?.details)) return null;
   const saved = {
@@ -3886,10 +4230,9 @@ export async function saveTrainingSession(profileKey, session) {
   };
   if (!pool) {
     memoryTrainingSessions.set(`${profileKey}:${safeSession.id}`, saved);
-    await linkHeartRateStreamsToTrainingSession(profileKey, safeSession.id);
     return cloneJson(enrichMemoryClubTrainingSession(saved), saved);
   }
-  const result = await query(
+  const result = await writeQuery(
     `INSERT INTO ${schema}.training_sessions (
        profile_key, id, activity_type, title, started_at, ended_at, duration_ms,
        distance_meters, track_id, track_name, source, details, club_id, studio_rider_id,
@@ -3931,7 +4274,6 @@ export async function saveTrainingSession(profileKey, session) {
   );
   const stored = trainingSessionFromRow(result?.rows?.[0]);
   if (!stored) return null;
-  await linkHeartRateStreamsToTrainingSession(profileKey, safeSession.id);
   return {
     ...stored,
     ...(safeSession._clubName ? { _clubName: safeSession._clubName } : {}),
@@ -11504,7 +11846,11 @@ function legacyRaceSessions(entries, profileKey) {
   });
 }
 
-export async function loadTrainingSessions(profileKey, { from = 0, to = Date.now(), limit = 1000 } = {}) {
+function noteTrainingRangeLimit(rowCount, limit, onRangeIncomplete) {
+  if (rowCount >= limit && typeof onRangeIncomplete === 'function') onRangeIncomplete();
+}
+
+export async function loadTrainingSessions(profileKey, { from = 0, to = Date.now(), limit = 1000, onRangeIncomplete } = {}) {
   const safeLimit = Math.max(1, Math.min(2000, Math.round(Number(limit) || 1000)));
   let sessions;
   let raceEntries;
@@ -11564,6 +11910,10 @@ export async function loadTrainingSessions(profileKey, { from = 0, to = Date.now
         ],
       ),
     ]);
+    // Report the bounded raw queries before projection, grouping, or dedup can
+    // reduce their result count and hide that older source rows were omitted.
+    noteTrainingRangeLimit(sessionResult?.rows?.length ?? 0, safeLimit, onRangeIncomplete);
+    noteTrainingRangeLimit(raceResult?.rows?.length ?? 0, safeLimit * 4, onRangeIncomplete);
     sessions = (sessionResult?.rows ?? []).map(trainingSessionFromRow).filter(Boolean);
     raceEntries = (raceResult?.rows ?? []).map((row) => ({
       dedupeKey: row.dedupe_key,
@@ -11579,22 +11929,25 @@ export async function loadTrainingSessions(profileKey, { from = 0, to = Date.now
       createdAt: new Date(row.created_at).toISOString(),
     }));
   }
+  noteTrainingRangeLimit(sessions.length, safeLimit, onRangeIncomplete);
+  noteTrainingRangeLimit(raceEntries.length, safeLimit * 4, onRangeIncomplete);
   const byId = new Map(sessions.map((session) => [session.id, session]));
   legacyRaceSessions(raceEntries, profileKey).forEach((session) => {
     if (!byId.has(session.id)) byId.set(session.id, session);
   });
-  return [...byId.values()]
-    .filter((session) => !isReactionTestSession(session))
+  const combined = [...byId.values()].filter((session) => !isReactionTestSession(session));
+  noteTrainingRangeLimit(combined.length, safeLimit, onRangeIncomplete);
+  return combined
     .sort((left, right) => right.startedAt - left.startedAt)
     .slice(0, safeLimit);
 }
 
-export async function loadClubTrainingSessions(ownerProfileKey, { from = 0, to = Date.now(), limit = 1000 } = {}) {
+export async function loadClubTrainingSessions(ownerProfileKey, { from = 0, to = Date.now(), limit = 1000, onRangeIncomplete } = {}) {
   const safeLimit = Math.max(1, Math.min(2000, Math.round(Number(limit) || 1000)));
   if (!pool) {
     const ownedClubId = memoryClubIdByOwner.get(ownerProfileKey);
     if (!ownedClubId) return [];
-    return [...memoryTrainingSessions.values()]
+    const sessions = [...memoryTrainingSessions.values()]
       .filter((session) => (
         session._clubId === ownedClubId
         && session._profileKey !== ownerProfileKey
@@ -11606,8 +11959,9 @@ export async function loadClubTrainingSessions(ownerProfileKey, { from = 0, to =
       .map((session) => cloneJson(trainingSessionWithPrivateHealthRemoved(
         enrichMemoryClubTrainingSession(session),
       ), session))
-      .sort((left, right) => right.startedAt - left.startedAt)
-      .slice(0, safeLimit);
+      .sort((left, right) => right.startedAt - left.startedAt);
+    noteTrainingRangeLimit(sessions.length, safeLimit, onRangeIncomplete);
+    return sessions.slice(0, safeLimit);
   }
   const result = await query(
     `SELECT sessions.*, clubs.name AS club_name, members.rider_name AS club_rider_name
@@ -11626,6 +11980,7 @@ export async function loadClubTrainingSessions(ownerProfileKey, { from = 0, to =
      ORDER BY sessions.started_at DESC LIMIT $4`,
     [ownerProfileKey, from, to, safeLimit],
   );
+  noteTrainingRangeLimit(result?.rows?.length ?? 0, safeLimit, onRangeIncomplete);
   return (result?.rows ?? []).map(trainingSessionFromRow).filter(Boolean);
 }
 
@@ -13240,6 +13595,13 @@ export async function saveClubInvite({
 }
 
 export async function claimClubInvite(tokenHash, athleteProfileKey, athleteName) {
+  return withFamilyLock(
+    (client) => claimClubInviteWithClient(tokenHash, athleteProfileKey, athleteName, client),
+    () => claimClubInviteWithClient(tokenHash, athleteProfileKey, athleteName, null),
+  );
+}
+
+async function claimClubInviteWithClient(tokenHash, athleteProfileKey, athleteName, client) {
   const now = Date.now();
   if (!pool) {
     const invite = memoryClubInvitesByHash.get(tokenHash);
@@ -13262,7 +13624,7 @@ export async function claimClubInvite(tokenHash, athleteProfileKey, athleteName)
     });
     return { clubId: club.id, studioRiderId: member.studioRiderId };
   }
-  const result = await query(
+  const result = await client.query(
     `WITH eligible AS (
        SELECT invites.id, invites.club_id, invites.studio_rider_id
        FROM ${schema}.club_invites AS invites
@@ -13275,6 +13637,7 @@ export async function claimClubInvite(tokenHash, athleteProfileKey, athleteName)
          AND invites.expires_at > now()
          AND clubs.owner_profile_key <> $2
          AND (members.athlete_profile_key IS NULL OR members.athlete_profile_key = $2)
+       FOR UPDATE OF invites, members
      ), claimed_invite AS (
        UPDATE ${schema}.club_invites AS invites
        SET claimed_at = now(), claimed_by_profile_key = $2
@@ -18907,13 +19270,17 @@ export async function saveRaceResults(room, client, raceState) {
   );
 }
 
-export async function saveLocalRaceResults({
+export async function saveLocalRaceResults(input) {
+  return withManagedFamilyWrite(input.profileKey, (writeQuery) => saveLocalRaceResultsWithQuery(input, writeQuery));
+}
+
+async function saveLocalRaceResultsWithQuery({
   sessionId,
   profileKey,
   trackId,
   trackName,
   summaries,
-}) {
+}, writeQuery) {
   const entries = (Array.isArray(summaries) ? summaries : []).slice(0, 4).map((summary) => ({
     dedupeKey: `local:${sessionId}:${profileKey}:${summary.playerId}`,
     roomId: 'local',
@@ -18976,7 +19343,7 @@ export async function saveLocalRaceResults({
       $${base + 9}, $${base + 10}, $${base + 11}, $${base + 12}, $${base + 13}, $${base + 14}, $${base + 15}, $${base + 16}, $${base + 17}::jsonb
     )`);
   });
-  return query(
+  return writeQuery(
     `INSERT INTO ${schema}.race_results (
       dedupe_key, room_id, guest_key, rider_name, player_id, track_id, track_name, rank,
       finish_time_ms, distance_meters, top_speed_kph, average_speed_kph, top_cadence, average_cadence,
@@ -19611,6 +19978,10 @@ function ghostFromRow(row, source = 'top', includeAnalytics = false) {
 }
 
 export async function saveGhostLap(ghost) {
+  return withManagedFamilyWrite(ghost?.ownerKey, (writeQuery) => saveGhostLapWithQuery(ghost, writeQuery));
+}
+
+async function saveGhostLapWithQuery(ghost, writeQuery) {
   if (!ghost?.id || !ghost.trackId || !ghost.ownerKey || !ghost.riderName || !Number.isFinite(Number(ghost.finishTimeMs))) {
     return null;
   }
@@ -19667,7 +20038,7 @@ export async function saveGhostLap(ghost) {
     }
     return changed ? cloneJson(next, null) : null;
   }
-  const result = await query(
+  const result = await writeQuery(
     `INSERT INTO ${schema}.ghost_laps (
       id, owner_key, owner_name, rider_name, track_id, track_name, route_variant_id, route_key,
       finish_time_ms, thirty_foot_time_ms, color_name, accent, race_source, lap_count, analytics_public,

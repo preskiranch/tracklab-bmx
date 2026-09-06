@@ -2360,6 +2360,40 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
         )`,
       ],
     },
+    {
+      version: 48,
+      name: 'add managed family children and consented activity delegations',
+      statements: [
+        `CREATE TABLE ${schema}.family_children (
+          id TEXT PRIMARY KEY,
+          parent_user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL CHECK (kind IN ('managed','linked')),
+          profile_key TEXT NOT NULL,
+          linked_user_id TEXT REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          display_name TEXT NOT NULL,
+          activity_consent_at TIMESTAMPTZ NOT NULL,
+          revoked_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (parent_user_id, profile_key),
+          CHECK ((kind = 'managed' AND linked_user_id IS NULL) OR
+            (kind = 'linked' AND linked_user_id IS NOT NULL AND parent_user_id <> linked_user_id))
+        )`,
+        `CREATE INDEX idx_family_children_linked_user ON ${schema}.family_children(linked_user_id)
+          WHERE linked_user_id IS NOT NULL`,
+        `CREATE TABLE ${schema}.family_link_invites (
+          id TEXT PRIMARY KEY,
+          parent_user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          token_hash TEXT UNIQUE NOT NULL,
+          expires_at TIMESTAMPTZ NOT NULL,
+          claimed_at TIMESTAMPTZ,
+          claimed_by_user_id TEXT REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          revoked_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`,
+        `CREATE INDEX idx_family_link_invites_parent ON ${schema}.family_link_invites(parent_user_id, created_at DESC)`,
+      ],
+    },
   ];
 }
 

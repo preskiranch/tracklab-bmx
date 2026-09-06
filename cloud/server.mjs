@@ -66,6 +66,7 @@ import {
 import { AppleBillingError, createAppleBillingService } from './appleBilling.mjs';
 import { wattbikeMembershipForAccount } from './appleMembership.mjs';
 import { betaInvitationPolicy, publicBetaAccessStatus } from './betaAccess.mjs';
+import { familyChildName, validFamilyToken, publicFamilyChild, publicFamilyInvitation, familyTrainingTotals } from './familyAccess.mjs';
 import {
   applyNativeAppCors,
   applySecurityHeaders,
@@ -5424,6 +5425,7 @@ async function loadTrainingSessionsForAccount(profileKey, options) {
             : Number.NaN,
         );
       const attributedStudioRiderId = sanitizeText(session?._studioRiderId, '', 160);
+      if (options.athleteOnly && ownedClubSession) return null;
       return publicTrainingSession(
         session,
         ownedClubSession ? 'owner' : 'athlete',
@@ -5442,11 +5444,13 @@ async function loadTrainingSessionsForAccount(profileKey, options) {
     const sessions = [...legacyOwnerSessions, ...attributedClubSessions]
       .filter((session) => session?._profileKey !== profileKey);
     return sessions.flatMap((session) => {
-      const projected = projectClubTrainingSession(session, membership);
+      // Family delegation cannot infer a sibling identity from a matching name.
+      const projected = projectClubTrainingSession(session, options.athleteOnly
+        ? { ...membership, claimedAt: Number.NaN } : membership);
       return projected ? [projected] : [];
     });
   }))).flat();
-  const ownedClubSessions = clubState.ownedClub
+  const ownedClubSessions = clubState.ownedClub && !options.athleteOnly
     ? (await persistence.loadClubTrainingSessions(profileKey, options)).flatMap((session) => {
       const member = (clubState.ownedClub.members ?? []).find((candidate) => (
         candidate.studioRiderId === session?._studioRiderId
@@ -5456,9 +5460,178 @@ async function loadTrainingSessionsForAccount(profileKey, options) {
     })
     : [];
   const byId = new Map([...ownSessions, ...clubSessions, ...ownedClubSessions].map((session) => [session.id, session]));
+  if (byId.size >= options.limit) options.onRangeIncomplete?.();
   return [...byId.values()]
     .sort((left, right) => right.startedAt - left.startedAt)
     .slice(0, options.limit);
+}
+
+async function familyProfilePayload(child) {
+  const [data, state] = await Promise.all([
+    persistence.loadUserData(child.profileKey), persistence.loadClubConnectState(child.profileKey),
+  ]);
+  const own = data.accountProfile ?? {};
+  let personalRecords = sanitizePersonalRecords(own.personalRecords);
+  let photoUrl = sanitizeRiderPhotoDataUrl(own.photoUrl);
+  let updatedAt = Math.max(0, Number(own.updatedAt) || 0);
+  const memberships = state.memberships ?? [];
+  for (const membership of memberships) {
+    const owner = await persistence.loadUserData(membership.ownerProfileKey);
+    const rider = (owner.studioRiders ?? []).find((item) => item.id === membership.studioRiderId && !item.deletedAt);
+    if (!rider) continue;
+    personalRecords = mergePersonalRecordValues(personalRecords, rider.personalRecords);
+    if (!photoUrl) photoUrl = sanitizeRiderPhotoDataUrl(rider.photoUrl);
+    updatedAt = Math.max(updatedAt, Number(rider.updatedAt) || 0);
+  }
+  return {
+    child: publicFamilyChild(child, photoUrl),
+    accountProfile: { ...(photoUrl ? { photoUrl } : {}), ...(personalRecords ? { personalRecords } : {}), updatedAt },
+    memberships: memberships.map(({ clubId, clubName, studioRiderId, riderName, claimedAt }) => (
+      { clubId, clubName, studioRiderId, riderName, claimedAt }
+    )),
+    healthAvailable: false,
+  };
+}
+
+async function familyTrainingHistory(child, options) {
+  const state = await persistence.loadClubConnectState(child.profileKey);
+  const own = await loadTrainingSessionsForAccount(child.profileKey, { ...options, athleteOnly: true });
+  // A claimed child keeps access to precisely their own pre-claim tablet key.
+  const historical = (await Promise.all(clubTabletHistoricalProfileKeys(state).map(async (key) => (
+    (await persistence.loadTrainingSessions(key, options)).map((session) => {
+      const projected = publicTrainingSession(session, 'athlete');
+      if (!projected) return null;
+      // Attributed pre-claim rows also arrive through club history. Give both
+      // views the same identity so totals never count that one effort twice.
+      return session._clubId && session._studioRiderId
+        ? { ...projected, id: `club:${session._clubId}:${session.id}` } : projected;
+    }).filter(Boolean)
+  )))).flat();
+  const combined = [...new Map([...own, ...historical].filter((item) => !isReactionTestSession(item))
+    .map((item) => [item.id, item])).values()];
+  if (combined.length >= options.limit) options.onRangeIncomplete?.();
+  return combined
+    .sort((a, b) => b.startedAt - a.startedAt).slice(0, options.limit);
+}
+
+async function handleFamilyRequest(request, response, requestUrl) {
+  const pathname = requestUrl.pathname;
+  if (pathname !== '/api/family' && !pathname.startsWith('/api/family/')) return false;
+  const reply = (status, body) => writeJson(response, status, body, { 'Cache-Control': 'no-store' });
+  if (request.tracklabClubTabletSession || String(request.headers['x-tracklab-club-tablet-session'] || '').trim()
+    || nonPersonalBearerCredentialPresented(request)) {
+    reply(403, { error: 'Family access requires a personal signed-in account.' }); return true;
+  }
+  const session = await currentAuthSession(request, personalAuthSessions);
+  if (!session?.user) { reply(401, { error: 'Sign in to manage family access.' }); return true; }
+  const userId = session.user.id;
+  if (!enforceNoStoreRateLimit(request, response, betaAccessRateLimiter,
+    request.method === 'GET' ? 600 : 100, `family:${userId}:${request.method === 'GET' ? 'read' : 'write'}`)) return true;
+  const childMatch = /^\/api\/family\/children\/([a-zA-Z0-9-]{1,100})(?:\/(profile|training-sessions|club-claim|restore))?$/u.exec(pathname);
+  try {
+    if (pathname === '/api/family' && request.method === 'GET') {
+      const state = await persistence.loadFamilyAccess(userId);
+      const children = await Promise.all(state.children.map(async (child) => {
+        const data = await persistence.loadUserData(child.profileKey);
+        return publicFamilyChild(child, sanitizeRiderPhotoDataUrl(data.accountProfile?.photoUrl));
+      }));
+      const [current, auth] = await Promise.all([
+        persistence.loadFamilyAccess(userId), currentAuthSessionByHash(session.sessionTokenHash, personalAuthSessions),
+      ]);
+      if (auth?.user?.id !== userId) { reply(401, { error: 'Sign in to manage family access.' }); return true; }
+      const activeById = new Map(current.children.map((item) => [item.id, item]));
+      const authorizedChildren = children.filter((item) => activeById.get(item.id)?.updatedAt === item.updatedAt);
+      reply(200, { children: authorizedChildren, archivedChildren: current.archivedChildren.map((child) => publicFamilyChild(child)), invitations: current.invitations.map(publicFamilyInvitation),
+        sharedWith: current.sharedWith.map((item) => ({ id: item.id, parentName: item.parentName,
+          createdAt: item.createdAt, permissions: { activity: true, health: false } })) });
+    } else if (pathname === '/api/family/children' && request.method === 'POST') {
+      const body = await readJsonBody(request, 8_000);
+      const name = familyChildName(body?.name);
+      if (!name) { reply(400, { error: 'Enter a child’s name using 1–80 characters.' }); return true; }
+      const child = await persistence.createFamilyChild(userId, name);
+      reply(child ? 201 : 409, child ? { child: publicFamilyChild(child) } : { error: 'A child could not be added. Check the account and family capacity.' });
+    } else if (pathname === '/api/family/link-invites' && request.method === 'POST') {
+      await readJsonBody(request, 8_000);
+      const origin = publicRequestOrigin(request);
+      if (!origin) { reply(503, { error: 'The public TrackLab address is not configured.' }); return true; }
+      const token = createSessionToken();
+      const invite = await persistence.createFamilyLinkInvitation(userId, tokenHash(token));
+      reply(invite ? 201 : 409, invite ? { invite: publicFamilyInvitation(invite),
+        claimUrl: `${origin}/#familyInvite=${encodeURIComponent(token)}` } : { error: 'A family invitation could not be created. Review pending invitations.' });
+    } else if (pathname === '/api/family/link-invites/preview' && request.method === 'GET') {
+      const token = requestUrl.searchParams.get('token');
+      const invite = validFamilyToken(token) ? await persistence.previewFamilyLinkInvitation(tokenHash(token)) : null;
+      reply(invite ? 200 : 409, invite ? { invite: publicFamilyInvitation(invite), parentName: invite.parentName,
+        canAccept: invite.parentUserId !== userId } : { error: 'This invitation expired, was used, or was revoked.' });
+    } else if (pathname === '/api/family/link-invites/accept' && request.method === 'POST') {
+      const body = await readJsonBody(request, 8_000);
+      if (!validFamilyToken(body?.token) || body?.activityConsent !== true || body?.healthConsent === true) {
+        reply(400, { error: 'Explicit approval to share your profile and non-health activity is required. Apple Watch data is not included.' }); return true;
+      }
+      const child = await persistence.acceptFamilyLinkInvitation(tokenHash(body.token), userId, true);
+      reply(child ? 200 : 409, child ? { ok: true, parentName: child.parentName }
+        : { error: 'This invitation expired, was used, was revoked, or cannot be accepted by this account.' });
+    } else if (childMatch) {
+      const [, childId, action] = childMatch;
+      if (action === 'restore' && request.method === 'POST') {
+        await readJsonBody(request, 8_000);
+        const restored = await persistence.restoreManagedFamilyChild(userId, childId);
+        reply(restored ? 200 : 404, restored ? { child: publicFamilyChild(restored) } : { error: 'This archived child cannot be restored.' });
+        return true;
+      }
+      const child = await persistence.loadFamilyChild(userId, childId);
+      if (!child) { reply(404, { error: 'This child profile is unavailable.' }); return true; }
+      if (!action && request.method === 'DELETE') {
+        const removed = await persistence.revokeFamilyAccess(userId, childId);
+        reply(removed ? 200 : 404, removed ? { ok: true } : { error: 'This child profile is unavailable.' });
+      } else if (action === 'club-claim' && request.method === 'POST') {
+        const body = await readJsonBody(request, 8_000);
+        if (child.kind !== 'managed' || !validFamilyToken(body?.token)) {
+          reply(400, { error: 'Choose a managed child and a valid unclaimed Club Connect invitation.' }); return true;
+        }
+        const claimed = await persistence.claimFamilyClubInvitation(userId, childId, tokenHash(body.token));
+        if (!claimed) { reply(409, { error: 'This club invitation expired, was used, or its athlete is already claimed.' }); return true; }
+        const result = await familyProfilePayload(child);
+        const [current, auth] = await Promise.all([
+          persistence.loadFamilyChild(userId, childId), currentAuthSessionByHash(session.sessionTokenHash, personalAuthSessions),
+        ]);
+        const authorized = current && current.updatedAt === child.updatedAt && auth?.user?.id === userId;
+        reply(authorized ? 200 : 404, authorized ? result : { error: 'Family access ended.' });
+      } else if ((action === 'profile' || action === 'training-sessions') && request.method === 'GET') {
+        let result;
+        if (action === 'profile') result = await familyProfilePayload(child);
+        else {
+          const from = Math.max(0, finiteNumber(requestUrl.searchParams.get('from'), 0));
+          const toValue = requestUrl.searchParams.get('to');
+          const to = Math.max(from, toValue == null ? Date.now() : finiteNumber(toValue, Date.now()));
+          const limit = Math.max(1, Math.min(2000, Math.round(finiteNumber(requestUrl.searchParams.get('limit'), 1000) || 1000)));
+          let rangeComplete = true;
+          const sessions = await familyTrainingHistory(child, { from, to, limit,
+            onRangeIncomplete: () => { rangeComplete = false; } });
+          result = { child: publicFamilyChild(child), sessions, totals: familyTrainingTotals(sessions), rangeComplete, healthAvailable: false };
+        }
+        // Re-check after asynchronous reads: an unlink or account deletion may
+        // have happened while another child’s history was being assembled.
+        const [current, auth] = await Promise.all([
+          persistence.loadFamilyChild(userId, childId), currentAuthSessionByHash(session.sessionTokenHash, personalAuthSessions),
+        ]);
+        if (!current || current.updatedAt !== child.updatedAt || auth?.user?.id !== userId) reply(404, { error: 'Family access ended. Refresh the family list.' });
+        else reply(200, result);
+      } else reply(405, { error: 'Method not allowed.' });
+    } else {
+      const revokeMatch = /^\/api\/family\/(shared-with|link-invites)\/([a-zA-Z0-9-]{1,100})$/u.exec(pathname);
+      if (revokeMatch && request.method === 'DELETE') {
+        const removed = revokeMatch[1] === 'shared-with'
+          ? await persistence.revokeFamilyAccess(userId, revokeMatch[2], true)
+          : await persistence.revokeFamilyInvitation(userId, revokeMatch[2]);
+        reply(removed ? 200 : 404, removed ? { ok: true } : { error: 'This family permission or invitation is unavailable.' });
+      } else reply(405, { error: 'Method not allowed.' });
+    }
+  } catch (error) {
+    if (error?.code === 'TRACKLAB_FAMILY_STORAGE_UNAVAILABLE') reply(503, { error: 'Family account storage is temporarily unavailable.' });
+    else throw error;
+  }
+  return true;
 }
 
 function publicClubConnectState(state, user) {
@@ -10051,13 +10224,14 @@ async function reactionTestRequestAccess(request, response, { allowResultArtifac
 async function reactionTestResponse(access) {
   const tablet = access.tabletSession;
   const profileKey = tablet ? tablet.ownerProfileKey : authProfileKey(access.authSession.user);
+  const claimedUserId = tablet && access.identity.member.status === 'claimed'
+    ? authUserIdFromProfileKey(access.identity.profileKey) : '';
   const [measured, data, claimedData, claimedMeasured] = await Promise.all([
     persistence.loadReactionTestBest(profileKey.slice(5), tablet?.studioRiderId || ''),
     persistence.loadUserData(profileKey),
     tablet && access.identity.member.status === 'claimed'
       ? persistence.loadUserData(access.identity.profileKey) : null,
-    tablet && access.identity.member.status === 'claimed'
-      ? persistence.loadReactionTestBest(access.identity.profileKey.slice(5)) : null,
+    claimedUserId ? persistence.loadReactionTestBest(claimedUserId) : null,
   ]);
   const records = tablet
     ? data?.studioRiders?.find((rider) => rider.id === tablet.studioRiderId)?.personalRecords
@@ -10087,8 +10261,11 @@ async function saveReactionTestForAccess(access, result, { legacy = false, autoJ
   // private; only complete measured results can enter the ranking store.
   const measuredMs = measuredReactionTestBestMs(result);
   for (const target of targets) {
-    if (measuredMs != null) await persistence.saveReactionTestBest(
-      target.profileKey.slice(5), measuredMs, target.studioRiderId || '',
+    // Managed children have private profile records but no auth user. Their
+    // measured club result remains keyed to the owner and exact roster rider.
+    const targetUserId = authUserIdFromProfileKey(target.profileKey);
+    if (measuredMs != null && targetUserId) await persistence.saveReactionTestBest(
+      targetUserId, measuredMs, target.studioRiderId || '',
       { autoJoinDisplayName: autoJoinLeaderboard && access.authSession && !access.tabletSession
         ? reactionLeaderboardAccountName(access.authSession.user.displayName) : '' },
     );
@@ -19409,6 +19586,10 @@ async function serveStatic(request, response) {
             '/': '/',
             '#': 'betaInvite=*',
             comment: 'Open a personal beta invitation without sending its token in the URL request.',
+          }, {
+            '/': '/',
+            '#': 'familyInvite=*',
+            comment: 'Open a family activity-sharing invitation for personal account approval.',
           }],
         }],
       },
@@ -20628,6 +20809,8 @@ async function serveStatic(request, response) {
     }, { 'Cache-Control': 'no-store' });
     return;
   }
+
+  if (await handleFamilyRequest(request, response, requestUrl)) return;
 
   if (['/api/beta-access', '/api/beta-access/accept', '/api/admin/beta-access',
     '/api/admin/beta-access/invites', '/api/admin/beta-access/revoke'].includes(requestUrl.pathname)) {
