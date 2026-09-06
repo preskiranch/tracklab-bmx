@@ -65,6 +65,7 @@ import {
 } from '../bridge/bike-metric-sanity.mjs';
 import { AppleBillingError, createAppleBillingService } from './appleBilling.mjs';
 import { wattbikeMembershipForAccount } from './appleMembership.mjs';
+import { betaInvitationPolicy, publicBetaAccessStatus } from './betaAccess.mjs';
 import {
   applyNativeAppCors,
   applySecurityHeaders,
@@ -406,6 +407,7 @@ const scryptAsync = promisify(scryptCallback);
 const authRateLimiter = createRateLimiter();
 const accountDeletionRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const billingRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
+const betaAccessRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const authWebSocketTicketRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const appleNotificationRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const nativeRuntimeConfigRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
@@ -1202,13 +1204,14 @@ function membershipForAccount(user) {
 async function refreshConnectedMembershipForUser(user) {
   if (!user?.id) return;
   const loadedUser = await persistence.findEffectiveWattbikeBillingOwnerById(user.id);
-  // An Apple notification must never re-project a stale cached racer grant if
+  // A membership refresh must never re-project a stale paid or beta grant if
   // the authoritative read cannot prove it. Admin identity is retained so the
   // explicit operator override in membershipForAccount still applies.
   const effectiveUser = loadedUser ?? {
     ...user,
     membershipTier: 'spectator',
     bikeSeats: 1,
+    betaAccess: null,
   };
   const membership = membershipForAccount(effectiveUser);
   for (const client of clients.values()) {
@@ -19402,6 +19405,10 @@ async function serveStatic(request, response) {
             '/': '/',
             '#': 'heartRateAccountBlock=*',
             comment: 'Open a private same-account Apple Watch handoff without sending its code to the server.',
+          }, {
+            '/': '/',
+            '#': 'betaInvite=*',
+            comment: 'Open a personal beta invitation without sending its token in the URL request.',
           }],
         }],
       },
@@ -20619,6 +20626,97 @@ async function serveStatic(request, response) {
         profile: publicFriendProfile(preview.profile, 'none'),
       },
     }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (['/api/beta-access', '/api/beta-access/accept', '/api/admin/beta-access',
+    '/api/admin/beta-access/invites', '/api/admin/beta-access/revoke'].includes(requestUrl.pathname)) {
+    const session = await requireAuthSession(request, response);
+    if (!session) return;
+    const adminRoute = requestUrl.pathname.startsWith('/api/admin/');
+    if (adminRoute && !isAdminEmail(session.user.email)) {
+      writeJson(response, 403, { error: 'Only the TrackLab administrator can manage beta access.' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const listing = requestUrl.pathname === '/api/beta-access' || requestUrl.pathname === '/api/admin/beta-access';
+    if (request.method !== (listing ? 'GET' : 'POST')) {
+      writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (!enforceNoStoreRateLimit(request, response, betaAccessRateLimiter,
+      listing ? 600 : 100, `beta:${session.user.id}:${listing ? 'read' : 'write'}`)) return;
+    try {
+      if (listing) {
+        const result = adminRoute
+          ? await persistence.listBetaAccess()
+          : { beta: publicBetaAccessStatus(await persistence.loadBetaAccessForUser(session.user.id)) };
+        writeJson(response, 200, result, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      const payload = await readJsonBody(request, 8_000);
+      if (requestUrl.pathname === '/api/admin/beta-access/invites') {
+        const policy = betaInvitationPolicy(payload ?? {});
+        const email = sanitizeEmail(payload?.email);
+        if (!email || String(payload?.email ?? '').trim().length > 160 || !policy) {
+          writeJson(response, 400, { error: 'Enter an email address, 1–4 bike connections, and 1–365 days.' }, { 'Cache-Control': 'no-store' });
+          return;
+        }
+        const origin = publicRequestOrigin(request);
+        if (!origin) {
+          writeJson(response, 503, { error: 'The public TrackLab address is not configured.' }, { 'Cache-Control': 'no-store' });
+          return;
+        }
+        const token = createSessionToken();
+        const invite = await persistence.createBetaAccessInvite({ email, ...policy,
+          issuerUserId: session.user.id, tokenHash: tokenHash(token) });
+        if (!invite) throw new HttpRequestError(503, 'Beta access could not create the invitation.');
+        writeJson(response, 201, { invite, token, claimUrl: `${origin}/#betaInvite=${encodeURIComponent(token)}` }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (requestUrl.pathname === '/api/beta-access/accept') {
+        const token = typeof payload?.token === 'string' ? payload.token.trim() : '';
+        if (!/^[A-Za-z0-9_-]{43}$/.test(token)) {
+          writeJson(response, 400, { error: 'This beta invitation is invalid.' }, { 'Cache-Control': 'no-store' });
+          return;
+        }
+        const grant = await persistence.acceptBetaAccessInvite(tokenHash(token), session.user.id);
+        if (!grant) {
+          writeJson(response, 409, { error: 'This invitation expired, was revoked or used, or belongs to a different email address.' }, { 'Cache-Control': 'no-store' });
+          return;
+        }
+        const user = await persistence.findEffectiveWattbikeBillingOwnerById(session.user.id);
+        if (!user) throw new HttpRequestError(503, 'Beta access was accepted. Refresh your account to load its access.');
+        authSessionLookups.refreshUser(user);
+        personalAuthSessions.refreshUser(user);
+        await refreshConnectedMembershipForUser(user);
+        writeJson(response, 200, { beta: publicBetaAccessStatus(grant), user: publicAuthUser(user) }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      const inviteId = typeof payload?.inviteId === 'string' ? payload.inviteId.trim() : '';
+      const grantId = typeof payload?.grantId === 'string' ? payload.grantId.trim() : '';
+      if (Boolean(inviteId) === Boolean(grantId) || inviteId.length > 100 || grantId.length > 100) {
+        writeJson(response, 400, { error: 'Choose one invitation or beta grant to revoke.' }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      const revoked = await persistence.revokeBetaAccess({ inviteId, grantId, actorUserId: session.user.id });
+      if (!revoked) {
+        writeJson(response, 404, { error: 'This invitation or grant was not found. For an accepted invitation, revoke its beta grant.' }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (revoked.userId) {
+        const user = await persistence.findEffectiveWattbikeBillingOwnerById(revoked.userId);
+        if (user) {
+          authSessionLookups.refreshUser(user);
+          personalAuthSessions.refreshUser(user);
+          await refreshConnectedMembershipForUser(user);
+        }
+      }
+      writeJson(response, 200, { ok: true }, { 'Cache-Control': 'no-store' });
+    } catch (error) {
+      if (error?.code === 'TRACKLAB_BETA_STORAGE_UNAVAILABLE') {
+        writeJson(response, 503, { error: 'Beta access storage is temporarily unavailable.' }, { 'Cache-Control': 'no-store' });
+      } else throw error;
+    }
     return;
   }
 

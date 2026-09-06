@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { MultiplayerComingSoon } from './MultiplayerComingSoon';
 import {
   Activity,
   Bike,
@@ -36,6 +37,7 @@ export type CloudUserDataStatus = 'loading' | 'online' | 'offline';
 type DiagnosticSeverity = 'ready' | 'warning' | 'blocked';
 
 type DiagnosticsPanelProps = {
+  multiplayerAvailable?: boolean;
   bridgeConnection: ConnectionState;
   bridgeMode: BridgeMode | 'unknown';
   bridgeSourceState: BridgeSourceState | 'unknown';
@@ -144,6 +146,7 @@ function formatProfileKey(value: string) {
 }
 
 export function DiagnosticsPanel({
+  multiplayerAvailable = true,
   bridgeConnection,
   bridgeMode,
   bridgeSourceState,
@@ -192,7 +195,7 @@ export function DiagnosticsPanel({
   const savedBikeCount = bikeProfiles.length;
   const trackReady = track.routeStatus === 'user-mapped';
   const inputReady = demoMode ? demoBikeCount > 0 : liveCount > 0;
-  const multiplayerReady = playMode === 'multiplayer' && multiplayerConnection === 'open';
+  const multiplayerReady = multiplayerAvailable && playMode === 'multiplayer' && multiplayerConnection === 'open';
   const checks = [
     {
       id: 'google',
@@ -225,7 +228,7 @@ export function DiagnosticsPanel({
     {
       id: 'multiplayer',
       title: 'Multiplayer',
-      detail: multiplayerReady ? currentRoomId ?? 'Online' : playMode === 'multiplayer' ? multiplayerConnection : 'Local mode',
+      detail: !multiplayerAvailable ? 'Coming soon' : multiplayerReady ? currentRoomId ?? 'Online' : playMode === 'multiplayer' ? multiplayerConnection : 'Local mode',
       severity: multiplayerReady ? 'ready' : playMode === 'multiplayer' ? 'warning' : 'warning',
       icon: Users,
     },
@@ -243,8 +246,9 @@ export function DiagnosticsPanel({
     severity: DiagnosticSeverity;
     icon: typeof Activity;
   }>;
-  const readyCount = checks.filter((check) => check.severity === 'ready').length;
-  const blockedCount = checks.filter((check) => check.severity === 'blocked').length;
+  const visibleChecks = multiplayerAvailable ? checks : checks.filter((check) => check.id !== 'multiplayer');
+  const readyCount = visibleChecks.filter((check) => check.severity === 'ready').length;
+  const blockedCount = visibleChecks.filter((check) => check.severity === 'blocked').length;
   const readinessLabel = blockedCount === 0 ? 'Session ready' : `${blockedCount} blocker${blockedCount === 1 ? '' : 's'}`;
   const canCreateRoom = playMode === 'multiplayer' && multiplayerConnection === 'open';
   const canCopyInvite = Boolean(inviteUrl);
@@ -258,16 +262,16 @@ export function DiagnosticsPanel({
             Preflight
           </div>
           <h2>{readinessLabel}</h2>
-          <p>{readyCount} of {checks.length} systems ready for this setup.</p>
+          <p>{readyCount} of {visibleChecks.length} systems ready for this setup.</p>
         </div>
         <div className={`readiness-ring ${blockedCount === 0 ? 'ready' : 'blocked'}`}>
-          <strong>{readyCount}/{checks.length}</strong>
+          <strong>{readyCount}/{visibleChecks.length}</strong>
           <span>ready</span>
         </div>
       </section>
 
       <section className="diagnostic-grid" aria-label="System readiness">
-        {checks.map(({ id, title, detail, severity, icon: Icon }) => (
+        {visibleChecks.map(({ id, title, detail, severity, icon: Icon }) => (
           <div className={`diagnostic-card ${severity}`} key={id}>
             <div className="diagnostic-card-head">
               <span><Icon size={18} /></span>
@@ -354,27 +358,33 @@ export function DiagnosticsPanel({
             <span><strong>{demoMode ? 'On' : 'Off'}</strong> demo mode</span>
             <span><strong>{demoBikeCount}</strong> demo riders</span>
             <span><strong>{demoVariableCount}</strong> race variables</span>
-            <span><strong>{onlineRiderCount}</strong> riders online</span>
+            {multiplayerAvailable && <span><strong>{onlineRiderCount}</strong> riders online</span>}
           </div>
           <div className="diagnostic-actions stacked">
             <button type="button" onClick={onEnableDemoTest}>
               <Bike size={16} />
               Enable demo test
             </button>
-            <button type="button" onClick={onEnableMultiplayer}>
-              <Users size={16} />
-              Multiplayer online
-            </button>
-            <button type="button" onClick={onCreatePrivateRoom} disabled={!canCreateRoom}>
-              <PlayCircle size={16} />
-              Create private room
-            </button>
-            <button type="button" onClick={onCopyInvite} disabled={!canCopyInvite}>
-              <Copy size={16} />
-              Copy invite
-            </button>
+            {multiplayerAvailable && (
+              <>
+                <button type="button" onClick={onEnableMultiplayer}>
+                  <Users size={16} />
+                  Multiplayer online
+                </button>
+                <button type="button" onClick={onCreatePrivateRoom} disabled={!canCreateRoom}>
+                  <PlayCircle size={16} />
+                  Create private room
+                </button>
+                <button type="button" onClick={onCopyInvite} disabled={!canCopyInvite}>
+                  <Copy size={16} />
+                  Copy invite
+                </button>
+              </>
+            )}
           </div>
-          <p className="diagnostic-note">{multiplayerStatus}</p>
+          {multiplayerAvailable
+            ? <p className="diagnostic-note">{multiplayerStatus}</p>
+            : <MultiplayerComingSoon compact />}
         </div>
 
         <div className="diagnostics-section">

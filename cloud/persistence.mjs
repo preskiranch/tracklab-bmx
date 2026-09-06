@@ -4,6 +4,7 @@ import { runDatabaseMigrations } from './migrations.mjs';
 import { cloudTelemetry } from './telemetry.mjs';
 import { isReactionTestSession, reactionLeaderboardDisplayName } from './reactionTest.mjs';
 import { appleAppAccountTokenLineageHash } from './appleBilling.mjs';
+import { betaInvitationPolicy, betaInvitationDurationMs, publicBetaAccessStatus } from './betaAccess.mjs';
 import {
   maximumAcceptedTrainingSpeedKph,
   maximumAcceptedTrainingSpeedMph,
@@ -60,6 +61,9 @@ const memoryAuthUsersById = new Map();
 const memoryAuthUserIdByEmail = new Map();
 const memoryErasedAuthUserIdHashes = new Set();
 const memoryAuthSessionsByToken = new Map();
+const memoryBetaInvitesById = new Map();
+const memoryBetaGrantsById = new Map();
+const memoryBetaAudit = [];
 const memoryAppleSubscriptionsByOriginalTransactionId = new Map();
 const memoryAppleTransactionsById = new Map();
 const memoryAppleNotificationsByUuid = new Map();
@@ -466,7 +470,7 @@ function normalizedUsername(displayName, userId) {
 }
 
 function cloneAuthUser(user) {
-  return user ? { ...user } : null;
+  return user ? { ...user, betaAccess: memoryBetaGrantForUser(user.id) } : null;
 }
 
 function cloneAuthSession(session) {
@@ -679,6 +683,7 @@ function authUserFromRow(row) {
     legacyBikeSeats: Number(row.legacy_bike_seats ?? row.bike_seats) || 1,
     appleBillingManaged,
     appleEntitlementActive,
+    betaAccess: betaGrantFromRow(row.beta_access),
     admin: Boolean(row.admin),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -689,8 +694,215 @@ function authUserFromRow(row) {
 function effectiveMemoryAuthUser(userId) {
   const user = memoryAuthUsersById.get(userId);
   if (!user) return null;
-  if (user.appleBillingManaged === true) return memoryAppleProjection(userId).user;
-  return { ...cloneAuthUser(user), appleEntitlementActive: false };
+  const projected = user.appleBillingManaged === true
+    ? memoryAppleProjection(userId).user
+    : { ...cloneAuthUser(user), appleEntitlementActive: false };
+  return { ...projected, betaAccess: memoryBetaGrantForUser(userId) };
+}
+
+const betaAccessProjectionSql = `(SELECT row_to_json(beta) FROM ${schema}.beta_access_grants AS beta
+  WHERE beta.user_id = users.id
+  ORDER BY (beta.revoked_at IS NULL) DESC, beta.created_at DESC, beta.id DESC LIMIT 1) AS beta_access`;
+
+function betaTimestamp(value) {
+  return value == null ? null : new Date(value).getTime();
+}
+
+function betaGrantFromRow(row) {
+  return row ? {
+    id: row.id, userId: row.user_id, inviteId: row.invite_id,
+    email: row.email, bikeSeats: Number(row.bike_seats), issuerUserId: row.issuer_user_id,
+    createdAt: betaTimestamp(row.created_at), startsAt: betaTimestamp(row.starts_at),
+    expiresAt: betaTimestamp(row.expires_at), revokedAt: betaTimestamp(row.revoked_at),
+    revokedByUserId: row.revoked_by_user_id ?? null,
+  } : null;
+}
+
+function betaInviteFromRow(row) {
+  return row ? {
+    id: row.id, email: row.email, bikeSeats: Number(row.bike_seats), durationDays: Number(row.duration_days),
+    issuerUserId: row.issuer_user_id, createdAt: betaTimestamp(row.created_at),
+    expiresAt: betaTimestamp(row.expires_at), claimedAt: betaTimestamp(row.claimed_at),
+    claimedByUserId: row.claimed_by_user_id ?? null, revokedAt: betaTimestamp(row.revoked_at),
+    revokedByUserId: row.revoked_by_user_id ?? null,
+  } : null;
+}
+
+function publicMemoryBetaInvite(invite) {
+  if (!invite) return null;
+  const { tokenHash: _tokenHash, ...safe } = invite;
+  return { ...safe };
+}
+
+function memoryBetaGrantForUser(userId) {
+  const grants = [...memoryBetaGrantsById.values()].filter((grant) => grant.userId === userId)
+    .sort((a, b) => Number(b.revokedAt == null) - Number(a.revokedAt == null)
+      || b.createdAt - a.createdAt || b.id.localeCompare(a.id));
+  return grants[0] ? { ...grants[0] } : null;
+}
+
+function betaStorageError() {
+  const error = new Error('Beta access storage is temporarily unavailable.');
+  error.statusCode = 503;
+  error.code = 'TRACKLAB_BETA_STORAGE_UNAVAILABLE';
+  return error;
+}
+
+function requireBetaStorage() {
+  if (!pool && databaseConfigured) throw betaStorageError();
+}
+
+async function withBetaLock(operation, memoryOperation) {
+  requireBetaStorage();
+  if (!pool) return withMemoryPersistenceLock('beta-access', memoryOperation);
+  const result = await withPersistenceLock('beta-access', async (client) => ({ value: await operation(client) }));
+  if (!result) throw betaStorageError();
+  return result.value;
+}
+
+async function betaAudit(client, action, targetId, actorUserId, now) {
+  const record = { id: randomUUID(), action, targetId, actorUserId, createdAt: now };
+  if (!client) memoryBetaAudit.push(record);
+  else await client.query(`INSERT INTO ${schema}.beta_access_audit
+    (id, action, target_id, actor_user_id, created_at) VALUES ($1,$2,$3,$4,to_timestamp($5/1000.0))`,
+  [record.id, action, targetId, actorUserId, now]);
+}
+
+export async function createBetaAccessInvite(candidate, now = Date.now()) {
+  const policy = betaInvitationPolicy(candidate);
+  const email = authEmailKey(candidate?.email);
+  if (!policy || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 160
+    || !/^[a-f0-9]{64}$/.test(candidate?.tokenHash ?? '') || !candidate?.issuerUserId) return null;
+  const invite = {
+    id: randomUUID(), email, tokenHash: candidate.tokenHash, ...policy,
+    issuerUserId: candidate.issuerUserId, createdAt: now, expiresAt: now + betaInvitationDurationMs,
+    claimedAt: null, claimedByUserId: null, revokedAt: null, revokedByUserId: null,
+  };
+  return withBetaLock(async (client) => {
+    const issuer = await client.query(`SELECT id FROM ${schema}.auth_users WHERE id=$1 FOR KEY SHARE`, [invite.issuerUserId]);
+    if (!issuer.rows[0]) return null;
+    const replaced = await client.query(`UPDATE ${schema}.beta_access_invites
+      SET revoked_at=to_timestamp($2/1000.0), revoked_by_user_id=$3
+      WHERE email=$1 AND claimed_at IS NULL AND revoked_at IS NULL RETURNING id`, [email, now, invite.issuerUserId]);
+    for (const row of replaced.rows) await betaAudit(client, 'invite-replaced', row.id, invite.issuerUserId, now);
+    const result = await client.query(`INSERT INTO ${schema}.beta_access_invites
+      (id,email,token_hash,bike_seats,duration_days,issuer_user_id,created_at,expires_at)
+      VALUES ($1,$2,$3,$4,$5,$6,to_timestamp($7/1000.0),to_timestamp($8/1000.0)) RETURNING *`,
+    [invite.id,email,invite.tokenHash,invite.bikeSeats,invite.durationDays,invite.issuerUserId,now,invite.expiresAt]);
+    await betaAudit(client, 'invite-created', invite.id, invite.issuerUserId, now);
+    return betaInviteFromRow(result.rows[0]);
+  }, async () => {
+    if (!memoryAuthUsersById.has(invite.issuerUserId)) return null;
+    for (const previous of memoryBetaInvitesById.values()) {
+      if (previous.email === email && previous.claimedAt == null && previous.revokedAt == null) {
+        previous.revokedAt = now;
+        previous.revokedByUserId = invite.issuerUserId;
+        await betaAudit(null, 'invite-replaced', previous.id, invite.issuerUserId, now);
+      }
+    }
+    memoryBetaInvitesById.set(invite.id, invite);
+    await betaAudit(null, 'invite-created', invite.id, invite.issuerUserId, now);
+    return publicMemoryBetaInvite(invite);
+  });
+}
+
+export async function acceptBetaAccessInvite(tokenHash, userId, now = Date.now()) {
+  if (!/^[a-f0-9]{64}$/.test(tokenHash ?? '') || !userId) return null;
+  return withBetaLock(async (client) => {
+    const user = await client.query(`SELECT id,email FROM ${schema}.auth_users WHERE id=$1 FOR UPDATE`, [userId]);
+    if (!user.rows[0]) return null;
+    const result = await client.query(`UPDATE ${schema}.beta_access_invites
+      SET claimed_at=to_timestamp($3/1000.0), claimed_by_user_id=$2
+      WHERE token_hash=$1 AND email=$4 AND claimed_at IS NULL AND revoked_at IS NULL
+        AND expires_at > to_timestamp($3/1000.0) RETURNING *`, [tokenHash,userId,now,authEmailKey(user.rows[0].email)]);
+    const invite = betaInviteFromRow(result.rows[0]);
+    if (!invite) return null;
+    const replaced = await client.query(`UPDATE ${schema}.beta_access_grants
+      SET revoked_at=to_timestamp($2/1000.0), revoked_by_user_id=$1
+      WHERE user_id=$1 AND revoked_at IS NULL RETURNING id`, [userId,now]);
+    for (const row of replaced.rows) await betaAudit(client, 'grant-replaced', row.id, userId, now);
+    const id = randomUUID();
+    const grant = await client.query(`INSERT INTO ${schema}.beta_access_grants
+      (id,user_id,invite_id,bike_seats,issuer_user_id,created_at,starts_at,expires_at)
+      VALUES ($1,$2,$3,$4,$5,to_timestamp($6/1000.0),to_timestamp($6/1000.0),to_timestamp($7/1000.0)) RETURNING *`,
+    [id,userId,invite.id,invite.bikeSeats,invite.issuerUserId,now,now+invite.durationDays*86400000]);
+    await betaAudit(client, 'grant-claimed', id, userId, now);
+    return betaGrantFromRow(grant.rows[0]);
+  }, async () => {
+    const user = memoryAuthUsersById.get(userId);
+    const invite = [...memoryBetaInvitesById.values()].find((candidate) => candidate.tokenHash === tokenHash);
+    if (!user || !invite || invite.email !== authEmailKey(user.email) || invite.claimedAt != null
+      || invite.revokedAt != null || invite.expiresAt <= now) return null;
+    // Consume before any asynchronous operation so concurrent claims cannot replay.
+    invite.claimedAt = now;
+    invite.claimedByUserId = userId;
+    for (const previous of memoryBetaGrantsById.values()) {
+      if (previous.userId === userId && previous.revokedAt == null) {
+        previous.revokedAt = now;
+        previous.revokedByUserId = userId;
+        await betaAudit(null, 'grant-replaced', previous.id, userId, now);
+      }
+    }
+    const grant = { id: randomUUID(), userId, inviteId: invite.id, bikeSeats: invite.bikeSeats,
+      issuerUserId: invite.issuerUserId, createdAt: now, startsAt: now,
+      expiresAt: now+invite.durationDays*86400000, revokedAt: null, revokedByUserId: null };
+    memoryBetaGrantsById.set(grant.id, grant);
+    await betaAudit(null, 'grant-claimed', grant.id, userId, now);
+    return { ...grant };
+  });
+}
+
+export async function loadBetaAccessForUser(userId) {
+  requireBetaStorage();
+  if (!pool) return memoryBetaGrantForUser(userId);
+  const result = await query(`SELECT * FROM ${schema}.beta_access_grants WHERE user_id=$1
+    ORDER BY (revoked_at IS NULL) DESC, created_at DESC, id DESC LIMIT 1`, [userId]);
+  if (!result) throw betaStorageError();
+  return betaGrantFromRow(result.rows[0]);
+}
+
+export async function listBetaAccess() {
+  requireBetaStorage();
+  if (!pool) return {
+    invites: [...memoryBetaInvitesById.values()].sort((a,b) => b.createdAt-a.createdAt).slice(0,500).map(publicMemoryBetaInvite),
+    grants: [...memoryBetaGrantsById.values()].sort((a,b) => b.createdAt-a.createdAt).slice(0,500)
+      .map((grant) => ({ ...grant, email: memoryAuthUsersById.get(grant.userId)?.email ?? '',
+        active: publicBetaAccessStatus(grant)?.active ?? false })),
+  };
+  const [invites, grants] = await Promise.all([
+    query(`SELECT * FROM ${schema}.beta_access_invites ORDER BY created_at DESC,id DESC LIMIT 500`),
+    query(`SELECT grants.*, users.email FROM ${schema}.beta_access_grants AS grants
+      JOIN ${schema}.auth_users AS users ON users.id=grants.user_id ORDER BY grants.created_at DESC,grants.id DESC LIMIT 500`),
+  ]);
+  if (!invites || !grants) throw betaStorageError();
+  return { invites: invites.rows.map(betaInviteFromRow), grants: grants.rows.map((row) => {
+    const grant = betaGrantFromRow(row);
+    return { ...grant, active: publicBetaAccessStatus(grant)?.active ?? false };
+  }) };
+}
+
+export async function revokeBetaAccess({ inviteId, grantId, actorUserId }, now = Date.now()) {
+  if (Boolean(inviteId) === Boolean(grantId) || !actorUserId) return null;
+  return withBetaLock(async (client) => {
+    const actor = await client.query(`SELECT id FROM ${schema}.auth_users WHERE id=$1 FOR KEY SHARE`, [actorUserId]);
+    if (!actor.rows[0]) return null;
+    const table = inviteId ? 'beta_access_invites' : 'beta_access_grants';
+    const result = await client.query(`UPDATE ${schema}.${table}
+      SET revoked_at=COALESCE(revoked_at,to_timestamp($2/1000.0)),
+        revoked_by_user_id=COALESCE(revoked_by_user_id,$3)
+      WHERE id=$1 ${inviteId ? 'AND claimed_at IS NULL' : ''} RETURNING *`, [inviteId||grantId,now,actorUserId]);
+    if (!result.rows[0]) return null;
+    await betaAudit(client, inviteId ? 'invite-revoked' : 'grant-revoked', inviteId||grantId, actorUserId, now);
+    return { userId: result.rows[0].user_id ?? null };
+  }, async () => {
+    if (!memoryAuthUsersById.has(actorUserId)) return null;
+    const target = inviteId ? memoryBetaInvitesById.get(inviteId) : memoryBetaGrantsById.get(grantId);
+    if (!target || (inviteId && target.claimedAt != null)) return null;
+    target.revokedAt ??= now;
+    target.revokedByUserId ??= actorUserId;
+    await betaAudit(null, inviteId ? 'invite-revoked' : 'grant-revoked', inviteId||grantId, actorUserId, now);
+    return { userId: target.userId ?? null };
+  });
 }
 
 export async function findAuthUserByEmail(email) {
@@ -702,7 +914,8 @@ export async function findAuthUserByEmail(email) {
   const result = await query(
     `SELECT users.*, official.kind AS official_friend_kind,
        active_subscription.original_transaction_id AS effective_apple_original_transaction_id,
-       active_subscription.bike_seats AS effective_apple_bike_seats
+       active_subscription.bike_seats AS effective_apple_bike_seats,
+       ${betaAccessProjectionSql}
      FROM ${schema}.auth_users AS users
      LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = users.id
      LEFT JOIN LATERAL (
@@ -726,7 +939,8 @@ export async function findAuthUserById(id) {
   const result = await query(
     `SELECT users.*, official.kind AS official_friend_kind,
        active_subscription.original_transaction_id AS effective_apple_original_transaction_id,
-       active_subscription.bike_seats AS effective_apple_bike_seats
+       active_subscription.bike_seats AS effective_apple_bike_seats,
+       ${betaAccessProjectionSql}
      FROM ${schema}.auth_users AS users
      LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = users.id
      LEFT JOIN LATERAL (
@@ -756,7 +970,8 @@ export async function findEffectiveWattbikeBillingOwnerById(id) {
   const result = await query(
     `SELECT users.*,
        active_subscription.original_transaction_id AS effective_apple_original_transaction_id,
-       active_subscription.bike_seats AS effective_apple_bike_seats
+       active_subscription.bike_seats AS effective_apple_bike_seats,
+       ${betaAccessProjectionSql}
      FROM ${schema}.auth_users AS users
      LEFT JOIN LATERAL (
        SELECT original_transaction_id, bike_seats
@@ -1020,7 +1235,8 @@ export async function findAuthSession(tokenHash) {
        users.*,
        official.kind AS official_friend_kind,
        active_subscription.original_transaction_id AS effective_apple_original_transaction_id,
-       active_subscription.bike_seats AS effective_apple_bike_seats
+       active_subscription.bike_seats AS effective_apple_bike_seats,
+       ${betaAccessProjectionSql}
      FROM ${schema}.auth_sessions AS session
      JOIN ${schema}.auth_users AS users ON users.id = session.user_id
      LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = users.id
@@ -1210,7 +1426,10 @@ function deleteMemoryOwnedClub(clubId) {
 }
 
 async function deleteMemoryAuthUserAccount(userId) {
-  return withMemoryPersistenceLock(`account-delete:${userId}`, async () => {
+  // Beta claims can replace an existing grant across an audit write. Serialize
+  // deletion with those claims so an in-flight replacement cannot re-create a
+  // grant after its account and invitation have already been erased.
+  return withMemoryPersistenceLock('beta-access', () => withMemoryPersistenceLock(`account-delete:${userId}`, async () => {
     const user = memoryAuthUsersById.get(userId);
     if (!user) return { deleted: false, profileKey: `user:${userId}`, clubIds: [] };
     const profileKey = `user:${userId}`;
@@ -1232,6 +1451,13 @@ async function deleteMemoryAuthUserAccount(userId) {
     memoryErasedAuthUserIdHashes.add(erasedAuthUserIdHash(userId));
 
     const deletedAt = Date.now();
+    deleteMemoryEntries(memoryBetaInvitesById, (invite) => invite.email === authEmailKey(user.email));
+    deleteMemoryEntries(memoryBetaGrantsById, (grant) => grant.userId === userId);
+    for (const record of [...memoryBetaInvitesById.values(), ...memoryBetaGrantsById.values()]) {
+      if (record.issuerUserId === userId) record.issuerUserId = null;
+      if (record.revokedByUserId === userId) record.revokedByUserId = null;
+    }
+    for (const record of memoryBetaAudit) if (record.actorUserId === userId) record.actorUserId = null;
     const appleSubscriptions = [...memoryAppleSubscriptionsByOriginalTransactionId.values()]
       .filter((subscription) => subscription.userId === userId);
     const appleOriginalTransactionIds = new Set(
@@ -1484,7 +1710,7 @@ async function deleteMemoryAuthUserAccount(userId) {
       clubIds: ownedClubIds,
       authSessionTokenHashes,
     };
-  });
+  }));
 }
 
 async function deletePostgresAuthUserAccount(userId) {
@@ -1497,6 +1723,7 @@ async function deletePostgresAuthUserAccount(userId) {
       return { deleted: false, profileKey: `user:${userId}`, clubIds: [] };
     }
     const profileKey = `user:${userId}`;
+    await client.query(`DELETE FROM ${schema}.beta_access_invites WHERE email=$1`, [authEmailKey(userResult.rows[0].email)]);
     const sessionResult = await client.query(
       `SELECT token_hash FROM ${schema}.auth_sessions WHERE user_id = $1 FOR UPDATE`,
       [userId],
@@ -2091,7 +2318,8 @@ async function persistPostgresAppleReconciliation(
   { allowDeletedRebind = false } = {},
 ) {
   const userResult = await client.query(
-    `SELECT * FROM ${schema}.auth_users WHERE id = $1 FOR UPDATE`,
+    `SELECT users.*, ${betaAccessProjectionSql}
+     FROM ${schema}.auth_users AS users WHERE id = $1 FOR UPDATE`,
     [userId],
   );
   if (!userResult.rows[0]) return { status: 'user-not-found', user: null, subscription: null };
@@ -2317,6 +2545,7 @@ async function persistPostgresAppleReconciliation(
     status: 'saved',
     user: authUserFromRow({
       ...updatedUser.rows[0],
+      beta_access: userResult.rows[0].beta_access,
       effective_apple_original_transaction_id:
         activeSubscription?.original_transaction_id ?? null,
       effective_apple_bike_seats: activeSubscription?.bike_seats ?? null,

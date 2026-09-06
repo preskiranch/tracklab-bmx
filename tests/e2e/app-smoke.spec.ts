@@ -4452,9 +4452,8 @@ test('unfinished local Explore ride restores across reload and after returning f
     });
 
     const exploreMode = page.locator('.explore-mode-switch');
-    await exploreMode.getByRole('button', { name: 'Private room', exact: true }).click();
-    await expect(page.locator('.explore-route-summary')).toHaveCount(0);
-    await exploreMode.getByRole('button', { name: 'Local bikes', exact: true }).click();
+    await expect(exploreMode.getByRole('button', { name: /Private room/ })).toBeDisabled();
+    await expect(page.getByRole('region', { name: /Coming soon/ })).toBeVisible();
 
     await expect(page.locator('.explore-route-summary')).toContainText('Checkpoint Coast Ride');
     await expect(restoredRider).toContainText('3.18 mi');

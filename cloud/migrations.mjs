@@ -2317,6 +2317,49 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           ADD COLUMN IF NOT EXISTS leaderboard_hidden BOOLEAN NOT NULL DEFAULT false`,
       ],
     },
+    {
+      version: 47,
+      name: 'add independent invitation-only beta access and audit',
+      statements: [
+        `CREATE TABLE ${schema}.beta_access_invites (
+          id TEXT PRIMARY KEY,
+          email TEXT NOT NULL,
+          token_hash TEXT UNIQUE NOT NULL,
+          bike_seats INTEGER NOT NULL CHECK (bike_seats BETWEEN 1 AND 4),
+          duration_days INTEGER NOT NULL CHECK (duration_days BETWEEN 1 AND 365),
+          issuer_user_id TEXT REFERENCES ${schema}.auth_users(id) ON DELETE SET NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          expires_at TIMESTAMPTZ NOT NULL,
+          claimed_at TIMESTAMPTZ,
+          claimed_by_user_id TEXT REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          revoked_at TIMESTAMPTZ,
+          revoked_by_user_id TEXT REFERENCES ${schema}.auth_users(id) ON DELETE SET NULL
+        )`,
+        `CREATE INDEX idx_beta_access_invites_email ON ${schema}.beta_access_invites(email)`,
+        `CREATE TABLE ${schema}.beta_access_grants (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          invite_id TEXT REFERENCES ${schema}.beta_access_invites(id) ON DELETE SET NULL,
+          bike_seats INTEGER NOT NULL CHECK (bike_seats BETWEEN 1 AND 4),
+          issuer_user_id TEXT REFERENCES ${schema}.auth_users(id) ON DELETE SET NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          starts_at TIMESTAMPTZ NOT NULL,
+          expires_at TIMESTAMPTZ NOT NULL CHECK (expires_at > starts_at),
+          revoked_at TIMESTAMPTZ,
+          revoked_by_user_id TEXT REFERENCES ${schema}.auth_users(id) ON DELETE SET NULL
+        )`,
+        `CREATE UNIQUE INDEX idx_beta_access_active_user ON ${schema}.beta_access_grants(user_id)
+          WHERE revoked_at IS NULL`,
+        `CREATE INDEX idx_beta_access_grants_user ON ${schema}.beta_access_grants(user_id, created_at DESC)`,
+        `CREATE TABLE ${schema}.beta_access_audit (
+          id TEXT PRIMARY KEY,
+          action TEXT NOT NULL CHECK (action IN ('invite-created','invite-replaced','invite-revoked','grant-claimed','grant-replaced','grant-revoked')),
+          target_id TEXT NOT NULL,
+          actor_user_id TEXT REFERENCES ${schema}.auth_users(id) ON DELETE SET NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`,
+      ],
+    },
   ];
 }
 

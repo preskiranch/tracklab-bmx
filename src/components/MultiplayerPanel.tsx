@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import './MultiplayerPanel.css';
+import { MultiplayerComingSoon } from './MultiplayerComingSoon';
 import {
   Check,
   Copy,
@@ -51,6 +52,7 @@ export type ChatMessage = {
 };
 
 type MultiplayerPanelProps = {
+  multiplayerAvailable?: boolean;
   clubTabletDemoActive?: boolean;
   demoParticipantEligible?: boolean;
   playMode: PlayMode;
@@ -148,7 +150,44 @@ export function formatMultiplayerProSetMinimumSpeed(speedUnit: SpeedUnit) {
   return `${formatSpeedFromKph(proSplitMinimumMph * 1.609344, speedUnit)} ${speedUnitLabel(speedUnit)}`;
 }
 
-export function MultiplayerPanel({
+function LocalMultiplayerRoster({ players, maxPlayers }: Pick<MultiplayerPanelProps, 'players' | 'maxPlayers'>) {
+  return (
+    <section className="panel-section roster-section">
+      <div className="section-heading">
+        <div>
+          <span className="eyebrow">Riders</span>
+          <h3>{players.length} / {maxPlayers} connected</h3>
+        </div>
+      </div>
+      <div className="roster-list">
+        {players.length === 0 && <div className="empty-compact">Waiting for Wattbikes.</div>}
+        {players.map((player) => (
+          <div className="roster-row" style={{ '--player-color': player.accent } as React.CSSProperties} key={player.id}>
+            <span className="player-chip">P{player.id}</span>
+            <div>
+              <strong>{player.name}</strong>
+              <span>{player.deviceId ? `Wattbike ${player.deviceId}` : 'Unassigned'}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+export function MultiplayerPanel(props: MultiplayerPanelProps) {
+  if (props.multiplayerAvailable === false) {
+    return (
+      <aside className="multiplayer-panel">
+        <MultiplayerComingSoon onContinueSolo={() => props.onPlayModeChange('local')} />
+        <LocalMultiplayerRoster players={props.players} maxPlayers={props.maxPlayers} />
+      </aside>
+    );
+  }
+  return <AvailableMultiplayerPanel {...props} />;
+}
+
+function AvailableMultiplayerPanel({
   clubTabletDemoActive = false,
   demoParticipantEligible = true,
   playMode,
@@ -853,31 +892,7 @@ export function MultiplayerPanel({
         </section>
       )}
 
-      <section className="panel-section roster-section">
-        <div className="section-heading">
-          <div>
-            <span className="eyebrow">Riders</span>
-            <h3>{players.length} / {maxPlayers} connected</h3>
-          </div>
-        </div>
-        <div className="roster-list">
-          {players.length === 0 && <div className="empty-compact">Waiting for Wattbikes.</div>}
-          {players.map((player) => {
-            const sample = sampleForPlayer(player, samplesByDevice);
-            const rider = riders.find((item) => item.playerId === player.id);
-
-            return (
-              <div className="roster-row" style={{ '--player-color': player.accent } as React.CSSProperties} key={player.id}>
-                <span className="player-chip">P{player.id}</span>
-                <div>
-                  <strong>{player.name}</strong>
-                  <span>{player.deviceId ? `Wattbike ${player.deviceId}` : 'Unassigned'}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </section>
+      <LocalMultiplayerRoster players={players} maxPlayers={maxPlayers} />
 
       {playMode === 'multiplayer' && currentRoom && !demoConnection && roomSafetyMembers.length > 0 && (
         <section className="panel-section room-safety-section" aria-labelledby="room-safety-heading">

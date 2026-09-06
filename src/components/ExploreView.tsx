@@ -119,6 +119,7 @@ import { ExploreRouteMapPicker } from './ExploreRouteMapPicker';
 import { ExploreStreetViewOverlay } from './ExploreStreetViewOverlay';
 import { RiderAvatar } from './RiderAvatar';
 import './ExploreView.css';
+import { MultiplayerComingSoon } from './MultiplayerComingSoon';
 import { heartRateReadingState } from './HeartRateMetric';
 import type { LiveHeartRateByPlayer } from './RaceRiderOverlay';
 import { demoHeartRateReadingForBikeSample } from '../lib/demoHeartRate';
@@ -128,7 +129,10 @@ import {
   clubEventExploreLaunch,
 } from '../lib/clubEventExplore';
 
+const unavailableExploreRemoteStates: MultiplayerExploreState[] = [];
+
 type ExploreViewProps = {
+  multiplayerAvailable?: boolean;
   developerMode: boolean;
   players: PlayerSlot[];
   demoPlayerOptions: PlayerSlot[];
@@ -358,6 +362,7 @@ function useLocationSuggestions(
 }
 
 export function ExploreView({
+  multiplayerAvailable = true,
   developerMode,
   players,
   demoPlayerOptions,
@@ -368,26 +373,26 @@ export function ExploreView({
   speedUnit,
   distanceUnit,
   onDistanceUnitChange,
-  playMode,
+  playMode: requestedPlayMode,
   demoMode,
-  clubTabletDemoActive = false,
+  clubTabletDemoActive: requestedClubTabletDemoActive = false,
   multiplayerConnection,
   multiplayerClockOffsetMs,
   multiplayerClockMeasuredAt,
   demoParticipantEligible,
-  currentRoom,
+  currentRoom: requestedRoom,
   currentUserId,
   accountProfileKey,
   cloudRecentRoutesEnabled,
   cloudRecentRoutesAuthoritative,
   requestAccess = null,
   inviteUrl,
-  remoteStates,
+  remoteStates: requestedRemoteStates,
   voiceEnabled,
   voiceSupported,
   voiceStatus,
   voiceRemoteCount,
-  clubEventLaunch = null,
+  clubEventLaunch: requestedClubEventLaunch = null,
   onClubEventProgramReady,
   onPlayModeChange,
   onCreatePrivateRoom,
@@ -413,6 +418,11 @@ export function ExploreView({
   onFullscreenChange,
   heartRateByPlayer = {},
 }: ExploreViewProps) {
+  const playMode = multiplayerAvailable ? requestedPlayMode : 'local';
+  const currentRoom = multiplayerAvailable ? requestedRoom : null;
+  const remoteStates = multiplayerAvailable ? requestedRemoteStates : unavailableExploreRemoteStates;
+  const clubTabletDemoActive = multiplayerAvailable && requestedClubTabletDemoActive;
+  const clubEventLaunch = multiplayerAvailable ? requestedClubEventLaunch : null;
   const recentProfileKey = accountProfileKey?.trim() || null;
   const exploreRequestAccess = useMemo<ExploreRequestAccess | null>(() => {
     const clubTabletSessionToken = requestAccess?.clubTabletSessionToken?.trim() ?? '';
@@ -1807,10 +1817,10 @@ export function ExploreView({
           <button
             className={playMode === 'multiplayer' ? 'selected' : ''}
             type="button"
-            disabled={serverControlledExplore}
+            disabled={!multiplayerAvailable || serverControlledExplore}
             onClick={() => onPlayModeChange('multiplayer')}
           >
-            <Users size={17} /> Private room
+            <Users size={17} /> Private room{!multiplayerAvailable && <small> · Coming soon</small>}
           </button>
         </div>
       </header>
@@ -1961,6 +1971,14 @@ export function ExploreView({
                 <p className="race-entry-empty">Add a saved profile from Riders, then select it here.</p>
               )}
             </section>
+          )}
+
+          {!multiplayerAvailable && (
+            <MultiplayerComingSoon
+              compact
+              title="Private rooms"
+              description="Shared Explore rides are coming soon. Choose a route and keep riding with your local bikes."
+            />
           )}
 
           {playMode === 'multiplayer' && (

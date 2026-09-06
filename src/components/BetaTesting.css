@@ -1,0 +1,23 @@
+.beta-testing { display: grid; gap: 16px; scroll-margin-top: 28px; }
+.beta-testing p,.beta-invite-dialog p { margin: 0; line-height: 1.55; color: var(--ink); }
+.beta-testing small,.beta-invite-dialog small { color: var(--muted); line-height: 1.5; }
+.beta-access-summary,.beta-created-link { display: grid; gap: 10px; padding: 18px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel-soft); }
+.beta-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
+.beta-testing h3 { margin: 8px 0 0; }
+.beta-action { display: inline-flex; align-items: center; justify-content: center; gap: 8px; justify-self: start; min-height: 44px; padding: 10px 16px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--panel); color: var(--ink); font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+.beta-action:disabled { opacity: .5; cursor: default; }
+.beta-primary { background: #1d1d1f; color: #fff; border-color: #1d1d1f; }
+.beta-invite-form { display: grid; grid-template-columns: minmax(170px,2fr) minmax(85px,1fr) minmax(125px,1fr); align-items: end; gap: 12px; }
+.beta-invite-form label,.beta-created-link label { display: grid; gap: 7px; min-width: 0; font-weight: 600; font-size: 13px; }
+.beta-invite-form input,.beta-invite-form select,.beta-created-link input { width: 100%; min-width: 0; min-height: 44px; padding: 10px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--panel); color: var(--ink); font: inherit; }
+.beta-invite-form > button { grid-column: 1 / -1; }
+.beta-access-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.beta-access-list li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
+.beta-access-list li > div { display: grid; gap: 5px; min-width: 0; overflow-wrap: anywhere; }
+.beta-error { font-weight: 600; border-left: 3px solid var(--ink); padding-left: 12px; }
+.beta-invite-dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; padding: 30px; border: 1px solid var(--line); border-radius: 24px; background: #fff; color: #1d1d1f; box-shadow: 0 20px 80px #0003; }
+.beta-invite-dialog[open] { display: grid; gap: 18px; }
+.beta-invite-dialog::backdrop { background: #0008; }
+.beta-invite-dialog h2 { margin: 0; font-size: 30px; letter-spacing: -.03em; }
+.beta-dialog-close { position: absolute; right: 10px; top: 10px; display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 50%; background: #fff; color: #1d1d1f; }
+@media (max-width: 620px) { .beta-invite-form { grid-template-columns: 1fr; } .beta-access-list li { align-items: start; flex-direction: column; } .beta-invite-dialog { padding: 26px 20px; } }

@@ -25,6 +25,7 @@ export function shouldOpenCommunityHomeOnLaunch(href: string | null | undefined)
       || url.searchParams.has('heartRateStudioInvite')
       || (url.pathname === '/friends/invite' && url.searchParams.has('token'))
       || fragment.has('clubInvite')
+      || fragment.has('betaInvite')
       || fragment.has('heartRateAccountBlock');
 
     return !opensWorkspace;

@@ -135,4 +135,30 @@ describe('TrackLab native universal links', () => {
     expect(onTrackLocator).toHaveBeenCalledTimes(2);
     now.mockRestore();
   });
+
+  it('opens a beta invite on cold launch, deduplicates the event, and allows a later reopen', async () => {
+    const token = 'b'.repeat(43);
+    const url = `https://tracklab-bmx.onrender.com/#betaInvite=${token}`;
+    let listener: ((event: { url: string }) => void) | null = null;
+    const onBetaInvite = vi.fn();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(10_000);
+    try {
+      await listenForHeartRateStudioInviteAppLinks(vi.fn(), {
+        isNativePlatform: () => true,
+        addListener: vi.fn(async (_name, nextListener) => {
+          listener = nextListener;
+          return { remove: async () => undefined };
+        }),
+        getLaunchUrl: vi.fn(async () => ({ url })),
+        onBetaInvite,
+      });
+      await Promise.resolve();
+      expect(onBetaInvite).toHaveBeenCalledWith(token);
+      listener?.({ url });
+      expect(onBetaInvite).toHaveBeenCalledTimes(1);
+      now.mockReturnValue(11_001);
+      listener?.({ url });
+      expect(onBetaInvite).toHaveBeenCalledTimes(2);
+    } finally { now.mockRestore(); }
+  });
 });

@@ -115,6 +115,23 @@ function props(overrides: Partial<QuickRaceLobbyProps> = {}): QuickRaceLobbyProp
 }
 
 describe('QuickRaceLobby', () => {
+  it('keeps unavailable multiplayer closed even with a restored room or pending match', () => {
+    for (const state of [
+      { room: roomFixture() },
+      { matchmaking: { ...idleMatchmaking, active: true } },
+      { localEntry: true },
+    ]) {
+      const markup = renderToStaticMarkup(createElement(QuickRaceLobby, props({
+        ...state,
+        multiplayerAvailable: false,
+        onUseSoloTraining: vi.fn(),
+      })));
+      expect(markup).toContain('Coming soon');
+      expect(markup).toContain('Continue solo');
+      expect(markup).not.toMatch(/Race code|Create private race|Quick Match worldwide|Finding racers|Tap Ready/);
+    }
+  });
+
   it('normalizes short private race codes without leaking the room prefix', () => {
     expect(normalizeQuickRaceCode(' ab-12_cd ')).toBe('AB12CD');
     expect(displayQuickRaceCode('ROOM-AB12CD')).toBe('AB12CD');

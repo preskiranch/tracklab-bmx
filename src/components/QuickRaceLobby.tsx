@@ -19,12 +19,14 @@ import type {
   SplitBranchChoice,
 } from '../types';
 import './QuickRaceLobby.css';
+import { MultiplayerComingSoon } from './MultiplayerComingSoon';
 
 export type QuickRaceLobbyMatchmakingStatus = MultiplayerMatchmakingState;
 
 type QuickRaceLobbyAction = () => void | boolean | Promise<void>;
 
 export type QuickRaceLobbyProps<TRoom extends MultiplayerRoom = MultiplayerRoom> = Readonly<{
+  multiplayerAvailable?: boolean;
   room: TRoom | null;
   localRiderId: string | null;
   /** True only for a restored, authenticated tablet assigned to this club. */
@@ -177,7 +179,14 @@ function SearchingState({
   );
 }
 
-export default function QuickRaceLobby<TRoom extends MultiplayerRoom = MultiplayerRoom>({
+export default function QuickRaceLobby<TRoom extends MultiplayerRoom = MultiplayerRoom>(props: QuickRaceLobbyProps<TRoom>) {
+  if (props.multiplayerAvailable === false) {
+    return <MultiplayerComingSoon title="Race Together" onContinueSolo={props.onUseSoloTraining} />;
+  }
+  return <AvailableQuickRaceLobby {...props} />;
+}
+
+function AvailableQuickRaceLobby<TRoom extends MultiplayerRoom = MultiplayerRoom>({
   room,
   localRiderId,
   isAuthenticatedClubTablet,

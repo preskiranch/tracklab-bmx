@@ -21,6 +21,7 @@ import type {
   TrackRecord,
 } from '../types';
 import { safeSetLocalStorage } from '../lib/browserStorage';
+import { multiplayerMessageAllowed } from '../lib/liveMultiplayerAvailability';
 import type {
   ClubTabletDeviceCredential,
   ClubTabletSessionCredential,
@@ -94,6 +95,7 @@ export function canonicalizeMultiplayerExploreState(
 
 type UseMultiplayerOptions = {
   enabled: boolean;
+  liveRacingAvailable?: boolean;
   /** Keeps only the authenticated capacity transport online outside multiplayer. */
   capacityChannelEnabled?: boolean;
   track: TrackRecord;
@@ -295,6 +297,7 @@ function latencyQualityForMs(value: number | null): MultiplayerLatencySnapshot['
 
 export function useMultiplayer({
   enabled,
+  liveRacingAvailable = true,
   capacityChannelEnabled = false,
   track,
   bikeCount,
@@ -340,6 +343,8 @@ export function useMultiplayer({
     ? `${clubTabletDemoConfiguration.activityType}:${clubTabletDemoConfiguration.configurationId}`
     : '';
   const transportEnabled = enabled || capacityChannelEnabled;
+  const liveRacingAvailableRef = useRef(liveRacingAvailable);
+  liveRacingAvailableRef.current = liveRacingAvailable;
   const [connection, setConnection] = useState<ConnectionState>('idle');
   const [clientId, setClientId] = useState<string | null>(null);
   const [onlineRiders, setOnlineRiders] = useState<MultiplayerRider[]>([]);
@@ -424,6 +429,7 @@ export function useMultiplayer({
   }, []);
 
   const send = useCallback((payload: Record<string, unknown>) => {
+    if (!multiplayerMessageAllowed(payload.type, liveRacingAvailableRef.current)) return false;
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       return false;
@@ -614,6 +620,7 @@ export function useMultiplayer({
         const pendingRoom = pendingInviteRoomRef.current;
         if (
           !pendingRoom
+          || !liveRacingAvailableRef.current
           || cancelled
           || socketRef.current !== socket
           || socket.readyState !== WebSocket.OPEN

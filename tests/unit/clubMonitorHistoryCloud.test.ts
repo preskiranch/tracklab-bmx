@@ -180,6 +180,10 @@ describe('owner-operated Monitor View athlete history', () => {
             '/': '/',
             '#': 'heartRateAccountBlock=*',
             comment: 'Open a private same-account Apple Watch handoff without sending its code to the server.',
+          }, {
+            '/': '/',
+            '#': 'betaInvite=*',
+            comment: 'Open a personal beta invitation without sending its token in the URL request.',
           }],
         }],
       },

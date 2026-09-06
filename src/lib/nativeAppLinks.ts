@@ -3,6 +3,7 @@ import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { normalizeHeartRateAccountBlockCode } from './heartRateAccountBlock';
 import { normalizeHeartRateStudioInviteCode } from './heartRateCloud';
 import { normalizeTrackLocatorId } from './mapLinks';
+import { betaInviteTokenFromHref } from './betaAccess';
 
 export const trackLabUniversalLinkHost = 'tracklab-bmx.onrender.com' as const;
 
@@ -45,6 +46,11 @@ export function trackLocatorIdFromAppLink(value: unknown) {
   return url ? normalizeTrackLocatorId(url.searchParams.get('locator')) : '';
 }
 
+export function betaInviteTokenFromAppLink(value: unknown) {
+  const url = productionAppLink(value);
+  return url ? betaInviteTokenFromHref(url.href) : '';
+}
+
 /**
  * Accepts only the production TrackLab HTTPS universal-link origin and emits
  * the normalized one-use invitation code. The raw URL is never logged or
@@ -57,6 +63,7 @@ export async function listenForHeartRateStudioInviteAppLinks(
     addListener?: AppUrlListener;
     getLaunchUrl?: AppLaunchUrl;
     onTrackLocator?: (trackId: string) => void;
+    onBetaInvite?: (token: string) => void;
   } = {},
 ): Promise<PluginListenerHandle> {
   const isNativePlatform = options.isNativePlatform ?? (() => Capacitor.isNativePlatform());
@@ -64,8 +71,19 @@ export async function listenForHeartRateStudioInviteAppLinks(
   const addListener = options.addListener ?? CapacitorApp.addListener.bind(CapacitorApp);
   const getLaunchUrl = options.getLaunchUrl ?? CapacitorApp.getLaunchUrl.bind(CapacitorApp);
   let lastDisposition = '';
+  let lastBetaDispositionAt = 0;
   let lastTrackDispositionAt = 0;
   const handleUrl = (value: unknown) => {
+    const betaToken = betaInviteTokenFromAppLink(value);
+    if (betaToken && options.onBetaInvite) {
+      const now = Date.now();
+      if (lastDisposition !== `beta:${betaToken}` || now - lastBetaDispositionAt >= 1_000) {
+        lastDisposition = `beta:${betaToken}`;
+        lastBetaDispositionAt = now;
+        options.onBetaInvite(betaToken);
+      }
+      return;
+    }
     const inviteCode = heartRateStudioInviteCodeFromAppLink(value);
     if (inviteCode && lastDisposition !== `invite:${inviteCode}`) {
       lastDisposition = `invite:${inviteCode}`;

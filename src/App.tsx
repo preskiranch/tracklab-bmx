@@ -17,6 +17,7 @@ import {
   Compass,
   Gauge,
   LogOut,
+  Mail,
   MapPinned,
   Radio,
   RefreshCcw,
@@ -32,6 +33,8 @@ import {
 } from 'lucide-react';
 import type { CloudUserDataStatus } from './components/DiagnosticsPanel';
 import type { ChatMessage } from './components/MultiplayerPanel';
+import { betaInviteTokenFromHref, clearBetaInvitationFromUrl } from './lib/betaAccess';
+import { publicLiveMultiplayerAvailable } from './lib/liveMultiplayerAvailability';
 import type {
   MonitorSprintArm,
   MonitorSprintArmCancellation,
@@ -447,6 +450,8 @@ const AccountProfileView = lazy(loadAccountProfileView);
 const loadAppSettingsView = () => import('./components/AppSettingsView')
   .then((module) => ({ default: module.AppSettingsView }));
 const AppSettingsView = lazy(loadAppSettingsView);
+const BetaTestingPanel = lazy(() => import('./components/BetaTestingPanel').then((module) => ({ default: module.BetaTestingPanel })));
+const BetaInviteDialog = lazy(() => import('./components/BetaInviteDialog').then((module) => ({ default: module.BetaInviteDialog })));
 const HeartRateSettingsCard = lazy(() => import('./components/HeartRateSettingsCard')
   .then((module) => ({ default: module.HeartRateSettingsCard })));
 const HeartRateAccountBlockCoordinator = lazy(() => import('./components/HeartRateAccountBlockCoordinator')
@@ -2244,6 +2249,12 @@ export default function App() {
   const [straightSprintDistanceFeet, setStraightSprintDistanceFeet] = useState(100);
   const [straightSprintAirSetting, setStraightSprintAirSetting] = useState(1);
   const [playMode, setPlayMode] = useState<PlayMode>('local');
+  const [betaInviteToken, setBetaInviteToken] = useState(() => typeof window === 'undefined' ? '' : betaInviteTokenFromHref(window.location.href));
+  const [betaInviteOpen, setBetaInviteOpen] = useState(Boolean(betaInviteToken));
+  const [betaSettingsFocusRequested, setBetaSettingsFocusRequested] = useState(false);
+  const handleBetaSettingsFocused = useCallback(() => setBetaSettingsFocusRequested(false), []);
+  const betaAccountIdRef = useRef(authUser?.id);
+  betaAccountIdRef.current = authUser?.id;
   const [cloudUserDataStatus, setCloudUserDataStatus] = useState<CloudUserDataStatus>('loading');
   const [cloudUserDataMessage, setCloudUserDataMessage] = useState('Loading cloud profile data.');
   const [unitPreferencesSyncStatus, setUnitPreferencesSyncStatus] = useState<CloudUserDataStatus>('loading');
@@ -3225,10 +3236,27 @@ export default function App() {
   }, [membership]);
 
   useEffect(() => {
-    if (currentSearchParam('room') != null) {
+    if (publicLiveMultiplayerAvailable && currentSearchParam('room') != null) {
       setPlayMode('multiplayer');
     }
   }, []);
+
+  useEffect(() => {
+    const syncBetaInvite = () => {
+      const token = betaInviteTokenFromHref(window.location.href);
+      if (token) { setBetaInviteToken(token); setBetaInviteOpen(true); }
+    };
+    window.addEventListener('hashchange', syncBetaInvite);
+    window.addEventListener('popstate', syncBetaInvite);
+    return () => {
+      window.removeEventListener('hashchange', syncBetaInvite);
+      window.removeEventListener('popstate', syncBetaInvite);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (authUser && betaInviteToken) setBetaInviteOpen(true);
+  }, [authUser?.id, betaInviteToken]);
 
   useEffect(() => {
     const hasClubInvite = currentSearchParam('clubInvite') != null
@@ -3268,7 +3296,14 @@ export default function App() {
           window.history.replaceState(window.history.state, '', handoffHref);
           setHeartRateStudioInviteCode(inviteCode);
           setHeartRateStudioInviteOpen(true);
-        }, { onTrackLocator: () => !disposed && setShowMembershipLanding(true) })
+        }, {
+          onTrackLocator: () => !disposed && setShowMembershipLanding(true),
+          onBetaInvite: (token) => {
+            if (disposed) return;
+            setBetaInviteToken(token);
+            setBetaInviteOpen(true);
+          },
+        })
       )).then((handle) => {
         listener = handle;
         if (disposed) void handle.remove();
@@ -4480,8 +4515,14 @@ export default function App() {
     }
     return Math.min(maxPlayers, connectedDeviceIds.size);
   }, [bluetooth.devices, bridge.devices, clubTabletKioskMode, demoMode]);
+  // Coach-assigned club activities keep their authenticated transport;
+  // ordinary users cannot enter public or private live rooms during beta.
+  const liveRacingAvailable = publicLiveMultiplayerAvailable || Boolean(
+    clubEventLaunch?.eventId || (clubTabletDeviceActive && demoMode),
+  );
   const multiplayer = useMultiplayer({
-    enabled: playMode === 'multiplayer' && (
+    liveRacingAvailable,
+    enabled: liveRacingAvailable && playMode === 'multiplayer' && (
       !clubTabletKioskMode
       || clubTabletSessionActive
       || (clubTabletDeviceActive && demoMode)
@@ -10138,7 +10179,7 @@ export default function App() {
       setShowMembershipLanding(shouldOpenCommunityHomeOnLaunch(
         typeof window === 'undefined' ? '/' : window.location.href,
       ));
-      setPlayMode('multiplayer');
+      setPlayMode(publicLiveMultiplayerAvailable ? 'multiplayer' : 'local');
       setAppMode('race');
       return true;
     } catch (error) {
@@ -10403,7 +10444,7 @@ export default function App() {
     setAppleBillingStatus('idle');
     setAppleBillingAction(null);
     setShowMembershipLanding(false);
-    setPlayMode('multiplayer');
+    setPlayMode(publicLiveMultiplayerAvailable ? 'multiplayer' : 'local');
     handleTrackChange(benchmarkDemoTrackId);
     handleDemoBikeCountChange(Math.min(4, maxPlayers));
     handleDemoModeChange(true, 'demo');
@@ -10724,7 +10765,7 @@ export default function App() {
   }, [adminProfileActive, clearStartGateSequence, demoBikeCount, resetRace]);
 
   const enableMultiplayerTest = useCallback(() => {
-    setPlayMode('multiplayer');
+    setPlayMode(publicLiveMultiplayerAvailable ? 'multiplayer' : 'local');
     setAppMode('diagnostics');
   }, []);
 
@@ -12534,6 +12575,24 @@ export default function App() {
       />
     </Suspense>
   ) : null;
+  const betaInvitation = !clubTabletKioskMode && betaInviteToken ? (
+    <Suspense fallback={null}>
+      <BetaInviteDialog
+        key={authUser?.id ?? 'signed-out'}
+        token={betaInviteToken}
+        user={authUser}
+        open={betaInviteOpen}
+        onClose={() => { setBetaInviteOpen(false); setBetaInviteToken(''); clearBetaInvitationFromUrl(); }}
+        onSignIn={() => { setBetaInviteOpen(false); setShowMembershipLanding(true); setAuthMode('register'); }}
+        onAccepted={(user) => {
+          if (betaAccountIdRef.current !== user.id) return;
+          applyAppleBillingAuthUser(user);
+          setBetaInviteOpen(false); setBetaInviteToken(''); clearBetaInvitationFromUrl();
+          setShowMembershipLanding(false); setPlayMode('local'); setAppMode('race');
+        }}
+      />
+    </Suspense>
+  ) : null;
   if (!clubTabletKioskMode && (showMembershipLanding || !accountProfileComplete)) {
     return (
       <>
@@ -12543,6 +12602,7 @@ export default function App() {
         {heartRateAccountBlockCoordinator}
         {watchConnectCoordinator}
         {appleBillingCoordinator}
+        {betaInvitation}
         <Suspense fallback={lazyLoadingFallback}>
           <MembershipLanding
           membership={membership}
@@ -12666,6 +12726,7 @@ export default function App() {
       {heartRateAccountBlockCoordinator}
       {watchConnectCoordinator}
       {appleBillingCoordinator}
+      {betaInvitation}
       {!clubTabletKioskMode && (
         raceViewFullscreen || mappingFullscreen || exploreRideFullscreen || utilityFullscreen
       ) && <div className="watch-connect-indicator-slot fullscreen" id="watch-connect-indicator-slot" />}
@@ -13327,6 +13388,10 @@ export default function App() {
               <button type="button" onClick={handleHeartRateAccountBlockOpenSettings}>
                 <Settings size={17} /> Settings
               </button>
+              <button type="button" onClick={() => {
+                setBetaSettingsFocusRequested(true);
+                handleHeartRateAccountBlockOpenSettings();
+              }}><Mail size={17} /> Beta Testing</button>
               <button type="button" onClick={() => handleHeartRateAccountBlockOpenSettings(true)}>
                 Watch Connect
               </button>
@@ -13703,6 +13768,9 @@ export default function App() {
               />
             </Suspense>
             {authUser && <div className="app-settings-view">
+              <Suspense fallback={<p role="status">Loading beta testing…</p>}>
+                <BetaTestingPanel key={authUser.id} user={authUser} focusRequested={betaSettingsFocusRequested} onFocusHandled={handleBetaSettingsFocused} />
+              </Suspense>
               <div id="watch" style={{ display: 'grid', gap: 16 }}>
                 <div id="heart-rate-account-block-settings-slot" style={{ display: 'contents' }} />
                 <div id="watch-connect-settings-slot" style={{ display: 'contents' }} />
@@ -13871,6 +13939,7 @@ export default function App() {
               {...clubOwnerUtilitySharedProps}
               mode="explore"
               viewProps={{
+                multiplayerAvailable: liveRacingAvailable,
                 developerMode: developerUiActive,
                 players: playMode === 'multiplayer'
                   ? explorePlayers.slice(0, localExploreSeatLimit)
@@ -13950,6 +14019,7 @@ export default function App() {
         ) : appMode === 'diagnostics' ? (
           <Suspense fallback={lazyLoadingFallback}>
             <DiagnosticsPanel
+            multiplayerAvailable={publicLiveMultiplayerAvailable}
             bridgeConnection={bridge.connection}
             bridgeMode={bridge.mode}
             bridgeSourceState={bridge.sourceState}
@@ -14264,6 +14334,7 @@ export default function App() {
                   && !multiplayer.currentRoom?.clubEventId ? (
                   <Suspense fallback={panelLoadingFallback}>
                     <QuickRaceLobby
+                      multiplayerAvailable={publicLiveMultiplayerAvailable}
                       room={playMode === 'multiplayer' ? multiplayer.currentRoom : null}
                       localRiderId={multiplayer.clientId}
                       isAuthenticatedClubTablet={clubTabletSessionActive}
@@ -14325,6 +14396,7 @@ export default function App() {
                 ) : (
                 <Suspense fallback={panelLoadingFallback}>
                   <MultiplayerPanel
+                  multiplayerAvailable={liveRacingAvailable}
                   clubTabletDemoActive={clubTabletDemoClubLiveActive}
                   demoParticipantEligible={multiplayer.demoParticipantEligible}
                   playMode={playMode}

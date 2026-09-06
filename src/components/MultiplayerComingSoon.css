@@ -1,0 +1,84 @@
+.multiplayer-coming-soon {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 18px;
+  min-width: 0;
+  padding: 24px;
+  border: 1px solid var(--line, #d2d2d7);
+  border-radius: 18px;
+  background: var(--panel, #fff);
+  color: var(--ink, #1d1d1f);
+}
+
+.multiplayer-coming-soon-icon {
+  display: grid;
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--panel-soft, #f5f5f7);
+  color: var(--ink, #1d1d1f);
+}
+
+.multiplayer-coming-soon-copy {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.multiplayer-coming-soon-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted, #6e6e73);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.multiplayer-coming-soon h3 {
+  margin: 0;
+  color: var(--ink, #1d1d1f);
+  font-size: 21px;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+}
+
+.multiplayer-coming-soon p {
+  max-width: 56ch;
+  margin: 8px 0 0;
+  color: var(--muted, #6e6e73);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.multiplayer-coming-soon button {
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid var(--line, #d2d2d7);
+  border-radius: 10px;
+  background: var(--panel, #fff);
+  color: var(--ink, #1d1d1f);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.multiplayer-coming-soon button:hover {
+  background: var(--hover, #f5f5f7);
+}
+
+.multiplayer-coming-soon button:focus-visible {
+  outline: 2px solid var(--ink, #1d1d1f);
+  outline-offset: 3px;
+}
+
+.multiplayer-coming-soon.compact {
+  gap: 12px;
+  padding: 16px;
+  border-radius: 14px;
+}
+
+.multiplayer-coming-soon.compact h3 {
+  font-size: 18px;
+}
