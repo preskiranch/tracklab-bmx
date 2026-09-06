@@ -2,7 +2,7 @@
 
 On September 6, 2026, the user requested white backgrounds and black text for the signed-in training dashboard after approving the light public website. Release 76 extends the light appearance through navigation, race configuration, result tables, account, friends, studio and club controls. Layout, track imagery, reaction media, gate geometry, animation and sounds are preserved.
 
-The shared palette uses white panels, near-black ink, muted readable secondary labels, subtle borders, and dark primary actions with white labels. Map/video/race overlays retain dark local tokens for legibility over imagery. No image filters, resizing, regeneration or asset changes are involved. Native backing and default system bars match the light app; fullscreen race experiences restore light status icons over dark surfaces.
+The shared palette uses white panels, near-black ink, muted readable secondary labels, subtle borders, and dark primary actions with white labels. Map/video/race overlays retain dark local tokens for legibility over imagery. No image filters, resizing, regeneration or asset changes are involved. Native backing and default system bars match the light app; fullscreen race experiences restore light status icons over dark surfaces. Light fullscreen Monitor and Get Pulled panels retain dark status icons.
 
 The iPhone Watch navigation label wraps on whole words. Rider number chips retain their colors with black text for contrast.
 

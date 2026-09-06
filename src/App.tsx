@@ -5309,7 +5309,7 @@ export default function App() {
 
   useLayoutEffect(() => {
     const fullscreenActive = raceViewFullscreen || exploreRideFullscreen || utilityFullscreen || reactionTestMode;
-    setAppSurfaceAppearance(fullscreenActive);
+    setAppSurfaceAppearance(raceViewFullscreen || exploreRideFullscreen || reactionTestMode);
     document.documentElement.classList.toggle('tracklab-race-active', fullscreenActive);
     document.body.classList.toggle('tracklab-race-active', fullscreenActive);
     return () => {
