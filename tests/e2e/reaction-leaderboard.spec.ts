@@ -309,13 +309,24 @@ for (const interruption of ['suspend', 'close'] as const) {
     await mockReactionAccount(page);
     await preparePredictableCadence(page);
     await page.addInitScript(() => {
-      const probe = { context: null as AudioContext | null, signals: [] as Array<{ duration: number; peak: number; ended: boolean }> };
+      // Chromium can decode the 48kHz WAV one frame short at a 44.1kHz output
+      // rate. Exercise that real resampling path instead of relying on the
+      // host's default audio device rate (48kHz on the development machine).
+      const BrowserAudioContext = window.AudioContext;
+      window.AudioContext = class extends BrowserAudioContext {
+        constructor(options?: AudioContextOptions) { super({ ...options, sampleRate: 44_100 }); }
+      };
+      const probe = { context: null as AudioContext | null, signals: [] as Array<{ direction: 'drop' | 'raise'; duration: number; sourcePeak: number; peak: number; ended: boolean }> };
       (window as typeof window & { __gateSignal?: typeof probe }).__gateSignal = probe;
       const originalStart = AudioBufferSourceNode.prototype.start;
       AudioBufferSourceNode.prototype.start = function (...args) {
-        if (this.buffer?.duration === 1 || this.buffer?.duration === 2) {
+        const duration = this.buffer?.duration ?? 0;
+        const direction = Math.abs(duration - 1) < 0.005 ? 'drop'
+          : Math.abs(duration - 2) < 0.005 ? 'raise' : null;
+        if (direction) {
           probe.context = this.context as AudioContext;
-          const signal = { duration: this.buffer.duration, peak: 0, ended: false };
+          const sourcePeak = this.buffer!.getChannelData(0).reduce((peak, value) => Math.max(peak, Math.abs(value)), 0);
+          const signal = { direction, duration, sourcePeak, peak: 0, ended: false };
           probe.signals.push(signal);
           // Tap the real source graph; never replace source.start or the WAV.
           const analyser = this.context.createAnalyser();
@@ -342,21 +353,26 @@ for (const interruption of ['suspend', 'close'] as const) {
     const view = await openReactionTest(page);
     await recordValidRun(page, view, 120);
     await page.waitForFunction(() => (window as typeof window & {
-      __gateSignal: { signals: Array<{ duration: number; ended: boolean }> };
-    }).__gateSignal.signals.some(signal => signal.duration === 1 && signal.ended));
+      __gateSignal: { signals: Array<{ direction: string; ended: boolean }> };
+    }).__gateSignal.signals.some(signal => signal.direction === 'drop' && signal.ended));
     await page.evaluate(async action => {
       const context = (window as typeof window & { __gateSignal: { context: AudioContext } }).__gateSignal.context;
       await context[action]();
     }, interruption);
     await view.getByRole('button', { name: 'Try Again', exact: true }).click();
     await expect.poll(() => page.evaluate(() => (window as typeof window & {
-      __gateSignal: { signals: Array<{ duration: number; peak: number; ended: boolean }> };
-    }).__gateSignal.signals.find(signal => signal.duration === 2))).toMatchObject({ duration: 2, ended: true });
-    const returnPeak = await page.evaluate(() => (window as typeof window & {
-      __gateSignal: { signals: Array<{ duration: number; peak: number }> };
-    }).__gateSignal.signals.find(signal => signal.duration === 2)!.peak);
-    expect(returnPeak).toBeGreaterThan(0.025);
-    expect(returnPeak).toBeLessThan(0.036);
+      __gateSignal: { signals: Array<{ direction: string; ended: boolean }> };
+    }).__gateSignal.signals.find(signal => signal.direction === 'raise'))).toMatchObject({ direction: 'raise', ended: true });
+    const returnSignal = await page.evaluate(() => (window as typeof window & {
+      __gateSignal: { signals: Array<{ direction: string; duration: number; sourcePeak: number; peak: number }> };
+    }).__gateSignal.signals.find(signal => signal.direction === 'raise')!);
+    expect(returnSignal.duration).toBeCloseTo(2, 3);
+    // Resampling can slightly increase sample peaks. Compare the real output
+    // with its decoded source, while still requiring a quiet, nonzero return.
+    expect(returnSignal.sourcePeak).toBeGreaterThan(0.025);
+    expect(returnSignal.sourcePeak).toBeLessThan(0.05);
+    expect(returnSignal.peak).toBeGreaterThan(returnSignal.sourcePeak * 0.8);
+    expect(returnSignal.peak).toBeLessThanOrEqual(returnSignal.sourcePeak + 0.001);
     await expect(view.locator('.reaction-gate-layer')).toHaveAttribute('data-gate-progress', '0.000');
   });
 }
