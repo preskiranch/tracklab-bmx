@@ -7,7 +7,7 @@
     "node": ">=22.12 <25"
   },
   "scripts": {
-    "dev": "concurrently -k -n bike-connector,web -c cyan,green \"npm:bridge\" \"npm:web\"",
+    "dev": "npm run web",
     "dev:ant": "concurrently -k -n ant-bridge,web -c cyan,green \"npm:bridge:ant\" \"npm:web\"",
     "dev:ble": "concurrently -k -n ble-bridge,web -c cyan,green \"npm:bridge:ble\" \"npm:web\"",
     "dev:sim": "concurrently -k -n sim-bridge,web -c cyan,green \"npm:bridge:sim\" \"npm:web\"",

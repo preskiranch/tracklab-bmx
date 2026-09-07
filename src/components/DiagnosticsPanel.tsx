@@ -219,13 +219,6 @@ export function DiagnosticsPanel({
       icon: Bike,
     },
     {
-      id: 'bridge',
-      title: 'Advanced Connector',
-      detail: demoMode ? 'Bypassed for demo' : `${bridgeMode.toString().toUpperCase()} / ${bridgeSourceState}`,
-      severity: demoMode || bridgeConnection === 'open' ? 'ready' : 'warning',
-      icon: RadioTower,
-    },
-    {
       id: 'multiplayer',
       title: 'Multiplayer',
       detail: !multiplayerAvailable ? 'Coming soon' : multiplayerReady ? currentRoomId ?? 'Online' : playMode === 'multiplayer' ? multiplayerConnection : 'Local mode',
@@ -299,12 +292,8 @@ export function DiagnosticsPanel({
             <span><strong>{savedBikeCount}</strong> remembered bikes</span>
             <span><strong>{latestSampleAge(players, samplesByDevice)}</strong> latest sample</span>
           </div>
-          <p className="diagnostic-note">{bridgeError ?? bridgeControlStatus ?? bridgeStatus}</p>
+          <p className="diagnostic-note">{bluetoothStatus}</p>
           <div className="diagnostic-actions">
-            <button type="button" onClick={bridgeRunning ? onStopBridge : onStartBridge} disabled={demoMode || bridgeBusy || bridgeConnection !== 'open'}>
-              {bridgeRunning ? <StopCircle size={16} /> : <PlayCircle size={16} />}
-              {bridgeRunning ? 'Stop connector' : 'Start connector'}
-            </button>
             <button type="button" onClick={onOpenMonitor}>
               <Gauge size={16} />
               Monitor

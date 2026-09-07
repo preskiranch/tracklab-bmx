@@ -41,7 +41,7 @@ export const betaGuideSection: AppGuideSection = {
     {
       title: 'Prepare your bike and report an issue',
       paragraphs: [
-        'For a Wattbike Trainer or Pro, compatibility depends on its monitor, enabled wireless services, and the device running TrackLab. Put a compatible monitor in Just Ride, enable the relevant Bluetooth or ANT+ settings, and pedal to wake it. Native iPhone/iPad pairing differs from browser pairing; consult the connection guide for your platform. A model name or country alone does not guarantee that every monitor and firmware combination has been validated.',
+        'For a Wattbike Trainer or Pro, compatibility depends on its monitor, enabled wireless services, and the device running TrackLab. Put a compatible monitor in Just Ride, enable the relevant Bluetooth settings, and pedal to wake it. Native iPhone/iPad pairing differs from browser pairing; consult the connection guide for your platform. A model name or country alone does not guarantee that every monitor and firmware combination has been validated.',
       ],
       steps: [
         'Check that the expected bike appears and its live cadence and power respond before beginning a test.',

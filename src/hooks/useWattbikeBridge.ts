@@ -61,11 +61,11 @@ function normalizeConnectedDevices(
   return [...devicesById.values()].sort((a, b) => a.deviceId - b.deviceId);
 }
 
-export function useWattbikeBridge(): BridgeSnapshot {
-  const [connection, setConnection] = useState<ConnectionState>('connecting');
+export function useWattbikeBridge(enabled = true): BridgeSnapshot {
+  const [connection, setConnection] = useState<ConnectionState>(enabled ? 'connecting' : 'closed');
   const [mode, setMode] = useState<BridgeSnapshot['mode']>('unknown');
   const [sourceState, setSourceState] = useState<BridgeSnapshot['sourceState']>('unknown');
-  const [status, setStatus] = useState('Connecting to TrackLab Bike Connector.');
+  const [status, setStatus] = useState(enabled ? 'Connecting to TrackLab Bike Connector.' : '');
   const [error, setError] = useState<string | null>(null);
   const [controlStatus, setControlStatus] = useState<string | null>(null);
   const [devices, setDevices] = useState<ConnectedBikeDevice[]>([]);
@@ -74,6 +74,7 @@ export function useWattbikeBridge(): BridgeSnapshot {
   const socketRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     let reconnectTimer = 0;
 
@@ -187,7 +188,7 @@ export function useWattbikeBridge(): BridgeSnapshot {
       window.clearTimeout(reconnectTimer);
       socketRef.current?.close();
     };
-  }, []);
+  }, [enabled]);
 
   const sendBridgeApiCommand = useCallback(async (action: 'start' | 'stop') => {
     const urls = [...new Set([activeBridgeUrl, ...bridgeUrls])];
@@ -195,6 +196,7 @@ export function useWattbikeBridge(): BridgeSnapshot {
 
     for (const bridgeUrl of urls) {
       try {
+        if (!enabled) return false;
         const response = await fetch(bridgeHttpUrlFromWebSocket(bridgeUrl, `/api/bridge/${action}`), { method: 'POST' });
         const payload = await response.json() as Partial<BridgeStatusMessage> & { message?: string };
         if (payload.mode) {
@@ -222,7 +224,7 @@ export function useWattbikeBridge(): BridgeSnapshot {
     setConnection('error');
     setError(`Could not ${action} TrackLab Bike Connector on ${urls.join(' or ')}. ${lastMessage}`);
     return false;
-  }, [activeBridgeUrl]);
+  }, [activeBridgeUrl, enabled]);
 
   const startLocalBridge = useCallback(() => sendBridgeApiCommand('start'), [sendBridgeApiCommand]);
   const stopLocalBridge = useCallback(() => sendBridgeApiCommand('stop'), [sendBridgeApiCommand]);

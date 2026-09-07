@@ -9,20 +9,20 @@ export const ridingGuideSections: AppGuideSection[] = [
       {
         title: 'Get ready to ride',
         paragraphs: [
-          'Use a Wattbike Trainer or Pro with a monitor that supplies compatible Bluetooth or ANT+ data. Compatibility depends on the monitor and its firmware; the bike model alone does not guarantee that every connection works. Sign in to the account with your active beta access or Wattbike membership.',
-          'You can ride away from the studio wherever you have internet, your compatible bike, and a supported local connection. Keep the phone, tablet, or connector computer near the bike. Internet provides maps and account services; your nearby device receives the bike signal.',
+          'Use a Wattbike Trainer or Pro with a monitor that supplies compatible Bluetooth data. Compatibility depends on the monitor and its firmware; the bike model alone does not guarantee that every connection works. Sign in to the account with your active beta access or Wattbike membership.',
+          'You can ride away from the studio wherever you have internet, your compatible bike, and a supported local connection. Keep the phone, tablet, or supported computer near the bike. Internet provides maps and account services; your nearby device receives the bike signal.',
         ],
         steps: [
           'Wake the Wattbike monitor. On Model B, open Settings → Remote → Bluetooth On when using Bluetooth.',
           'Enter Just Ride and pedal for a few seconds. Level 1 is the standard shared race starting setup; follow the selected activity’s AIR instructions afterward.',
-          'Close Wattbike Hub or another app using that monitor if TrackLab cannot connect. Disconnect another computer’s Bluetooth connector from the same bike before trying direct pairing.',
+          'Close Wattbike Hub or another app using that monitor if TrackLab cannot connect. Disconnect the bike from other devices before trying direct pairing.',
         ],
       },
       {
         title: 'Pair directly with Bluetooth',
         paragraphs: [
           'The native TrackLab iPhone/iPad app uses a native Bluetooth device list. Desktop Chrome or Edge, and supported Android Chrome devices, use the browser’s Bluetooth chooser. Allow Bluetooth permission when requested.',
-          'Safari and Chrome websites on iPhone/iPad cannot pair Wattbikes directly. Use the native TrackLab app for direct pairing. A browser connected through a Mac/PC helper needs a separately configured, reachable connector.',
+          'Safari and Chrome websites on iPhone/iPad cannot pair Wattbikes directly. Use the native TrackLab app for direct pairing.',
         ],
         steps: [
           'Choose Bluetooth in the sidebar, then Pair Wattbike.',
@@ -33,25 +33,13 @@ export const ridingGuideSections: AppGuideSection[] = [
         ],
       },
       {
-        title: 'Use Connector or ANT+',
-        paragraphs: [
-          'The TrackLab Bike Connector runs on the computer near your bikes. Its automatic mode can receive Bluetooth and ANT+ signals. ANT+ needs a supported USB dongle attached to that computer. Ask your beta administrator for the appropriate connector setup if it is not installed.',
-        ],
-        steps: [
-          'Open the installed helper and choose Connector in the TrackLab sidebar. Its accessibility label is Advanced Connector.',
-          'On a configured Mac, Open Connector launches the local helper. Once it is connected, choose Start Connector.',
-          'Keep each monitor in Just Ride and pedal. Watch Scanning change to connected/live bikes, then confirm the correct rider and bike assignments.',
-          'Leave the helper running while riding. Stop Connector stops its bike input. ANT+ bikes are rediscovered by their device IDs when they broadcast again.',
-        ],
-      },
-      {
         title: 'Check the numbers and report a connection issue',
         paragraphs: [
           'Watts and cadence come from the monitor when available. Virtual speed depends on the activity’s riding model and can differ from the monitor’s speed. Explore needs both fresh cadence and power to propel the rider; a connection supplying only one can appear paired without moving the map.',
-          'TrackLab’s AIR instructions ask you to move the physical lever. They do not automatically change the bike’s resistance. A USB cable alone is not a general replacement for the supported Bluetooth or ANT+ connection.',
+          'TrackLab’s AIR instructions ask you to move the physical lever. They do not automatically change the bike’s resistance. A USB cable alone is not a general replacement for the supported Bluetooth connection.',
         ],
         bullets: [
-          'For feedback, include Trainer/Pro model, monitor model and firmware, device/OS/browser, native app versus website, and Bluetooth versus Connector/ANT+.',
+          'For feedback, include Trainer/Pro model, monitor model and firmware, device/OS/browser, native app versus website, and whether Bluetooth pairing completes.',
           'Include the exact status or error, number of connected bikes, whether watts and cadence change while pedaling, and a screenshot with the approximate time.',
         ],
       },

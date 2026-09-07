@@ -220,3 +220,22 @@ test('signed-in riders reach both guides through More and the beta access panel'
   expect(state.errors).toEqual([]);
   expect(state.mutations.filter((path) => path.startsWith('/api/beta-access/') || path.startsWith('/api/admin/beta-access'))).toEqual([]);
 });
+
+test('legacy connector preference migrates to Bluetooth without opening a local connector', async ({ page }) => {
+  await isolateGuideAccount(page, true);
+  const sockets: string[] = [];
+  await page.context().routeWebSocket(/.*/, (socket) => { sockets.push(socket.url()); socket.close(); });
+  await page.addInitScript(() => localStorage.setItem('tracklab-bmx-bike-connection-source-v1', 'advanced'));
+  await page.goto('/');
+  const openApp = page.getByRole('button', { name: 'Open App', exact: true });
+  await expect(openApp.or(page.getByRole('navigation', { name: 'Primary' })).first()).toBeVisible();
+  if (await openApp.isVisible()) await openApp.click();
+  await expect(page.getByRole('button', { name: 'Bluetooth', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Connector/i })).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('tracklab-bmx-bike-connection-source-v1'))).toBe('bluetooth');
+  expect(sockets.filter(url => /127\.0\.0\.1:19787|localhost:19787/.test(url))).toEqual([]);
+  await page.goto('/#app-guide');
+  const guide = page.getByRole('region', { name: 'App Guide', exact: true });
+  await expect(guide).toBeVisible();
+  await expect(guide).not.toContainText(/ANT\+|Connector/);
+});

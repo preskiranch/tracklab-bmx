@@ -1434,16 +1434,8 @@ function writeStoredBikeProfiles(profiles: BikeProfile[]) {
 }
 
 function readStoredBikeConnectionSource(): BikeConnectionSource {
-  try {
-    const stored = window.localStorage.getItem(bikeConnectionSourceStorageKey);
-    if (isBikeConnectionSource(stored) && stored !== 'demo') {
-      return stored;
-    }
-  } catch {
-    // Ignore blocked storage and fall back to the best available live path.
-  }
-
-  return browserSupportsBluetoothDirect() ? 'bluetooth' : 'advanced';
+  // Migrate legacy connector preferences to the supported direct pairing path.
+  return 'bluetooth';
 }
 
 function downloadTrackMapping(mapping: UserTrackMapping) {
@@ -1891,7 +1883,7 @@ export function activeMonitorHeartRateBlock(
 }
 
 export default function App() {
-  const bridge = useWattbikeBridge();
+  const bridge = useWattbikeBridge(false);
   const raceShellRef = useRef<HTMLDivElement | null>(null);
   const startGateTimeoutsRef = useRef<number[]>([]);
   const startGateSequenceIdRef = useRef(0);
@@ -4207,17 +4199,8 @@ export default function App() {
   );
   const demoPlayers = exploreDemoCandidates.filter((player) => selectedDemoPlayerIds.includes(player.id));
   const connectedBikeSamples = useMemo(() => {
-    // A temporary Club Live Monitor grant authorizes one direct-Bluetooth studio
-    // bike only. Connector data remains a Racer feature and must never leak into
-    // the temporary club seat when a connector happens to be running locally.
-    const next = authenticatedRacerAccess
-      ? new Map(bridge.samplesByDevice)
-      : new Map<number, BikeSample>();
-    bluetooth.samplesByDevice.forEach((sample, deviceId) => {
-      next.set(deviceId, sample);
-    });
-    return next;
-  }, [authenticatedRacerAccess, bluetooth.samplesByDevice, bridge.samplesByDevice]);
+    return new Map(bluetooth.samplesByDevice);
+  }, [bluetooth.samplesByDevice]);
   const clubTabletBikeActivityAt = useMemo(() => {
     if (!clubTabletSessionActive || !clubTabletSession) return 0;
     const sample = connectedBikeSamples.get(clubTabletSession.session.bikeDeviceId);
@@ -10083,18 +10066,12 @@ export default function App() {
   };
 
   const handleBikeConnectionSourceChange = (source: BikeConnectionSource) => {
+    if (source === 'advanced') return;
     if (clubTabletKioskMode && source !== 'bluetooth') return;
 
     if (!accountProfileComplete && !clubTabletDeviceActive) {
       setProfileFormError('Create an account or sign in before connecting Wattbikes.');
       setAppleBillingMessage(null);
-      setShowMembershipLanding(true);
-      return;
-    }
-
-    if (source === 'advanced' && !authenticatedRacerAccess) {
-      setAppleBillingMessage(advancedConnectorMembershipMessage);
-      setAppleBillingStatus('idle');
       setShowMembershipLanding(true);
       return;
     }
@@ -12962,17 +12939,6 @@ export default function App() {
               <Bluetooth size={15} />
               <span>Bluetooth</span>
             </button>
-            {!clubTabletKioskMode && (
-              <button
-                className={bikeConnectionSource === 'advanced' && !demoMode ? 'selected' : ''}
-                type="button"
-                aria-label="Advanced Connector"
-                onClick={() => handleBikeConnectionSourceChange('advanced')}
-              >
-                <Usb size={15} />
-                <span>Connector</span>
-              </button>
-            )}
             {developerUiActive && (
               <button
                 className={demoMode ? 'selected' : ''}
@@ -13004,41 +12970,6 @@ export default function App() {
                       : 'Pair Wattbike'}
               </span>
             </button>
-          )}
-          {bikeConnectionSource === 'advanced' && !demoMode && (
-            <div className="bridge-controls">
-              {bridge.connection !== 'open' ? (
-                <button
-                  className="bridge-control-button start"
-                  type="button"
-                  aria-label={clubMonitorReleasesLocalBikes
-                    ? 'Connector unavailable in Club Live Monitor'
-                    : advancedConnectorAccessLocked ? 'Upgrade to Connect' : 'Open Mac Connector'}
-                  onClick={advancedConnectorAccessLocked ? showAdvancedConnectorUpgrade : openMacConnector}
-                  disabled={demoMode || clubMonitorReleasesLocalBikes}
-                >
-                  <Usb size={16} />
-                  <span>{clubMonitorReleasesLocalBikes
-                    ? 'Bikes released for Club Monitor'
-                    : advancedConnectorAccessLocked ? 'Upgrade to Connect' : 'Open Connector'}</span>
-                </button>
-              ) : (
-                <button
-                  className={bridgeRunning ? 'bridge-control-button stop' : 'bridge-control-button start'}
-                  type="button"
-                  onClick={() => {
-                    void (bridgeRunning ? bridge.stopLocalBridge() : bridge.startLocalBridge());
-                  }}
-                  disabled={bridgeButtonDisabled}
-                >
-                  <span aria-hidden="true">{bridgeRunning ? '■' : '▶'}</span>
-                  <span>{bridgeButtonLabel}</span>
-                </button>
-              )}
-              <span className={`bridge-live-pill ${activePlayers.length > 0 ? 'live' : bridgeRunning ? 'waiting' : ''}`}>
-                {activePlayers.length > 0 ? 'Bike connected' : bridgeRunning ? 'Scanning' : 'Idle'}
-              </span>
-            </div>
           )}
           {bridgePrompt && <div className="bridge-prompt">{bridgePrompt}</div>}
           {nativeBluetoothFailed && bikeConnectionSource === 'bluetooth' && !demoMode && (
