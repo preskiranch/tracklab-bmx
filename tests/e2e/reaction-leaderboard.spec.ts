@@ -759,7 +759,8 @@ test('original reaction scene keeps the full tree and gate clear in ready and dr
           for (const bulb of await view.locator('.reaction-light-bulb').all()) await expect(bulb).toHaveCSS('visibility', 'hidden');
         } else {
           await expect(view.locator('[data-lamp-state="stopped"]')).toHaveCount(1);
-          await expect(view.locator('[data-lamp-state="dim"]')).toHaveCount(3);
+          await expect(view.locator('[data-lamp-state="lit"]')).toHaveCount(3);
+    await expect(view.locator('.reaction-scene-stack')).toHaveAttribute('data-gate-state', 'settled');
         }
         await page.screenshot({ path: testInfo.outputPath(`original-scene-${state}-${viewport.label}.png`) });
       });
@@ -788,7 +789,8 @@ for (const [cueNumber, stoppedStage] of ['red', 'yellow-1', 'yellow-2', 'green']
     await expect(view.locator(`[data-reaction-stage="${stoppedStage}"]`)).toHaveAttribute('data-lamp-state', 'stopped');
     await expect(view.getByRole('button', { name: 'Try Again', exact: true })).toBeVisible();
     await expect(view.locator('[data-lamp-state="stopped"]')).toHaveCount(1);
-    await expect(view.locator('[data-lamp-state="dim"]')).toHaveCount(3);
+    await expect(view.locator('[data-lamp-state="lit"]')).toHaveCount(3);
+    await expect(view.locator('.reaction-scene-stack')).toHaveAttribute('data-gate-state', 'settled');
     await expect(view.locator('.reaction-light-stop-marker')).toHaveCount(0);
     await expect(view.locator(`[data-reaction-stage="${stoppedStage}"]`)).toHaveCSS('box-shadow', 'none');
     await expect(view.locator(`[data-reaction-stage="${stoppedStage}"]`)).toHaveCSS('outline-style', 'none');
