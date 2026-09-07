@@ -79,6 +79,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
   const cadencePlanRef = useRef<ReactionTestCadencePlan | null>(null);
   const resultCapturedRef = useRef(false);
   const retryPreparingRef = useRef(false);
+  const startAfterRaiseRef = useRef(false);
   const runStateRef = useRef<ReactionTestRunState>('ready');
   const personalBestRef = useRef(displayedPersonalBestMs);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -154,6 +155,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
   }, []);
 
   const resetAttempt = useCallback(() => {
+    startAfterRaiseRef.current = false;
     generationRef.current += 1;
     clearTimers();
     stopStartGateAudio();
@@ -404,6 +406,12 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
   const startButtonDisabled = runState !== 'ready';
   const retryAvailable = result != null && (result.falseStart || gateSettled);
   const handleGateSettled = useCallback(() => setGateSettled(true), []);
+  const handleGateRaised = useCallback(() => {
+    if (!startAfterRaiseRef.current) return;
+    startAfterRaiseRef.current = false;
+    setRunStateSafely('ready');
+    void startAttempt();
+  }, [setRunStateSafely, startAttempt]);
   const retryAttempt = useCallback(async () => {
     if (retryPreparingRef.current) return;
     retryPreparingRef.current = true;
@@ -411,12 +419,21 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
     try {
       // iOS can suspend or replace the context while the result is onscreen.
       // Unlock in this click and finish decoding before the return starts.
-      await primeReactionGateAirSounds();
-      if (generation === generationRef.current) resetAttempt();
+      await Promise.all([primeReactionGateAirSounds(), primeAudioCues().catch(() => undefined)]);
+      if (generation !== generationRef.current) return;
+      resetAttempt();
+      if (gateReleased) {
+        startAfterRaiseRef.current = true;
+        setRunStateSafely('finished');
+        setNotice('Raising gate. The next reaction test will start automatically.');
+      } else {
+        // A false start leaves the gate upright, so no raise callback will fire.
+        void startAttempt();
+      }
     } finally {
       retryPreparingRef.current = false;
     }
-  }, [resetAttempt]);
+  }, [gateReleased, resetAttempt, setRunStateSafely, startAttempt]);
 
 
   return (
@@ -459,7 +476,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
                 alt="BMX starting hill with a four-lamp signal tree, starting platform, trackside spectators and canopies"
                 draggable={false}
               />
-              <ReactionGateLayer released={gateReleased} onSettled={handleGateSettled} />
+              <ReactionGateLayer released={gateReleased} onSettled={handleGateSettled} onRaised={handleGateRaised} />
               <ReactionTree activeStage={activeStage} stoppedStage={result?.stage ?? null} ready={runState === 'ready'} />
             </div>
           </div>

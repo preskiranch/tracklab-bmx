@@ -69,12 +69,13 @@ function GatePaths({ paths, prefix }: { paths: ReactionGatePath[]; prefix: strin
   ));
 }
 
-export type ReactionGateLayerProps = { released: boolean; onSettled: () => void };
+export type ReactionGateLayerProps = { released: boolean; onSettled: () => void; onRaised?: () => void };
 
-export function ReactionGateLayer({ released, onSettled }: ReactionGateLayerProps) {
+export function ReactionGateLayer({ released, onSettled, onRaised }: ReactionGateLayerProps) {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const coordinateSpaceRef = useRef<HTMLDivElement | null>(null);
   const onSettledRef = useRef(onSettled);
+  const onRaisedRef = useRef(onRaised);
   const settledForReleaseRef = useRef(false);
   const progressRef = useRef(0);
   const [progress, setProgress] = useState(0);
@@ -87,6 +88,7 @@ export function ReactionGateLayer({ released, onSettled }: ReactionGateLayerProp
   const photoShell = useMemo(() => buildReactionGatePhotoShell(progress), [progress]);
 
   useEffect(() => { onSettledRef.current = onSettled; }, [onSettled]);
+  useEffect(() => { onRaisedRef.current = onRaised; }, [onRaised]);
 
   useEffect(() => {
     const layer = layerRef.current;
@@ -126,6 +128,7 @@ export function ReactionGateLayer({ released, onSettled }: ReactionGateLayerProp
         settledForReleaseRef.current = true;
         onSettledRef.current();
       }
+      if (!released) onRaisedRef.current?.();
     };
     const startedAt = performance.now();
     const duration = released ? REACTION_GATE_DROP_MS : REACTION_GATE_RAISE_MS;

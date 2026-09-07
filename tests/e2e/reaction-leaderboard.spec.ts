@@ -187,11 +187,12 @@ async function preparePredictableCadence(page: Page) {
 
 async function recordValidRun(page: Page, view: Locator, reactionDelayMs: number) {
   const retry = view.getByRole('button', { name: 'Try Again', exact: true });
-  if (await retry.isVisible()) await retry.click();
+  const isRetry = await retry.isVisible();
   await page.evaluate(() => {
     delete (window as typeof window & { __reactionFirstRedAt?: number }).__reactionFirstRedAt;
   });
-  await view.getByRole('button', { name: 'Start Reaction Test', exact: true }).click();
+  if (isRetry) await retry.click();
+  else await view.getByRole('button', { name: 'Start Reaction Test', exact: true }).click();
   await page.waitForFunction((delay) => {
     const firstRedAt = (window as typeof window & { __reactionFirstRedAt?: number }).__reactionFirstRedAt;
     return firstRedAt !== undefined && performance.now() - firstRedAt >= delay;
@@ -294,8 +295,7 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
     expect(completed[1].duration).toBeCloseTo(2, 3);
     expect(completed[1].peak / completed[0].peak).toBeCloseTo(10 ** (-18 / 20), 3);
 
-    // A false start never releases the gate, so its retry must stay silent.
-    await view.getByRole('button', { name: 'Start Reaction Test', exact: true }).click();
+    // Automatic retry is already waiting for the red tone. A false start keeps the gate upright.
     await view.locator('.reaction-race-surface').click({ position: { x: 500, y: 300 } });
     await expect(view.getByText('TOO EARLY / FALSE START', { exact: true })).toBeVisible();
     await view.getByRole('button', { name: 'Try Again', exact: true }).click();
@@ -802,7 +802,37 @@ for (const [cueNumber, stoppedStage] of ['red', 'yellow-1', 'yellow-2', 'green']
     })).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`tree-${stoppedStage}-phone.png`) });
     await view.getByRole('button', { name: 'Try Again', exact: true }).click();
-    await expect(view.locator('.reaction-tree')).toHaveClass(/is-ready/);
-    await expect(view.locator('[data-lamp-state="lit"]')).toHaveCount(4);
+    await expect(view.getByRole('button', { name: 'Start Reaction Test', exact: true })).toHaveCount(0);
+    await expect(view.locator('[data-reaction-stage="red"]')).toHaveAttribute('data-lamp-state', 'lit');
   });
 }
+
+for (const motion of ['no-preference', 'reduce'] as const) {
+  test(`Try Again starts automatically after the gate returns (${motion})`, async ({ page }) => {
+    await mockReactionAccount(page);
+    await preparePredictableCadence(page);
+    await page.emulateMedia({ reducedMotion: motion });
+    const view = await openReactionTest(page);
+    await recordValidRun(page, view, 50);
+    await expect(view.getByRole('button', { name: 'Try Again', exact: true })).toBeVisible();
+    await view.getByRole('button', { name: 'Try Again', exact: true }).click();
+    await expect(view.locator('.reaction-gate-layer')).toHaveAttribute('data-gate-progress', '0.000');
+    await expect(view.getByRole('button', { name: 'Start Reaction Test', exact: true })).toHaveCount(0);
+    await expect(view.locator('[data-reaction-stage="red"]')).toHaveAttribute('data-lamp-state', 'lit');
+    await view.locator('.reaction-race-surface').click({ position: { x: 500, y: 300 } });
+    await expect(view.locator('.reaction-result-card')).toBeVisible();
+  });
+}
+
+test('false-start retry starts the next cadence without a gate movement', async ({ page }) => {
+  await mockReactionAccount(page);
+  await preparePredictableCadence(page);
+  const view = await openReactionTest(page);
+  await view.getByRole('button', { name: 'Start Reaction Test', exact: true }).click();
+  await view.locator('.reaction-race-surface').click({ position: { x: 500, y: 300 } });
+  await expect(view.getByText('TOO EARLY / FALSE START', { exact: true })).toBeVisible();
+  await view.getByRole('button', { name: 'Try Again', exact: true }).click();
+  await expect(view.getByRole('button', { name: 'Start Reaction Test', exact: true })).toHaveCount(0);
+  await expect(view.locator('[data-reaction-stage="red"]')).toHaveAttribute('data-lamp-state', 'lit');
+  await expect(view.locator('.reaction-gate-layer')).toHaveAttribute('data-gate-progress', '0.000');
+});
