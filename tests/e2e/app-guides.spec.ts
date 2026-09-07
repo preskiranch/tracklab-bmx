@@ -233,7 +233,7 @@ test('legacy connector preference migrates to Bluetooth without opening a local 
   await expect(page.getByRole('button', { name: 'Bluetooth', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: /Connector/i })).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => localStorage.getItem('tracklab-bmx-bike-connection-source-v1'))).toBe('bluetooth');
-  expect(sockets.filter(url => /127\.0\.0\.1:19787|localhost:19787/.test(url))).toEqual([]);
+  expect(sockets.filter(url => /(?:127\.0\.0\.1|localhost):(?:19787|8787)/.test(url))).toEqual([]);
   await page.goto('/#app-guide');
   const guide = page.getByRole('region', { name: 'App Guide', exact: true });
   await expect(guide).toBeVisible();
