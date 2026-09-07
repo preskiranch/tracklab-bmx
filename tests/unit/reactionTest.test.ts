@@ -65,7 +65,7 @@ describe('Reaction Test scoring', () => {
     expect(reactionStageAtTimestamp(cueEvents, 10_400)).toBe('green');
   });
 
-  it('keeps precise timing internally and displays hundredths of a second', () => {
+  it('keeps precise timing internally and displays thousandths of a second', () => {
     const result = createReactionTestResult({
       id: 'attempt',
       timerStartedAt: 1_000.123,
@@ -76,8 +76,17 @@ describe('Reaction Test scoring', () => {
       cadenceDelayMs: 1_200,
     });
     expect(result.reactionTimeMs).toBeCloseTo(1_274.444, 6);
-    expect(formatReactionTime(result.reactionTimeMs)).toBe('1.27');
+    expect(formatReactionTime(result.reactionTimeMs)).toBe('1.274');
     expect(result.rating).toBe('great');
+  });
+
+  it('shows three decimal places without changing stored timing precision', () => {
+    expect(formatReactionTime(380)).toBe('0.380');
+    expect(formatReactionTime(381)).toBe('0.381');
+    expect(formatReactionTime(30)).toBe('0.030');
+    expect(formatReactionTime(999.6)).toBe('1.000');
+    expect(formatReactionTime(null)).toBe('--.---');
+    expect(formatReactionTime(Number.NaN)).toBe('--.---');
   });
 
   it('preserves a false start as invalid instead of treating it as a response', () => {
