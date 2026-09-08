@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createUciRandomDelayMs,
   uciGreenToneDurationSeconds,
@@ -21,4 +21,17 @@ describe('UCI random start timing', () => {
     expect(createUciRandomDelayMs(() => 0)).toBe(uciRandomDelayMinMs);
     expect(createUciRandomDelayMs(() => 0.999999999)).toBe(uciRandomDelayMaxMs);
   });
+});
+
+
+it('requests fresh crypto randomness for each start instead of reusing a fixed delay', () => {
+  const draws = [0, 200, 2600, 950];
+  const source = vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(array => {
+    (array as Uint32Array)[0] = draws.shift()!;
+    return array;
+  });
+  try {
+    expect(Array.from({length:4}, () => createUciRandomDelayMs())).toEqual([100,300,2700,1050]);
+    expect(source).toHaveBeenCalledTimes(4);
+  } finally { source.mockRestore(); }
 });

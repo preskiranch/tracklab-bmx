@@ -167,7 +167,11 @@ export type StartGateToneOnsetResult = Readonly<{
   source: 'web-audio' | 'media-element' | 'web-audio-retry' | 'cancelled' | 'unavailable';
 }>;
 
+let cancelVoiceCompletion: (() => void) | null = null;
+
 export type UciVoiceStartResult = {
+  /** Actual playback completion; null means interrupted or unavailable. */
+  finished?: Promise<number | null>;
   startedAt: number;
   /**
    * Same start event expressed on the browser's monotonic clock. Consumers
@@ -1196,6 +1200,7 @@ export function playStartGateTone(kind: StartGateToneKind) {
 }
 
 export function stopStartGateAudio() {
+  cancelVoiceCompletion?.();
   // Invalidate async voice startup work as well as stopping sources that have
   // already started. A slow media element, AudioContext resume, or buffer load
   // must not revive the cadence after a red/green phase or explicit cancel.
@@ -1227,6 +1232,27 @@ export function stopStartGateAudio() {
   });
 
   window.speechSynthesis?.cancel();
+}
+
+function voicePlaybackCompletion(source: EventTarget, alreadyEnded = false): Promise<number | null> {
+  if (alreadyEnded) return Promise.resolve(monotonicAudioNow());
+  return new Promise(resolve => {
+    const finish = (time: number | null) => {
+      window.clearTimeout(timeout);
+      source.removeEventListener('ended', ended);
+      source.removeEventListener('error', cancelled);
+      source.removeEventListener('abort', cancelled);
+      if (cancelVoiceCompletion === cancelled) cancelVoiceCompletion = null;
+      resolve(time);
+    };
+    const ended = () => finish(monotonicAudioNow());
+    const cancelled = () => finish(null);
+    const timeout = window.setTimeout(cancelled, 30_000);
+    cancelVoiceCompletion = cancelled;
+    source.addEventListener('ended', ended, { once: true });
+    source.addEventListener('error', cancelled, { once: true });
+    source.addEventListener('abort', cancelled, { once: true });
+  });
 }
 
 export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoiceStartResult> {
@@ -1312,7 +1338,7 @@ export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoi
   }
 
   if (mediaResult) {
-    return mediaResult;
+    return { ...mediaResult, finished: voicePlaybackCompletion(audio, audio.ended) };
   }
 
   cancelPendingStartGateAudio(audio);
@@ -1356,8 +1382,9 @@ export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoi
         mix.nodes.forEach((node) => node.disconnect());
         return cancelledResult();
       }
+      const finished = voicePlaybackCompletion(source);
       source.start();
-      return { startedAt, startedAtMonotonic, source: 'audio' };
+      return { startedAt, startedAtMonotonic, source: 'audio', finished };
     }
   }
 

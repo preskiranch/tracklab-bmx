@@ -304,7 +304,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
         timerStartedAtEpochRef.current = Date.now()
           - Math.max(0, monotonicNow() - event.firedAt);
         setRunStateSafely('running');
-        setNotice('Tap anywhere on the race surface now.');
+        setNotice('Tap anywhere on the picture to stop the timer.');
       }
       if (event.releasesGate) {
         setGateReleased(true);
@@ -370,17 +370,24 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
     const voice = await playUciRandomStartVoice().catch(() => null);
     if (generation !== generationRef.current) return;
 
-    // playUciRandomStartVoice supplies a monotonic timestamp from the same
-    // audio-start event. A fallback remains functional in browsers that cannot
-    // report it, while preserving the existing UCI timing constants.
-    const voiceStartedAt = voice?.startedAtMonotonic ?? monotonicNow();
+    // The random hold begins at actual voice completion, including any media
+    // stalls. A guessed offset can overlap the final word on short draws.
+    const voiceEndedAt = await voice?.finished;
+    if (generation !== generationRef.current) return;
+    if (voice?.source !== 'audio' || voiceEndedAt == null) {
+      stopStartGateAudio();
+      setNotice('Cadence could not finish. Tap Start Reaction Test to try again.');
+      setRunStateSafely('ready');
+      return;
+    }
     const plan = createReactionTestCadencePlan(
-      voiceStartedAt,
+      voice.startedAtMonotonic,
       createReactionTestCadenceDelay(),
+      voiceEndedAt,
     );
     cadencePlanRef.current = plan;
     setRunStateSafely('waiting');
-    setNotice('Listen for the UCI cadence. The whole race surface is your reaction target.');
+    setNotice('Tap anywhere on the picture to stop the timer.');
     scheduleCadence(plan, generation);
   }, [scheduleCadence, setRunStateSafely]);
 
@@ -535,7 +542,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
                   <div className="reaction-group-average" aria-label="This group’s average" aria-live="polite">
                     <span>Group average</span>
                     <b>{formatReactionTime(completedAverageMs)} sec</b>
-                    <span>{newAverageRecord ? 'New average PR' : averageBestMs != null && Math.round(completedAverageMs - averageBestMs) > 0
+                    <span>{newAverageRecord ? 'New average PR' : averageBestMs != null && Math.round((completedAverageMs - averageBestMs) / 10) > 0
                       ? `+${formatReactionTime(completedAverageMs - averageBestMs)} sec vs PR` : 'Matches average PR'}</span>
                   </div>
                 )}
@@ -546,7 +553,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
             ) : (
               <div className="reaction-ready-card">
                 <Flag size={20} />
-                <span>{runState === 'ready' ? 'Ready at the gate' : 'Tap the entire race surface — no small button to find.'}</span>
+                <span>{runState === 'ready' ? 'Ready at the gate' : 'Tap anywhere on the picture to stop the timer.'}</span>
               </div>
             )}
             <div className="reaction-record-actions"><div

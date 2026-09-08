@@ -68,6 +68,7 @@ export function createReactionTestCadenceDelay(random?: () => number) {
 export function createReactionTestCadencePlan(
   voiceStartedAt: number,
   cadenceDelayMs: number,
+  voiceEndedAt?: number,
 ): ReactionTestCadencePlan {
   if (!Number.isFinite(voiceStartedAt)) {
     throw new TypeError('voiceStartedAt must be a finite monotonic timestamp.');
@@ -80,7 +81,7 @@ export function createReactionTestCadencePlan(
     uciRandomDelayMinMs,
     Math.min(uciRandomDelayMaxMs, Math.round(cadenceDelayMs)),
   );
-  const firstRedAt = voiceStartedAt + uciVoiceWatchGateOffsetMs + normalizedDelay;
+  const firstRedAt = (voiceEndedAt ?? voiceStartedAt + uciVoiceWatchGateOffsetMs) + normalizedDelay;
   const cues = Object.freeze([
     Object.freeze({
       stage: 'red' as const,
@@ -187,10 +188,10 @@ export function reactionRatingForStage(stage: ReactionTestStage): ReactionTestRa
   return null;
 }
 
-/** Round milliseconds to the thousandths-of-a-second value displayed to riders. */
+/** Round milliseconds to the hundredths-of-a-second value displayed to riders. */
 export function formatReactionTime(reactionTimeMs: number | null) {
-  if (reactionTimeMs == null || !Number.isFinite(reactionTimeMs)) return '--.---';
-  return (Math.max(0, reactionTimeMs) / 1_000).toFixed(3);
+  if (reactionTimeMs == null || !Number.isFinite(reactionTimeMs)) return '--.--';
+  return (Math.max(0, reactionTimeMs) / 1_000).toFixed(2);
 }
 
 export function createReactionTestResult(input: {
