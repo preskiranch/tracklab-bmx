@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { acceptChildDevice, type AuthUser } from '../lib/auth';
+import { acceptChildDevice, assignChildDevice, type AuthUser } from '../lib/auth';
 import { childDeviceRequest } from '../lib/childDevices';
 import './FamilyAccounts.css';
 
@@ -9,6 +9,7 @@ export function ChildPhoneSetup({ childId, name }: { childId: string; name: stri
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [confirmRevoke, setConfirmRevoke] = useState(false);
+  const [confirmAssign, setConfirmAssign] = useState(false);
   async function perform(revoke: boolean) {
     if (busy) return;
     setBusy(true); setError(''); setNotice('');
@@ -19,12 +20,34 @@ export function ChildPhoneSetup({ childId, name }: { childId: string; name: stri
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Please try again.'); }
     finally { setBusy(false); }
   }
+  async function assign() {
+    if (busy) return;
+    setBusy(true); setError('');
+    try {
+      const user = await assignChildDevice(childId);
+      if (!user?.managedChild) throw new Error('Device assignment could not be confirmed. Sign in again.');
+      await import('../lib/nativeRecoveryAlerts').then(({ nativeRecoveryAlerts }) => nativeRecoveryAlerts.clearAllEpisodes()).catch(() => undefined);
+      // Reload discards parent-only React state and reconnects services as the child.
+      const url = new URL(window.location.href);
+      url.searchParams.delete('clubInvite'); url.hash = '';
+      window.location.replace(url.toString());
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Please try again.'); setBusy(false); }
+  }
   return <section className="family-card" aria-label={`${name} phone setup`}>
     <h2>Set up {name}’s phone</h2>
-    <p>The child gets their own profile, training history, and recording identity. No child email or parent password is needed. Studio records stay connected.</p>
+    <p>The child gets their own profile, training history, and recording identity. No separate child email is needed. Studio records stay connected.</p>
     <p>For an eligible iOS beta tester, install TrackLab through TestFlight before opening the setup link. Apple requires testers to be at least 13 or the local equivalent minimum age. The parent account does not bypass that requirement. Younger athletes can use supported website features; native Watch access needs a suitable iOS distribution.</p>
-    <button type="button" className="family-primary" disabled={busy} onClick={() => void perform(false)}>Create child-phone setup link</button>
+    <p>On the child’s phone, install TrackLab from the Preski Labs beta page, sign in as the parent, then open My Profile → Family and select {name}.</p>
+    <button type="button" className="family-primary" disabled={busy} onClick={() => setConfirmAssign(true)}>Use this device as {name}</button>
+    {confirmAssign && <div className="family-confirm" role="group" aria-label="Confirm child device">
+      <p>Is this {name}’s device? It will sign out your parent account here and open only {name}’s profile. Your other devices stay signed in. Switching back requires the parent to sign in again.</p>
+      <button type="button" disabled={busy} onClick={() => void assign()}>Yes, this is {name}’s device</button>
+      <button type="button" disabled={busy} onClick={() => setConfirmAssign(false)}>Keep this as my parent device</button>
+    </div>}
+    <details><summary>Alternatively, use a private setup link</summary>
+    <button type="button" disabled={busy} onClick={() => void perform(false)}>Create child-phone setup link</button>
     {link && <div className="family-created-link"><label>Private child-phone setup link<input readOnly value={link} onFocus={(event) => event.target.select()} /></label><button type="button" onClick={() => { void navigator.clipboard.writeText(link).then(() => setNotice('Setup link copied. Open it on the child’s phone.'), () => setNotice('Select and copy the link above.')); }}>Copy setup link</button></div>}
+    </details>
     <p>The child’s phone records as {name}. Your Family view shows their synced training. On the child’s iPhone, use Watch Connect for their paired Apple Watch, then approve studio sharing when training at the club.</p>
     <button type="button" disabled={busy} onClick={() => setConfirmRevoke(true)}>Sign out child’s devices</button>
     {confirmRevoke && <div className="family-confirm"><p>Sign out all of {name}’s devices and cancel pending setup links? Their saved training will remain.</p><button type="button" disabled={busy} onClick={() => void perform(true)}>Confirm device sign-out</button><button type="button" disabled={busy} onClick={() => setConfirmRevoke(false)}>Cancel</button></div>}

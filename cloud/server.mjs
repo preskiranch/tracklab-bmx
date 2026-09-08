@@ -5582,7 +5582,7 @@ async function handleFamilyRequest(request, response, requestUrl) {
   if (managedChildId(userId)) { reply(403, { error: 'Ask your parent to manage Family from their account.' }); return true; }
   if (!enforceNoStoreRateLimit(request, response, betaAccessRateLimiter,
     request.method === 'GET' ? 600 : 100, `family:${userId}:${request.method === 'GET' ? 'read' : 'write'}`)) return true;
-  const childMatch = /^\/api\/family\/children\/([a-zA-Z0-9-]{1,100})(?:\/(profile|training-sessions|club-claim|restore|device-invite|devices))?$/u.exec(pathname);
+  const childMatch = /^\/api\/family\/children\/([a-zA-Z0-9-]{1,100})(?:\/(profile|training-sessions|club-claim|restore|device-invite|assign-device|devices))?$/u.exec(pathname);
   try {
     if (pathname === '/api/family' && request.method === 'GET') {
       const state = await persistence.loadFamilyAccess(userId);
@@ -5649,6 +5649,29 @@ async function handleFamilyRequest(request, response, requestUrl) {
       if (!action && request.method === 'DELETE') {
         const removed = await persistence.revokeFamilyAccess(userId, childId);
         reply(removed ? 200 : 404, removed ? { ok: true } : { error: 'This child profile is unavailable.' });
+      } else if (action === 'assign-device' && request.method === 'POST') {
+        const body = await readJsonBody(request, 8_000);
+        if (body?.confirm !== true || child.kind !== 'managed') {
+          reply(400, { error: 'Confirm this device is for an active parent-managed child.' }); return true;
+        }
+        const invitationToken = createSessionToken();
+        const invite = await persistence.createFamilyDeviceInvitation(userId, childId, tokenHash(invitationToken));
+        if (!invite) { reply(404, { error: 'This child profile is unavailable.' }); return true; }
+        const token = createSessionToken();
+        const user = await persistence.acceptFamilyDeviceInvitation(tokenHash(invitationToken), {
+          id: randomUUID(), tokenHash: tokenHash(token),
+          expiresAt: new Date(Date.now() + authSessionMaxAgeSeconds * 1000).toISOString(),
+        }, Date.now(), { userId, sessionHash: session.sessionTokenHash });
+        if (!user) { reply(409, { error: 'Family access changed. Sign in again and select your child.' }); return true; }
+        const hash = session.sessionTokenHash;
+        terminateClubLivePublisher(`personal:${hash}`);
+        authSessionLookups.forget(hash); personalAuthSessions.forget(hash);
+        deleteClubLiveSessionsWhere(live => live?._publisherAuthSessionHash === hash);
+        deactivateAuthenticatedClientsForSession(hash, 'Device assigned to child');
+        closeFriendEventStreamsForSession(hash); closeTrainingHistoryStreamsForSession(hash);
+        const native = requestIsNativeApp(request);
+        if (!native) setAuthCookie(response, request, token);
+        reply(200, { user: publicAuthUser(await withAutomaticBetaAccess(user)), ...(native ? { nativeSessionToken: token } : {}) });
       } else if (action === 'device-invite' && request.method === 'POST') {
         await readJsonBody(request, 8_000);
         const origin = publicRequestOrigin(request);

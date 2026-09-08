@@ -15,13 +15,15 @@ export const familyGuideSection: AppGuideSection = {
     {
       title: 'Create a child profile without an email',
       paragraphs: [
-        'A parent or guardian can create a managed child profile with a name. The child does not need an email address or password. Each child can sign into their own phone using a one-use setup link approved by the parent. Add each child separately, even when the same parent supervises several athletes.',
+        'A parent or guardian can create a managed child profile with a name. The child does not need an email address or password. On each child’s phone, the parent signs in, opens Family, selects that child, and confirms Use this device as that child. The parent session on that phone is replaced with child-only access. A one-use setup link is also available. Add each child separately, even when the same parent supervises several athletes.',
         'For an athlete who trains at a TrackLab club, connect their unclaimed Club Connect invitation to the selected managed child. This attaches that exact athlete’s available studio records and future recorded club sessions without renaming the parent or moving another child’s history.',
       ],
       steps: [
         'Open the club’s athlete invitation and choose I’m the parent or guardian. Create or sign into your own account with your email.',
+        'If you are also an athlete, first open your own studio invitation, choose I’m the athlete, and claim your personal records. Stay signed into that same account when opening each child’s invitation and choose I’m the parent or guardian. Your personal workouts stay separate from each child’s records.',
+        'For a sibling, open that sibling’s separate studio invitation while signed into the same parent account. Create a new child profile or select that sibling’s existing profile. Never assign a sibling’s invitation to the first child.',
         'Enter the child’s name or choose their existing managed profile, confirm guardian authorization, and claim the studio record. You can also connect an unclaimed invitation from Family.',
-        'Choose Create child-phone setup link and open it on the child’s phone within 15 minutes. Confirm the athlete’s name. The phone signs into that child’s profile; your own phone stays signed into the parent account. Repeat separately for each child.',
+        'On the child’s phone, install TrackLab from the Preski Labs beta page and sign in with the parent account. Open My Profile → Family, select the child, and choose Use this device as [child’s name]. Confirm the device belongs to that child. Only this device switches to child access; the parent’s other devices remain signed in. A private setup link remains available as an alternative.',
       ],
     },
     {
@@ -29,7 +31,7 @@ export const familyGuideSection: AppGuideSection = {
       paragraphs: [
         'Adults open their club invitation and choose I’m the athlete, then create or sign into their own account and complete their athlete profile. A valid unclaimed invitation supports either path; no replacement link is needed just because the athlete is a child. Already-claimed independent accounts use the separate Family permission link instead of claiming the studio record again.',
         'During the iOS beta, eligible parents and athletes install TrackLab through TestFlight using access provided by the beta organizer. Apple’s TestFlight terms do not permit children under 13 or the equivalent local minimum age to use TestFlight; a parent account does not bypass this rule. Younger athletes can use supported website features, while native Apple Watch access needs a suitable iOS distribution. Installing the beta and claiming a TrackLab athlete profile are separate steps. The child-phone setup link does not itself enroll an Apple account in TestFlight. Open the setup link after installing a build that supports child phone setup.',
-        'Only share a child-phone setup link with that child’s device. It expires in 15 minutes and can be used once. Creating another link replaces the pending one. From the selected child in Family, a parent can sign out the child’s devices without deleting records. Archiving a child also cancels their device sign-ins; restoring the profile requires a new setup link.',
+        'Only share a child-phone setup link with that child’s device. It expires in 15 minutes and can be used once. Creating another link replaces the pending one. From the selected child in Family, a parent can sign out the child’s devices without deleting records. Archiving a child also cancels their device sign-ins; restoring the profile requires assigning the device again or creating a new setup link.',
       ],
     },
     {

@@ -241,3 +241,27 @@ describe('personal family access API', () => {
     expect(preclaimHistory.totals).toMatchObject({ sessions: 1, durationMs: 6000, distanceMeters: 50 });
   });
 });
+
+it('assigns only the selected managed child and replaces only this parent session', async () => {
+  const email = `device-parent-${Date.now()}@tracklab.test`;
+  const parent = await register('Device Parent', email);
+  const otherParent = await register('Other Parent');
+  const first = await managed(parent, 'First Sibling');
+  const second = await managed(parent, 'Second Sibling');
+  const login = await api('/api/auth/login', undefined, { email, password: 'tracklab-family-test-password' });
+  expect(login.status).toBe(200);
+  const anotherPhone = { cookie: login.headers.get('set-cookie')!.split(';')[0], user: parent.user };
+  const endpoint = `/api/family/children/${second.id}/assign-device`;
+  expect((await api(endpoint, undefined, { confirm: true })).status).toBe(401);
+  expect((await api(endpoint, otherParent, { confirm: true })).status).toBe(404);
+  expect((await api(endpoint, parent, { confirm: false })).status).toBe(400);
+  const response = await api(endpoint, parent, { confirm: true });
+  expect(response.status, await response.clone().text()).toBe(200);
+  const user = (await response.json()).user;
+  expect(user).toMatchObject({ name: 'Second Sibling', managedChild: true, profileKey: `family-child:${second.id}` });
+  const child = { cookie: response.headers.get('set-cookie')!.split(';')[0], user };
+  expect((await api('/api/family', child)).status).toBe(403);
+  expect((await api(`/api/family/children/${first.id}/profile`, child)).status).toBe(403);
+  expect((await api('/api/family', parent)).status).toBe(401);
+  expect((await api('/api/family', anotherPhone)).status).toBe(200);
+});

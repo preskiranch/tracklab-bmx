@@ -147,3 +147,9 @@ export async function acceptChildDevice(token: string) {
     method: 'POST', body: JSON.stringify({ token, confirm: true }),
   });
 }
+
+export async function assignChildDevice(childId: string) {
+  return authFetch(`/api/family/children/${encodeURIComponent(childId)}/assign-device`, {
+    method: 'POST', body: JSON.stringify({ confirm: true }),
+  });
+}

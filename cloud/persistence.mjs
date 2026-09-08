@@ -1110,7 +1110,7 @@ export async function previewFamilyDeviceInvitation(tokenHash, now = Date.now())
 
 // Consume the invitation and store a separate child session atomically. There
 // is no parent credential on the child's phone, and old records never move.
-export async function acceptFamilyDeviceInvitation(tokenHash, session, now = Date.now()) {
+export async function acceptFamilyDeviceInvitation(tokenHash, session, now = Date.now(), parentAssignment = null) {
   return withFamilyLock(async (client) => {
     const result = await client.query(`SELECT children.*,invites.id AS invite_id
       FROM ${schema}.family_device_invites invites JOIN ${schema}.family_children children ON children.id=invites.child_id
@@ -1120,6 +1120,13 @@ export async function acceptFamilyDeviceInvitation(tokenHash, session, now = Dat
       FOR UPDATE OF invites,children`, [tokenHash, now]);
     const child = result.rows[0];
     if (!child) return null;
+    if (parentAssignment) {
+      if (child.parent_user_id !== parentAssignment.userId) return null;
+      const parentSession = await client.query(`DELETE FROM ${schema}.auth_sessions
+        WHERE token_hash=$1 AND user_id=$2 AND expires_at>now() RETURNING id`,
+        [parentAssignment.sessionHash, parentAssignment.userId]);
+      if (!parentSession.rows.length) return null;
+    }
     const userId = `child-${child.id}`;
     const user = await client.query(`INSERT INTO ${schema}.auth_users
       (id,email,display_name,username,friend_discoverable,password_hash,membership_tier,bike_seats,legacy_membership_tier,legacy_bike_seats,admin,last_login)
@@ -1134,11 +1141,17 @@ export async function acceptFamilyDeviceInvitation(tokenHash, session, now = Dat
     const invite = memoryFamilyDeviceInvites.get(tokenHash);
     const child = invite && memoryFamilyChild(memoryFamilyChildren.get(invite.childId));
     if (!child || child.kind !== 'managed' || invite.claimedAt != null || invite.revokedAt != null || invite.expiresAt <= now) return null;
+    if (parentAssignment) {
+      const parentSession = memoryAuthSessionsByToken.get(parentAssignment.sessionHash);
+      if (child.parentUserId !== parentAssignment.userId || !parentSession
+        || parentSession.userId !== parentAssignment.userId || new Date(parentSession.expiresAt).getTime() <= now) return null;
+    }
     const userId = `child-${child.id}`;
     const user = effectiveMemoryAuthUser(userId) ?? await createAuthUser({ id: userId,
       email: `${userId}@managed.tracklab.invalid`, displayName: child.name, username: `athlete-${child.id}`,
       passwordHash: '!parent-managed-device-only!', membershipTier: 'spectator', bikeSeats: 1, admin: false });
     if (!user || !await createAuthSession({ ...session, userId })) return null;
+    if (parentAssignment) memoryAuthSessionsByToken.delete(parentAssignment.sessionHash);
     invite.claimedAt = now;
     return user;
   });

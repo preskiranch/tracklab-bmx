@@ -29,7 +29,7 @@ export function ParentAthleteClaim({ token, onClaimed }: { token: string; onClai
   }
   if (claimed) return <><p role="status">{claimed.name}’s studio profile is connected. Find it any time in My Profile → Family.</p><ChildPhoneSetup key={claimed.id} childId={claimed.id} name={claimed.name} /></>;
   return <section className="family-card" aria-label="Parent athlete claim">
-    <h3>Claim your child’s studio profile</h3><p>You stay signed in as the parent. Your child gets their own separate profile, with their existing studio history.</p>
+    <h3>Claim your child’s studio profile</h3><p>You stay signed in as the parent. This invitation connects one child’s existing studio history. For a sibling’s invitation, create a new child profile or choose that sibling’s existing profile—not another child.</p>
     {children.length > 0 && <label>Child profile<select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}><option value="">Create a new child profile</option>{children.map((child) => <option key={child.id} value={child.id}>{child.name}</option>)}</select></label>}
     {!selectedId && <label>Child’s name<input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} autoComplete="off" /></label>}
     <label className="family-consent"><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} />I am this athlete’s parent or guardian and am authorized to manage their profile.</label>
