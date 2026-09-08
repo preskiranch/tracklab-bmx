@@ -831,7 +831,7 @@ test('false-start retry starts the next cadence without a gate movement', async 
   await view.getByRole('button', { name: 'Start Reaction Test', exact: true }).click();
   await view.locator('.reaction-race-surface').click({ position: { x: Math.min(500, (page.viewportSize()?.width ?? 1000) / 2), y: 300 } });
   await expect(view.getByText('TOO EARLY / FALSE START', { exact: true })).toBeVisible();
-  await expect(view.locator('.reaction-series-help')).toContainText('Series 0/3');
+  await expect(view.locator('.reaction-series-help')).toContainText('Attempt 1 of 3 · Start again');
   await view.getByRole('button', { name: 'Try Again', exact: true }).click();
   await expect(view.locator('.reaction-gate-layer')).toHaveAttribute('data-gate-progress', '0.000');
   await expect(view.getByRole('button', { name: 'Start Reaction Test', exact: true })).toHaveCount(0);
@@ -844,9 +844,13 @@ test('reaction card shows best clean three-run average and single best separatel
   await page.setViewportSize({width:390,height:844});
   const view = await openReactionTest(page);
   await expect(view.getByLabel('Best three-attempt average')).toContainText('—');
-  for (let i=0;i<3;i++) await recordValidRun(page,view,100);
+  await expect(view.locator('.reaction-attempt-label')).toHaveText('Attempt 1 of 3');
+  for (let i=0;i<3;i++) {
+    await recordValidRun(page,view,100);
+    await expect(view.locator('.reaction-attempt-label')).toHaveText(`Attempt ${i+1} of 3 · ${i===2 ? 'Group complete' : 'Recorded'}`);
+  }
   await expect(view.getByLabel('Best three-attempt average')).toContainText(/0\.\d{3} sec/);
-  await expect(view.locator('.reaction-series-help')).toContainText('Series 0/3');
+  await expect(view.locator('.reaction-series-help')).toContainText('Attempt 3 of 3 · Group complete');
   await expect(view.locator('.reaction-pr-badge').filter({hasText:'Single best'})).toContainText(/0\.\d{3} sec/);
   await expect(view.getByLabel('Best three-attempt average')).toBeInViewport();
   await expect(view.getByRole('button',{name:'Try Again',exact:true})).toBeInViewport();

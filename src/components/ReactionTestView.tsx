@@ -538,7 +538,10 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
             <div className="reaction-pr-badge" aria-label="Best three-attempt average">
               <Trophy aria-hidden="true" size={17} /><span>Average PR · {averageBestMs == null ? '—' : `${formatReactionTime(averageBestMs)} sec`}</span>
             </div>
-            <small className="reaction-series-help">Series {seriesCount}/3 · False starts reset the group. Best three-attempt average ranks.</small>
+            <div className="reaction-series-help" aria-live="polite">
+              <strong className="reaction-attempt-label">Attempt {result?.valid ? seriesCount || 3 : seriesCount + 1} of 3{result?.valid ? seriesCount === 0 ? ' · Group complete' : ' · Recorded' : result?.falseStart ? ' · Start again' : ''}</strong>
+              <span>False starts reset to attempt 1. Best three-attempt average ranks.</span>
+            </div>
             <ReactionLeaderboard disabled={runState !== 'ready' && !retryAvailable} onPersonalBest={acceptPersonalBest} recordOwner={recordOwner} refreshKey={savedResultRevision} />
             </div>
             {saveError && <small className="reaction-save-error" role="alert">{saveError}</small>}
