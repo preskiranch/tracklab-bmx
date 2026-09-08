@@ -10,6 +10,7 @@ const tables = [
   'family_children',
   'family_link_invites',
   'reaction_test_bests',
+  'reaction_test_attempts',
   'auth_sessions',
   'billing_checkouts',
   'apple_iap_lineage_token_bindings',

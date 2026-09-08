@@ -24,15 +24,15 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-describe('Reaction Test best-only cloud synchronization', () => {
-  it('retains just the fastest pending attempt across reload and syncs under the original account', async () => {
+describe('Reaction Test ordered attempt cloud synchronization', () => {
+  it('retains every pending attempt across reload and syncs under the original account', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Offline')));
     let api = await import('../../src/lib/reactionTestCloud');
     await expect(api.saveReactionPersonalBest(result('first', 200), account)).rejects.toThrow('Offline');
     await expect(api.saveReactionPersonalBest(result('best', 180), account)).rejects.toThrow('Offline');
     await expect(api.saveReactionPersonalBest(result('slower', 210), account)).rejects.toThrow('Offline');
     expect(storage.size).toBe(1);
-    expect([...storage.values()][0]).not.toContain('slower');
+    expect([...storage.values()][0]).toContain('slower');
     vi.resetModules();
     api = await import('../../src/lib/reactionTestCloud');
     expect(api.localReactionPersonalBest(account)).toBe(180);
@@ -42,8 +42,9 @@ describe('Reaction Test best-only cloud synchronization', () => {
     await api.flushReactionPersonalBest(account);
     const [url, request] = fetcher.mock.calls[0];
     expect(url).toBe('/api/reaction-test/result');
-    expect(JSON.parse(request.body)).toMatchObject({ expectedAccountId: 'athlete-a', result: { id: 'best' } });
-    expect(JSON.parse([...storage.values()][0])).toEqual({ bestMs: 180 });
+    expect(JSON.parse(request.body)).toMatchObject({ expectedAccountId: 'athlete-a', result: { id: 'first' } });
+    expect(fetcher.mock.calls.map(call => JSON.parse(call[1].body).result.id)).toEqual(['first', 'best', 'slower']);
+    expect(JSON.parse([...storage.values()][0])).toMatchObject({ bestMs: 180, queue: [] });
   });
 
   it('uses captured tablet credentials even after local tablet storage changes', async () => {
@@ -68,13 +69,14 @@ describe('Reaction Test best-only cloud synchronization', () => {
     expect(fetcher.mock.calls[1][1].headers['X-TrackLab-Club-Tablet-Result-Token']).toBeUndefined();
   });
 
-  it('does not persist false starts or send them to a training endpoint', async () => {
-    const fetcher = vi.fn();
+  it('sends false starts to the reaction endpoint so they reset the series', async () => {
+    const fetcher = vi.fn().mockImplementation(response);
     vi.stubGlobal('fetch', fetcher);
     const api = await import('../../src/lib/reactionTestCloud');
     await api.saveReactionPersonalBest({ ...result('early', 0), valid: false, falseStart: true, reactionTimeMs: null }, account);
-    expect(fetcher).not.toHaveBeenCalled();
-    expect(storage.size).toBe(0);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0][0]).toBe('/api/reaction-test/result');
+    expect(JSON.parse(fetcher.mock.calls[0][1].body).result.falseStart).toBe(true);
   });
 
   it('uploads the newer in-memory minimum when persistent storage rejects writes', async () => {

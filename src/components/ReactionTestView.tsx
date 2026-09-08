@@ -22,7 +22,7 @@ import {
 import { uciStartToneIntervalMs } from '../lib/uciStartGate';
 import { ReactionGateLayer, REACTION_GATE_DROP_MS } from './ReactionGateLayer';
 import { ReactionLeaderboard } from './ReactionLeaderboard';
-import { flushReactionPersonalBest, localReactionPersonalBest, type ReactionRecordOwner } from '../lib/reactionTestCloud';
+import { flushReactionPersonalBest, loadReactionProfile, localReactionAverageBest, localReactionPersonalBest, type ReactionRecordOwner } from '../lib/reactionTestCloud';
 import './ReactionTestView.css';
 import { ReactionTree } from './ReactionTree';
 import { prepareReactionGateAirSounds, primeReactionGateAirSounds } from '../lib/reactionGateAudio';
@@ -82,6 +82,13 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
   const startAfterRaiseRef = useRef(false);
   const runStateRef = useRef<ReactionTestRunState>('ready');
   const personalBestRef = useRef(displayedPersonalBestMs);
+  const seriesIdRef = useRef(crypto.randomUUID());
+  const seriesTimesRef = useRef<number[]>([]);
+  const [seriesCount, setSeriesCount] = useState(0);
+  const [averageBestMs, setAverageBestMs] = useState<number | null>(() => recordOwner ? localReactionAverageBest(recordOwner) : null);
+  const acceptAverageBest = useCallback((value: number | null | undefined) => {
+    if (value != null && Number.isFinite(value) && value > 0) setAverageBestMs(current => Math.min(current ?? Infinity, value));
+  }, []);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const sceneFrameRef = useRef<HTMLDivElement | null>(null);
 
@@ -192,12 +199,15 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
   useEffect(() => {
     if (!recordOwner) return;
     let active = true;
+    acceptAverageBest(localReactionAverageBest(recordOwner));
+    void loadReactionProfile(recordOwner).then(profile => { if (active) acceptAverageBest(profile.averageBestMs); }).catch(() => undefined);
     const localBest = localReactionPersonalBest(recordOwner);
     if (localBest != null) acceptPersonalBest(localBest);
     const retry = () => {
       void flushReactionPersonalBest(recordOwner).then((profile) => {
         if (!active || !profile) return;
         if (profile.personalBestMs != null) acceptPersonalBest(profile.personalBestMs);
+        acceptAverageBest(profile.averageBestMs);
         setSaveError('');
         setSavedResultRevision((value) => value + 1);
       }).catch(() => {
@@ -207,7 +217,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
     retry();
     window.addEventListener('online', retry);
     return () => { active = false; window.removeEventListener('online', retry); };
-  }, [recordOwner, acceptPersonalBest]);
+  }, [recordOwner, acceptPersonalBest, acceptAverageBest]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -228,10 +238,17 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
         setDisplayedPersonalBestMs(nextResult.reactionTimeMs);
       }
     }
+    if (nextResult.falseStart) seriesTimesRef.current = [];
+    else if (nextResult.valid && nextResult.reactionTimeMs != null) seriesTimesRef.current.push(nextResult.reactionTimeMs);
+    if (seriesTimesRef.current.length === 3) {
+      acceptAverageBest(seriesTimesRef.current.reduce((sum, value) => sum + value, 0) / 3);
+      seriesTimesRef.current = [];
+    }
+    setSeriesCount(seriesTimesRef.current.length);
     setNewPersonalRecord(beatExistingRecord);
     setResult(nextResult);
-    void Promise.resolve(onResult?.(nextResult)).then(() => {
-      if (nextResult.valid) {
+    void Promise.resolve(onResult?.({ ...nextResult, seriesId: seriesIdRef.current })).then(() => {
+      {
         setSaveError('');
         setSavedResultRevision((value) => value + 1);
       }
@@ -239,7 +256,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
       console.warn('Could not save Reaction Test result:', error);
       setSaveError('Your PR is saved on this device and will sync when connected.');
     });
-  }, [onResult]);
+  }, [onResult, acceptAverageBest]);
 
   const scheduleCadence = useCallback((plan: ReactionTestCadencePlan, generation: number) => {
     const runCue = async (index: number) => {
@@ -514,10 +531,14 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
               aria-live="polite"
             >
               <Trophy aria-hidden="true" size={17} />
-              <span>{newPersonalRecord ? 'NEW PR' : 'PR'} · {displayedPersonalBestMs == null
+              <span>Single best · {displayedPersonalBestMs == null
                 ? '—'
                 : `${formatReactionTime(displayedPersonalBestMs)} sec`}</span>
             </div>
+            <div className="reaction-pr-badge" aria-label="Best three-attempt average">
+              <Trophy aria-hidden="true" size={17} /><span>Average PR · {averageBestMs == null ? '—' : `${formatReactionTime(averageBestMs)} sec`}</span>
+            </div>
+            <small className="reaction-series-help">Series {seriesCount}/3 · False starts reset the group. Best three-attempt average ranks.</small>
             <ReactionLeaderboard disabled={runState !== 'ready' && !retryAvailable} onPersonalBest={acceptPersonalBest} recordOwner={recordOwner} refreshKey={savedResultRevision} />
             </div>
             {saveError && <small className="reaction-save-error" role="alert">{saveError}</small>}

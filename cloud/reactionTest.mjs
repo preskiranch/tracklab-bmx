@@ -50,3 +50,27 @@ export function reactionLeaderboardAccountName(value) {
   }
   return reactionLeaderboardDisplayName(shortened) || 'TrackLab rider';
 }
+
+export function validReactionSeriesAttempt(result) {
+  if (!result || typeof result.seriesId !== 'string' || !/^[a-zA-Z0-9_-]{8,100}$/.test(result.seriesId)
+    || typeof result.id !== 'string' || !result.id || result.id.length > 160
+    || !Number.isFinite(result.recordedAtEpoch) || result.recordedAtEpoch <= 0
+    || result.recordedAtEpoch > Date.now() + 60_000) return false;
+  return measuredReactionTestBestMs(result) != null || (result.falseStart === true && result.valid === false
+    && result.stage === 'too-early' && result.rating === 'false-start' && result.reactionTimeMs === null);
+}
+
+/** Disjoint groups of three; retries are deduplicated by the persistence layer. */
+export function advanceReactionSeries(previous, result) {
+  if (!validReactionSeriesAttempt(result)) throw new TypeError('Invalid reaction series attempt');
+  const state = previous || {};
+  // A delayed older attempt cannot complete a group across an intervening result.
+  if (state.lastAt != null && result.recordedAtEpoch < state.lastAt) {
+    return { state: { ...state, times: [] }, averageMs: null };
+  }
+  const times = state.seriesId === result.seriesId ? [...(state.times || [])] : [];
+  if (result.falseStart) return { state: { seriesId: result.seriesId, lastAt: result.recordedAtEpoch, times: [] }, averageMs: null };
+  times.push(measuredReactionTestBestMs(result));
+  const averageMs = times.length === 3 ? times.reduce((sum, time) => sum + time, 0) / 3 : null;
+  return { state: { seriesId: result.seriesId, lastAt: result.recordedAtEpoch, times: averageMs == null ? times : [] }, averageMs };
+}

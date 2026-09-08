@@ -197,7 +197,7 @@ async function recordValidRun(page: Page, view: Locator, reactionDelayMs: number
     const firstRedAt = (window as typeof window & { __reactionFirstRedAt?: number }).__reactionFirstRedAt;
     return firstRedAt !== undefined && performance.now() - firstRedAt >= delay;
   }, reactionDelayMs);
-  await view.locator('.reaction-race-surface').click({ position: { x: 500, y: 300 } });
+  await view.locator('.reaction-race-surface').click({ position: { x: Math.min(500, (page.viewportSize()?.width ?? 1000) / 2), y: 300 } });
   await expect(view.locator('.reaction-result-card')).toBeVisible();
   await expect(view.getByText('TOO EARLY / FALSE START', { exact: true })).toHaveCount(0);
   await expect(retry).toBeVisible();
@@ -296,7 +296,7 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
     expect(completed[1].peak / completed[0].peak).toBeCloseTo(10 ** (-18 / 20), 3);
 
     // Automatic retry is already waiting for the red tone. A false start keeps the gate upright.
-    await view.locator('.reaction-race-surface').click({ position: { x: 500, y: 300 } });
+    await view.locator('.reaction-race-surface').click({ position: { x: Math.min(500, (page.viewportSize()?.width ?? 1000) / 2), y: 300 } });
     await expect(view.getByText('TOO EARLY / FALSE START', { exact: true })).toBeVisible();
     await view.getByRole('button', { name: 'Try Again', exact: true }).click();
     await expect(gate).toHaveAttribute('data-gate-progress', '0.000');
@@ -640,7 +640,7 @@ test('leaderboard controls do not interrupt an active reaction attempt', async (
   const leaderboardButton = view.getByRole('button', { name: 'Leaderboard', exact: true });
   await expect.poll(async () => !await leaderboardButton.isVisible() || !await leaderboardButton.isEnabled()).toBe(true);
   await expect(page.getByRole('dialog', { name: 'Reaction time leaderboard', exact: true })).toHaveCount(0);
-  await view.locator('.reaction-race-surface').click({ position: { x: 500, y: 300 } });
+  await view.locator('.reaction-race-surface').click({ position: { x: Math.min(500, (page.viewportSize()?.width ?? 1000) / 2), y: 300 } });
   await expect(view.getByText('TOO EARLY / FALSE START', { exact: true })).toBeVisible();
   await expect(leaderboardButton).toBeEnabled();
   expect(mock.preferenceWrites).toEqual([]);
@@ -819,7 +819,7 @@ for (const motion of ['no-preference', 'reduce'] as const) {
     await expect(view.locator('.reaction-gate-layer')).toHaveAttribute('data-gate-progress', '0.000');
     await expect(view.getByRole('button', { name: 'Start Reaction Test', exact: true })).toHaveCount(0);
     await expect(view.locator('[data-reaction-stage="red"]')).toHaveAttribute('data-lamp-state', 'lit');
-    await view.locator('.reaction-race-surface').click({ position: { x: 500, y: 300 } });
+    await view.locator('.reaction-race-surface').click({ position: { x: Math.min(500, (page.viewportSize()?.width ?? 1000) / 2), y: 300 } });
     await expect(view.locator('.reaction-result-card')).toBeVisible();
   });
 }
@@ -829,10 +829,30 @@ test('false-start retry starts the next cadence without a gate movement', async 
   await preparePredictableCadence(page);
   const view = await openReactionTest(page);
   await view.getByRole('button', { name: 'Start Reaction Test', exact: true }).click();
-  await view.locator('.reaction-race-surface').click({ position: { x: 500, y: 300 } });
+  await view.locator('.reaction-race-surface').click({ position: { x: Math.min(500, (page.viewportSize()?.width ?? 1000) / 2), y: 300 } });
   await expect(view.getByText('TOO EARLY / FALSE START', { exact: true })).toBeVisible();
+  await expect(view.locator('.reaction-series-help')).toContainText('Series 0/3');
   await view.getByRole('button', { name: 'Try Again', exact: true }).click();
+  await expect(view.locator('.reaction-gate-layer')).toHaveAttribute('data-gate-progress', '0.000');
   await expect(view.getByRole('button', { name: 'Start Reaction Test', exact: true })).toHaveCount(0);
   await expect(view.locator('[data-reaction-stage="red"]')).toHaveAttribute('data-lamp-state', 'lit');
-  await expect(view.locator('.reaction-gate-layer')).toHaveAttribute('data-gate-progress', '0.000');
+});
+
+test('reaction card shows best clean three-run average and single best separately', async ({ page }, testInfo) => {
+  await mockReactionAccount(page, { personalBestMs: null });
+  await preparePredictableCadence(page);
+  await page.setViewportSize({width:390,height:844});
+  const view = await openReactionTest(page);
+  await expect(view.getByLabel('Best three-attempt average')).toContainText('—');
+  for (let i=0;i<3;i++) await recordValidRun(page,view,100);
+  await expect(view.getByLabel('Best three-attempt average')).toContainText(/0\.\d{3} sec/);
+  await expect(view.locator('.reaction-series-help')).toContainText('Series 0/3');
+  await expect(view.locator('.reaction-pr-badge').filter({hasText:'Single best'})).toContainText(/0\.\d{3} sec/);
+  await expect(view.getByLabel('Best three-attempt average')).toBeInViewport();
+  await expect(view.getByRole('button',{name:'Try Again',exact:true})).toBeInViewport();
+  await page.screenshot({path:testInfo.outputPath('reaction-series-phone.png')});
+  await page.setViewportSize({width:844,height:390});
+  await expect(view.getByLabel('Best three-attempt average')).toBeInViewport();
+  await expect(view.getByRole('button',{name:'Try Again',exact:true})).toBeInViewport();
+  await page.screenshot({path:testInfo.outputPath('reaction-series-landscape.png')});
 });

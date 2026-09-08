@@ -2410,6 +2410,23 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
         `CREATE INDEX idx_family_device_invites_child ON ${schema}.family_device_invites(child_id)`,
       ],
     },
+    {
+      version: 50,
+      name: 'separate reaction series averages from single attempt records',
+      statements: [
+        `ALTER TABLE ${schema}.reaction_test_bests ADD COLUMN average_ms DOUBLE PRECISION,
+          ADD COLUMN series_state JSONB NOT NULL DEFAULT '{}'::jsonb`,
+        `CREATE TABLE ${schema}.reaction_test_attempts (
+          user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          studio_rider_id TEXT NOT NULL DEFAULT '',
+          attempt_id TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (user_id, studio_rider_id, attempt_id)
+        )`,
+        `CREATE INDEX idx_reaction_series_leaders ON ${schema}.reaction_test_bests (average_ms, user_id)
+          WHERE leaderboard_joined AND studio_rider_id = '' AND average_ms IS NOT NULL`,
+      ],
+    },
   ];
 }
 

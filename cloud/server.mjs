@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
 import * as persistence from './persistence.mjs';
-import { isReactionTestSession, measuredReactionTestBestMs, reactionLeaderboardAccountName, reactionLeaderboardDisplayName } from './reactionTest.mjs';
+import { validReactionSeriesAttempt, isReactionTestSession, measuredReactionTestBestMs, reactionLeaderboardAccountName, reactionLeaderboardDisplayName } from './reactionTest.mjs';
 import { cloudTelemetry } from './telemetry.mjs';
 import { planClubLiveExploreClusters } from './clubLiveExploreClusters.mjs';
 import {
@@ -10311,6 +10311,8 @@ async function reactionTestResponse(access) {
     .filter((best) => typeof best === 'number' && Number.isFinite(best) && best > 0);
   return {
     personalBestMs: bests.length ? Math.min(...bests) : null,
+    averageBestMs: [measured.averageBestMs, claimedMeasured?.averageBestMs].filter(value => typeof value === 'number').reduce((best, value) => best == null ? value : Math.min(best, value), null),
+    seriesCount: measured.seriesCount || 0,
     leaderboard: tablet ? { joined: false, hidden: false, displayName: '' } : {
       ...measured.leaderboard,
       displayName: measured.leaderboard.displayName || reactionLeaderboardAccountName(access.authSession.user.displayName),
@@ -24895,7 +24897,7 @@ async function serveStatic(request, response) {
         writeJson(response, 409, { error: 'This Reaction Test belongs to another signed-in account.' });
         return;
       }
-      if (measuredReactionTestBestMs(payload?.result) == null) {
+      if (measuredReactionTestBestMs(payload?.result) == null && !validReactionSeriesAttempt(payload?.result)) {
         writeJson(response, 400, { error: 'A valid measured Reaction Test result is required.' });
         return;
       }
@@ -24905,6 +24907,18 @@ async function serveStatic(request, response) {
         || payload.result.recordedAtEpoch > recordingDeadline)) {
         writeJson(response, 400, { error: 'This Reaction Test was recorded after the original tablet athlete session ended.' });
         return;
+      }
+      if (validReactionSeriesAttempt(payload.result)) {
+        const tablet = access.tabletSession;
+        const targets = tablet ? [
+          [trainingProfileAccountId(tablet.ownerProfileKey), tablet.studioRiderId],
+          ...(access.identity.member.status === 'claimed' ? [[authUserIdFromProfileKey(access.identity.profileKey), '']] : []),
+        ] : [[access.authSession.user.id, '']];
+        for (const [userId, riderId] of targets) {
+          if (userId && (!managedChildId(userId) || await persistence.findAuthUserById(userId))) {
+            await persistence.recordReactionSeriesAttempt(userId, payload.result, riderId);
+          }
+        }
       }
       await saveReactionTestForAccess(access, payload.result, { autoJoinLeaderboard: true });
       writeJson(response, 200, await reactionTestResponse(access), { 'Cache-Control': 'no-store' });

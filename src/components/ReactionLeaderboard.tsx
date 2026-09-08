@@ -100,7 +100,7 @@ export function ReactionLeaderboard({ disabled, onPersonalBest, recordOwner, ref
       </header>
       <div className="reaction-leaderboard-scroll">
         <div className="reaction-leaderboard-toolbar">
-          <p>Best valid time per rider, measured from the first red tone.</p>
+          <p>Best average of three consecutive valid attempts, measured from the first red tone. A false start clears the unfinished group. After three valid attempts, a new group begins. Leaving Reaction Test also starts a fresh group.</p>
           <label>Show<select aria-label="Leaderboard size" value={limit} disabled={saving}
             onChange={(event) => setLimit(Number(event.target.value))}>
             {[5, 10, 25, 50].map((count) => <option key={count} value={count}>Top {count}</option>)}
@@ -109,13 +109,13 @@ export function ReactionLeaderboard({ disabled, onPersonalBest, recordOwner, ref
         {error && <p className="reaction-leaderboard-error" role="alert">{error} <button type="button" onClick={() => setRevision((value) => value + 1)}>Try again</button></p>}
         {loading ? <p role="status">Loading leaderboard…</p> : <>
           <table className="reaction-leaderboard-table">
-            <thead><tr><th scope="col">Rank</th><th scope="col">Rider</th><th scope="col">Time</th></tr></thead>
+            <thead><tr><th scope="col">Rank</th><th scope="col">Rider</th><th scope="col">Average</th></tr></thead>
             <tbody>{entries.map((entry) => <tr key={entry.rank} className={entry.isYou ? 'is-you' : undefined}>
               <td>{entry.rank}</td><th scope="row">{entry.displayName}{entry.isYou && <small> You</small>}</th>
               <td>{formatReactionTime(entry.reactionTimeMs)} sec</td>
             </tr>)}</tbody>
           </table>
-          {!entries.length && !error && <p className="reaction-leaderboard-empty">Set a valid time to appear on the leaderboard.</p>}
+          {!entries.length && !error && <p className="reaction-leaderboard-empty">Complete three consecutive valid attempts to qualify for the leaderboard.</p>}
         </>}
         <section className="reaction-leaderboard-participation" aria-label="Your leaderboard entry">
           {profileError && <p className="reaction-leaderboard-error" role="alert">{profileError} <button type="button" onClick={() => setRevision((value) => value + 1)}>Try again</button></p>}
@@ -124,16 +124,16 @@ export function ReactionLeaderboard({ disabled, onPersonalBest, recordOwner, ref
             <p>Signed in as <strong>{profile.leaderboard.displayName}</strong>.</p>
             <p>{profile.leaderboard.hidden
               ? 'Your time is hidden. Your personal PR still updates while you play.'
-              : 'Your best valid time posts automatically under your account name when you play. A faster time replaces it automatically.'}</p>
+              : 'Your best three-attempt average posts under your account name. A faster qualifying average replaces it. Your fastest single attempt remains on your card and does not rank.'}</p>
             <div className="reaction-leaderboard-form-actions">
               <button type="button" disabled={saving || loading} onClick={() => void updateParticipation(Boolean(profile.leaderboard.hidden))}>
                 {saving ? 'Saving…' : profile.leaderboard.hidden ? 'Show my time' : 'Hide my time'}
               </button>
             </div>
-            <small>One best time per account. False starts do not count. Free and paid accounts are both eligible.</small>
+            <small>One best average per account. A false start resets the current group to zero. Previous single-attempt leaderboard scores do not qualify. Free and paid accounts are both eligible.</small>
           </> : recordOwner?.kind === 'account'
             ? !profileError && <p>Loading your account’s leaderboard settings…</p>
-            : <p>Sign in to your own account to post your best time automatically. Your personal PR is still available while playing on a studio tablet.</p>}
+            : <p>Sign in to your own account to post your best three-attempt average automatically. Your personal PR is still available while playing on a studio tablet.</p>}
         </section>
       </div>
     </dialog>

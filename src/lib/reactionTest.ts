@@ -42,6 +42,7 @@ export type ReactionTestResult = Readonly<{
   recordedAt: number;
   recordedAtEpoch: number;
   reactionTimeMs: number | null;
+  seriesId?: string;
   rating: ReactionTestRating;
   stage: ReactionTestStage | 'too-early';
   cadenceDelayMs: number | null;

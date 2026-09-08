@@ -59,7 +59,7 @@ export const discoveryGuideSections: AppGuideSection[] = [
         title: 'Reaction Test',
         paragraphs: [
           'Practice your response to the randomized start sequence using the four-light tree and moving gate. Start the test, then tap the reaction area after the first red light to record your response. A keyboard can use Space or Enter. Timing is measured from the first red tone, and the result identifies the light reached when you reacted.',
-          'Your best valid time is tracked as your personal record. The leaderboard shows one best valid time per rider, with Top 5, 10, 25, or 50 views. A faster valid time replaces the previous entry; false starts do not count. Use Hide my time or Show my time to control your leaderboard entry. The Reaction Test is available with a free account.',
+          'Your card shows Average PR (your best average of three consecutive valid attempts) and Single best (your fastest individual attempt). Only Average PR ranks on the leaderboard. A false start resets the unfinished group to zero; completing three attempts starts a new group. Leaving Reaction Test starts a fresh group. Previous single-attempt leaderboard scores do not qualify. Times are measured from the first red tone and displayed to thousandths. Use Hide my time or Show my time to control your entry. Free and paid accounts are eligible.',
         ],
       },
       {

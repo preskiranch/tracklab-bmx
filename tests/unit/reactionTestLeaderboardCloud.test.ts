@@ -6,6 +6,8 @@ let child: ChildProcess;
 let baseUrl = '';
 let serverOutput = '';
 let accountSequence = 0;
+let attemptSequence = 0;
+const epochBase = Date.now() - 86_400_000;
 
 async function availablePort() {
   return new Promise<number>((resolve, reject) => {
@@ -45,7 +47,7 @@ async function register(options: { name?: string; email?: string } = {}) {
 }
 
 function measuredResult(reactionTimeMs: number, overrides: Record<string, unknown> = {}) {
-  const startedAtEpoch = Date.now() - 2_000;
+  const startedAtEpoch = epochBase + (++attemptSequence * 1000);
   return {
     id: `reaction-${startedAtEpoch}-${reactionTimeMs}`,
     startedAt: 1_000,
@@ -63,11 +65,17 @@ function measuredResult(reactionTimeMs: number, overrides: Record<string, unknow
   };
 }
 
-function saveResult(cookie: string, reactionTimeMs: number, overrides: Record<string, unknown> = {}) {
-  return api('/api/reaction-test/result', {
-    method: 'POST',
-    body: JSON.stringify({ result: measuredResult(reactionTimeMs, overrides) }),
-  }, cookie);
+async function saveResult(cookie: string, reactionTimeMs: number, overrides: Record<string, unknown> = {}) {
+  let response!: Response;
+  const qualifying = Object.keys(overrides).length === 0;
+  const seriesId = `test-series-${++attemptSequence}`;
+  for (let i=0;i<(qualifying?3:1);i++) {
+    response = await api('/api/reaction-test/result', { method:'POST', body:JSON.stringify({
+      result: measuredResult(reactionTimeMs, { ...(qualifying ? {seriesId} : {}), ...overrides }),
+    }) },cookie);
+    if (!response.ok) break;
+  }
+  return response;
 }
 
 function setPreference(cookie: string, joined: boolean, displayName = '') {
@@ -131,7 +139,7 @@ describe('Reaction Test leaderboard API', () => {
   it('rejects false starts and incomplete or inconsistent measurements without creating history', async () => {
     const account = await register();
     const initial = await api('/api/reaction-test', {}, account.cookie);
-    await expect(initial.json()).resolves.toEqual({
+    await expect(initial.json()).resolves.toMatchObject({
       personalBestMs: null,
       leaderboard: { joined: false, hidden: false, displayName: account.name },
       canJoinLeaderboard: true,
@@ -295,7 +303,7 @@ describe('Reaction Test leaderboard API', () => {
     }
   });
 
-  it('keeps existing measurements unpublished during reads, then uses the prior best on a slower new run', async () => {
+  it('preserves old single PRs privately and ranks only newly completed groups', async () => {
     const account = await register();
     const result = measuredResult(170);
     const seed = await api('/api/training-sessions', {
@@ -316,7 +324,8 @@ describe('Reaction Test leaderboard API', () => {
     await expect((await saveResult(account.cookie, 250)).json()).resolves.toMatchObject({
       personalBestMs: 170, leaderboard: { joined: true, hidden: false, displayName: account.name },
     });
-    const responses = await Promise.all([250, 140, 180, 140, 300].map((time) => saveResult(account.cookie, time)));
+    const responses = [];
+    for (const time of [250, 140, 180, 140, 300]) responses.push(await saveResult(account.cookie, time));
     expect(responses.map((response) => response.status)).toEqual([200, 200, 200, 200, 200]);
     await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [{
       rank: 1, displayName: account.name, reactionTimeMs: 140, isYou: false,

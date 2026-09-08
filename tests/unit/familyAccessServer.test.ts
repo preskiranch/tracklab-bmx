@@ -156,7 +156,7 @@ describe('personal family access API', () => {
       const response = await api('/api/reaction-test/result', undefined, { result }, 'POST', reactionHeaders);
       const payload = await response.json();
       expect(response.status, JSON.stringify(payload)).toBe(200);
-      expect(payload).toEqual({ personalBestMs: 90, leaderboard: { joined: false, hidden: false, displayName: '' }, canJoinLeaderboard: false });
+      expect(payload).toMatchObject({ personalBestMs: 90, leaderboard: { joined: false, hidden: false, displayName: '' }, canJoinLeaderboard: false });
     }
     expect((await (await api(`/api/family/children/${a.id}/profile`, parent)).json()).accountProfile.personalRecords.reactionTestBestMs).toBe(90);
     expect((await (await api(`/api/family/children/${b.id}/profile`, parent)).json()).accountProfile.personalRecords.reactionTestBestMs).toBe(220);

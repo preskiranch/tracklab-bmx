@@ -7830,7 +7830,7 @@ export default function App() {
   const handleReactionTestResult = useCallback((result: ReactionTestResult) => {
     // Reaction practice has a personal best, not a training-session log.
     const reactionRider = clubTabletRider ?? accountRider;
-    if (!reactionRider || !reactionRecordOwner || !result.valid || result.reactionTimeMs == null) return;
+    if (!reactionRider || !reactionRecordOwner) return;
     const resultOwner = reactionRecordOwner;
 
     if (result.valid && result.reactionTimeMs != null) {

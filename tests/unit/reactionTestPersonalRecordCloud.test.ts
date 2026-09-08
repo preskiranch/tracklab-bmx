@@ -326,7 +326,7 @@ describe('Reaction Test personal-record cloud durability', () => {
     expect(selection.status).toBe(201);
     const tabletSession = await selection.json() as { sessionToken: string; resultUploadToken: string };
     const tabletHeaders = { 'X-TrackLab-Club-Tablet-Session': tabletSession.sessionToken };
-    await expect((await api('/api/reaction-test', { headers: tabletHeaders }, athleteCookie)).json()).resolves.toEqual({
+    await expect((await api('/api/reaction-test', { headers: tabletHeaders }, athleteCookie)).json()).resolves.toMatchObject({
       personalBestMs: 350, leaderboard: { joined: false, hidden: false, displayName: '' }, canJoinLeaderboard: false,
     });
     const result = {
@@ -339,7 +339,7 @@ describe('Reaction Test personal-record cloud durability', () => {
       method: 'POST', headers: tabletHeaders, body: JSON.stringify({ result }),
     }, athleteCookie);
     expect(tabletSave.status).toBe(200);
-    await expect(tabletSave.json()).resolves.toEqual({
+    await expect(tabletSave.json()).resolves.toMatchObject({
       personalBestMs: 100, leaderboard: { joined: false, hidden: false, displayName: '' }, canJoinLeaderboard: false,
     });
     await expect((await api('/api/user-data', {}, athleteCookie)).json()).resolves.toMatchObject({
@@ -360,12 +360,12 @@ describe('Reaction Test personal-record cloud durability', () => {
     expect((await api('/api/reaction-test', {
       headers: { 'X-TrackLab-Club-Tablet-Session': 'invalid-tablet-token' },
     }, athleteCookie)).status).toBe(401);
-    await expect((await api('/api/reaction-test', {}, athleteCookie)).json()).resolves.toEqual({
+    await expect((await api('/api/reaction-test', {}, athleteCookie)).json()).resolves.toMatchObject({
       personalBestMs: 100,
       leaderboard: { joined: false, hidden: false, displayName: 'Claimed Reaction Rider' },
       canJoinLeaderboard: true,
     });
-    await expect((await api('/api/reaction-test', {}, freshOwnerCookie)).json()).resolves.toEqual({
+    await expect((await api('/api/reaction-test', {}, freshOwnerCookie)).json()).resolves.toMatchObject({
       personalBestMs: null,
       leaderboard: { joined: false, hidden: false, displayName: 'Reaction Test Club' },
       canJoinLeaderboard: true,
@@ -378,15 +378,13 @@ describe('Reaction Test personal-record cloud durability', () => {
       } }),
     }, athleteCookie);
     expect(personalRun.status).toBe(200);
-    await expect(personalRun.json()).resolves.toEqual({
+    await expect(personalRun.json()).resolves.toMatchObject({
       personalBestMs: 100,
       leaderboard: { joined: true, hidden: false, displayName: 'Claimed Reaction Rider' },
       canJoinLeaderboard: true,
     });
-    await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [
-      { rank: 1, displayName: 'Claimed Reaction Rider', reactionTimeMs: 100, isYou: false },
-    ] });
-    await expect((await api('/api/reaction-test', { headers: tabletHeaders })).json()).resolves.toEqual({
+    await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [] });
+    await expect((await api('/api/reaction-test', { headers: tabletHeaders })).json()).resolves.toMatchObject({
       personalBestMs: 100, leaderboard: { joined: false, hidden: false, displayName: '' }, canJoinLeaderboard: false,
     });
     expect((await api('/api/reaction-test/leaderboard', {
@@ -399,12 +397,10 @@ describe('Reaction Test personal-record cloud durability', () => {
       } }),
     }, freshOwnerCookie);
     expect(joinedAthleteTabletSave.status).toBe(200);
-    await expect(joinedAthleteTabletSave.json()).resolves.toEqual({
+    await expect(joinedAthleteTabletSave.json()).resolves.toMatchObject({
       personalBestMs: 90, leaderboard: { joined: false, hidden: false, displayName: '' }, canJoinLeaderboard: false,
     });
-    await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [
-      { rank: 1, displayName: 'Claimed Reaction Rider', reactionTimeMs: 90, isYou: false },
-    ] });
+    await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [] });
     await expect((await api('/api/training-sessions', {}, athleteCookie)).json()).resolves.toMatchObject({ sessions: [] });
 
     const completedAt = Date.now() - 1;
@@ -428,12 +424,10 @@ describe('Reaction Test personal-record cloud durability', () => {
       method: 'POST', headers: completionHeaders, body: JSON.stringify({ result: pendingResult }),
     });
     expect(completedUpload.status).toBe(200);
-    await expect(completedUpload.json()).resolves.toEqual({
+    await expect(completedUpload.json()).resolves.toMatchObject({
       personalBestMs: 75, leaderboard: { joined: false, hidden: false, displayName: '' }, canJoinLeaderboard: false,
     });
-    await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [
-      { rank: 1, displayName: 'Claimed Reaction Rider', reactionTimeMs: 75, isYou: false },
-    ] });
+    await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual({ entries: [] });
     const afterExpiry = Date.now() + 1000;
     expect((await api('/api/reaction-test/result', {
       method: 'POST', headers: completionHeaders,
@@ -468,10 +462,10 @@ describe('Reaction Test personal-record cloud durability', () => {
       } }),
     }, freshOwnerCookie);
     expect(hiddenAthleteTabletSave.status).toBe(200);
-    await expect(hiddenAthleteTabletSave.json()).resolves.toEqual({
+    await expect(hiddenAthleteTabletSave.json()).resolves.toMatchObject({
       personalBestMs: 50, leaderboard: { joined: false, hidden: false, displayName: '' }, canJoinLeaderboard: false,
     });
-    await expect((await api('/api/reaction-test', {}, athleteCookie)).json()).resolves.toEqual({
+    await expect((await api('/api/reaction-test', {}, athleteCookie)).json()).resolves.toMatchObject({
       personalBestMs: 50,
       leaderboard: { joined: false, hidden: true, displayName: 'Claimed Reaction Rider' },
       canJoinLeaderboard: true,
@@ -524,7 +518,7 @@ describe('Reaction Test personal-record cloud durability', () => {
     const tabletSession = await selection.json() as { sessionToken: string };
     const tabletHeaders = { 'X-TrackLab-Club-Tablet-Session': tabletSession.sessionToken };
     const boardBefore = await (await api('/api/reaction-test/leaderboard')).json();
-    await expect((await api('/api/reaction-test', { headers: tabletHeaders }, freshOwnerCookie)).json()).resolves.toEqual({
+    await expect((await api('/api/reaction-test', { headers: tabletHeaders }, freshOwnerCookie)).json()).resolves.toMatchObject({
       personalBestMs: 600, leaderboard: { joined: false, hidden: false, displayName: '' }, canJoinLeaderboard: false,
     });
     const result = {
@@ -537,10 +531,10 @@ describe('Reaction Test personal-record cloud durability', () => {
       method: 'POST', headers: tabletHeaders, body: JSON.stringify({ result }),
     }, freshOwnerCookie);
     expect(tabletSave.status).toBe(200);
-    await expect(tabletSave.json()).resolves.toEqual({
+    await expect(tabletSave.json()).resolves.toMatchObject({
       personalBestMs: 90, leaderboard: { joined: false, hidden: false, displayName: '' }, canJoinLeaderboard: false,
     });
-    await expect((await api('/api/reaction-test', {}, freshOwnerCookie)).json()).resolves.toEqual({
+    await expect((await api('/api/reaction-test', {}, freshOwnerCookie)).json()).resolves.toMatchObject({
       personalBestMs: 700,
       leaderboard: { joined: false, hidden: false, displayName: 'Unclaimed Reaction Club' },
       canJoinLeaderboard: true,
@@ -555,4 +549,31 @@ describe('Reaction Test personal-record cloud durability', () => {
       .resolves.toEqual(boardBefore);
     await expect((await api('/api/reaction-test/leaderboard')).json()).resolves.toEqual(boardBefore);
   });
+});
+
+it('ranks only a complete clean series and preserves single best separately', async () => {
+  const registration = await api('/api/auth/register', {method:'POST', body:JSON.stringify({
+    email:`series-${Date.now()}@tracklab.test`,name:'Three Run Rider',password:'tracklab-test-password',
+  })});
+  expect(registration.status).toBe(201);
+  const cookie=(registration.headers.get('set-cookie') || '').split(';',1)[0];
+  const send=async (index:number, ms:number, early=false) => {
+    const startedAtEpoch=Date.now()-100000+index*1000;
+    const response=await api('/api/reaction-test/result',{method:'POST',body:JSON.stringify({result:{
+      id:`series-attempt-${index}`,seriesId:'fresh-series',startedAt:1000,recordedAt:1000+ms,
+      startedAtEpoch,recordedAtEpoch:startedAtEpoch+ms,reactionTimeMs:early?null:ms,cadenceDelayMs:100,
+      stage:early?'too-early':'red',rating:early?'false-start':'excellent',valid:!early,falseStart:early,late:false,
+    }})},cookie);
+    expect(response.status).toBe(200);return response.json();
+  };
+  expect(await send(1,10)).toMatchObject({personalBestMs:10,averageBestMs:null,seriesCount:1});
+  expect(await send(1,10)).toMatchObject({seriesCount:1});
+  expect(await send(2,20)).toMatchObject({averageBestMs:null,seriesCount:2});
+  expect(await send(3,0,true)).toMatchObject({averageBestMs:null,seriesCount:0});
+  await send(4,100);await send(5,200);
+  expect(await send(6,300)).toMatchObject({personalBestMs:10,averageBestMs:200,seriesCount:0});
+  const board=await (await api('/api/reaction-test/leaderboard',{},cookie)).json();
+  expect(board.entries).toContainEqual({rank:1,displayName:'Three Run Rider',reactionTimeMs:200,isYou:true});
+  expect(await send(6,300)).toMatchObject({averageBestMs:200,seriesCount:0});
+  await api('/api/account',{method:'DELETE'},cookie);
 });

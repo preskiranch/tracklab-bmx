@@ -12,6 +12,14 @@ async function account() {
   return id;
 }
 
+async function series(id: string, ms: number) {
+  for (let i=0; i<3; i++) await persistence.recordReactionSeriesAttempt(id, {
+    id: `series-${i}`, seriesId: 'practice-series', startedAt: 1000, recordedAt: 1000+ms,
+    startedAtEpoch: 10000+i*1000, recordedAtEpoch: 10000+i*1000+ms,
+    reactionTimeMs: ms, cadenceDelayMs: 100, valid:true, falseStart:false, late:false, stage:'red',rating:'excellent',
+  });
+}
+
 describe('Reaction Test measured best persistence', () => {
   it('keeps concurrent minima, opt-in settings and account erasure independent', async () => {
     const id = await account();
@@ -19,9 +27,11 @@ describe('Reaction Test measured best persistence', () => {
     await Promise.all([250, 110, 190, 350, 110].map((ms) => persistence.saveReactionTestBest(id, ms)));
     await persistence.saveUserData(`user:${id}`, { accountProfile: { personalRecords: { reactionTestBestMs: 1 } } });
     await persistence.saveReactionTestBest(id, 70, 'studio-private');
-    await expect(persistence.loadReactionTestBest(id)).resolves.toEqual({
+    await expect(persistence.loadReactionTestBest(id)).resolves.toMatchObject({
       personalBestMs: 110, leaderboard: { joined: true, hidden: false, displayName: 'Public Rider' },
     });
+    await expect(persistence.loadReactionTestLeaderboard(id, 5)).resolves.toEqual([]);
+    await series(id, 110);
     await expect(persistence.loadReactionTestLeaderboard(id, 5)).resolves.toEqual([
       { rank: 1, displayName: 'Public Rider', reactionTimeMs: 110, isYou: true },
     ]);
@@ -44,10 +54,11 @@ describe('Reaction Test measured best persistence', () => {
     await persistence.saveReactionTestBest(id, 170);
     await expect(persistence.loadReactionTestLeaderboard()).resolves.toEqual([]);
     await persistence.saveReactionTestBest(id, 250, '', automatic);
-    await expect(persistence.loadReactionTestBest(id)).resolves.toEqual({
+    await expect(persistence.loadReactionTestBest(id)).resolves.toMatchObject({
       personalBestMs: 170, leaderboard: { joined: true, hidden: false, displayName: 'Account Rider' },
     });
     await Promise.all([190, 100, 200, 100, 400].map((ms) => persistence.saveReactionTestBest(id, ms, '', automatic)));
+    await series(id, 100);
     await expect(persistence.loadReactionTestLeaderboard(id)).resolves.toEqual([
       { rank: 1, displayName: 'Account Rider', reactionTimeMs: 100, isYou: true },
     ]);
@@ -57,13 +68,13 @@ describe('Reaction Test measured best persistence', () => {
     });
     await persistence.saveReactionTestLeaderboardSettings(id, { joined: false, displayName: '' });
     await Promise.all([90, 180].map((ms) => persistence.saveReactionTestBest(id, ms, '', automatic)));
-    await expect(persistence.loadReactionTestBest(id)).resolves.toEqual({
+    await expect(persistence.loadReactionTestBest(id)).resolves.toMatchObject({
       personalBestMs: 90, leaderboard: { joined: false, hidden: true, displayName: '' },
     });
     await expect(persistence.loadReactionTestLeaderboard()).resolves.toEqual([]);
     await persistence.saveReactionTestLeaderboardSettings(id, { joined: true, displayName: 'Chosen Name' });
     await persistence.saveReactionTestBest(id, 120, '', automatic);
-    await expect(persistence.loadReactionTestBest(id)).resolves.toEqual({
+    await expect(persistence.loadReactionTestBest(id)).resolves.toMatchObject({
       personalBestMs: 90, leaderboard: { joined: true, hidden: false, displayName: 'Chosen Name' },
     });
     await persistence.deleteAuthUserAccount(id);
@@ -83,6 +94,7 @@ describe('Reaction Test measured best persistence', () => {
     for (let index = 0; index < 55; index += 1) {
       const id = await account(); ids.push(id);
       await persistence.saveReactionTestBest(id, 100 + index);
+      await series(id, 100 + index);
       await persistence.saveReactionTestLeaderboardSettings(id, { joined: true, displayName: `Rider ${index}` });
     }
     for (const limit of [5, 10, 25, 50]) {

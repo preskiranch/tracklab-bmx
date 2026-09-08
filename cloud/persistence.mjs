@@ -2,7 +2,7 @@ import pg from 'pg';
 import { createHash, randomUUID } from 'node:crypto';
 import { runDatabaseMigrations } from './migrations.mjs';
 import { cloudTelemetry } from './telemetry.mjs';
-import { isReactionTestSession, reactionLeaderboardDisplayName } from './reactionTest.mjs';
+import { advanceReactionSeries, validReactionSeriesAttempt, isReactionTestSession, reactionLeaderboardDisplayName } from './reactionTest.mjs';
 import { appleAppAccountTokenLineageHash } from './appleBilling.mjs';
 import { betaInvitationPolicy, betaInvitationDurationMs, publicBetaAccessStatus, publicBetaPolicy } from './betaAccess.mjs';
 import { familyChildName, familyInvitationDurationMs, familyMaximumChildren, managedChildId, accountTrainingProfileKey, trainingProfileAccountId } from './familyAccess.mjs';
@@ -2021,6 +2021,7 @@ async function deleteMemoryAuthUserAccount(userId, locksHeld = false) {
     deleteMemoryEntries(memoryMap3DLoadEvents, (event) => event.userId === userId);
     memoryUserDataByGuestKey.delete(profileKey);
     deleteMemoryEntries(memoryReactionTestBests, (record) => record.userId === userId);
+    for (const key of memoryReactionAttemptIds) if (JSON.parse(key)[0] === userId) memoryReactionAttemptIds.delete(key);
     deleteMemoryEntries(memoryLocalRaceResults, (result) => result.guestKey === profileKey);
     deleteMemoryEntries(memoryGhostLaps, (ghost) => ghost.owner_key === profileKey);
     deleteMemoryEntries(memoryTrainingSessions, (session, key) => (
@@ -4265,6 +4266,8 @@ function enrichMemoryClubTrainingSession(session) {
 function reactionTestRecord(row) {
   return {
     personalBestMs: row?.best_ms == null ? null : Number(row.best_ms),
+    averageBestMs: row?.average_ms == null ? null : Number(row.average_ms),
+    seriesCount: row?.series_state?.times?.length || 0,
     leaderboard: {
       joined: row?.leaderboard_joined === true,
       hidden: row?.leaderboard_hidden === true,
@@ -4285,10 +4288,46 @@ export async function loadReactionTestBest(userId, studioRiderId = '') {
     return reactionTestRecord(record);
   }
   const result = requireReactionTestStorage(await query(
-    `SELECT best_ms, leaderboard_joined, leaderboard_hidden, display_name FROM ${schema}.reaction_test_bests
+    `SELECT average_ms, series_state, best_ms, leaderboard_joined, leaderboard_hidden, display_name FROM ${schema}.reaction_test_bests
      WHERE user_id = $1 AND studio_rider_id = $2`, [userId, studioRiderId],
   ));
   return reactionTestRecord(result.rows[0]);
+}
+
+const memoryReactionAttemptIds = new Set();
+export async function recordReactionSeriesAttempt(userId, result, studioRiderId = '') {
+  if (!validReactionSeriesAttempt(result)) throw new TypeError('Invalid reaction series attempt');
+  if (!pool) {
+    if (databaseConfigured) requireReactionTestStorage(null);
+    if (!memoryAuthUsersById.has(userId)) throw new Error('Reaction account unavailable');
+    const attemptKey = JSON.stringify([userId, studioRiderId, result.id]);
+    const key = JSON.stringify([userId, studioRiderId]);
+    const row = memoryReactionTestBests.get(key) || { userId, studioRiderId };
+    if (!memoryReactionAttemptIds.has(attemptKey)) {
+      const next = advanceReactionSeries(row.series_state, result);
+      memoryReactionAttemptIds.add(attemptKey);
+      row.series_state = next.state;
+      if (next.averageMs != null) row.average_ms = Math.min(row.average_ms ?? Infinity, next.averageMs);
+      memoryReactionTestBests.set(key, row);
+    }
+    return reactionTestRecord(row);
+  }
+  return requireReactionTestStorage(await withPersistenceLock(`reaction-series:${userId}:${studioRiderId}`, async (client) => {
+    await client.query(`INSERT INTO ${schema}.reaction_test_bests (user_id, studio_rider_id)
+      VALUES ($1,$2) ON CONFLICT DO NOTHING`, [userId, studioRiderId]);
+    const { rows: [row] } = await client.query(`SELECT * FROM ${schema}.reaction_test_bests
+      WHERE user_id=$1 AND studio_rider_id=$2 FOR UPDATE`, [userId, studioRiderId]);
+    const inserted = await client.query(`INSERT INTO ${schema}.reaction_test_attempts (user_id,studio_rider_id,attempt_id)
+      VALUES ($1,$2,$3) ON CONFLICT DO NOTHING RETURNING attempt_id`, [userId,studioRiderId,result.id]);
+    if (inserted.rowCount) {
+      const next = advanceReactionSeries(row.series_state, result);
+      const average = next.averageMs == null ? row.average_ms : Math.min(row.average_ms ?? Infinity, next.averageMs);
+      await client.query(`UPDATE ${schema}.reaction_test_bests SET average_ms=$3,series_state=$4::jsonb,updated_at=now()
+        WHERE user_id=$1 AND studio_rider_id=$2`, [userId,studioRiderId,average,JSON.stringify(next.state)]);
+      row.average_ms=average; row.series_state=next.state;
+    }
+    return reactionTestRecord(row);
+  }));
 }
 
 /** Atomic minimum is independent of editable account-profile records. */
@@ -4326,7 +4365,7 @@ export async function saveReactionTestBest(userId, bestMs, studioRiderId = '', {
          AND NOT reaction_test_bests.leaderboard_hidden AND NOT reaction_test_bests.leaderboard_joined
          THEN EXCLUDED.display_name ELSE reaction_test_bests.display_name END,
        updated_at = now()
-     RETURNING best_ms, leaderboard_joined, leaderboard_hidden, display_name`,
+     RETURNING average_ms, series_state, best_ms, leaderboard_joined, leaderboard_hidden, display_name`,
     [userId, studioRiderId, bestMs, Boolean(autoJoinName), autoJoinName || ''],
   ));
   return reactionTestRecord(result.rows[0]);
@@ -4351,7 +4390,7 @@ export async function saveReactionTestLeaderboardSettings(userId, { joined, disp
        leaderboard_joined = EXCLUDED.leaderboard_joined,
        leaderboard_hidden = EXCLUDED.leaderboard_hidden,
        display_name = EXCLUDED.display_name, updated_at = now()
-     RETURNING best_ms, leaderboard_joined, leaderboard_hidden, display_name`, [userId, joined, joined ? displayName : '', !joined],
+     RETURNING average_ms, series_state, best_ms, leaderboard_joined, leaderboard_hidden, display_name`, [userId, joined, joined ? displayName : '', !joined],
   ));
   return reactionTestRecord(result.rows[0]);
 }
@@ -4362,20 +4401,20 @@ export async function loadReactionTestLeaderboard(userId = '', limit = 5) {
   if (!pool) {
     if (databaseConfigured) requireReactionTestStorage(null);
     rows = [...memoryReactionTestBests.values()]
-      .filter((row) => row.studioRiderId === '' && row.leaderboard_joined && row.best_ms != null)
-      .sort((left, right) => left.best_ms - right.best_ms || left.userId.localeCompare(right.userId))
+      .filter((row) => row.studioRiderId === '' && row.leaderboard_joined && row.average_ms != null)
+      .sort((left, right) => left.average_ms - right.average_ms || left.userId.localeCompare(right.userId))
       .slice(0, safeLimit)
       .map((row) => ({ ...row, user_id: row.userId }));
   } else {
     const result = requireReactionTestStorage(await query(
-      `SELECT user_id, best_ms, display_name FROM ${schema}.reaction_test_bests
-       WHERE leaderboard_joined AND studio_rider_id = '' AND best_ms IS NOT NULL
-       ORDER BY best_ms, user_id LIMIT $1`, [safeLimit],
+      `SELECT user_id, average_ms, display_name FROM ${schema}.reaction_test_bests
+       WHERE leaderboard_joined AND studio_rider_id = '' AND average_ms IS NOT NULL
+       ORDER BY average_ms, user_id LIMIT $1`, [safeLimit],
     ));
     rows = result.rows;
   }
   return rows.map((row, index) => ({
-    rank: index + 1, displayName: row.display_name, reactionTimeMs: Number(row.best_ms),
+    rank: index + 1, displayName: row.display_name, reactionTimeMs: Number(row.average_ms),
     isYou: Boolean(userId) && row.user_id === userId,
   }));
 }
