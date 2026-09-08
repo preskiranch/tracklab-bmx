@@ -89,6 +89,7 @@ export const ridingGuideSections: AppGuideSection[] = [
       {
         title: 'Terrain, maps, and your records',
         paragraphs: [
+          'For an optional, more immersive preview of a destination, we recommend Google Earth. Open it separately to explore imagery and available 3D terrain, then return here for Smart Route search and training. Installing Earth is not required and does not change TrackLab’s built-in maps or sync a ride to Earth.',
           'Explore calculates virtual speed from cadence with gradual acceleration, hills, and coasting. Watch distance, speed, average speed, progress percentage, and available heart rate on the rider cards. AIR 1–10 recommends a manual air-lever setting for the grade. If grade is unavailable, the app shows its retry status and recommends minimum.',
           'The standard view is Google satellite. Use Follow zoom, Behind/Centered/Ahead, Free camera/Auto camera, North up/Travel up, and Miles/Kilometers to adjust it. Maps split automatically when local riders spread apart. Street names enables labels and interactive landmarks; available place details and Street View can open while the ride continues.',
           'Review completed real rides in My Profile’s training calendar. Recent routes reopens routes, while recovery checkpoints resume unfinished local progress on the same device. If a Demo is shown, its riders and metrics are simulated; Explore demo rides do not create real training records.',

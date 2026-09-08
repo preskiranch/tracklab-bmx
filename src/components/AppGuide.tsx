@@ -64,6 +64,8 @@ export default function AppGuide({ beta, billingReady, onOpenTracks, onOpenShops
         </div>
       </div>
 
+      <p className="app-guide-availability"><strong>Recommended, optional companion:</strong> Install Google Earth on your phone or tablet to explore discovered track locations in more detail. On PC, use Earth on the web or optionally install Earth Pro. TrackLab works without it. <a href="https://www.google.com/earth/about/versions/" target="_blank" rel="noopener noreferrer">Get Google Earth</a></p>
+
       <div className="app-guide-access" aria-label="Access at a glance">
         <article><span>01 / Free</span><h3>Discover. Practice. Connect.</h3><p>Browse tracks and bike shops without signing in. A free account adds the Reaction Test, track favorites, a community profile, and Friends.</p></article>
         <article><span>02 / Public beta</span><h3>Bring your Wattbike.</h3><p>While public beta enrollment is open, signed-in testers automatically receive four simultaneous Wattbike connections for a limited period. No purchase or separate beta invitation is required.</p></article>

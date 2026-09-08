@@ -7,6 +7,20 @@ export const discoveryGuideSections: AppGuideSection[] = [
     summary: 'Plan a BMX visit, explore the surroundings, and find nearby shops in either direction.',
     articles: [
       {
+  "title": "Recommended companion: Google Earth (optional)",
+  "paragraphs": [
+    "We highly recommend installing Google Earth on your phone or tablet if you enjoy exploring the places you discover in TrackLab. It is an optional companion for a more immersive look at satellite imagery and available 3D terrain—not a requirement for TrackLab, Wattbike training, or recording results.",
+    "In BMX Tracks, select a track and choose Google Earth. TrackLab passes that track’s coordinates to Google Earth through a web link. Your device may open the browser or offer to open the installed app. If it stays in the browser, you can also search for the track in Google Earth. Return to TrackLab to train or review your data.",
+    "When browsing bike shops, open a nearby BMX track and use its Google Earth link to explore the area. For Explore the World, use Google Earth separately to preview a destination; Smart Route search and the ride itself run in TrackLab. Installing Earth does not change TrackLab’s built-in maps, automatically import routes, or sync your training records to Google Earth.",
+    "On a PC, Google Earth on the web works without an installation. Earth Pro is an optional desktop download; TrackLab’s links open the web version rather than controlling Earth Pro. Imagery and 3D coverage vary by location."
+  ],
+  "steps": [
+    "Use the official Google Earth download page linked above to choose the version for your device.",
+    "Select a BMX track in TrackLab, then choose Google Earth to explore its location.",
+    "Zoom and tilt where supported, then return to TrackLab for activities, route search, and saved results."
+  ]
+},
+      {
         title: 'Find your next BMX track',
         paragraphs: [
           'Open BMX Tracks to search the public directory by track name, city, state, or country. Narrow the list with the Country and State / region filters, then choose a track to see its location on satellite imagery. You can browse the directory without an account.',
