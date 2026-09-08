@@ -425,6 +425,7 @@ import type {
 } from './types';
 
 const IntervalTrackPicker = lazy(() => import('./components/IntervalTrackPicker'));
+const IntervalTrackPreview = lazy(() => import('./components/IntervalTrackPreview'));
 const BluetoothPairingDialog = lazy(() => import('./components/BluetoothPairingDialog').then((module) => ({
   default: module.BluetoothPairingDialog,
 })));
@@ -13650,6 +13651,11 @@ export default function App() {
                 {availableTracks.map((track) => <option value={track.id} key={track.id}>{track.name}</option>)}
               </select>
             </label>
+            {appMode === 'race' && selectedTrackMapping && !mappingMode && (
+              <Suspense fallback={<span>Loading track preview…</span>}>
+                <IntervalTrackPreview key={selectedTrackId} mapping={selectedTrackMapping}/>
+              </Suspense>
+            )}
           </div>
           )}
 
