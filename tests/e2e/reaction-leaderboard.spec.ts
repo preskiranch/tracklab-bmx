@@ -857,6 +857,17 @@ test('reaction card shows best clean three-run average and single best separatel
   await expect(view.getByLabel('Best three-attempt average')).toBeInViewport();
   await expect(view.getByRole('button',{name:'Try Again',exact:true})).toBeInViewport();
   await page.screenshot({path:testInfo.outputPath('reaction-series-phone.png')});
+  for (const size of [{width:375,height:667},{width:320,height:568}]) {
+    await page.setViewportSize(size);
+    await expect.poll(() => view.evaluate(el => {
+      const photo=el.querySelector('.reaction-scene-frame')!.getBoundingClientRect();
+      const panel=el.querySelector('.reaction-bottom-panel')!.getBoundingClientRect();
+      return panel.top >= photo.bottom + 8 && panel.bottom <= innerHeight;
+    })).toBe(true);
+    await expect(view.getByLabel('Best three-attempt average')).toBeInViewport();
+    await expect(view.getByRole('button',{name:'Try Again',exact:true})).toBeInViewport();
+    await page.screenshot({path:testInfo.outputPath(`reaction-small-${size.width}.png`)});
+  }
   await page.setViewportSize({width:844,height:390});
   await expect(view.getByLabel('Best three-attempt average')).toBeInViewport();
   await expect(view.getByRole('button',{name:'Try Again',exact:true})).toBeInViewport();

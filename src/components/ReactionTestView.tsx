@@ -118,8 +118,11 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
       const headerSpace = Math.max(0, titleBottom - bounds.top) + 20;
       // Reserve the result/record/start controls for every state. A captured
       // result must not move the photograph while the cadence finishes.
-      const photoSpace = Math.max(1, height - headerSpace - safeBottom - 180);
       const controlBounds = controls?.getBoundingClientRect();
+      // Keep the full result, two records, attempt label and retry action below
+      // the photo on small portrait phones, with room for the completed state.
+      const portraitControlSpace = Math.max(320, (controlBounds?.height ?? 0) + 16);
+      const photoSpace = Math.max(1, height - headerSpace - safeBottom - (portrait ? portraitControlSpace : 180));
       // A 128px record card fits the unchanged PR and Leaderboard typography.
       // Reserve both control columns before positioning the photographed scene.
       const landscapeSubjectSpace = controlBounds ? Math.max(1, controlBounds.width - 128 - 108 - 20) : width;
@@ -154,6 +157,8 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
     frameScene();
     const observer = new ResizeObserver(frameScene);
     observer.observe(stage);
+    const controls = stage.parentElement?.querySelector<HTMLElement>('.reaction-bottom-panel');
+    if (controls) observer.observe(controls);
     return () => observer.disconnect();
   }, []);
 
