@@ -424,6 +424,7 @@ import type {
   UserTrackMapping,
 } from './types';
 
+const IntervalTrackPicker = lazy(() => import('./components/IntervalTrackPicker'));
 const BluetoothPairingDialog = lazy(() => import('./components/BluetoothPairingDialog').then((module) => ({
   default: module.BluetoothPairingDialog,
 })));
@@ -13610,6 +13611,13 @@ export default function App() {
                 <small>UCI start-cadence reaction practice</small>
               </span>
             </div>
+          ) : appMode === 'race' && !developerUiActive ? (
+            <Suspense fallback={<span>Loading playable tracks…</span>}>
+              <IntervalTrackPicker key={authUser?.id ?? 'guest'} tracks={baseCatalogTracks} mappings={publicTrackMappings}
+                selectedId={selectedTrackId} onSelect={handleTrackChange}
+                locked={clubEventConfigurationLocked || startGateStatus.active || raceState === 'racing'}
+                userId={authUser?.id}/>
+            </Suspense>
           ) : (
           <div className="track-selectors">
             <label>

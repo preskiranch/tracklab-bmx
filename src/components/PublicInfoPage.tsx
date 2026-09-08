@@ -202,7 +202,7 @@ function PrivacyPage() {
               <h3>Maps, routes, and location</h3>
               <p>
                 TrackLab stores selected tracks, custom routes, mapped ride lines, split routes, pedal zones, camera
-                preferences, and recent Explore routes. If you tap <em>Use my current location</em>, the app requests
+                preferences, and recent Explore routes. Track mapping requests are linked to your account and notify the TrackLab team by email. If you tap <em>Use my current location</em>, the app requests
                 a one-time device location to choose the route origin. Explore progress is driven by bike input rather
                 than continuous device GPS. Developer-published track mappings and custom mapped tracks are designed
                 to be visible to other TrackLab users.

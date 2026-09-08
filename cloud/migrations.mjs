@@ -2443,6 +2443,20 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
         `CREATE INDEX idx_account_email_tokens_user ON ${schema}.account_email_tokens(user_id,purpose)`,
       ],
     },
+    {
+      version: 52,
+      name: 'account track mapping requests',
+      statements: [
+        `CREATE TABLE ${schema}.track_mapping_requests (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          track_id TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          notified_at TIMESTAMPTZ,
+          UNIQUE(user_id,track_id)
+        )`,
+      ],
+    },
   ];
 }
 

@@ -1,3 +1,4 @@
+import { createMappingRequestStore, isPlayableIntervalMapping, sendMappingRequestEmail } from './trackMappingRequests.mjs';
 import { accountEmailConfigured, accountEmailVerificationEnabled, accountEmailHash, validAccountEmailToken, sendAccountEmail } from './accountEmail.mjs';
 import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
@@ -407,6 +408,8 @@ const personalAuthSessions = createAuthSessionCache({
 const transientStateMaxAgeMs = 6 * 60 * 60 * 1000;
 const scryptAsync = promisify(scryptCallback);
 const authRateLimiter = createRateLimiter();
+const mappingRequestLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
+const mappingRequestStore = createMappingRequestStore(persistence, 'tracklab');
 const accountDeletionRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const billingRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const betaAccessRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
@@ -20992,6 +20995,32 @@ async function serveStatic(request, response) {
     writeJson(response, 200, { user: publicAuthUser(session?.user ?? null) }, {
       'Cache-Control': 'no-store',
     });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/track-mapping-requests') {
+    const session = await requireAuthSession(request, response);
+    if (!session) return;
+    const userId = session.user.id;
+    if (request.method === 'GET') {
+      if (!enforceNoStoreRateLimit(request,response,friendReadRateLimiter,180,`mapping-request-read:${userId}`)) return;
+      const requests = await mappingRequestStore.list(userId);
+      writeJson(response, 200, { requests: requests.map(r => ({trackId:r.track_id, notified:Boolean(r.notified_at)})) }, {'Cache-Control':'no-store'});
+      return;
+    }
+    if (request.method !== 'POST') { writeJson(response,405,{error:'Method not allowed'}); return; }
+    if (!enforceNoStoreRateLimit(request,response,mappingRequestLimiter,10,`mapping-request:${userId}`)) return;
+    const payload = await readJsonBody(request,2000);
+    const track = await canonicalPublicTrack(sanitizeText(payload?.trackId,'',140));
+    if (!track) { writeJson(response,404,{error:'Choose a track from the directory.'}); return; }
+    const mappings = await persistence.loadPublicTrackMappings();
+    if (isPlayableIntervalMapping(mappings[track.id])) { writeJson(response,409,{error:'This track is already ready to race. Refresh the track list.'}); return; }
+    const saved = await mappingRequestStore.save(userId,track.id);
+    if (!saved.notified_at) {
+      try { await sendMappingRequestEmail(saved,track); await mappingRequestStore.notified(userId,track.id); }
+      catch { writeJson(response,503,{error:'Your request is saved, but the email could not be sent. Tap Retry notification.'}); return; }
+    }
+    writeJson(response,200,{requested:true,trackId:track.id},{'Cache-Control':'no-store'});
     return;
   }
 

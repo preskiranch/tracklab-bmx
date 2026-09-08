@@ -40,7 +40,7 @@ export const betaGuideSection: AppGuideSection = {
       ],
       bullets: [
         'Discovery: find a BMX track, open a nearby bike shop, then open a nearby track from that shop. Check directions, listed contact details, and your Back navigation.',
-        'BMX Race Intervals: try a mapped course with your Wattbike at level 1. The pedal zones approximate typical pedaling areas using available imagery; tracks may have changed. Tell us how the interval rhythm feels and flag outdated mapping.',
+        'BMX Race Intervals: choose Ready to race and try a mapped course with your Wattbike at level 1. Use All tracks · Request mapping to request a future course. The pedal zones approximate typical pedaling areas using available imagery; tracks may have changed. Tell us how the interval rhythm feels and flag outdated mapping.',
         'Connection: pair your Wattbike, verify fresh watts and cadence, complete a short activity, and confirm the result appears in your training history.',
         'Explore: build one Smart Route and one route from a typed Starting location and Destination. Try pause/resume and Recent routes.',
         'Reaction Test: check the complete tree and gate, the stopped light, gate motion, and drop/return sounds on your device.',
