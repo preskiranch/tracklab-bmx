@@ -20,6 +20,7 @@ type ReactionResultWrite = {
 async function mockReactionAccount(page: Page, options: {
   canJoinLeaderboard?: boolean;
   personalBestMs?: number | null;
+  averageBestMs?: number | null;
   joined?: boolean;
   hidden?: boolean;
   tier?: 'spectator' | 'racer';
@@ -35,6 +36,7 @@ async function mockReactionAccount(page: Page, options: {
     membership: { tier: options.tier ?? 'spectator', bikeSeats: 1, updatedAt: now },
   };
   const state = {
+    averageBestMs: options.averageBestMs ?? null,
     personalBestMs: options.personalBestMs === undefined ? 205 : options.personalBestMs,
     leaderboard: { joined: options.joined ?? false, hidden: options.hidden ?? false, displayName: account.name },
     canJoinLeaderboard: options.canJoinLeaderboard ?? true,
@@ -848,11 +850,11 @@ test('reaction card shows best clean three-run average and single best separatel
   for (let i=0;i<3;i++) {
     await recordValidRun(page,view,100);
     if (i === 0) await expect(view.locator('.reaction-pr-badge').filter({hasText:'Single best'})).toHaveClass(/is-new-record/);
-    await expect(view.locator('.reaction-attempt-label')).toHaveText(`Attempt ${i+1} of 3 · ${i===2 ? 'Group complete' : 'Recorded'}`);
+    await expect(view.locator('.reaction-attempt-label')).toHaveText(`Attempt ${i+1} of 3${i===2 ? '' : ' · Recorded'}`);
   }
   await expect(view.getByLabel('Best three-attempt average')).toContainText(/0\.\d{3} sec/);
   await expect(view.getByLabel('Best three-attempt average')).toHaveClass(/is-new-record/);
-  await expect(view.locator('.reaction-series-help')).toContainText('Attempt 3 of 3 · Group complete');
+  await expect(view.locator('.reaction-series-help')).toContainText('Attempt 3 of 3');
   await expect(view.locator('.reaction-pr-badge').filter({hasText:'Single best'})).toContainText(/0\.\d{3} sec/);
   await expect(view.getByLabel('Best three-attempt average')).toBeInViewport();
   await expect(view.getByRole('button',{name:'Try Again',exact:true})).toBeInViewport();
@@ -872,4 +874,33 @@ test('reaction card shows best clean three-run average and single best separatel
   await expect(view.getByLabel('Best three-attempt average')).toBeInViewport();
   await expect(view.getByRole('button',{name:'Try Again',exact:true})).toBeInViewport();
   await page.screenshot({path:testInfo.outputPath('reaction-series-landscape.png')});
+});
+
+
+test('completed group average remains visible when slower than the existing PR', async ({ page }, testInfo) => {
+  const mock = await mockReactionAccount(page, { personalBestMs: 25, averageBestMs: 50 });
+  await preparePredictableCadence(page);
+  await page.setViewportSize({width:375,height:667});
+  const view = await openReactionTest(page);
+  await expect(view.getByLabel('Best three-attempt average')).toContainText('0.050 sec');
+  for (let i=0; i<3; i++) await recordValidRun(page,view,150);
+  await expect.poll(() => mock.resultWrites.length).toBe(3);
+  const mean = mock.resultWrites.reduce((sum, item) => sum + item.result.reactionTimeMs!, 0) / 3;
+  const average = view.getByLabel('This group’s average');
+  await expect(average.locator('b')).toHaveText(`${(mean / 1000).toFixed(3)} sec`);
+  await expect(average).toContainText(`+${((mean-50)/1000).toFixed(3)} sec vs PR`);
+  await expect(view.getByLabel('Best three-attempt average')).toContainText('0.050 sec');
+  await expect(view.getByLabel('Best three-attempt average')).not.toHaveClass(/is-new-record/);
+  await expect(average).toBeInViewport();
+  await page.screenshot({path:testInfo.outputPath('group-average-phone.png')});
+  await page.setViewportSize({width:844,height:390});
+  await expect(average).toBeInViewport();
+  await expect.poll(() => view.evaluate(el => {
+    const card=el.querySelector('.reaction-result-stack')!.getBoundingClientRect();
+    const title=el.querySelector('.reaction-title')!.getBoundingClientRect();
+    return card.top >= title.bottom + 4;
+  })).toBe(true);
+  await page.screenshot({path:testInfo.outputPath('group-average-landscape.png')});
+  await view.getByRole('button',{name:'Try Again',exact:true}).click();
+  await expect(average).toHaveCount(0);
 });

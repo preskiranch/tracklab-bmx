@@ -86,6 +86,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
   const seriesIdRef = useRef(crypto.randomUUID());
   const seriesTimesRef = useRef<number[]>([]);
   const [seriesCount, setSeriesCount] = useState(0);
+  const [completedAverageMs, setCompletedAverageMs] = useState<number | null>(null);
   const [averageBestMs, setAverageBestMs] = useState<number | null>(() => recordOwner ? localReactionAverageBest(recordOwner) : null);
   const averageBestRef = useRef(averageBestMs);
   const acceptAverageBest = useCallback((value: number | null | undefined, celebrate = false) => {
@@ -121,7 +122,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
       const controlBounds = controls?.getBoundingClientRect();
       // Keep the full result, two records, attempt label and retry action below
       // the photo on small portrait phones, with room for the completed state.
-      const portraitControlSpace = Math.max(320, (controlBounds?.height ?? 0) + 16);
+      const portraitControlSpace = Math.max(360, (controlBounds?.height ?? 0) + 32);
       const photoSpace = Math.max(1, height - headerSpace - safeBottom - (portrait ? portraitControlSpace : 180));
       // A 128px record card fits the unchanged PR and Leaderboard typography.
       // Reserve both control columns before positioning the photographed scene.
@@ -186,6 +187,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
     setGateReleased(false);
     setGateSettled(false);
     setResult(null);
+    setCompletedAverageMs(null);
     setNewPersonalRecord(false);
     setNewAverageRecord(false);
     setSaveError('');
@@ -253,7 +255,9 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
     if (nextResult.falseStart) seriesTimesRef.current = [];
     else if (nextResult.valid && nextResult.reactionTimeMs != null) seriesTimesRef.current.push(nextResult.reactionTimeMs);
     if (seriesTimesRef.current.length === 3) {
-      acceptAverageBest(seriesTimesRef.current.reduce((sum, value) => sum + value, 0) / 3, true);
+      const groupAverage = seriesTimesRef.current.reduce((sum, value) => sum + value, 0) / 3;
+      setCompletedAverageMs(groupAverage);
+      acceptAverageBest(groupAverage, true);
       seriesTimesRef.current = [];
     }
     setSeriesCount(seriesTimesRef.current.length);
@@ -351,6 +355,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
     setGateReleased(false);
     setGateSettled(false);
     setResult(null);
+    setCompletedAverageMs(null);
     setNotice('Preparing the UCI start cadence…');
     setRunStateSafely('arming');
 
@@ -526,7 +531,14 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
               <div className={`reaction-result-card ${result.falseStart ? 'false-start' : result.rating}`}>
                 <span className="reaction-result-label">{result.falseStart ? 'REACTION RESULT' : 'REACTION TIME'}</span>
                 <strong>{result.falseStart ? '—' : `${formatReactionTime(result.reactionTimeMs)} sec`}</strong>
-                <em>{ratingLabel(result)}</em>
+                {completedAverageMs == null ? <em>{ratingLabel(result)}</em> : (
+                  <div className="reaction-group-average" aria-label="This group’s average" aria-live="polite">
+                    <span>Group average</span>
+                    <b>{formatReactionTime(completedAverageMs)} sec</b>
+                    <span>{newAverageRecord ? 'New average PR' : averageBestMs != null && Math.round(completedAverageMs - averageBestMs) > 0
+                      ? `+${formatReactionTime(completedAverageMs - averageBestMs)} sec vs PR` : 'Matches average PR'}</span>
+                  </div>
+                )}
                 <small>{result.falseStart
                   ? 'False start · does not count toward your PR or leaderboard.'
                   : `${result.stage === 'red' ? 'First red' : result.stage.replace('-', ' ')} stage`}</small>
@@ -551,8 +563,8 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
               <Trophy aria-hidden="true" size={17} /><span>Average PR · {averageBestMs == null ? '—' : `${formatReactionTime(averageBestMs)} sec`}</span>
             </div>
             <div className="reaction-series-help" aria-live="polite">
-              <strong className="reaction-attempt-label">Attempt {result?.valid ? seriesCount || 3 : seriesCount + 1} of 3{result?.valid ? seriesCount === 0 ? ' · Group complete' : ' · Recorded' : result?.falseStart ? ' · Start again' : ''}</strong>
-              <span>False start: restart at 1.</span>
+              <strong className="reaction-attempt-label">Attempt {result?.valid ? seriesCount || 3 : seriesCount + 1} of 3{result?.valid ? seriesCount === 0 ? '' : ' · Recorded' : result?.falseStart ? ' · Start again' : ''}</strong>
+              {completedAverageMs == null && <span>False start: restart at 1.</span>}
             </div>
             <ReactionLeaderboard disabled={runState !== 'ready' && !retryAvailable} onPersonalBest={acceptPersonalBest} recordOwner={recordOwner} refreshKey={savedResultRevision} />
             </div>
