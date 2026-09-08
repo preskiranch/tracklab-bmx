@@ -1,3 +1,4 @@
+import { accountEmailConfigured, accountEmailVerificationEnabled, accountEmailHash, validAccountEmailToken, sendAccountEmail } from './accountEmail.mjs';
 import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -1896,6 +1897,7 @@ async function withAutomaticBetaAccess(user) {
 }
 
 async function createSignedInResponse(request, response, user, statusCode = 200) {
+  if(user.emailVerificationRequired) {writeJson(response,403,{error:"Verify your email before signing in."});return;}
   user = await withAutomaticBetaAccess(user);
   const token = createSessionToken();
   const sessionId = randomUUID();
@@ -1933,6 +1935,8 @@ async function createSignedInResponse(request, response, user, statusCode = 200)
 async function currentAuthSessionByHash(hash, sessionCache = authSessionLookups) {
   if (!/^[a-f0-9]{64}$/u.test(String(hash || ''))) return null;
   let session = await sessionCache.load(hash, persistence.findAuthSession);
+  if(session && !(await persistence.authSessionStillValid(hash))) {sessionCache.forget(hash);return null;}
+  if(session?.user?.emailVerificationRequired) return null;
   if (managedChildId(session?.user?.id)) {
     // Revalidate every managed-device request, even while ordinary sessions are
     // cached. Revocation/archival must take effect on every server instance.
@@ -21046,6 +21050,56 @@ async function serveStatic(request, response) {
     return;
   }
 
+  if (requestUrl.pathname === '/api/auth/email-correct') {
+    if(request.method!=='POST'){writeJson(response,405,{error:'Method not allowed'});return;}
+    if(!enforceRateLimit(request,response,authRateLimiter,5,'account-email-correct')) return;
+    if(!accountEmailConfigured()){writeJson(response,503,{error:'Account email is temporarily unavailable.'});return;}
+    const payload=await readJsonBody(request,32000);
+    const email=sanitizeEmail(payload?.email), nextEmail=sanitizeEmail(payload?.newEmail);
+    const password=sanitizePassword(payload?.password);
+    if(!email || !nextEmail || password.length<8 || password.length>128){writeJson(response,400,{error:'Enter both email addresses and your account password.'});return;}
+    const user=await persistence.findAuthUserByEmail(email);
+    const valid=user ? await verifyPassword(password,user.passwordHash) : (await hashPassword(password),false);
+    if(!valid || !user.emailVerificationRequired || !(await persistence.correctPendingAccountEmail(user.id,nextEmail,user.passwordHash))){writeJson(response,400,{error:'Could not update this pending account. Check the details or use Forgot password if you already verified.'});return;}
+    try{await sendAccountEmail({...user,email:nextEmail},'verify',persistence);}catch{writeJson(response,503,{error:'Email address updated, but delivery failed. Resend verification to the new address.'});return;}
+    writeJson(response,200,{message:'Email address updated. Check your new inbox to verify, then sign in.'},{'Cache-Control':'no-store'});return;
+  }
+
+  if (requestUrl.pathname === '/api/auth/email-request' || requestUrl.pathname === '/api/auth/email-complete') {
+    if (request.method !== 'POST') { writeJson(response,405,{error:'Method not allowed'}); return; }
+    if (!enforceRateLimit(request,response,authRateLimiter,5,'account-email')) return;
+    const payload=await readJsonBody(request, 32000);
+    const purpose=payload?.purpose;
+    if (!['reset','verify'].includes(purpose)) {writeJson(response,400,{error:'Choose verification or password reset.'});return;}
+    if(requestUrl.pathname.endsWith('email-request')) {
+      if(!accountEmailConfigured()) {writeJson(response,503,{error:'Account email is temporarily unavailable. Please try again shortly.'});return;}
+      const email=sanitizeEmail(payload?.email);
+      if(!email) {writeJson(response,400,{error:'Enter your email address.'});return;}
+      const user=await persistence.findAuthUserByEmail(email);
+      // Identical public response regardless of account existence or delivery outcome.
+      if(user && !managedChildId(user.id) && (purpose==='reset' || user.emailVerificationRequired)) {
+        try {await sendAccountEmail(user,purpose,persistence);} catch {cloudTelemetry.increment('tracklab_account_email_failures_total',{purpose});}
+      }
+      writeJson(response,200,{message:'If this email needs that link, we will send it. Check your inbox and spam folder. You can resend after one minute.'},{'Cache-Control':'no-store'});return;
+    }
+    if(!validAccountEmailToken(payload?.token)) {writeJson(response,400,{error:'This link is invalid or expired. Request a new email.'});return;}
+    let passwordHash=null;
+    if(purpose==='reset') {
+      const password=sanitizePassword(payload?.password);
+      if(password.length<8 || password.length>128) {writeJson(response,400,{error:'Use a password between 8 and 128 characters.'});return;}
+      passwordHash=await hashPassword(password);
+    }
+    const userId=await persistence.consumeAccountEmailToken(accountEmailHash(payload.token),purpose,passwordHash);
+    if(!userId) {writeJson(response,400,{error:'This link is invalid, expired, or already used. Request a new email.'});return;}
+    if(purpose==='reset') {
+      deactivateAuthenticatedClientsForProfile(userId,'Password reset');
+      closeFriendEventStreamsForProfile(userId);
+      const streams=trainingHistoryStreams.get(`user:${userId}`);
+      streams?.forEach(response=>{removeTrainingHistoryStream(`user:${userId}`,response);response.end();});
+    }
+    writeJson(response,200,{message:purpose==='verify'?'Email verified. Return to TrackLab and sign in.':'Password updated. Sign in with your new password.'},{'Cache-Control':'no-store'});return;
+  }
+
   if (requestUrl.pathname === '/api/auth/register') {
     if (request.method !== 'POST') {
       writeJson(response, 405, { error: 'Method not allowed' });
@@ -21070,6 +21124,9 @@ async function serveStatic(request, response) {
       return;
     }
 
+    if(accountEmailVerificationEnabled() && !accountEmailConfigured()) {
+      writeJson(response,503,{error:'Account setup is temporarily unavailable. Please try again shortly.'});return;
+    }
     const existing = await persistence.findAuthUserByEmail(account.email);
     if (existing) {
       writeJson(response, 409, { error: 'An account already exists for this email. Sign in instead.' });
@@ -21093,6 +21150,7 @@ async function serveStatic(request, response) {
       bikeSeats: isAdmin ? maxRaceBikeCount : 1,
       admin: isAdmin,
       officialFriendKind,
+      emailVerificationRequired: accountEmailVerificationEnabled(),
     });
 
     if (!createdUser) {
@@ -21100,6 +21158,12 @@ async function serveStatic(request, response) {
       return;
     }
 
+    if(createdUser.emailVerificationRequired) {
+      try {await sendAccountEmail(createdUser,'verify',persistence);} catch {
+        writeJson(response,503,{error:'Your account was saved, but the email could not be sent. Use Resend verification email below.'});return;
+      }
+      writeJson(response,403,{code:'EMAIL_VERIFICATION_REQUIRED',error:'Check your email to verify your account, then sign in. You can resend the email below.'},{'Cache-Control':'no-store'});return;
+    }
     const officialFriendChanges = await persistence.ensureOfficialFriendships(createdUser.id);
     notifyFriendGraphProfiles(officialFriendChanges ?? []);
     if (registrationInviteToken) {
@@ -21157,6 +21221,8 @@ async function serveStatic(request, response) {
       writeJson(response, 401, { error: 'Email or password is incorrect.' });
       return;
     }
+
+    if(user.emailVerificationRequired) {writeJson(response,403,{code:'EMAIL_VERIFICATION_REQUIRED',error:'Verify your email before signing in. Use Resend verification email below if needed.'});return;}
 
     const entitledUser = isAdminEmail(user.email)
       ? await persistence.updateAuthUserAdminAccess(

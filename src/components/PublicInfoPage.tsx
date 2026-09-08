@@ -351,6 +351,11 @@ function PrivacyPage() {
                   devices. TrackLab does not receive raw payment-card numbers from Apple.
                 </li>
                 <li>
+                  <strong>Account email:</strong> Resend processes your email address and transactional email content
+                  to deliver signup verification and password recovery messages. These are account-service emails,
+                  not a marketing subscription. TrackLab stores hashed, expiring recovery tokens.
+                </li>
+                <li>
                   <strong>Hosting and database providers:</strong> TrackLab uses hosted application and database
                   infrastructure to deliver and store cloud-backed features.
                 </li>

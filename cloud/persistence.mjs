@@ -679,6 +679,8 @@ function authUserFromRow(row) {
     friendDiscoverable: row.friend_discoverable === true,
     officialFriendKind: row.official_friend_kind ?? null,
     passwordHash: row.password_hash,
+    emailVerificationRequired: row.email_verification_required === true,
+    emailVerifiedAt: row.email_verified_at ?? null,
     membershipTier: appleBillingManaged
       ? (appleEntitlementActive ? 'racer' : 'spectator')
       : row.membership_tier,
@@ -1497,6 +1499,8 @@ export async function createAuthUser(user) {
       friendDiscoverable: user.friendDiscoverable === true,
       officialFriendKind: user.officialFriendKind ?? null,
       passwordHash: user.passwordHash,
+      emailVerificationRequired: user.emailVerificationRequired === true,
+      emailVerifiedAt: null,
       membershipTier: user.membershipTier,
       bikeSeats: Number(user.bikeSeats) || 1,
       legacyMembershipTier: user.membershipTier,
@@ -1520,9 +1524,9 @@ export async function createAuthUser(user) {
        INSERT INTO ${schema}.auth_users (
          id, email, display_name, username, friend_discoverable, password_hash,
          membership_tier, bike_seats, legacy_membership_tier, legacy_bike_seats,
-         admin, last_login
+         admin, last_login, email_verification_required
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $7, $8, $9, now())
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $7, $8, $9, now(), $11)
        RETURNING *
      ), bound AS (
        INSERT INTO ${schema}.official_friend_accounts (kind, user_id)
@@ -1544,6 +1548,7 @@ export async function createAuthUser(user) {
       user.bikeSeats,
       Boolean(user.admin),
       user.officialFriendKind ?? null,
+      user.emailVerificationRequired === true,
     ],
   );
   return authUserFromRow(result?.rows?.[0]);
@@ -21648,4 +21653,91 @@ export async function deleteRecoveryAlertData(ownerProfileKey) {
     [ownerProfileKey],
   );
   return Boolean(result);
+}
+
+// Tokens are hashed at the HTTP boundary; raw email secrets never enter storage.
+const memoryAccountEmailTokens = new Map();
+export async function issueAccountEmailToken(userId, purpose, hash, expiresAt, expectedEmail = null) {
+  if (!['verify', 'reset'].includes(purpose)) throw new Error('Invalid email purpose');
+  if (!pool) {
+    const owner = memoryAuthUsersById.get(userId);
+    if (!owner || (expectedEmail && owner.email !== expectedEmail)) return false;
+    for (const [key, item] of memoryAccountEmailTokens) if (item.expiresAt <= Date.now()) memoryAccountEmailTokens.delete(key);
+    const recent = [...memoryAccountEmailTokens.values()].some(t => t.userId === userId && t.purpose === purpose && t.createdAt > Date.now() - 60000);
+    if (recent) return false;
+    memoryAccountEmailTokens.set(hash, {userId, purpose, expiresAt, createdAt: Date.now()}); return true;
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const owner = await client.query(`SELECT email FROM ${schema}.auth_users WHERE id=$1 FOR UPDATE`, [userId]);
+    if (!owner.rows[0] || (expectedEmail && owner.rows[0].email !== expectedEmail)) {await client.query('ROLLBACK');return false;}
+    const recent = await client.query(`SELECT 1 FROM ${schema}.account_email_tokens WHERE user_id=$1 AND purpose=$2 AND created_at > now()-interval '60 seconds' LIMIT 1`, [userId,purpose]);
+    if (recent.rowCount) { await client.query('ROLLBACK'); return false; }
+    await client.query(`DELETE FROM ${schema}.account_email_tokens WHERE user_id=$1 AND expires_at <= now()`, [userId]);
+    await client.query(`INSERT INTO ${schema}.account_email_tokens(token_hash,user_id,purpose,expires_at) VALUES($1,$2,$3,to_timestamp($4/1000.0))`, [hash,userId,purpose,expiresAt]);
+    await client.query('COMMIT'); return true;
+  } catch (error) { await client.query('ROLLBACK'); throw error; } finally {client.release();}
+}
+export async function discardAccountEmailToken(hash) {
+  if (!pool) { memoryAccountEmailTokens.delete(hash); return; }
+  await query(`DELETE FROM ${schema}.account_email_tokens WHERE token_hash=$1`, [hash]);
+}
+export async function consumeAccountEmailToken(hash, purpose, passwordHash = null) {
+  if (!['verify','reset'].includes(purpose) || (purpose === 'reset' && !passwordHash)) return null;
+  if (!pool) {
+    const token = memoryAccountEmailTokens.get(hash);
+    if (!token || token.purpose !== purpose || token.expiresAt <= Date.now()) return null;
+    const user = memoryAuthUsersById.get(token.userId); if (!user) return null;
+    memoryAccountEmailTokens.delete(hash);
+    if (purpose === 'verify') {user.emailVerificationRequired=false; user.emailVerifiedAt=new Date().toISOString();}
+    else {user.passwordHash=passwordHash; for (const [key,t] of memoryAuthSessionsByToken) if (t.userId===user.id) memoryAuthSessionsByToken.delete(key);}
+    for (const [key,t] of memoryAccountEmailTokens) if(t.userId===user.id && t.purpose===purpose) memoryAccountEmailTokens.delete(key);
+    return user.id;
+  }
+  const client=await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // Serialize all reset links for this account before testing one-use status.
+    const owner=await client.query(`SELECT user_id FROM ${schema}.account_email_tokens WHERE token_hash=$1 AND purpose=$2`,[hash,purpose]);
+    if (!owner.rows[0]) {await client.query('ROLLBACK'); return null;}
+    const userId=owner.rows[0].user_id;
+    await client.query(`SELECT id FROM ${schema}.auth_users WHERE id=$1 FOR UPDATE`,[userId]);
+    const token=await client.query(`DELETE FROM ${schema}.account_email_tokens WHERE token_hash=$1 AND purpose=$2 AND expires_at>now() RETURNING user_id`,[hash,purpose]);
+    if (!token.rows[0]) {await client.query('ROLLBACK'); return null;}
+    if(purpose==='verify') await client.query(`UPDATE ${schema}.auth_users SET email_verification_required=false,email_verified_at=now(),updated_at=now() WHERE id=$1`,[userId]);
+    else {
+      await client.query(`UPDATE ${schema}.auth_users SET password_hash=$2,updated_at=now() WHERE id=$1`,[userId,passwordHash]);
+      await client.query(`DELETE FROM ${schema}.auth_sessions WHERE user_id=$1`,[userId]);
+    }
+    await client.query(`DELETE FROM ${schema}.account_email_tokens WHERE user_id=$1 AND purpose=$2`,[userId,purpose]);
+    await client.query('COMMIT'); return userId;
+  } catch(error) {await client.query('ROLLBACK');throw error;} finally{client.release();}
+}
+export async function correctPendingAccountEmail(userId, email, expectedPasswordHash) {
+  if (!pool) {
+    const user=memoryAuthUsersById.get(userId);
+    if(!user?.emailVerificationRequired || user.passwordHash !== expectedPasswordHash || memoryAuthUserIdByEmail.has(authEmailKey(email))) return false;
+    memoryAuthUserIdByEmail.delete(authEmailKey(user.email));user.email=email;memoryAuthUserIdByEmail.set(authEmailKey(email),userId);
+    for(const [hash,t] of memoryAccountEmailTokens) if(t.userId===userId) memoryAccountEmailTokens.delete(hash);
+    return true;
+  }
+  const client=await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result=await client.query(`UPDATE ${schema}.auth_users SET email=$2,updated_at=now() WHERE id=$1 AND email_verification_required=true AND password_hash=$3 RETURNING id`,[userId,email,expectedPasswordHash]);
+    if(!result.rowCount){await client.query('ROLLBACK');return false;}
+    await client.query(`DELETE FROM ${schema}.account_email_tokens WHERE user_id=$1`,[userId]);
+    await client.query('COMMIT');return true;
+  }catch(error){await client.query('ROLLBACK');if(error.code==='23505')return false;throw error;}finally{client.release();}
+}
+// Cheap existence check keeps cached profile lookups while enforcing revocation
+// immediately across server instances after password recovery.
+export async function authSessionStillValid(hash) {
+  if (!pool) {
+    const session=memoryAuthSessionsByToken.get(hash);
+    return Boolean(session && Date.parse(session.expiresAt)>Date.now());
+  }
+  const result=await query(`SELECT 1 FROM ${schema}.auth_sessions WHERE token_hash=$1 AND expires_at>now()`,[hash]);
+  return Boolean(result?.rowCount);
 }

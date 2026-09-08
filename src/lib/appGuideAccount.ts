@@ -6,6 +6,15 @@ export const betaGuideSection: AppGuideSection = {
   summary: 'Sign in for public beta access, connect a compatible Wattbike, and send useful feedback.',
   articles: [
     {
+      title: 'Verify your email or recover your password',
+      paragraphs: [
+        'New accounts verify their email once before signing in. Open the verification email, select Verify email, then return to your original TrackLab app or tab and sign in. Your athlete invitation stays in that original tab. Existing accounts keep their access; verification is not repeated at every login.',
+        'Use Forgot password on the sign-in screen to request a reset email. The link lasts 30 minutes and can be used once. After saving a new password, sign in again. Your old password and account sessions stop working.',
+        'If a verification email is missing, check spam and use Resend verification email. Wait one minute between requests. Verification links last 24 hours. Correct signup email lets you fix a typo before verification using your existing password.',
+        'Parents verify their own email. A child using a parent-managed profile does not need an email address or separate password. Parent-issued child-phone setup links continue to work.',
+      ],
+    },
+    {
       title: 'Start your automatic beta access',
       paragraphs: [
         'While public beta enrollment is open, signing in automatically gives a new tester four simultaneous Wattbike connections, including parent-managed athletes using their own phone setup. This works on the native app and website and requires no separate beta invitation or purchase. Access has a fixed end date shown in More → Beta Testing and lasts no more than 90 days. Signing in again does not extend or restore expired or revoked access. Administrators can also issue individual invitations: Each link belongs to one email address, can be accepted once, and expires after seven days. The testing period begins when you accept. The default invitation includes four simultaneous Wattbike connections for 90 days; your invitation may have a different connection allowance or duration.',

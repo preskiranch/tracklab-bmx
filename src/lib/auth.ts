@@ -17,6 +17,7 @@ type AuthResponse = {
   user: AuthUser | null;
   nativeSessionToken?: string;
   error?: string;
+  code?: string;
 };
 
 type DeleteAccountResponse = {
@@ -64,7 +65,7 @@ async function authFetch(path: string, options: RequestInit = {}) {
   const payload = await response.json().catch(() => ({})) as AuthResponse;
   if (!response.ok) {
     if (payload.error) {
-      throw new Error(payload.error);
+      throw Object.assign(new Error(payload.error), { code: payload.code });
     }
 
     if (response.status === 404) {

@@ -1,0 +1,11 @@
+# Account verification and recovery
+
+Resend sends transactional account emails using server-only TRACKLAB_RESEND_API_KEY, TRACKLAB_ACCOUNT_EMAIL_FROM, and optional TRACKLAB_ACCOUNT_REPLY_TO. TRACKLAB_ACCOUNT_PUBLIC_ORIGIN is a fixed trusted HTTPS origin, never the incoming Host header. TRACKLAB_REQUIRE_EMAIL_VERIFICATION enables one-time verification for newly registered accounts. Existing accounts are grandfathered (not falsely marked verified). Parent-managed device accounts retain their parent-issued access.
+
+Verification links expire after 24 hours. Reset links expire after 30 minutes. Raw 256-bit tokens appear only in email URL fragments and are removed from the address bar on page load. Only SHA-256 hashes are stored. Opening an email link does not consume it: an explicit form POST confirms the action, avoiding email scanner consumption. Successful completion consumes all outstanding links for the same purpose. Resetting a password deletes the account's sessions; authenticated requests recheck persisted sessions. Child device sessions are separate and remain parent-managed.
+
+Resend requests are limited by IP and by account (60 seconds between emails). Public recovery responses do not disclose whether an email exists or provider errors. Failed email sends delete their token and increment a failure metric. Unverified users may correct an email with their current password; correction atomically invalidates outstanding links and refuses a concurrently changed password. No emails, tokens, passwords, or provider secrets are logged by this flow.
+
+The account helper at /account-access.html works in a browser from iPhone, iPad, or PC. After verification, users return to the original TrackLab app/tab and sign in, preserving any invitation there. The original signup form stays open and switches to Sign in. Forgot password, resend, and typo correction are optional help controls, not extra onboarding screens.
+
+Before production enforcement: test delivery, verification, expired/reused links, two concurrent reset requests, old-session revocation, email correction, and parent-managed access. If delivery is unavailable, leave the verification flag false for new registrations; already pending users remain protected and can retry later. Never bypass verification on a pending account merely because the provider is unavailable.

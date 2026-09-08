@@ -1,0 +1,21 @@
+import { randomUUID } from 'node:crypto';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as persistence from '../../cloud/persistence.mjs';
+import { accountEmailHash, sendAccountEmail } from '../../cloud/accountEmail.mjs';
+const user = async () => {const id=randomUUID();return persistence.createAuthUser({id,email:`${id}@example.test`,displayName:'Test Rider',passwordHash:'old',membershipTier:'spectator',bikeSeats:1,admin:false,emailVerificationRequired:true});};
+afterEach(()=>vi.unstubAllEnvs());
+describe('account email safety',()=>{
+ it('verifies once and refuses replay or wrong purpose',async()=>{const u=await user();const h=accountEmailHash(randomUUID());await persistence.issueAccountEmailToken(u.id,'verify',h,Date.now()+60000);expect(await persistence.consumeAccountEmailToken(h,'reset','new')).toBeNull();expect(await persistence.consumeAccountEmailToken(h,'verify')).toBe(u.id);expect(await persistence.consumeAccountEmailToken(h,'verify')).toBeNull();expect((await persistence.findAuthUserByEmail(u.email)).emailVerificationRequired).toBe(false);});
+ it('rejects expired tokens',async()=>{const u=await user();const h=accountEmailHash(randomUUID());await persistence.issueAccountEmailToken(u.id,'reset',h,Date.now()-1);expect(await persistence.consumeAccountEmailToken(h,'reset','new')).toBeNull();});
+ it('resets once under simultaneous requests and invalidates sessions',async()=>{const u=await user();const session=accountEmailHash(randomUUID());await persistence.createAuthSession({id:randomUUID(),userId:u.id,tokenHash:session,expiresAt:new Date(Date.now()+60000).toISOString()});const h=accountEmailHash(randomUUID());await persistence.issueAccountEmailToken(u.id,'reset',h,Date.now()+60000);const results=await Promise.all([persistence.consumeAccountEmailToken(h,'reset','new'),persistence.consumeAccountEmailToken(h,'reset','other')]);expect(results.filter(Boolean)).toHaveLength(1);expect(await persistence.findAuthSession(session)).toBeNull();expect((await persistence.findAuthUserByEmail(u.email)).passwordHash).toBe('new');});
+ it('limits resend per account',async()=>{const u=await user();expect(await persistence.issueAccountEmailToken(u.id,'verify','a',Date.now()+60000)).toBe(true);expect(await persistence.issueAccountEmailToken(u.id,'verify','b',Date.now()+60000)).toBe(false);});
+ it('sends a fragment link using the configured brand, with no raw token in storage',async()=>{
+ vi.stubEnv('TRACKLAB_RESEND_API_KEY','test-secret');vi.stubEnv('TRACKLAB_ACCOUNT_EMAIL_FROM','TrackLab <accounts@tracklabbmx.com>');
+ const u=await user();let body:any;const fetcher=vi.fn(async(_url:any,options:any)=>{body=JSON.parse(options.body);return new Response('{}',{status:200});});await sendAccountEmail(u,'verify',persistence,fetcher);
+ expect(body.from).toBe('TrackLab <accounts@tracklabbmx.com>');const token=body.text.match(/#verify=([a-f0-9]{64})/)[1];expect(await persistence.consumeAccountEmailToken(token,'verify')).toBeNull();expect(await persistence.consumeAccountEmailToken(accountEmailHash(token),'verify')).toBe(u.id);
+ });
+ it('removes undelivered tokens and permits a retry without leaking provider details',async()=>{
+ vi.stubEnv('TRACKLAB_RESEND_API_KEY','test-secret');vi.stubEnv('TRACKLAB_ACCOUNT_EMAIL_FROM','TrackLab <accounts@tracklabbmx.com>');const u=await user();const fetcher=vi.fn(async()=>new Response('secret provider error',{status:403}));await expect(sendAccountEmail(u,'verify',persistence,fetcher)).rejects.toThrow('Account email could not be sent');expect(await persistence.issueAccountEmailToken(u.id,'verify','retry',Date.now()+60000)).toBe(true);
+ });
+});
+it('corrects only an unverified account with its current password and invalidates old links',async()=>{const u=await user();const hash=accountEmailHash(randomUUID());await persistence.issueAccountEmailToken(u.id,'verify',hash,Date.now()+60000);expect(await persistence.correctPendingAccountEmail(u.id,'changed@example.test','wrong')).toBe(false);expect(await persistence.correctPendingAccountEmail(u.id,'changed@example.test','old')).toBe(true);expect(await persistence.consumeAccountEmailToken(hash,'verify')).toBeNull();expect(await persistence.issueAccountEmailToken(u.id,'reset','stale-email-token',Date.now()+60000,u.email)).toBe(false);expect(await persistence.findAuthUserByEmail(u.email)).toBeNull();});

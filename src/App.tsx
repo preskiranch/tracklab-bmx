@@ -10213,6 +10213,7 @@ export default function App() {
       setAuthStatus('signed-out');
       setMembership(createMembership('visitor'));
       setAppleConnectionCount(1);
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'EMAIL_VERIFICATION_REQUIRED') { setAuthMode('login'); setAuthPasswordDraft(''); }
       setProfileFormError(error instanceof Error ? error.message : 'Could not sign in.');
       return false;
     }

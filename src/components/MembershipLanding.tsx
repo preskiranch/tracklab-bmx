@@ -564,8 +564,12 @@ export function MembershipLanding({
                 {creatingAccount ? 'Already have an account? Sign in' : 'Need an account? Create one free'}
               </button>
               <p className="profile-gate-note">
+                <a href="https://tracklabbmx.com/account-access.html#reset" target="_blank" rel="noopener noreferrer">Forgot password?</a>
+                {' · '}<a href="https://tracklabbmx.com/account-access.html" target="_blank" rel="noopener noreferrer">Resend verification email</a>
+              </p>
+              <p className="profile-gate-note">
                 {creatingAccount
-                  ? 'Your free account keeps your profile and favorites together.'
+                  ? 'Verify your email once, then sign in. Parents use their own email; children do not need a separate one.'
                   : 'New to TrackLab? Create a free account to get started.'}
               </p>
             </>

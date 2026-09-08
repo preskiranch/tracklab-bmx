@@ -2427,6 +2427,22 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           WHERE leaderboard_joined AND studio_rider_id = '' AND average_ms IS NOT NULL`,
       ],
     },
+    {
+      version: 51,
+      name: 'account email verification and recovery tokens',
+      statements: [
+        `ALTER TABLE ${schema}.auth_users ADD COLUMN email_verification_required BOOLEAN NOT NULL DEFAULT false,
+          ADD COLUMN email_verified_at TIMESTAMPTZ`,
+        `CREATE TABLE ${schema}.account_email_tokens (
+          token_hash TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          purpose TEXT NOT NULL CHECK (purpose IN ('verify','reset')),
+          expires_at TIMESTAMPTZ NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`,
+        `CREATE INDEX idx_account_email_tokens_user ON ${schema}.account_email_tokens(user_id,purpose)`,
+      ],
+    },
   ];
 }
 
