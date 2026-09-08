@@ -490,7 +490,8 @@ export function TrainingResultsSpreadsheet({
     ? []
     : rowsForTrainingResultSheet(rows, activeSheet.id);
   const resultsGridRef = useRef<HTMLDivElement>(null);
-  const lastVisibleResultRowsRef = useRef<Readonly<{ sheetId: TrainingResultSheetId; version: string }> | null>(null);
+  const resultsSectionRef = useRef<HTMLElement>(null);
+  const lastVisibleResultRowsRef = useRef<Readonly<{ sheetId: TrainingResultSheetId; dateLabel: string; version: string }> | null>(null);
   const visibleResultRowsVersion = useMemo(() => activeRows.map((row) => (
     `${row.id}:${sessionById.get(row.sessionId)?.updatedAt ?? 0}:${JSON.stringify(row)}`
   )).join('\u001e'), [activeRows, sessionById]);
@@ -511,15 +512,27 @@ export function TrainingResultsSpreadsheet({
     }
 
     const previous = lastVisibleResultRowsRef.current;
-    if (previous && previous.sheetId === activeSheet.id && previous.version !== visibleResultRowsVersion) {
+    if (previous && previous.sheetId === activeSheet.id && previous.dateLabel === dateLabel && previous.version !== visibleResultRowsVersion) {
       const grid = resultsGridRef.current;
-      if (grid) grid.scrollTop = grid.scrollHeight;
+      const section = resultsSectionRef.current;
+      const calendarScreen = section?.closest('.account-training-layout') ?? section;
+      const bounds = calendarScreen?.getBoundingClientRect();
+      if (grid && document.visibilityState === 'visible' && bounds && bounds.height > 0
+        && bounds.bottom > 0 && bounds.top < window.innerHeight) {
+        const horizontalPosition = grid.scrollLeft;
+        grid.scrollTop = grid.scrollHeight;
+        // Bring the newest row into the outer page viewport as well as the table.
+        // Keep the rider's horizontal column position and don't move keyboard focus.
+        grid.querySelector('tbody tr:last-child')?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+        grid.scrollLeft = horizontalPosition;
+      }
     }
-    lastVisibleResultRowsRef.current = { sheetId: activeSheet.id, version: visibleResultRowsVersion };
-  }, [activeSheet.id, visibleResultRowsVersion]);
+    lastVisibleResultRowsRef.current = { sheetId: activeSheet.id, dateLabel, version: visibleResultRowsVersion };
+  }, [activeSheet.id, dateLabel, visibleResultRowsVersion]);
 
   return (
     <section
+      ref={resultsSectionRef}
       className="training-results-sheet"
       aria-labelledby={`${regionId}-title`}
       aria-busy={privateExportDisabled || undefined}

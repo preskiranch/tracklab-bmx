@@ -8428,6 +8428,7 @@ test('club athletes see only their own connection and never the studio roster', 
 });
 
 test('training results follow the latest capture after a history refresh', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   const selectedDay = new Date();
   selectedDay.setHours(12, 0, 0, 0);
   const noon = selectedDay.getTime();
@@ -8547,6 +8548,7 @@ test('training results follow the latest capture after a history refresh', async
     return grid.scrollTop >= remaining - 2;
   })).toBe(true);
   await expect(latestRow).toBeVisible();
+  await expect(latestRow).toBeInViewport();
   const scrollPosition = await resultsGrid.evaluate((grid) => ({
     scrollTop: grid.scrollTop,
     remaining: grid.scrollHeight - grid.clientHeight,
