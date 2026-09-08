@@ -417,3 +417,24 @@ export function runClubEventGateTimelinePlan(
 
   return plan;
 }
+
+
+/** Align the end of the full unchanged voice with the shared random-hold boundary. */
+export function clubEventVoiceStartAt(plan: ClubEventGateTimelinePlan, durationMs: number) {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) throw new TypeError('Invalid voice duration');
+  return plan.timeline.randomDelayStartsAt - plan.serverClockOffsetMs - durationMs;
+}
+
+/** Never clip a late voice or replay missed tones over it; keep the shared race clock. */
+export function createClubEventVoiceGuard() {
+  let finished = true;
+  let tonesSuppressed = false;
+  return {
+    started() { finished = false; },
+    completed() { finished = true; },
+    allowTone() {
+      if (!finished) tonesSuppressed = true;
+      return !tonesSuppressed;
+    },
+  };
+}

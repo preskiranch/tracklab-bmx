@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { uciVoiceWatchGateOffsetMs } from '../../src/lib/audioCues';
 import {
   clubEventCadenceDelayMs,
+  clubEventVoiceStartAt,
+  createClubEventVoiceGuard,
   clubEventGateCueFreshnessMs,
   clubEventGateCuePlaybackState,
   clubEventRidersReadyOffsetMs,
@@ -392,4 +394,31 @@ describe('absolute Club Event gate timeline', () => {
       now: startAt,
     })).toThrow(/serverClockOffsetMs/);
   });
+});
+
+
+it('aligns full voice completion with the existing shared random boundary without moving green', () => {
+  const plan=planClubEventGateTimeline({eventId:'test-event',startAt:100000,serverClockOffsetMs:50,now:99000});
+  const green=plan.timeline.greenAt;
+  for (const duration of [6000,6008.163,6500]) {
+    const starts=clubEventVoiceStartAt(plan,duration);
+    expect(starts + duration + 50).toBeCloseTo(plan.timeline.randomDelayStartsAt,5);
+    expect(plan.timeline.greenAt).toBe(green);
+  }
+});
+
+it('suppresses conflicting club tones for the entire sequence while a late voice finishes', () => {
+  const guard=createClubEventVoiceGuard();
+  guard.started();
+  expect(guard.allowTone()).toBe(false);
+  guard.completed();
+  expect(guard.allowTone()).toBe(false);
+});
+
+it('allows all club tones when the voice finishes in time, including a late join without voice', () => {
+  const guard=createClubEventVoiceGuard();
+  guard.started();
+  guard.completed();
+  expect([0,1,2,3].map(() => guard.allowTone())).toEqual([true,true,true,true]);
+  expect(createClubEventVoiceGuard().allowTone()).toBe(true);
 });

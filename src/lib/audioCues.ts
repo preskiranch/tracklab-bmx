@@ -1234,6 +1234,14 @@ export function stopStartGateAudio() {
   window.speechSynthesis?.cancel();
 }
 
+/** Read the unchanged recording length before planning a synchronized start. */
+export async function prepareUciVoiceDurationMs(): Promise<number | null> {
+  const context = getAudioContext();
+  if (!context) return null;
+  const buffer = await settleWithin(loadUciVoiceBuffer(context), 2_500, null);
+  return buffer && Number.isFinite(buffer.duration) ? buffer.duration * 1_000 : null;
+}
+
 function voicePlaybackCompletion(source: EventTarget, alreadyEnded = false): Promise<number | null> {
   if (alreadyEnded) return Promise.resolve(monotonicAudioNow());
   return new Promise(resolve => {

@@ -19,6 +19,7 @@ type ReactionResultWrite = {
 
 async function mockReactionAccount(page: Page, options: {
   canJoinLeaderboard?: boolean;
+  admin?: boolean;
   personalBestMs?: number | null;
   averageBestMs?: number | null;
   joined?: boolean;
@@ -32,7 +33,7 @@ async function mockReactionAccount(page: Page, options: {
     profileKey: 'user:private-reaction-account',
     email: 'private-reaction-account@tracklab.test',
     name: 'Current Account Rider',
-    admin: false,
+    admin: options.admin ?? false,
     membership: { tier: options.tier ?? 'spectator', bikeSeats: 1, updatedAt: now },
   };
   const state = {
@@ -933,4 +934,40 @@ for (const [draw, delay] of [[0, 100], [2600, 2700]]) {
     expect(elapsed).toBeGreaterThanOrEqual(delay - 5);
     expect(elapsed).toBeLessThan(delay + 200);
   });
+}
+
+for (const mode of ['Straight Sprint', 'BMX Race Intervals']) {
+test(`race start waits for voice completion in ${mode}`, async ({page}) => {
+  test.setTimeout(90_000);
+  await mockReactionAccount(page, {tier:'racer',admin:true});
+  const track={id:'custom-cadence-sprint',name:'Drag Strip',country:'Custom Routes',countryCode:'CUSTOM',state:'New Hampshire',region:'New Hampshire',source:'Custom',sourceUrl:'local://custom-route',address:'Epping, NH',latitude:43.03,longitude:-71.08,lengthMeters:500,elevationMeters:0,surface:'Custom sprint route',outline:[{lat:43.03,lng:-71.08},{lat:43.035,lng:-71.08}],routeStatus:'user-mapped',zones:[],leaderboards:{rpm:[],speed:[]}};
+  const mapping={version:1,trackId:track.id,trackName:track.name,country:track.country,state:track.state,savedAt:new Date().toISOString(),routeStatus:'user-mapped',restAfterSeconds:1,lengthMeters:500,centerline:track.outline,startGate:track.outline[0],finishLine:track.outline[1],zoneBoundaryMeters:[],zoneBoundarySets:[],zones:[],splitSections:[]};
+  await page.route('**/api/user-data*',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({trackMappings:{[track.id]:mapping,'black-mountain-bmx':{...mapping,trackId:'black-mountain-bmx',trackName:'Black Mountain BMX'}},customRoutes:[track],bikeProfiles:[],studioRiders:[]})}));
+  await page.addInitScript(({track,mapping})=>{
+    localStorage.setItem('tracklab-bmx-custom-routes-v1',JSON.stringify([track]));
+    localStorage.setItem('tracklab:user-track-mappings:v1',JSON.stringify({[track.id]:mapping}));
+  },{track,mapping});
+  await preparePredictableCadence(page);
+  await page.addInitScript(() => {
+    const originalPlay = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function() {
+      if (this.src.includes('uci-random-start')) {
+        this.playbackRate = 0.8;
+        this.addEventListener('ended', () => { (window as any).__voiceEndedAt = performance.now(); }, {once:true});
+      }
+      return originalPlay.call(this);
+    };
+  });
+  await page.route('https://maps.googleapis.com/**', route => route.abort());
+  await page.goto(mode === 'Straight Sprint' ? '/?track=custom-cadence-sprint' : '/?track=black-mountain-bmx');
+  await page.getByRole('button',{name:'Open App',exact:true}).click();
+  if (mode === 'Straight Sprint') await page.getByRole('button',{name:mode,exact:true}).click();
+  await page.getByRole('button',{name:/Demo/i}).first().click();
+  await page.getByRole('button',{name:/Start Demo (Race|Sprint)/i}).first().click();
+  await page.waitForFunction(() => (window as any).__reactionFirstRedAt != null, null, {timeout:60000});
+  const elapsed=await page.evaluate(() => (window as any).__reactionFirstRedAt - (window as any).__voiceEndedAt);
+  expect(elapsed).toBeGreaterThanOrEqual(95);
+  expect(elapsed).toBeLessThan(400);
+});
+
 }

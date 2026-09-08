@@ -1355,15 +1355,14 @@ describe('Club Tablet client state', () => {
     expect(startHandler.indexOf("if (source === 'room-clock') {"))
       .toBeLessThan(startHandler.indexOf('scheduleStagingCountdown(startingTrackId, sequenceId);'));
     expect(appSource).toContain('cadenceStartedAtRef.current = plan.cadenceLocalAt;');
-    expect(appSource).toContain('// Stop any slow/stale cadence media before every coalesced red phase;');
+    expect(appSource).toContain('const audioAllowed = voiceGuard.allowTone();');
     expect(appSource).toContain('stopStartGateAudio();');
     const synchronizedGreenHandler = appSource.slice(
       appSource.indexOf('onGreen: (gateDropLocalAt, playTone) => {'),
       appSource.indexOf('beginRaceAtGateDrop(startingTrackId, sequenceId, gateDropLocalAt);') + 80,
     );
-    expect(synchronizedGreenHandler).toContain('stopStartGateAudio();');
-    expect(synchronizedGreenHandler.indexOf('stopStartGateAudio();'))
-      .toBeLessThan(synchronizedGreenHandler.indexOf("playStartGateTone('uci-green')"));
+    expect(synchronizedGreenHandler).not.toContain('stopStartGateAudio();');
+    expect(synchronizedGreenHandler).toContain("if (playTone && audioAllowed) playStartGateTone('uci-green');");
     expect(appSource).toContain("if (roomPhase == null || roomPhase === 'race')");
     expect(appSource).toContain('multiplayer.roomExit.sequence > activeClubEventGateRoomExitSequenceRef.current');
     expect(appSource).toContain('|| latestRoomExitSequenceRef.current !== roomExitSequence');

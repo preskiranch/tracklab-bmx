@@ -64,13 +64,13 @@ import { countriesForCatalog, statesForCountry, trackCatalog, tracksForLocation 
 import {
   playStartGateTone,
   playUciRandomStartVoice,
+  prepareUciVoiceDurationMs,
   primeAudioCues,
   releaseBmxEventAmbienceGateDuck,
   startBmxEventAmbience,
   stopBmxEventAmbience,
   stopRaceAudioKeepAlive,
   stopStartGateAudio,
-  uciVoiceWatchGateOffsetMs,
 } from './lib/audioCues';
 import {
   primeBikeRaceAudio,
@@ -9627,22 +9627,17 @@ export default function App() {
 
     void primeAudioCues().catch(() => undefined);
 
-    const voiceStart = await playUciRandomStartVoice().catch(() => {
-      playStartGateTone('tick');
-      return {
-        startedAt: Date.now(),
-        source: 'fallback' as const,
-      };
-    });
+    const voiceStart = await playUciRandomStartVoice().catch(() => null);
     if (sequenceId !== startGateSequenceIdRef.current || selectedTrackIdRef.current !== startingTrackId) {
       return;
     }
 
+    if (!voiceStart || voiceStart.source !== 'audio' || !voiceStart.finished) {
+      cancelStartGateSequence();
+      setStartGateStatus({ ...idleStartGateStatus, label: 'CADENCE UNAVAILABLE', detail: 'Please start again when audio is ready.' });
+      return;
+    }
     cadenceStartedAtRef.current = voiceStart.startedAt;
-    // Coach-led Club Events use the separate immutable server timeline below.
-    // This path remains deliberately local/random for manual races.
-    const randomDelayMs = createUciRandomDelayMs();
-    const firstToneAtMs = uciVoiceWatchGateOffsetMs + randomDelayMs;
     const scheduleVoiceStep = (voiceOffsetMs: number, action: () => void) => {
       const elapsedSinceVoiceStartMs = Date.now() - voiceStart.startedAt;
       scheduleStartGateStep(Math.max(0, voiceOffsetMs - elapsedSinceVoiceStartMs), action, sequenceId);
@@ -9666,15 +9661,15 @@ export default function App() {
       });
     });
 
-    scheduleVoiceStep(uciVoiceWatchGateOffsetMs, () => {
-      setStartGateStatus({
-        active: true,
-        phase: 'cadence',
-        label: 'RANDOM DELAY',
-        detail: 'Watch the gate',
-        lightIndex: null,
-      });
-    });
+    const voiceEndedAt = await voiceStart.finished;
+    if (sequenceId !== startGateSequenceIdRef.current || selectedTrackIdRef.current !== startingTrackId) return;
+    if (voiceEndedAt == null) {
+      cancelStartGateSequence();
+      setStartGateStatus({ ...idleStartGateStatus, label: 'CADENCE INTERRUPTED', detail: 'Please start again when audio is ready.' });
+      return;
+    }
+    const randomDelayMs = createUciRandomDelayMs();
+    setStartGateStatus({ active: true, phase: 'cadence', label: 'RANDOM DELAY', detail: 'Watch the gate', lightIndex: null });
 
     const runCadenceTone = (index: 0 | 1 | 2) => {
       if (index === 0) {
@@ -9710,8 +9705,8 @@ export default function App() {
       }, sequenceId);
     };
 
-    scheduleVoiceStep(firstToneAtMs, () => runCadenceTone(0));
-  }, [armReactionTimer, beginRaceAtGateDrop, demoMode, loadCStartPlayers, racePlayers, scheduleStartGateStep]);
+    scheduleStartGateStep(Math.max(0, voiceEndedAt + randomDelayMs - performance.now()), () => runCadenceTone(0), sequenceId);
+  }, [armReactionTimer, beginRaceAtGateDrop, cancelStartGateSequence, demoMode, loadCStartPlayers, racePlayers, scheduleStartGateStep]);
 
   const scheduleClubEventGate = useCallback(async (
     startingTrackId: string,
@@ -9724,6 +9719,8 @@ export default function App() {
     const roomExitSequence = latestRoomExitSequenceRef.current;
 
     const gateRuntime = await import('./lib/clubEventGateTimeline');
+    void primeAudioCues().catch(() => undefined);
+    const voiceDurationMs = await prepareUciVoiceDurationMs().catch(() => null);
     if (
       sequenceId !== startGateSequenceIdRef.current
       || selectedTrackIdRef.current !== startingTrackId
@@ -9743,10 +9740,24 @@ export default function App() {
       activeClubEventGateRoomExitSequenceRef.current = roomExitSequence;
     }
     cadenceStartedAtRef.current = plan.cadenceLocalAt;
-    const firstRedLocalAt = plan.timeline.redAt[0] - authority.serverClockOffsetMs;
     stagingCountdownEndsAtRef.current = plan.cadenceLocalAt;
     stagingCountdownTrackIdRef.current = startingTrackId;
     setStartCountdownPaused(false);
+
+    const voiceGuard = gateRuntime.createClubEventVoiceGuard();
+    const voiceAt = voiceDurationMs == null ? null : gateRuntime.clubEventVoiceStartAt(plan, voiceDurationMs);
+    if (voiceAt != null && voiceAt >= Date.now()) {
+      scheduleStartGateStep(voiceAt - Date.now(), () => {
+        // A late/woken tablet must not start the full recording after its slot.
+        if (Date.now() - voiceAt > gateRuntime.clubEventVoiceCueFreshnessMs) return;
+        voiceGuard.started();
+        void playUciRandomStartVoice().then(async voice => {
+          const endedAt = await voice.finished;
+          if (sequenceId !== startGateSequenceIdRef.current) return;
+          if (endedAt != null) voiceGuard.completed();
+        }).catch(() => undefined);
+      }, sequenceId);
+    }
 
     gateRuntime.runClubEventGateTimelinePlan(plan, {
       now: Date.now,
@@ -9761,14 +9772,8 @@ export default function App() {
           lightIndex: null,
         });
       },
-      onVoice: () => {
-        // This is best-effort playback only. Red/green remain on the immutable
-        // server clock even when a tablet's voice file starts slowly.
-        void primeAudioCues().catch(() => undefined);
-        void playUciRandomStartVoice().catch(() => {
-          if (Date.now() < firstRedLocalAt) playStartGateTone('tick');
-        });
-      },
+      // Voice is scheduled from its real duration above, not the old fixed offset.
+      onVoice: () => {},
       onCadencePhase: (phase) => {
         stagingCountdownEndsAtRef.current = 0;
         stagingCountdownRemainingMsRef.current = 0;
@@ -9790,9 +9795,7 @@ export default function App() {
         armReactionTimer(redLocalAt);
       },
       onRed: (index, playTone) => {
-        // Stop any slow/stale cadence media before every coalesced red phase;
-        // a blocked tablet may legitimately skip red 1 and resume on red 2.
-        stopStartGateAudio();
+        const audioAllowed = voiceGuard.allowTone();
         if (index === 2 && demoMode) {
           const demoPlayerIds = racePlayers.map((player) => player.id);
           cStartTriggeredPlayerIdsRef.current = new Set(demoPlayerIds);
@@ -9805,13 +9808,11 @@ export default function App() {
           detail: 'UCI cadence',
           lightIndex: index,
         });
-        if (playTone) playStartGateTone('uci-red');
+        if (playTone && audioAllowed) playStartGateTone('uci-red');
       },
       onGreen: (gateDropLocalAt, playTone) => {
-        // A suspended tablet can wake after every red callback was skipped.
-        // Always silence stale cadence media before the decisive green cue.
-        stopStartGateAudio();
-        if (playTone) playStartGateTone('uci-green');
+        const audioAllowed = voiceGuard.allowTone();
+        if (playTone && audioAllowed) playStartGateTone('uci-green');
         else releaseBmxEventAmbienceGateDuck();
         beginRaceAtGateDrop(startingTrackId, sequenceId, gateDropLocalAt);
       },
