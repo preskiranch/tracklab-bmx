@@ -13133,6 +13133,13 @@ export default function App() {
             <span>{raceWorkspaceMode === 'straight-sprint' ? 'Straight Sprint' : 'BMX Race Intervals'}</span>
             <small>{raceWorkspaceMode === 'straight-sprint' ? 'Custom sprint course' : 'Normal session order'}</small>
           </div>
+          {raceWorkspaceMode !== 'straight-sprint' && (
+            <details className="interval-training-note">
+              <summary>Fun intervals · Wattbike level 1 recommended</summary>
+              <p>Practice the rhythm of pedaling and recovery on mapped BMX tracks. Pedal zones approximate typical pedaling areas from available imagery; tracks may have changed, so they are not an exact guide to the current course.</p>
+              <p>Set your Wattbike’s physical Air resistance control to level 1. This activity aims to help you develop more efficient pedaling around a BMX track.</p>
+            </details>
+          )}
           <div className="workflow-list">
             {workflowSteps.map((step, index) => {
               if (step.kind === 'laps') {

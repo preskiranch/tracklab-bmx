@@ -9611,3 +9611,7 @@ button:focus-visible { outline-color: var(--line-strong); }
   color: var(--ink);
   border-color: var(--ink);
 }
+
+.interval-training-note { margin: 12px 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); font-size: 14px; line-height: 1.5; }
+.interval-training-note summary { cursor: pointer; font-weight: 600; }
+.interval-training-note p { margin: 10px 0 0; }

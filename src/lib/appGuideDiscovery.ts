@@ -79,6 +79,8 @@ export const discoveryGuideSections: AppGuideSection[] = [
       {
         title: 'BMX Race Intervals',
         paragraphs: [
+          'BMX Race Intervals is a fun way to practice intervals using mapped BMX tracks. Pedal zones represent typical places a rider might pedal, based on the imagery available when the course was mapped. They are approximate: track layouts may have changed, and the mapping is not an exact reproduction of every current track or riding line.',
+          'For BMX Race Intervals, we recommend setting your Wattbike to level 1 using its physical Air resistance control. TrackLab does not change that control for you. The activity is designed to help riders practice the rhythm of pedaling and recovery around a BMX track, with the aim of improving pedaling efficiency; improvement is not guaranteed.',
           'Choose an available mapped BMX course, assign the riding athletes to their connected bikes, and work through the race setup. The course’s pedal zones and coasting or technical sections shape the session. The start sequence launches the race, and rider progress and results follow the mapped course.',
           'Courses with saved alternatives offer Amateur or Pro layouts and race lines. Pro branches retain their speed requirement at the split. Loop courses support 1–20 laps, with pedal zones repeating each lap. Optional Race commentary and Ambient track sound have separate controls; spoken commentary depends on service availability.',
         ],
