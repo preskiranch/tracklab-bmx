@@ -847,9 +847,11 @@ test('reaction card shows best clean three-run average and single best separatel
   await expect(view.locator('.reaction-attempt-label')).toHaveText('Attempt 1 of 3');
   for (let i=0;i<3;i++) {
     await recordValidRun(page,view,100);
+    if (i === 0) await expect(view.locator('.reaction-pr-badge').filter({hasText:'Single best'})).toHaveClass(/is-new-record/);
     await expect(view.locator('.reaction-attempt-label')).toHaveText(`Attempt ${i+1} of 3 · ${i===2 ? 'Group complete' : 'Recorded'}`);
   }
   await expect(view.getByLabel('Best three-attempt average')).toContainText(/0\.\d{3} sec/);
+  await expect(view.getByLabel('Best three-attempt average')).toHaveClass(/is-new-record/);
   await expect(view.locator('.reaction-series-help')).toContainText('Attempt 3 of 3 · Group complete');
   await expect(view.locator('.reaction-pr-badge').filter({hasText:'Single best'})).toContainText(/0\.\d{3} sec/);
   await expect(view.getByLabel('Best three-attempt average')).toBeInViewport();

@@ -67,6 +67,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
     Number.isFinite(personalBestMs) && Number(personalBestMs) > 0 ? Number(personalBestMs) : null
   ));
   const [newPersonalRecord, setNewPersonalRecord] = useState(false);
+  const [newAverageRecord, setNewAverageRecord] = useState(false);
   const [notice, setNotice] = useState('Press start, then tap anywhere on the race surface when you react.');
   const [saveError, setSaveError] = useState('');
   const [savedResultRevision, setSavedResultRevision] = useState(0);
@@ -86,8 +87,13 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
   const seriesTimesRef = useRef<number[]>([]);
   const [seriesCount, setSeriesCount] = useState(0);
   const [averageBestMs, setAverageBestMs] = useState<number | null>(() => recordOwner ? localReactionAverageBest(recordOwner) : null);
-  const acceptAverageBest = useCallback((value: number | null | undefined) => {
-    if (value != null && Number.isFinite(value) && value > 0) setAverageBestMs(current => Math.min(current ?? Infinity, value));
+  const averageBestRef = useRef(averageBestMs);
+  const acceptAverageBest = useCallback((value: number | null | undefined, celebrate = false) => {
+    if (value != null && Number.isFinite(value) && value > 0 && (averageBestRef.current == null || value < averageBestRef.current)) {
+      averageBestRef.current = value;
+      setAverageBestMs(value);
+      if (celebrate) setNewAverageRecord(true);
+    }
   }, []);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const sceneFrameRef = useRef<HTMLDivElement | null>(null);
@@ -176,6 +182,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
     setGateSettled(false);
     setResult(null);
     setNewPersonalRecord(false);
+    setNewAverageRecord(false);
     setSaveError('');
     setNotice('Press start, then tap anywhere on the race surface when you react.');
     setRunStateSafely('ready');
@@ -233,7 +240,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
     if (nextResult.valid && nextResult.reactionTimeMs != null) {
       const previousBest = personalBestRef.current;
       if (previousBest == null || nextResult.reactionTimeMs < previousBest) {
-        beatExistingRecord = previousBest != null;
+        beatExistingRecord = true;
         personalBestRef.current = nextResult.reactionTimeMs;
         setDisplayedPersonalBestMs(nextResult.reactionTimeMs);
       }
@@ -241,7 +248,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
     if (nextResult.falseStart) seriesTimesRef.current = [];
     else if (nextResult.valid && nextResult.reactionTimeMs != null) seriesTimesRef.current.push(nextResult.reactionTimeMs);
     if (seriesTimesRef.current.length === 3) {
-      acceptAverageBest(seriesTimesRef.current.reduce((sum, value) => sum + value, 0) / 3);
+      acceptAverageBest(seriesTimesRef.current.reduce((sum, value) => sum + value, 0) / 3, true);
       seriesTimesRef.current = [];
     }
     setSeriesCount(seriesTimesRef.current.length);
@@ -535,7 +542,7 @@ export function ReactionTestView({ onResult, personalBestMs = null, recordOwner 
                 ? '—'
                 : `${formatReactionTime(displayedPersonalBestMs)} sec`}</span>
             </div>
-            <div className="reaction-pr-badge" aria-label="Best three-attempt average">
+            <div className={`reaction-pr-badge${newAverageRecord ? ' is-new-record' : ''}`} role={newAverageRecord ? 'status' : undefined} aria-live="polite" aria-label="Best three-attempt average">
               <Trophy aria-hidden="true" size={17} /><span>Average PR · {averageBestMs == null ? '—' : `${formatReactionTime(averageBestMs)} sec`}</span>
             </div>
             <div className="reaction-series-help" aria-live="polite">
