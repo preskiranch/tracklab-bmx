@@ -13754,6 +13754,38 @@ export async function ensureClubRosterMember(ownerProfileKey, studioRiderId, rid
   return clubMemberFromRow(result?.rows?.[0]);
 }
 
+// Explicit owner enrollment: the rider identity is derived from the authenticated
+// owner, never an arbitrary athlete supplied by a client or an invite token.
+export async function connectClubOwnerAthlete(ownerProfileKey, riderName) {
+  const accountId = trainingProfileAccountId(ownerProfileKey);
+  if (!accountId) return null;
+  const studioRiderId = `owner-athlete:${accountId}`;
+  if (!pool) {
+    const clubId = memoryClubIdByOwner.get(ownerProfileKey);
+    if (!clubId) return null;
+    const key = clubMemberKey(clubId, studioRiderId);
+    const existing = memoryClubMembers.get(key);
+    if (existing?.athleteProfileKey && existing.athleteProfileKey !== ownerProfileKey) return null;
+    const now = Date.now();
+    const member = { clubId, studioRiderId, riderName, athleteProfileKey: ownerProfileKey,
+      athleteName: riderName, status: 'claimed', claimedAt: existing?.claimedAt ?? now,
+      revokedAt: null, createdAt: existing?.createdAt ?? now, updatedAt: now };
+    memoryClubMembers.set(key, member);
+    return cloneJson(member, member);
+  }
+  const result = await query(
+    `INSERT INTO ${schema}.club_members AS existing
+       (club_id, studio_rider_id, rider_name, athlete_profile_key, status, claimed_at, revoked_at, created_at, updated_at)
+     SELECT id, $2, $3, owner_profile_key, 'claimed', now(), NULL, now(), now()
+     FROM ${schema}.clubs WHERE owner_profile_key = $1
+     ON CONFLICT (club_id, studio_rider_id) DO UPDATE SET
+       rider_name = EXCLUDED.rider_name, athlete_profile_key = EXCLUDED.athlete_profile_key,
+       status = 'claimed', claimed_at = COALESCE(existing.claimed_at, now()), revoked_at = NULL, updated_at = now()
+     WHERE existing.athlete_profile_key IS NULL OR existing.athlete_profile_key = $1
+     RETURNING *`, [ownerProfileKey, studioRiderId, riderName]);
+  return clubMemberFromRow(result?.rows?.[0]);
+}
+
 export async function saveClubInvite({
   club,
   studioRiderId,

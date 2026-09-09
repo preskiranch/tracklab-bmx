@@ -24797,6 +24797,44 @@ async function serveStatic(request, response) {
     return;
   }
 
+  if (requestUrl.pathname === '/api/club-connect/owner-athlete') {
+    const session = await requireAuthSession(request, response);
+    if (!session) return;
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!canManageClubConnect(session.user)) {
+      writeJson(response, 403, { error: 'Only the studio owner can add their own athlete profile.' });
+      return;
+    }
+    const profileKey = authProfileKey(session.user);
+    const riderName = sanitizeText(session.user.displayName, 'Studio owner', 120);
+    const studioRiderId = `owner-athlete:${session.user.id}`;
+    const club = await persistence.ensureClub(profileKey, riderName, `club-${randomUUID()}`);
+    if (!club) {
+      writeJson(response, 503, { error: 'Studio storage is temporarily unavailable.' });
+      return;
+    }
+    const member = await persistence.connectClubOwnerAthlete(profileKey, riderName);
+    if (!member) {
+      writeJson(response, 409, { error: 'Your owner athlete profile could not be connected.' });
+      return;
+    }
+    await saveMergedUserData(profileKey, (current) => {
+      const riders = Array.isArray(current.studioRiders) ? current.studioRiders : [];
+      const previous = riders.find((rider) => rider.id === studioRiderId);
+      const now = Date.now();
+      return { studioRiders: [...riders.filter((rider) => rider.id !== studioRiderId), {
+        ...previous, id: studioRiderId, name: riderName,
+        ...(current.accountProfile?.photoUrl ? { photoUrl: current.accountProfile.photoUrl } : {}),
+        createdAt: previous?.createdAt ?? now, updatedAt: now, deletedAt: null,
+      }] };
+    });
+    writeJson(response, 200, { ok: true, studioRiderId, riderName });
+    return;
+  }
+
   if (requestUrl.pathname === '/api/club-connect/invites') {
     const session = await requireAuthSession(request, response);
     if (!session) return;

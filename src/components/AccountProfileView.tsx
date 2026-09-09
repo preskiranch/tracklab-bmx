@@ -35,6 +35,7 @@ import {
   clubInviteTokenFromUrl,
   clubInviteUrl,
   createClubInvite,
+  connectOwnerAthlete,
   loadClubConnect,
   revokeClubMember,
   type ClubConnectState,
@@ -927,6 +928,14 @@ export function AccountProfileView({
     });
   }, []);
 
+  const addOwnerAthlete = () => {
+    setClubBusyId('owner-athlete');
+    setClubMessage('Connecting your account to the studio athlete list…');
+    void connectOwnerAthlete().then(() => window.location.reload())
+      .catch((error: Error) => setClubMessage(error.message))
+      .finally(() => setClubBusyId(null));
+  };
+
   const inviteRider = useCallback((rider: StudioRider) => {
     if (!clubState.canManageClub) {
       setClubMessage('Only the TrackLab club owner can invite studio athletes.');
@@ -1421,6 +1430,12 @@ export function AccountProfileView({
               <span>Club Athlete</span>
             </div>
           ))}
+
+          {clubState.canManageClub && !visibleStudioRiders.some((rider) => rider.id === `owner-athlete:${profileId}` && memberByRiderId.get(rider.id)?.status === 'claimed') && (
+            <button type="button" disabled={clubBusyId === 'owner-athlete'} onClick={addOwnerAthlete}>
+              Use my account as a studio athlete
+            </button>
+          )}
 
           {clubState.canManageClub && visibleStudioRiders.length > 0 && (
             <div className="club-owner-roster">

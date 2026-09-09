@@ -97,6 +97,10 @@ export async function loadClubConnect() {
   return normalizeState(await clubFetch('/api/club-connect'));
 }
 
+export async function connectOwnerAthlete() {
+  return clubFetch('/api/club-connect/owner-athlete', { method: 'POST' });
+}
+
 export async function createClubInvite(studioRiderId: string) {
   return clubFetch('/api/club-connect/invites', {
     method: 'POST',

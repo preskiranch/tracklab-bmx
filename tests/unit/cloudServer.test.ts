@@ -8309,6 +8309,47 @@ describe('cloud API trust boundaries', () => {
     cookie = originalCookie;
   });
 
+  it('enrolls only the signed-in owner as an athlete without replacing the studio roster', async () => {
+    const originalCookie = cookie;
+    cookie = '';
+    expect((await api('/api/club-connect/owner-athlete', { method: 'POST' })).status).toBe(401);
+    cookie = secondaryCookie;
+    expect((await api('/api/club-connect/owner-athlete', { method: 'POST' })).status).toBe(403);
+    const login = await api('/api/auth/login', {
+      method: 'POST', headers: { 'X-Forwarded-For': '198.51.100.244' },
+      body: JSON.stringify({ email: 'club-owner-admin@tracklab.test', password: 'correct-horse-battery-staple' }),
+    });
+    expect(login.status).toBe(200);
+    cookie = String(login.headers.get('set-cookie')).split(';')[0];
+    const owner = (await login.json()).user;
+    const before = await (await api('/api/user-data')).json();
+    const first = await api('/api/club-connect/owner-athlete', {
+      method: 'POST', body: JSON.stringify({ studioRiderId: 'shared-tablet-rider-one', athleteProfileKey: 'user:someone-else' }),
+    });
+    expect(first.status).toBe(200);
+    const ownAthlete = await first.json();
+    expect(ownAthlete.studioRiderId).toBe(`owner-athlete:${owner.id}`);
+    expect((await api('/api/club-connect/owner-athlete', { method: 'POST' })).status).toBe(200);
+    const after = await (await api('/api/user-data')).json();
+    expect(after.studioRiders.filter((rider: {id: string}) => rider.id === ownAthlete.studioRiderId)).toHaveLength(1);
+    for (const rider of before.studioRiders) expect(after.studioRiders).toContainEqual(rider);
+    const state = await (await api('/api/club-connect')).json();
+    expect(state.ownedClub.members.find((member: {studioRiderId: string}) => member.studioRiderId === ownAthlete.studioRiderId))
+      .toMatchObject({ status: 'claimed', athleteName: ownAthlete.riderName });
+    const enrollment = await api('/api/club-tablet/devices', { method: 'POST', body: JSON.stringify({ name: 'Owner Athlete Test' }) });
+    expect(enrollment.status).toBe(201);
+    const enrolled = await enrollment.json();
+    cookie = '';
+    const roster = await api('/api/club-tablet/roster', { headers: { Authorization: `Bearer ${enrolled.deviceToken}` } });
+    expect(roster.status).toBe(200);
+    expect((await roster.json()).athletes).toContainEqual(expect.objectContaining({
+      studioRiderId: ownAthlete.studioRiderId, riderName: ownAthlete.riderName, status: 'claimed',
+    }));
+    // Device enrollment and owner-athlete selection never give the kiosk an owner login.
+    expect((await api('/api/user-data', { headers: { Authorization: `Bearer ${enrolled.deviceToken}` } })).status).toBe(401);
+    cookie = originalCookie;
+  });
+
   it('returns actionable client errors for malformed and oversized JSON', async () => {
     const malformed = await api('/api/auth/login', {
       method: 'POST',
