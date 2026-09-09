@@ -1,3 +1,4 @@
+import type { ConnectedBikeDevice } from '../types';
 import { isTrackLabNativeShell } from './serviceOrigins';
 
 export type AdminAnalytics = {
@@ -10,9 +11,15 @@ export type AdminAnalytics = {
   active: { daily: number; weekly: number; monthly: number };
   activity: { activity: string; sessions: number }[];
   reactions: number;
+  wattbikes?: { platform: string; connections: number; reporting: number; connectedSessions: number }[];
   requests: { track_id: string; requests: number }[];
 };
 
+let wattbikeConnections: number | undefined;
+export function reportedWattbikeCount(devices: ConnectedBikeDevice[]) {
+  return new Set(devices.filter(d => d.connected && d.source !== 'sim' && d.source !== 'demo').map(d => d.deviceId)).size;
+}
+export function setAnalyticsWattbikeConnections(devices: ConnectedBikeDevice[]) { wattbikeConnections = reportedWattbikeCount(devices); }
 let appVisible = false;
 let screenChanged = () => {};
 export function setAnalyticsAppVisible(visible: boolean) { appVisible = visible; screenChanged(); }
@@ -44,7 +51,7 @@ export function startAdminAnalytics() {
     void fetch('/api/usage-event', {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ visitId, platform, page: currentPage(), kind }),
+      body: JSON.stringify({ visitId, platform, page: currentPage(), kind, wattbikeConnections }),
     }).catch(() => undefined);
   };
   let lastPage = currentPage();

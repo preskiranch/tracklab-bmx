@@ -41,6 +41,10 @@ export function AdminAnalyticsPanel() {
         <Stat title="Parent / family accounts" value={data.family.parents} detail={`${n(data.family.children)} managed child profiles · ${n(data.family.linked)} linked profiles`} />
       </div>
       <div className="admin-detail-grid">
+        <section className="admin-detail-card"><h2>Wattbike connections</h2>
+          {data.wattbikes?.length ? <div className="admin-active-counts">{data.wattbikes.map(row => <Stat key={row.platform} title={row.platform === 'ios' ? 'iOS connections' : 'Website connections'} value={row.connections} detail={`${n(row.connectedSessions)} connected sessions / ${n(row.reporting)} reporting sessions`} />)}</div> : <p>No recent connection reports available.</p>}
+          <p>Latest reported connected bikes from sessions seen within 5 minutes. Counts update on Refresh; this is not an instantaneous live count. Demo bikes and administrator sessions are excluded. Older app builds do not report connections. No bike identifiers or power measurements are collected here.</p>
+        </section>
         <section className="admin-detail-card"><h2>Active signed-in accounts</h2>
           <div className="admin-active-counts"><Stat title="Today" value={data.active.daily}/><Stat title="7 days" value={data.active.weekly}/><Stat title="30 days" value={data.active.monthly}/></div>
           <p>Distinct account logins seen using the app. Child-only devices and anonymous visitors are not counted as separate account logins.</p>

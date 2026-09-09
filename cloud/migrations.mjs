@@ -2479,6 +2479,16 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
         `ALTER TABLE ${schema}.rooms ADD COLUMN IF NOT EXISTS student_activity TEXT`,
       ],
     },
+    {
+      version: 55,
+      name: 'aggregate Wattbike connection reporting',
+      statements: [
+        `CREATE TABLE ${schema}.analytics_wattbike_status (
+          visit_id UUID NOT NULL, platform TEXT NOT NULL CHECK(platform IN ('web','ios')),
+          connections INTEGER NOT NULL CHECK(connections BETWEEN 0 AND 4),
+          last_seen TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY(visit_id,platform))`,
+      ],
+    },
   ];
 }
 

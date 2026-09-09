@@ -21820,6 +21820,9 @@ export async function recordAdminAnalytics(event, userId = null) {
     VALUES((now() AT TIME ZONE 'UTC')::date,$1,$2,$3,$4)
     ON CONFLICT(day,visit_id,page,platform) DO UPDATE SET views=LEAST(10000,analytics_visits.views+EXCLUDED.views),last_seen=now()`,
     [event.visitId,event.platform,event.page,event.kind === 'view' ? 1 : 0]);
+  if (event.wattbikeConnections !== undefined) await query(`INSERT INTO ${schema}.analytics_wattbike_status(visit_id,platform,connections)
+    VALUES($1,$2,$3) ON CONFLICT(visit_id,platform) DO UPDATE SET connections=EXCLUDED.connections,last_seen=now()`,
+    [event.visitId,event.platform,event.wattbikeConnections]);
   if (userId) await query(`INSERT INTO ${schema}.analytics_active_accounts(day,user_id,platform)
     SELECT (now() AT TIME ZONE 'UTC')::date,id,$2 FROM ${schema}.auth_users WHERE id=$1
     ON CONFLICT DO NOTHING`, [userId,event.platform]);
@@ -21830,7 +21833,8 @@ export async function loadAdminAnalytics(days) {
   const since=start.toISOString();
   await query(`DELETE FROM ${schema}.analytics_visits WHERE day < CURRENT_DATE - 90`);
   await query(`DELETE FROM ${schema}.analytics_active_accounts WHERE day < CURRENT_DATE - 90`);
-  const [accounts, family, traffic, daily, pages, active, activity, requests, tracking, reactions] = await Promise.all([
+  await query(`DELETE FROM ${schema}.analytics_wattbike_status WHERE last_seen < now()-interval '1 day'`);
+  const [accounts, family, traffic, daily, pages, active, activity, requests, tracking, reactions, wattbikes] = await Promise.all([
     query(`SELECT count(*)::int AS total, count(*) FILTER(WHERE email_verified_at IS NOT NULL)::int AS verified,
       count(*) FILTER(WHERE created_at >= $1)::int AS new FROM ${schema}.auth_users`,[since]),
     query(`SELECT count(*) FILTER(WHERE kind='managed')::int AS children,count(*) FILTER(WHERE kind='linked')::int AS linked,count(DISTINCT parent_user_id)::int AS parents FROM ${schema}.family_children WHERE revoked_at IS NULL`),
@@ -21848,8 +21852,11 @@ export async function loadAdminAnalytics(days) {
     query(`SELECT track_id,count(*)::int AS requests FROM ${schema}.track_mapping_requests WHERE created_at >= $1 GROUP BY track_id ORDER BY requests DESC LIMIT 10`,[since]),
     query(`SELECT applied_at FROM ${schema}.schema_migrations WHERE version=53`),
     query(`SELECT count(*)::int AS attempts FROM ${schema}.reaction_test_attempts WHERE created_at >= $1`,[since]),
+    query(`SELECT platform,sum(connections)::int AS connections,count(*)::int AS reporting,
+      count(*) FILTER(WHERE connections>0)::int AS "connectedSessions"
+      FROM ${schema}.analytics_wattbike_status WHERE last_seen > now()-interval '5 minutes' GROUP BY platform`),
   ]);
   return { generatedAt:new Date().toISOString(),since,days,trackingSince:tracking.rows[0]?.applied_at,
     accounts:accounts.rows[0],family:family.rows[0],traffic:traffic.rows,daily:daily.rows,pages:pages.rows,
-    active:active.rows[0],activity:activity.rows,reactions:reactions.rows[0].attempts,requests:requests.rows };
+    active:active.rows[0],activity:activity.rows,reactions:reactions.rows[0].attempts,requests:requests.rows,wattbikes:wattbikes.rows };
 }

@@ -1,6 +1,6 @@
 import { ClubStudentLobby } from './components/ClubStudentLobby';
 import { hasPlayableIntervalZones, playableIntervalTracks } from './lib/playableIntervalTracks';
-import { setAnalyticsAppVisible } from './lib/adminAnalytics';
+import { setAnalyticsAppVisible, setAnalyticsWattbikeConnections } from './lib/adminAnalytics';
 import { childDeviceTokenFromHref } from './lib/childDevices';
 import {
   lazy,
@@ -4261,6 +4261,7 @@ export default function App() {
     connectedBikeRosterRef.current = stableRoster;
     return stableRoster;
   }, [bluetooth.devices, bridge.devices, clubTabletKioskMode, connectedBikeSamples, liveBikeSeatLimit, now]);
+  useEffect(() => { setAnalyticsWattbikeConnections(connectedBikeDevices); }, [connectedBikeDevices]);
   const connectedBikeDeviceById = useMemo(
     () => new Map(connectedBikeDevices.map((device) => [device.deviceId, device])),
     [connectedBikeDevices],
