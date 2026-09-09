@@ -1,3 +1,4 @@
+import { setAnalyticsAppVisible } from './lib/adminAnalytics';
 import { childDeviceTokenFromHref } from './lib/childDevices';
 import {
   lazy,
@@ -2105,6 +2106,7 @@ export default function App() {
       typeof window === 'undefined' ? '/' : window.location.href,
     ),
   );
+  useEffect(() => { setAnalyticsAppVisible(!showMembershipLanding); }, [showMembershipLanding]);
   const [appleConnectionCount, setAppleConnectionCount] = useState(() => (
     clampAppleWattbikeConnections(initialMembershipRef.current?.bikeSeats ?? 1)
   ));

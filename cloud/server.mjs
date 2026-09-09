@@ -1,3 +1,4 @@
+import { normalizeAnalyticsEvent, analyticsDays } from './adminAnalytics.mjs';
 import { createMappingRequestStore, isPlayableIntervalMapping, sendMappingRequestEmail } from './trackMappingRequests.mjs';
 import { accountEmailConfigured, accountEmailVerificationEnabled, accountEmailHash, validAccountEmailToken, sendAccountEmail } from './accountEmail.mjs';
 import { createReadStream } from 'node:fs';
@@ -20842,6 +20843,24 @@ async function serveStatic(request, response) {
 
     cloudTelemetry.increment('tracklab_map_3d_loads_total', { context });
     writeJson(response, 201, { recorded: true });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/usage-event' && request.method === 'POST') {
+    if (!enforceNoStoreRateLimit(request, response, betaAccessRateLimiter, 12000, 'usage-event')) return;
+    const event = normalizeAnalyticsEvent(await readJsonBody(request, 1000));
+    if (!event) { writeJson(response,400,{error:'Invalid usage event'}); return; }
+    const session = await currentAuthSession(request, personalAuthSessions);
+    if (!isAdminEmail(session?.user?.email)) await persistence.recordAdminAnalytics(event, session?.user?.id ?? null);
+    writeJson(response,200,{ok:true},{'Cache-Control':'no-store'}); return;
+  }
+  if (requestUrl.pathname === '/api/admin/analytics') {
+    response.setHeader('Cache-Control', 'no-store');
+    const session = await requireAuthSession(request,response); if (!session) return;
+    if (!isAdminEmail(session.user.email)) { writeJson(response,403,{error:'Administrator access required'}); return; }
+    if (request.method !== 'GET') { writeJson(response,405,{error:'Method not allowed'}); return; }
+    try { writeJson(response,200,await persistence.loadAdminAnalytics(analyticsDays(requestUrl.searchParams.get('days'))),{'Cache-Control':'no-store'}); }
+    catch { writeJson(response,503,{error:'Analytics is temporarily unavailable. Please try again.'},{'Cache-Control':'no-store'}); }
     return;
   }
 

@@ -2457,6 +2457,21 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
         )`,
       ],
     },
+    {
+      version: 53,
+      name: 'private aggregate administrator analytics',
+      statements: [
+        `CREATE TABLE ${schema}.analytics_visits (
+          day DATE NOT NULL DEFAULT CURRENT_DATE, visit_id UUID NOT NULL,
+          platform TEXT NOT NULL CHECK(platform IN ('web','ios')),
+          page TEXT NOT NULL, views INTEGER NOT NULL DEFAULT 0,
+          last_seen TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY(day,visit_id,page,platform))`,
+        `CREATE TABLE ${schema}.analytics_active_accounts (
+          day DATE NOT NULL DEFAULT CURRENT_DATE,
+          user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          platform TEXT NOT NULL, PRIMARY KEY(day,user_id,platform))`,
+      ],
+    },
   ];
 }
 

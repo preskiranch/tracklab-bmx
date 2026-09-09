@@ -103,7 +103,7 @@ function PrivacyPage() {
           This notice describes the current TrackLab BMX web and iPhone/iPad app behavior. TrackLab combines
           Wattbike telemetry, mapped tracks, training history, multiplayer rooms, and optional AI commentary.
         </p>
-        <span className="public-info-updated">Last updated September 6, 2026</span>
+        <span className="public-info-updated">Last updated September 8, 2026</span>
       </section>
 
       <section className="public-info-summary" aria-label="Privacy summary">
@@ -249,6 +249,10 @@ function PrivacyPage() {
             </div>
           </section>
 
+          <section className="public-info-analytics">
+            <h2>Basic usage statistics</h2>
+            <p>TrackLab uses first-party usage counts to understand website and app sessions, screen views and active accounts. A random session identifier is stored in session storage; it is not used for advertising or tracking across other websites. These events do not include page URLs, invite links, precise location, names or fitness measurements. Signed-in activity may be associated with your account ID for aggregate active-account counts. The dashboard is restricted to administrators. Usage records older than 90 days are removed during routine cleanup. Browser Do Not Track and Global Privacy Control preferences disable this usage reporting.</p>
+          </section>
           <section id="privacy-use">
             <span className="public-info-section-icon"><Bike aria-hidden="true" /></span>
             <div>

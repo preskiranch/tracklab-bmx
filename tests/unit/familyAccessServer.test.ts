@@ -265,3 +265,23 @@ it('assigns only the selected managed child and replaces only this parent sessio
   expect((await api('/api/family', parent)).status).toBe(401);
   expect((await api('/api/family', anotherPhone)).status).toBe(200);
 });
+
+
+describe('administrator analytics access', () => {
+  it('blocks anonymous users and ordinary accounts, and never returns fabricated totals without a database', async () => {
+    expect((await api('/api/admin/analytics')).status).toBe(401);
+    const normal = await register('Analytics viewer');
+    expect((await api('/api/admin/analytics', normal)).status).toBe(403);
+    const login = await api('/api/auth/login', undefined, { email: 'family-club@tracklab.test', password: 'tracklab-family-test-password' });
+    const admin = login.ok ? { cookie: login.headers.get('set-cookie')!.split(';')[0], user: (await login.json()).user } : await register('Analytics admin', 'family-club@tracklab.test');
+    const response = await api('/api/admin/analytics', admin);
+    expect(response.status).toBe(503);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+  });
+  it('rejects malformed session IDs and arbitrary private page paths', async () => {
+    const event = { visitId: '12345678-1234-1234-1234-123456789abc', platform: 'web', kind: 'view', page: 'home' };
+    expect((await api('/api/usage-event', undefined, { ...event, visitId: '-'.repeat(36) })).status).toBe(400);
+    expect((await api('/api/usage-event', undefined, { ...event, page: '/claim?token=private' })).status).toBe(400);
+    expect((await api('/api/usage-event', undefined, event)).status).toBe(200);
+  });
+});

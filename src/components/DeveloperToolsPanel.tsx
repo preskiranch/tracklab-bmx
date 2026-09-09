@@ -1,3 +1,4 @@
+import { AdminAnalyticsPanel } from './AdminAnalyticsPanel';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
@@ -45,6 +46,13 @@ function monthLabel(value: string) {
 }
 
 export function DeveloperToolsPanel() {
+  const [tab, setTab] = useState<'overview' | 'maps'>('overview');
+  return <div className="admin-tools-shell"><nav className="admin-tools-tabs" aria-label="Developer tools">
+    <button aria-pressed={tab === 'overview'} onClick={() => setTab('overview')}>Overview</button>
+    <button aria-pressed={tab === 'maps'} onClick={() => setTab('maps')}>3D usage</button>
+  </nav>{tab === 'overview' ? <AdminAnalyticsPanel /> : <MapUsageTools />}</div>;
+}
+function MapUsageTools() {
   const [usage, setUsage] = useState<Map3DUsage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

@@ -21804,3 +21804,49 @@ export async function authSessionStillValid(hash) {
   const result=await query(`SELECT 1 FROM ${schema}.auth_sessions WHERE token_hash=$1 AND expires_at>now()`,[hash]);
   return Boolean(result?.rowCount);
 }
+
+let analyticsLastCleanup = 0;
+export async function recordAdminAnalytics(event, userId = null) {
+  if (!pool) return;
+  if (Date.now() - analyticsLastCleanup > 86_400_000) {
+    await query(`DELETE FROM ${schema}.analytics_visits WHERE day < CURRENT_DATE - 90`);
+    await query(`DELETE FROM ${schema}.analytics_active_accounts WHERE day < CURRENT_DATE - 90`);
+    analyticsLastCleanup = Date.now();
+  }
+  await query(`INSERT INTO ${schema}.analytics_visits(day,visit_id,platform,page,views)
+    VALUES((now() AT TIME ZONE 'UTC')::date,$1,$2,$3,$4)
+    ON CONFLICT(day,visit_id,page,platform) DO UPDATE SET views=LEAST(10000,analytics_visits.views+EXCLUDED.views),last_seen=now()`,
+    [event.visitId,event.platform,event.page,event.kind === 'view' ? 1 : 0]);
+  if (userId) await query(`INSERT INTO ${schema}.analytics_active_accounts(day,user_id,platform)
+    SELECT (now() AT TIME ZONE 'UTC')::date,id,$2 FROM ${schema}.auth_users WHERE id=$1
+    ON CONFLICT DO NOTHING`, [userId,event.platform]);
+}
+export async function loadAdminAnalytics(days) {
+  if (!pool) throw new Error('Analytics requires the production database.');
+  const start = new Date(); start.setUTCHours(0,0,0,0); start.setUTCDate(start.getUTCDate()-days+1);
+  const since=start.toISOString();
+  await query(`DELETE FROM ${schema}.analytics_visits WHERE day < CURRENT_DATE - 90`);
+  await query(`DELETE FROM ${schema}.analytics_active_accounts WHERE day < CURRENT_DATE - 90`);
+  const [accounts, family, traffic, daily, pages, active, activity, requests, tracking, reactions] = await Promise.all([
+    query(`SELECT count(*)::int AS total, count(*) FILTER(WHERE email_verified_at IS NOT NULL)::int AS verified,
+      count(*) FILTER(WHERE created_at >= $1)::int AS new FROM ${schema}.auth_users`,[since]),
+    query(`SELECT count(*) FILTER(WHERE kind='managed')::int AS children,count(*) FILTER(WHERE kind='linked')::int AS linked,count(DISTINCT parent_user_id)::int AS parents FROM ${schema}.family_children WHERE revoked_at IS NULL`),
+    query(`SELECT platform,count(DISTINCT visit_id)::int AS visits,coalesce(sum(views),0)::int AS views,
+      count(DISTINCT visit_id) FILTER(WHERE last_seen > now()-interval '5 minutes')::int AS online
+      FROM ${schema}.analytics_visits WHERE day >= $1::date GROUP BY platform`,[since]),
+    query(`SELECT day::text,count(DISTINCT visit_id)::int AS visits,coalesce(sum(views),0)::int AS views
+      FROM ${schema}.analytics_visits WHERE day >= $1::date GROUP BY day ORDER BY day`,[since]),
+    query(`SELECT page,sum(views)::int AS views FROM ${schema}.analytics_visits WHERE day >= $1::date GROUP BY page ORDER BY views DESC`,[since]),
+    query(`SELECT count(DISTINCT user_id) FILTER(WHERE day >= (now() AT TIME ZONE 'UTC')::date)::int AS daily,
+      count(DISTINCT user_id) FILTER(WHERE day >= (now() AT TIME ZONE 'UTC')::date-6)::int AS weekly,
+      count(DISTINCT user_id) FILTER(WHERE day >= (now() AT TIME ZONE 'UTC')::date-29)::int AS monthly FROM ${schema}.analytics_active_accounts`),
+    query(`SELECT activity_type AS activity,count(DISTINCT id)::int AS sessions FROM ${schema}.training_sessions
+      WHERE started_at >= $1 AND source <> 'demo' GROUP BY activity_type ORDER BY sessions DESC`,[since]),
+    query(`SELECT track_id,count(*)::int AS requests FROM ${schema}.track_mapping_requests WHERE created_at >= $1 GROUP BY track_id ORDER BY requests DESC LIMIT 10`,[since]),
+    query(`SELECT applied_at FROM ${schema}.schema_migrations WHERE version=53`),
+    query(`SELECT count(*)::int AS attempts FROM ${schema}.reaction_test_attempts WHERE created_at >= $1`,[since]),
+  ]);
+  return { generatedAt:new Date().toISOString(),since,days,trackingSince:tracking.rows[0]?.applied_at,
+    accounts:accounts.rows[0],family:family.rows[0],traffic:traffic.rows,daily:daily.rows,pages:pages.rows,
+    active:active.rows[0],activity:activity.rows,reactions:reactions.rows[0].attempts,requests:requests.rows };
+}

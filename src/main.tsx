@@ -1,3 +1,4 @@
+import { startAdminAnalytics } from './lib/adminAnalytics';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { bootstrapNativeBluetooth } from './lib/nativeBluetoothBootstrap';
@@ -42,6 +43,7 @@ async function bootstrap() {
     // build's capacitor-origin localStorage credential.
     await restoreNativeClubTabletCredential();
   }
+  startAdminAnalytics();
   const publicPage = resolvePublicPage(window.location.pathname);
   let pageContent;
 
