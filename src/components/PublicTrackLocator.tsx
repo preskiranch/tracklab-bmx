@@ -1,3 +1,4 @@
+import { isRacingDirectoryTrack } from '../lib/racingTrackDirectory';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   Check,
@@ -179,7 +180,7 @@ export function PublicTrackLocator({
   const shareDialogRef = useRef<HTMLElement | null>(null);
   const shareTriggerRef = useRef<HTMLButtonElement | null>(null);
   const randomTrackIdRef = useRef<string | null>(initialLocator.id || initialLocator.invalid || initialResumeState ? 'restored' : null);
-  const directoryTracks: TrackLocatorRecord[] = publicTracks ?? tracks;
+  const directoryTracks = useMemo(() => (publicTracks ?? tracks).filter(isRacingDirectoryTrack), [publicTracks, tracks]);
   const directoryReady = publicTracks !== null || (publicDirectoryFailed && catalogReady);
 
   useEffect(() => {
@@ -674,7 +675,7 @@ export function PublicTrackLocator({
           <div>
             <span className="eyebrow"><Globe2 size={14} /> Global BMX directory</span>
             <h2 id="public-track-locator-title">Find a BMX racing track</h2>
-            <p>Search verified federation directories and community track records, then inspect each track in your preferred mapping app.</p>
+            <p>Search BMX racing venues from federation and sanctioning-body directories. Unverified community-map locations are excluded.</p>
           </div>
           <strong>{directoryReady
             ? `${directoryTracks.length.toLocaleString()} ${directoryTracks.length === 1 ? 'track' : 'tracks'}`

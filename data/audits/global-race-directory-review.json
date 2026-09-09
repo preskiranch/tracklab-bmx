@@ -1,0 +1,4403 @@
+{
+  "scope": "Global BMX track search only; training catalog and history preserved",
+  "included": 677,
+  "pendingReview": 628,
+  "records": [
+    {
+      "id": "osm-gb-the-bmx-track-way-928922148",
+      "name": "'The BMX track'",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/928922148",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-1-bmx-club-koln-node-371728201",
+      "name": "1. BMX Club Köln",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/node/371728201",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-it-agsm-aim-bmx-olympic-arena-verona-way-624493127",
+      "name": "AGSM AIM BMX Olympic Arena Verona",
+      "country": "Italy",
+      "sourceUrl": "https://www.openstreetmap.org/way/624493127",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-it-airbag-way-1274372513",
+      "name": "Airbag",
+      "country": "Italy",
+      "sourceUrl": "https://www.openstreetmap.org/way/1274372513",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-airvolkspark-way-112519425",
+      "name": "AirVolksPark",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/112519425",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-se-alvsjo-bmx-bana-way-377428785",
+      "name": "Älvsjö BMX bana",
+      "country": "Sweden",
+      "sourceUrl": "https://www.openstreetmap.org/way/377428785",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-br-area-de-bicicross-way-380104694",
+      "name": "Área de Bicicross",
+      "country": "Brazil",
+      "sourceUrl": "https://www.openstreetmap.org/way/380104694",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ar-asociacion-de-bicicross-bahiense-way-1226974367",
+      "name": "Asociación de Bicicross Bahiense",
+      "country": "Argentina",
+      "sourceUrl": "https://www.openstreetmap.org/way/1226974367",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bad-kleinkirchheimer-bike-parcours-way-1425418350",
+      "name": "Bad Kleinkirchheimer Bike Parcours",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/1425418350",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-baden-to-the-bone-way-161801596",
+      "name": "Baden to the Bone",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/161801596",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-it-balance-way-1274392747",
+      "name": "Balance",
+      "country": "Italy",
+      "sourceUrl": "https://www.openstreetmap.org/way/1274392747",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bartley-park-bmx-track-way-204066117",
+      "name": "Bartley Park BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/204066117",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-basurtu-zorrotza-way-1314608655",
+      "name": "Basurtu-Zorrotza",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/1314608655",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-beech-rec-bmx-track-way-907804288",
+      "name": "Beech Rec BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/907804288",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-beechwood-park-bmx-track-way-910468680",
+      "name": "Beechwood Park BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/910468680",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-beginner-return-route-way-468773542",
+      "name": "Beginner Return Route",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/468773542",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bells-lane-bmx-track-way-465430000",
+      "name": "Bells Lane BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/465430000",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-belvoir-bmx-track-way-863669126",
+      "name": "Belvoir BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/863669126",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bexhill-bmx-race-track-relation-6628503",
+      "name": "Bexhill BMX Race Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/relation/6628503",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-br-bicicross-way-309712147",
+      "name": "Bicicross",
+      "country": "Brazil",
+      "sourceUrl": "https://www.openstreetmap.org/way/309712147",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-br-bicicross-way-557704949",
+      "name": "Bicicross",
+      "country": "Brazil",
+      "sourceUrl": "https://www.openstreetmap.org/way/557704949",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cl-bicicross-parque-araucano-way-234140442",
+      "name": "Bicicross Parque Araucano",
+      "country": "Chile",
+      "sourceUrl": "https://www.openstreetmap.org/way/234140442",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ar-bicicross-santa-rosa-way-1475164537",
+      "name": "Bicicross Santa Rosa",
+      "country": "Argentina",
+      "sourceUrl": "https://www.openstreetmap.org/way/1475164537",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-bo-bicicross-villa-olimpica-way-840406079",
+      "name": "Bicicross Villa Olímpica",
+      "country": "Bolivia",
+      "sourceUrl": "https://www.openstreetmap.org/way/840406079",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bideford-bmx-club-way-1189907980",
+      "name": "Bideford BMX Club",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/1189907980",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bike-anstalt-e-v-way-731791294",
+      "name": "Bike Anstalt e.V.",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/731791294",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-bike-circuit-way-765241042",
+      "name": "Bike Circuit",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/765241042",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bike-parcours-umhausen-way-1332948344",
+      "name": "Bike Parcours Umhausen",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/1332948344",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bike-parcours-way-1115676893",
+      "name": "Bike-Parcours",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1115676893",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bike-park-way-992045314",
+      "name": "Bike-Park",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/992045314",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bike-park-way-504602647",
+      "name": "Bike-Park",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/504602647",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bike-park-wiesent-way-576024336",
+      "name": "Bike-Park Wiesent",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/576024336",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-bikelamola-way-1057153228",
+      "name": "Bikelamola",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/1057153228",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bikemotorikpark-wels-way-167362378",
+      "name": "Bikemotorikpark Wels",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/167362378",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bikeparcours-friedrichshafen-way-131972185",
+      "name": "Bikeparcours Friedrichshafen",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/131972185",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bikeplatz-barwand-way-825886827",
+      "name": "Bikeplatz Bärwand",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/825886827",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bikerbahn-way-230273744",
+      "name": "Bikerbahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/230273744",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-biketrack-leopoldstal-way-1333866828",
+      "name": "Biketrack Leopoldstal",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1333866828",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cz-biketrial-track-way-670008419",
+      "name": "Biketrial track",
+      "country": "Czech Republic",
+      "sourceUrl": "https://www.openstreetmap.org/way/670008419",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-sk-bikros-puchov-way-199363609",
+      "name": "Bikros Púchov",
+      "country": "Slovakia",
+      "sourceUrl": "https://www.openstreetmap.org/way/199363609",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cz-bikrosova-trat-way-655039413",
+      "name": "bikrosová trať",
+      "country": "Czech Republic",
+      "sourceUrl": "https://www.openstreetmap.org/way/655039413",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cz-bikrosove-hriste-klub-bmx-way-368124659",
+      "name": "Bikrosové hřiště (klub BMX)",
+      "country": "Czech Republic",
+      "sourceUrl": "https://www.openstreetmap.org/way/368124659",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bird-in-bush-bmx-track-way-35448957",
+      "name": "Bird in Bush BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/35448957",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-birmingham-bmx-race-track-way-906810841",
+      "name": "Birmingham BMX Race Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/906810841",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-dk-bjerregaards-compound-way-437366983",
+      "name": "Bjerregaards Compound",
+      "country": "Denmark",
+      "sourceUrl": "https://www.openstreetmap.org/way/437366983",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-dk-bjerringbro-bmx-klub-node-12806135047",
+      "name": "Bjerringbro BMX klub",
+      "country": "Denmark",
+      "sourceUrl": "https://www.openstreetmap.org/node/12806135047",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-blackpool-bmx-club-way-302164863",
+      "name": "Blackpool BMX Club",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/302164863",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-way-1011286113",
+      "name": "bmx",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1011286113",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ar-bmx-way-386333996",
+      "name": "BMX",
+      "country": "Argentina",
+      "sourceUrl": "https://www.openstreetmap.org/way/386333996",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-way-628266943",
+      "name": "BMX",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/628266943",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-way-974812418",
+      "name": "BMX",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/974812418",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-way-194652434",
+      "name": "BMX",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/194652434",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-way-949851415",
+      "name": "BMX",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/949851415",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-way-1061533005",
+      "name": "BMX",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/1061533005",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cl-bmx-way-1144569419",
+      "name": "BMX",
+      "country": "Chile",
+      "sourceUrl": "https://www.openstreetmap.org/way/1144569419",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cz-bmx-way-507088466",
+      "name": "BMX",
+      "country": "Czech Republic",
+      "sourceUrl": "https://www.openstreetmap.org/way/507088466",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cz-bmx-way-1354914876",
+      "name": "BMX",
+      "country": "Czech Republic",
+      "sourceUrl": "https://www.openstreetmap.org/way/1354914876",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cz-bmx-way-916939566",
+      "name": "BMX",
+      "country": "Czech Republic",
+      "sourceUrl": "https://www.openstreetmap.org/way/916939566",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-node-1831847239",
+      "name": "BMX",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/node/1831847239",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-it-bmx-way-1226709987",
+      "name": "BMX",
+      "country": "Italy",
+      "sourceUrl": "https://www.openstreetmap.org/way/1226709987",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-bmx-way-928413855",
+      "name": "BMX",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/way/928413855",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-pt-bmx-node-2388620228",
+      "name": "BMX",
+      "country": "Portugal",
+      "sourceUrl": "https://www.openstreetmap.org/node/2388620228",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ch-bmx-way-144840385",
+      "name": "BMX",
+      "country": "Switzerland",
+      "sourceUrl": "https://www.openstreetmap.org/way/144840385",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ch-bmx-way-1126235147",
+      "name": "BMX",
+      "country": "Switzerland",
+      "sourceUrl": "https://www.openstreetmap.org/way/1126235147",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ch-bmx-node-2357808750",
+      "name": "BMX",
+      "country": "Switzerland",
+      "sourceUrl": "https://www.openstreetmap.org/node/2357808750",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ua-bmx-way-465861166",
+      "name": "BMX",
+      "country": "Ukraine",
+      "sourceUrl": "https://www.openstreetmap.org/way/465861166",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-way-1145100412",
+      "name": "BMX",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/1145100412",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-way-1073904496",
+      "name": "BMX",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/1073904496",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-strecke-way-101948694",
+      "name": "BMX - Strecke",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/101948694",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-fi-bmx-rata-way-1216027717",
+      "name": "BMX -rata",
+      "country": "Finland",
+      "sourceUrl": "https://www.openstreetmap.org/way/1216027717",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-bmx-apeldoorn-node-2685595929",
+      "name": "BMX Apeldoorn",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/node/2685595929",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cz-bmx-arena-repy-way-58998065",
+      "name": "BMX aréna Řepy",
+      "country": "Czech Republic",
+      "sourceUrl": "https://www.openstreetmap.org/way/58998065",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-arena-rsc-ahnatal-relation-5669064",
+      "name": "BMX Arena RSC Ahnatal",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/relation/5669064",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-bmx-baan-way-1141442242",
+      "name": "BMX baan",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/way/1141442242",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-bahn-way-285341493",
+      "name": "BMX Bahn",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/285341493",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-bahn-node-330329506",
+      "name": "BMX Bahn",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/node/330329506",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-bahn-way-363493140",
+      "name": "BMX Bahn",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/363493140",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-bahn-way-600099121",
+      "name": "BMX Bahn",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/600099121",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-bahn-node-9785289118",
+      "name": "BMX Bahn",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/node/9785289118",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-bahn-node-7637345254",
+      "name": "BMX Bahn",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/node/7637345254",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-144345594",
+      "name": "BMX Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/144345594",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-154336081",
+      "name": "BMX Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/154336081",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-49051308",
+      "name": "BMX Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/49051308",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-558083977",
+      "name": "BMX Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/558083977",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-440847423",
+      "name": "BMX Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/440847423",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-178128880",
+      "name": "BMX Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/178128880",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-1298507383",
+      "name": "BMX Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1298507383",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-1461859204",
+      "name": "BMX Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1461859204",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-des-vfl-luhetal-e-v-way-358516791",
+      "name": "BMX Bahn des VfL Luhetal e.V.",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/358516791",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-bahn-deseester-way-446085193",
+      "name": "BMX Bahn DESEESTER",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/446085193",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-hildrizhausen-way-170799973",
+      "name": "BMX Bahn Hildrizhausen",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/170799973",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-kaufering-way-114665436",
+      "name": "BMX Bahn Kaufering",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/114665436",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-nussdorf-way-30446025",
+      "name": "BMX Bahn Nussdorf",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/30446025",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-plessa-way-287146471",
+      "name": "BMX Bahn Plessa",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/287146471",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-no-bmx-bane-node-2678922199",
+      "name": "BMX bane",
+      "country": "Norway",
+      "sourceUrl": "https://www.openstreetmap.org/node/2678922199",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-dk-bmx-baner-way-231536775",
+      "name": "BMX Baner",
+      "country": "Denmark",
+      "sourceUrl": "https://www.openstreetmap.org/way/231536775",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-beginners-way-970088805",
+      "name": "BMX beginners",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/970088805",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-circuit-way-276009990",
+      "name": "BMX circuit",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/276009990",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-circuit-way-116974739",
+      "name": "BMX Circuit",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/116974739",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ch-bmx-club-de-la-beroche-node-703415132",
+      "name": "BMX Club de la Béroche",
+      "country": "Switzerland",
+      "sourceUrl": "https://www.openstreetmap.org/node/703415132",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-bmx-club-doetinchem-node-12219058472",
+      "name": "BMX Club Doetinchem",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/node/12219058472",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-bmx-club-dvo-way-952600683",
+      "name": "BMX Club DVO",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/way/952600683",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-se-bmx-course-way-554613530",
+      "name": "Bmx Course",
+      "country": "Sweden",
+      "sourceUrl": "https://www.openstreetmap.org/way/554613530",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-hu-bmx-cross-palya-node-7099219753",
+      "name": "BMX cross pálya",
+      "country": "Hungary",
+      "sourceUrl": "https://www.openstreetmap.org/node/7099219753",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-cross-strecke-way-171562889",
+      "name": "BMX Cross-strecke",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/171562889",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cz-bmx-draha-way-1307891788",
+      "name": "BMX dráha",
+      "country": "Czech Republic",
+      "sourceUrl": "https://www.openstreetmap.org/way/1307891788",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-sk-bmx-draha-bmx-team-liptov-way-488771732",
+      "name": "BMX dráha (BMX TEAM LIPTOV)",
+      "country": "Slovakia",
+      "sourceUrl": "https://www.openstreetmap.org/way/488771732",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-sk-bmx-draha-dunajska-luzna-way-78169544",
+      "name": "BMX dráha Dunajská Lúžna",
+      "country": "Slovakia",
+      "sourceUrl": "https://www.openstreetmap.org/way/78169544",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-sk-bmx-draha-furca-way-914145613",
+      "name": "BMX dráha Furča",
+      "country": "Slovakia",
+      "sourceUrl": "https://www.openstreetmap.org/way/914145613",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cz-bmx-draha-novy-liskovec-way-156515885",
+      "name": "BMX dráha Nový Lískovec",
+      "country": "Czech Republic",
+      "sourceUrl": "https://www.openstreetmap.org/way/156515885",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ch-bmx-echichens-way-278870090",
+      "name": "BMX Echichens",
+      "country": "Switzerland",
+      "sourceUrl": "https://www.openstreetmap.org/way/278870090",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ar-bmx-flatland-node-8047907492",
+      "name": "BMX Flatland",
+      "country": "Argentina",
+      "sourceUrl": "https://www.openstreetmap.org/node/8047907492",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ch-bmx-freesytle-park-way-1121092810",
+      "name": "BMX Freesytle Park",
+      "country": "Switzerland",
+      "sourceUrl": "https://www.openstreetmap.org/way/1121092810",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-gelande-node-9528599256",
+      "name": "BMX gelande",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/node/9528599256",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-gelande-way-224996016",
+      "name": "BMX Gelände",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/224996016",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-ingersheim-way-154169696",
+      "name": "BMX Ingersheim",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/154169696",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-sk-bmx-klub-raca-way-23126138",
+      "name": "BMX klub Rača",
+      "country": "Slovakia",
+      "sourceUrl": "https://www.openstreetmap.org/way/23126138",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-hu-bmx-palya-node-11207205211",
+      "name": "BMX pálya",
+      "country": "Hungary",
+      "sourceUrl": "https://www.openstreetmap.org/node/11207205211",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-hu-bmx-palya-way-514876116",
+      "name": "BMX pálya",
+      "country": "Hungary",
+      "sourceUrl": "https://www.openstreetmap.org/way/514876116",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-hu-bmx-palya-way-178134952",
+      "name": "BMX pálya",
+      "country": "Hungary",
+      "sourceUrl": "https://www.openstreetmap.org/way/178134952",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-hu-bmx-palya-extrempark-way-1056920482",
+      "name": "BMX Pálya (Extrémpark)",
+      "country": "Hungary",
+      "sourceUrl": "https://www.openstreetmap.org/way/1056920482",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-parc-way-1156884136",
+      "name": "BMX Parc",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/1156884136",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-parcour-way-1168469963",
+      "name": "BMX Parcour",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1168469963",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-parcours-way-913899971",
+      "name": "BMX parcours",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/913899971",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-parcours-way-332822600",
+      "name": "BMX Parcours",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/332822600",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-parcours-way-1377893077",
+      "name": "BMX Parcours",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1377893077",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-parcours-sportpark-de-hoogt-node-5648446257",
+      "name": "BMX parcours - sportpark de Hoogt",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/node/5648446257",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ie-bmx-park-way-626147491",
+      "name": "BMX park",
+      "country": "Ireland",
+      "sourceUrl": "https://www.openstreetmap.org/way/626147491",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-mx-bmx-park-node-11484505433",
+      "name": "BMX park",
+      "country": "Mexico",
+      "sourceUrl": "https://www.openstreetmap.org/node/11484505433",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-park-way-395669764",
+      "name": "BMX park",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/395669764",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-park-way-382044012",
+      "name": "BMX park",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/382044012",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-park-way-745702397",
+      "name": "BMX park",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/745702397",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-park-way-929209676",
+      "name": "BMX Park",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/929209676",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-park-way-24763554",
+      "name": "BMX Park",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/24763554",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gr-bmx-park-way-1015979316",
+      "name": "BMX Park",
+      "country": "Greece",
+      "sourceUrl": "https://www.openstreetmap.org/way/1015979316",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-hu-bmx-park-way-918249708",
+      "name": "BMX Park",
+      "country": "Hungary",
+      "sourceUrl": "https://www.openstreetmap.org/way/918249708",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-park-way-112661292",
+      "name": "BMX Park",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/112661292",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-park-berg-fidel-way-228391168",
+      "name": "BMX Park Berg Fidel",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/228391168",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-lt-bmx-parkas-way-248783417",
+      "name": "BMX parkas",
+      "country": "Lithuania",
+      "sourceUrl": "https://www.openstreetmap.org/way/248783417",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-lv-bmx-parks-way-909764956",
+      "name": "BMX parks",
+      "country": "Latvia",
+      "sourceUrl": "https://www.openstreetmap.org/way/909764956",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-bmx-parquesol-way-444814421",
+      "name": "BMX Parquesol",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/444814421",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-piste-way-190436680",
+      "name": "BMX piste",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/190436680",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-piste-way-303008183",
+      "name": "BMX piste",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/303008183",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-piste-way-401366774",
+      "name": "BMX piste",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/401366774",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-co-bmx-portales-del-norte-way-704071659",
+      "name": "BMX Portales del norte",
+      "country": "Colombia",
+      "sourceUrl": "https://www.openstreetmap.org/way/704071659",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ar-bmx-race-way-863847803",
+      "name": "BMX Race",
+      "country": "Argentina",
+      "sourceUrl": "https://www.openstreetmap.org/way/863847803",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-race-way-1503435410",
+      "name": "BMX Race",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1503435410",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-race-track-kornwestheim-way-27261972",
+      "name": "BMX Race Track Kornwestheim",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/27261972",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-race-track-rg-hamburg-way-422823871",
+      "name": "BMX Race Track RG-Hamburg",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/422823871",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-racetrack-way-204983058",
+      "name": "BMX Racetrack",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/204983058",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-rundkurs-way-148717447",
+      "name": "BMX Rundkurs",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/148717447",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cl-bmx-sausalito-node-259197946",
+      "name": "BMX Sausalito",
+      "country": "Chile",
+      "sourceUrl": "https://www.openstreetmap.org/node/259197946",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ua-bmx-spot-node-4458473015",
+      "name": "BMX Spot",
+      "country": "Ukraine",
+      "sourceUrl": "https://www.openstreetmap.org/node/4458473015",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-se-bmx-stadion-way-288823481",
+      "name": "BMX stadion",
+      "country": "Sweden",
+      "sourceUrl": "https://www.openstreetmap.org/way/288823481",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-stadion-cottbus-way-150075556",
+      "name": "BMX Stadion Cottbus",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/150075556",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-stadion-muhlen-way-730276416",
+      "name": "BMX Stadion Mühlen",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/730276416",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-stecke-way-1264324495",
+      "name": "BMX Stecke",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1264324495",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-si-bmx-steza-bezigrad-way-420698536",
+      "name": "BMX steza Bežigrad",
+      "country": "Slovenia",
+      "sourceUrl": "https://www.openstreetmap.org/way/420698536",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-strecke-way-218470274",
+      "name": "BMX Strecke",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/218470274",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-strecke-baltmannsweiler-way-52204859",
+      "name": "BMX Strecke Baltmannsweiler",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/52204859",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-strecke-fun-bahn-rheinauer-see-way-62199384",
+      "name": "BMX Strecke Fun-Bahn Rheinauer See",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/62199384",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cz-bmx-stvanice-way-488348628",
+      "name": "BMX Štvanice",
+      "country": "Czech Republic",
+      "sourceUrl": "https://www.openstreetmap.org/way/488348628",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-mx-bmx-sx-kukulkan-way-1500293023",
+      "name": "BMX SX Kukulkán",
+      "country": "Mexico",
+      "sourceUrl": "https://www.openstreetmap.org/way/1500293023",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-team-bekaf-way-185484706",
+      "name": "BMX Team Bekaf",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/185484706",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-bmx-torremolinos-way-324577202",
+      "name": "BMX Torremolinos",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/324577202",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ua-bmx-track-way-793544917",
+      "name": "BMX track",
+      "country": "Ukraine",
+      "sourceUrl": "https://www.openstreetmap.org/way/793544917",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-128918067",
+      "name": "BMX track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/128918067",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-591295137",
+      "name": "BMX track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/591295137",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-304654969",
+      "name": "BMX track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/304654969",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-958222032",
+      "name": "BMX track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/958222032",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-907035707",
+      "name": "BMX track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/907035707",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-477839030",
+      "name": "BMX track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/477839030",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-410834856",
+      "name": "BMX track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/410834856",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-track-way-1056860215",
+      "name": "BMX Track",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/1056860215",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ec-bmx-track-way-1432172565",
+      "name": "BMX Track",
+      "country": "Ecuador",
+      "sourceUrl": "https://www.openstreetmap.org/way/1432172565",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-track-way-1046501671",
+      "name": "BMX Track",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1046501671",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-track-node-5018690730",
+      "name": "BMX Track",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/node/5018690730",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ie-bmx-track-way-782248107",
+      "name": "BMX Track",
+      "country": "Ireland",
+      "sourceUrl": "https://www.openstreetmap.org/way/782248107",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ie-bmx-track-way-870914049",
+      "name": "BMX Track",
+      "country": "Ireland",
+      "sourceUrl": "https://www.openstreetmap.org/way/870914049",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-pl-bmx-track-way-767710083",
+      "name": "BMX Track",
+      "country": "Poland",
+      "sourceUrl": "https://www.openstreetmap.org/way/767710083",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-za-bmx-track-node-4230414203",
+      "name": "BMX Track",
+      "country": "South Africa",
+      "sourceUrl": "https://www.openstreetmap.org/node/4230414203",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-499535067",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/499535067",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-380425729",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/380425729",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-1351535812",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/1351535812",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-771911297",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/771911297",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-35392050",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/35392050",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-25978822",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/25978822",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-584876027",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/584876027",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-318493526",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/318493526",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-817859907",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/817859907",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-281701953",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/281701953",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-481456163",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/481456163",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-890042746",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/890042746",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-171268407",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/171268407",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-83911202",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/83911202",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-839907291",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/839907291",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-891449522",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/891449522",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-1046528695",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/1046528695",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-806214434",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/806214434",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-280444863",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/280444863",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-367793779",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/367793779",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-334627603",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/334627603",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-36867245",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/36867245",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-384655988",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/384655988",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-297356765",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/297356765",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-736773208",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/736773208",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-952410196",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/952410196",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-328564494",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/328564494",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-779263467",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/779263467",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-416886769",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/416886769",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-430605219",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/430605219",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-207248514",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/207248514",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-1011500432",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/1011500432",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bmx-track-way-465412293",
+      "name": "BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/465412293",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-track-esselbach-way-563391223",
+      "name": "BMX Track Esselbach",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/563391223",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ch-bmx-track-goldach-way-124053833",
+      "name": "BMX Track Goldach",
+      "country": "Switzerland",
+      "sourceUrl": "https://www.openstreetmap.org/way/124053833",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-lt-bmx-trasa-way-509429600",
+      "name": "BMX trasa",
+      "country": "Lithuania",
+      "sourceUrl": "https://www.openstreetmap.org/way/509429600",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-lt-bmx-trasa-way-838365686",
+      "name": "BMX trasa",
+      "country": "Lithuania",
+      "sourceUrl": "https://www.openstreetmap.org/way/838365686",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-lt-bmx-trasa-way-57969037",
+      "name": "BMX trasa",
+      "country": "Lithuania",
+      "sourceUrl": "https://www.openstreetmap.org/way/57969037",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-lv-bmx-trase-way-248655941",
+      "name": "BMX trase",
+      "country": "Latvia",
+      "sourceUrl": "https://www.openstreetmap.org/way/248655941",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-lv-bmx-trase-way-709282086",
+      "name": "BMX trase",
+      "country": "Latvia",
+      "sourceUrl": "https://www.openstreetmap.org/way/709282086",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-lv-bmx-trase-node-309059455",
+      "name": "BMX Trase",
+      "country": "Latvia",
+      "sourceUrl": "https://www.openstreetmap.org/node/309059455",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cz-bmx-trate-way-189117323",
+      "name": "BMX tratě",
+      "country": "Czech Republic",
+      "sourceUrl": "https://www.openstreetmap.org/way/189117323",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cz-bmx-trate-way-189117324",
+      "name": "BMX tratě",
+      "country": "Czech Republic",
+      "sourceUrl": "https://www.openstreetmap.org/way/189117324",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-hu-bmx-ugratok-way-267788089",
+      "name": "BMX ugratók",
+      "country": "Hungary",
+      "sourceUrl": "https://www.openstreetmap.org/way/267788089",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-und-moutainbikestrecke-cottbus-way-231824363",
+      "name": "BMX und Moutainbikestrecke Cottbus",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/231824363",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-bmx-zoetermeer-way-475426726",
+      "name": "BMX Zoetermeer",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/way/475426726",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ua-bmx-node-13742764537",
+      "name": "BMX парк",
+      "country": "Ukraine",
+      "sourceUrl": "https://www.openstreetmap.org/node/13742764537",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ua-bmx-way-405507917",
+      "name": "BMX траса",
+      "country": "Ukraine",
+      "sourceUrl": "https://www.openstreetmap.org/way/405507917",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-kr-bmx-way-1150654344",
+      "name": "BMX 경주로",
+      "country": "South Korea",
+      "sourceUrl": "https://www.openstreetmap.org/way/1150654344",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-downhill-strecke-way-300060650",
+      "name": "BMX- Downhill Strecke",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/300060650",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-anlage-node-409798282",
+      "name": "BMX-Anlage",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/node/409798282",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-anlage-way-398962670",
+      "name": "BMX-Anlage",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/398962670",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-anlage-way-1344824730",
+      "name": "BMX-Anlage",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1344824730",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-anlage-bludenz-way-292874804",
+      "name": "BMX-Anlage Bludenz",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/292874804",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-anlage-radsportfreunde-saarwellingen-way-102978700",
+      "name": "BMX-Anlage Radsportfreunde Saarwellingen",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/102978700",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-bmx-baan-way-949451889",
+      "name": "BMX-baan",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/way/949451889",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-bahn-node-3010332674",
+      "name": "BMX-Bahn",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/node/3010332674",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-bahn-way-388845321",
+      "name": "BMX-Bahn",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/388845321",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-364785903",
+      "name": "BMX-Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/364785903",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-28942548",
+      "name": "BMX-Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/28942548",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-32863200",
+      "name": "BMX-Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/32863200",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-386272868",
+      "name": "BMX-Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/386272868",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-1396712980",
+      "name": "BMX-Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1396712980",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-node-304827382",
+      "name": "BMX-Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/node/304827382",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-547297333",
+      "name": "BMX-Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/547297333",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-233167910",
+      "name": "BMX-Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/233167910",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-764126803",
+      "name": "BMX-Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/764126803",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-464858529",
+      "name": "BMX-Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/464858529",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-901752927",
+      "name": "BMX-Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/901752927",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-38992664",
+      "name": "BMX-Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/38992664",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-274839863",
+      "name": "BMX-Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/274839863",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-293674353",
+      "name": "BMX-Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/293674353",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-907841919",
+      "name": "BMX-Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/907841919",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-1042392162",
+      "name": "BMX-Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1042392162",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-way-145912602",
+      "name": "BMX-Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/145912602",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-funpark-way-48773260",
+      "name": "BMX-Bahn Funpark",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/48773260",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-bahn-gaaden-way-625951743",
+      "name": "BMX-Bahn Gaaden",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/625951743",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-bahn-im-draschepark-way-40266614",
+      "name": "BMX-Bahn im Draschepark",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/40266614",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-kerksiek-relation-6783511",
+      "name": "BMX-Bahn Kerksiek",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/relation/6783511",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-sandhausen-way-261879137",
+      "name": "BMX-Bahn Sandhausen",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/261879137",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-tsv-betzingen-way-443138318",
+      "name": "BMX-Bahn TSV Betzingen",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/443138318",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-bahn-tus-furstenfeldbruck-way-304380732",
+      "name": "BMX-Bahn TuS Fürstenfeldbruck",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/304380732",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-se-bmx-bana-way-51767170",
+      "name": "BMX-bana",
+      "country": "Sweden",
+      "sourceUrl": "https://www.openstreetmap.org/way/51767170",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-crossbahn-way-72714185",
+      "name": "BMX-Crossbahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/72714185",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-gelande-way-298160460",
+      "name": "BMX-Gelände",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/298160460",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-gelande-way-100872686",
+      "name": "BMX-Gelände",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/100872686",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-gelande-way-471503889",
+      "name": "BMX-Gelände",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/471503889",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-gelande-way-285491941",
+      "name": "BMX-Gelände",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/285491941",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-gelande-rkv-pfeil-hattorf-way-1188086822",
+      "name": "BMX-Gelände RKV Pfeil Hattorf",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1188086822",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-halle-way-31154636",
+      "name": "BMX-Halle",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/31154636",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-hindernisbahn-way-910905382",
+      "name": "BMX-Hindernisbahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/910905382",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-leistungszentrum-way-46352580",
+      "name": "BMX-Leistungszentrum",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/46352580",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-parcour-relation-21022415",
+      "name": "BMX-Parcour",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/relation/21022415",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-parcours-node-8100370457",
+      "name": "BMX-parcours",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/node/8100370457",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-parcours-way-224755501",
+      "name": "BMX-parcours",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/224755501",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-bmx-parcours-way-475559185",
+      "name": "BMX-parcours",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/way/475559185",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-parcours-way-217569216",
+      "name": "BMX-Parcours",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/217569216",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-parcours-way-27242530",
+      "name": "BMX-Parcours",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/27242530",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-parcours-way-429256325",
+      "name": "BMX-Parcours",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/429256325",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-park-way-132662877",
+      "name": "BMX-Park",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/132662877",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-piste-way-1265224040",
+      "name": "BMX-piste",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/1265224040",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-piste-way-832931142",
+      "name": "BMX-piste",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/832931142",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-piste-way-610037792",
+      "name": "BMX-piste",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/610037792",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-piste-way-231649851",
+      "name": "BMX-piste",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/231649851",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-platz-way-581260882",
+      "name": "BMX-Platz",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/581260882",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-race-strecke-misburg-way-300490548",
+      "name": "BMX-Race-Strecke Misburg",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/300490548",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-ranst-way-97303560",
+      "name": "Bmx-Ranst",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/97303560",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-fi-bmx-rata-way-306287686",
+      "name": "BMX-rata",
+      "country": "Finland",
+      "sourceUrl": "https://www.openstreetmap.org/way/306287686",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-rennstrecke-node-3926625942",
+      "name": "BMX-Rennstrecke",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/node/3926625942",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-sportanlage-way-34689748",
+      "name": "BMX-Sportanlage",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/34689748",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-sportanlage-muhlwehr-way-954855519",
+      "name": "BMX-Sportanlage Mühlwehr",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/954855519",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-strecke-way-292755658",
+      "name": "BMX-Strecke",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/292755658",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-strecke-way-204628360",
+      "name": "BMX-Strecke",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/204628360",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-strecke-node-9669155942",
+      "name": "BMX-Strecke",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/node/9669155942",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-strecke-way-203031613",
+      "name": "BMX-Strecke",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/203031613",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-strecke-way-940509257",
+      "name": "BMX-Strecke",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/940509257",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-strecke-way-1053659460",
+      "name": "BMX-Strecke",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1053659460",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-strecke-way-828215027",
+      "name": "BMX-Strecke",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/828215027",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ch-bmx-strecke-way-308187222",
+      "name": "BMX-Strecke",
+      "country": "Switzerland",
+      "sourceUrl": "https://www.openstreetmap.org/way/308187222",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-strecke-grunheide-way-445235201",
+      "name": "BMX-Strecke Grünheide",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/445235201",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-strecke-heidekamp-way-445235202",
+      "name": "BMX-Strecke Heidekamp",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/445235202",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-strecke-hexenwald-node-11750652243",
+      "name": "BMX-Strecke Hexenwald",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/node/11750652243",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-strecke-speyer-way-48687529",
+      "name": "BMX-Strecke Speyer",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/48687529",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-supercross-strecke-stuttgart-way-443868635",
+      "name": "BMX-Supercross-Strecke Stuttgart",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/443868635",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-terrein-kapelhof-way-1106470276",
+      "name": "BMX-terrein Kapelhof",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/1106470276",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-track-way-1033256113",
+      "name": "BMX-Track",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1033256113",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-track-way-89478071",
+      "name": "BMX-Track",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/89478071",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-bmx-ubungsplatz-way-59421287",
+      "name": "BMX-Übungsplatz",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/59421287",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-bmx-bahn-way-68999493",
+      "name": "bmx.bahn",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/68999493",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-bmx-ing-park-blegny-way-271843641",
+      "name": "BMX'ing Park Blegny",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/271843641",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-jp-bmx-way-771528787",
+      "name": "BMX広場",
+      "country": "Japan",
+      "sourceUrl": "https://www.openstreetmap.org/way/771528787",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cn-bmx-way-1446837625",
+      "name": "BMX泥地竞速场地",
+      "country": "China",
+      "sourceUrl": "https://www.openstreetmap.org/way/1446837625",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cn-bmx-relation-19784410",
+      "name": "BMX自由竞速场地",
+      "country": "China",
+      "sourceUrl": "https://www.openstreetmap.org/relation/19784410",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bole-hill-bmx-track-way-307483079",
+      "name": "Bole Hill BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/307483079",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-hu-bombatolcser-way-1487267017",
+      "name": "Bombatölcsér",
+      "country": "Hungary",
+      "sourceUrl": "https://www.openstreetmap.org/way/1487267017",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bournemouth-bmx-track-way-289286804",
+      "name": "Bournemouth BMX track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/289286804",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-braintree-bmx-track-way-31723561",
+      "name": "Braintree BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/31723561",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-broadwood-bmx-track-way-367216565",
+      "name": "Broadwood BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/367216565",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bruntwood-park-bmx-track-way-179303226",
+      "name": "Bruntwood Park BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/179303226",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-pt-btt-matosinhos-way-954979871",
+      "name": "BTT Matosinhos",
+      "country": "Portugal",
+      "sourceUrl": "https://www.openstreetmap.org/way/954979871",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-bump-track-way-1197456587",
+      "name": "Bump track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/1197456587",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-burgess-hill-bmx-track-way-798118557",
+      "name": "Burgess Hill BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/798118557",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-camelsdale-bmx-track-way-437325270",
+      "name": "Camelsdale BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/437325270",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "centennial-park-bmx",
+      "name": "Centennial Park BMX",
+      "country": "Canada",
+      "sourceUrl": "https://cyclingcanada.ca/sport/bmx/",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-centro-deportivo-municipal-circuito-bmx-way-179465579",
+      "name": "Centro Deportivo Municipal Circuito BMX",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/179465579",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-br-centro-olimpico-de-bmx-way-378126224",
+      "name": "Centro Olímpico de BMX",
+      "country": "Brazil",
+      "sourceUrl": "https://www.openstreetmap.org/way/378126224",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-lv-cesu-veloparks-node-7614350579",
+      "name": "Cēsu veloparks",
+      "country": "Latvia",
+      "sourceUrl": "https://www.openstreetmap.org/node/7614350579",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-champ-de-bosses-de-belgrade-way-1351201183",
+      "name": "Champ de bosses de Belgrade",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/1351201183",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuit-bmx-velodrom-d-horta-way-42727182",
+      "name": "Circuit BMX Velòdrom d'Horta",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/42727182",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuit-bmx-vila-sana-way-1421057873",
+      "name": "Circuit BMX Vila-sana",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/1421057873",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuit-de-bmx-les-arenes-way-35555704",
+      "name": "Circuit de BMX les Arenes",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/35555704",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuit-municipal-de-bmx-way-646702001",
+      "name": "Circuït municipal de bmx",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/646702001",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuit-municipal-santi-moreno-way-104177229",
+      "name": "Circuit Municipal Santi Moreno",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/104177229",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuit-mx-els-reguers-way-874077207",
+      "name": "Circuit MX Els Reguers",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/874077207",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-bo-circuito-achumani-way-755756715",
+      "name": "Circuito Achumani",
+      "country": "Bolivia",
+      "sourceUrl": "https://www.openstreetmap.org/way/755756715",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-bo-circuito-bicicross-way-849362424",
+      "name": "Circuito Bicicross",
+      "country": "Bolivia",
+      "sourceUrl": "https://www.openstreetmap.org/way/849362424",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-bo-circuito-bicicross-bermejo-way-839138922",
+      "name": "Circuito Bicicross Bermejo",
+      "country": "Bolivia",
+      "sourceUrl": "https://www.openstreetmap.org/way/839138922",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-pe-circuito-bmx-way-835144200",
+      "name": "Circuito BMX",
+      "country": "Peru",
+      "sourceUrl": "https://www.openstreetmap.org/way/835144200",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuito-bmx-way-578097523",
+      "name": "Circuito BMX",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/578097523",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuito-bmx-adeje-way-998152625",
+      "name": "Circuito BMX Adeje",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/998152625",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuito-bmx-calamocha-rafael-izquierdo-tello-way-1111060090",
+      "name": "Circuito BMX Calamocha \"Rafael Izquierdo Tello\"",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/1111060090",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuito-bmx-campello-way-745246555",
+      "name": "Circuito BMX Campello",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/745246555",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuito-bmx-chafiras-way-1272763445",
+      "name": "Circuito BMX Chafiras",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/1272763445",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuito-bmx-del-parque-de-la-vega-way-998879503",
+      "name": "Circuito BMX del Parque de La Vega",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/998879503",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuito-bmx-mostoles-way-230494489",
+      "name": "Circuito BMX Móstoles",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/230494489",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuito-bmx-motril-way-1228990752",
+      "name": "Circuito BMX Motril",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/1228990752",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuito-bmx-show-time-way-321854699",
+      "name": "Circuito BMX Show Time",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/321854699",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-bo-circuito-curubamba-way-545937916",
+      "name": "Circuito Curubamba",
+      "country": "Bolivia",
+      "sourceUrl": "https://www.openstreetmap.org/way/545937916",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuito-de-bmx-way-104805515",
+      "name": "Circuito de BMX",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/104805515",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuito-de-bmx-way-1200685683",
+      "name": "Circuito de BMX",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/1200685683",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuito-de-bmx-way-313459850",
+      "name": "Circuito de BMX",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/313459850",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuito-de-bmx-el-aranal-way-561104622",
+      "name": "Circuito de BMX “El Arañal”",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/561104622",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuito-de-bmx-de-huetor-vega-way-981459202",
+      "name": "Circuito de BMX de Huétor Vega",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/981459202",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuito-de-bmx-de-santander-way-1034315533",
+      "name": "Circuito de BMX de Santander",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/1034315533",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuito-de-bmx-padul-way-1161327234",
+      "name": "Circuito de BMX Padul",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/1161327234",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-bo-circuito-el-carmen-way-790600562",
+      "name": "Circuito El Carmen",
+      "country": "Bolivia",
+      "sourceUrl": "https://www.openstreetmap.org/way/790600562",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-bo-circuito-jorge-antezana-relation-7382917",
+      "name": "Circuito Jorge Antezana",
+      "country": "Bolivia",
+      "sourceUrl": "https://www.openstreetmap.org/relation/7382917",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-bo-circuito-municipal-de-bmx-way-888055523",
+      "name": "Circuito Municipal de BMX",
+      "country": "Bolivia",
+      "sourceUrl": "https://www.openstreetmap.org/way/888055523",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-circuito-municipal-de-bmx-el-alamo-way-1055674578",
+      "name": "Circuito Municipal de BMX EL Álamo",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/1055674578",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-colchester-bmx-park-way-35081695",
+      "name": "Colchester BMX Park",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/35081695",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-concord-park-bmx-track-way-27318465",
+      "name": "Concord Park BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/27318465",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-cookley-bmx-track-way-331409410",
+      "name": "Cookley BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/331409410",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-cornwall-bmx-racing-club-way-573584821",
+      "name": "Cornwall BMX Racing Club",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/573584821",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-curacao-international-bmx-track-way-448411261",
+      "name": "Curacao International BMX Track",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/way/448411261",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-cuxton-bmx-track-way-1534589385",
+      "name": "Cuxton BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/1534589385",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cz-cyklokros-way-421692669",
+      "name": "cyklokros",
+      "country": "Czech Republic",
+      "sourceUrl": "https://www.openstreetmap.org/way/421692669",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cz-cykloplacek-way-665003984",
+      "name": "Cykloplácek",
+      "country": "Czech Republic",
+      "sourceUrl": "https://www.openstreetmap.org/way/665003984",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-de-kleydrivers-node-5765291249",
+      "name": "De KleyDrivers",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/node/5765291249",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-decoy-bmx-way-204423530",
+      "name": "Decoy BMX",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/204423530",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-derby-bmx-club-way-468746591",
+      "name": "Derby BMX Club",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/468746591",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-down-lane-bmx-track-way-222716239",
+      "name": "Down Lane BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/222716239",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-hu-downhill-palya-node-6072635909",
+      "name": "Downhill pálya",
+      "country": "Hungary",
+      "sourceUrl": "https://www.openstreetmap.org/node/6072635909",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-dk-dragon-bmx-way-770875385",
+      "name": "Dragon BMX",
+      "country": "Denmark",
+      "sourceUrl": "https://www.openstreetmap.org/way/770875385",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-echtens-stunt-rondje-way-882532325",
+      "name": "Echtens Stunt Rondje",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/way/882532325",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cl-ecoparque-machali-way-1138544859",
+      "name": "EcoParque Machalí",
+      "country": "Chile",
+      "sourceUrl": "https://www.openstreetmap.org/way/1138544859",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-fi-einarinpuiston-bmx-rata-node-9465388763",
+      "name": "Einarinpuiston BMX rata",
+      "country": "Finland",
+      "sourceUrl": "https://www.openstreetmap.org/node/9465388763",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-se-engelholm-bmx-klubb-way-1435146118",
+      "name": "Engelholm BMX Klubb",
+      "country": "Sweden",
+      "sourceUrl": "https://www.openstreetmap.org/way/1435146118",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-co-escuela-de-bicicross-ditaires-way-644515633",
+      "name": "Escuela de bicicross ditaires",
+      "country": "Colombia",
+      "sourceUrl": "https://www.openstreetmap.org/way/644515633",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-exeter-eagles-bmx-node-9135853255",
+      "name": "Exeter Eagles BMX",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/node/9135853255",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-f-c-c-ammersoyen-way-154664016",
+      "name": "F.C.C. Ammersoyen",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/way/154664016",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-fahrradparcour-way-629306995",
+      "name": "Fahrradparcour",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/629306995",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-fahrradpark-way-1351202193",
+      "name": "Fahrradpark",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/1351202193",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-dk-falcon-bmx-way-448937411",
+      "name": "Falcon BMX",
+      "country": "Denmark",
+      "sourceUrl": "https://www.openstreetmap.org/way/448937411",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-fcc-de-bissinghcrossers-node-2709556428",
+      "name": "FCC De Bissinghcrossers",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/node/2709556428",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-fcc-de-fivelcrossers-node-12757044999",
+      "name": "FCC De Fivelcrossers",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/node/12757044999",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-fcc-de-kombocht-node-1428009990",
+      "name": "FCC de Kombocht",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/node/1428009990",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-fcc-de-spartanen-way-278692238",
+      "name": "FCC de Spartanen",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/way/278692238",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-fcc-de-vaart-way-87968653",
+      "name": "FCC De Vaart",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/way/87968653",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-fcc-de-volharding-node-2877886217",
+      "name": "FCC de Volharding",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/node/2877886217",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-fcc-nuland-way-447994081",
+      "name": "FCC Nuland",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/way/447994081",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-fcc-putten-way-878637469",
+      "name": "FCC Putten",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/way/878637469",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-fcc-wheels-node-2815041241",
+      "name": "FCC Wheels",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/node/2815041241",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-fcv-d-n-urste-way-155739731",
+      "name": "FCV D'n Urste",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/way/155739731",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-fcv-de-durtrappers-way-86558143",
+      "name": "FCV De Durtrappers",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/way/86558143",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-fcv-de-lochsprinters-node-5821253397",
+      "name": "FCV de Lochsprinters",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/node/5821253397",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-fcv-het-twentse-ros-node-5796610322",
+      "name": "FCV het Twentse Ros",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/node/5796610322",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-dk-feldborg-bmx-way-674077875",
+      "name": "Feldborg BMX",
+      "country": "Denmark",
+      "sourceUrl": "https://www.openstreetmap.org/way/674077875",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-fietscrossbaan-overasselt-node-11500197519",
+      "name": "Fietscrossbaan Overasselt",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/node/11500197519",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-fietscrossbaan-steenbergerpark-way-1033175062",
+      "name": "Fietscrossbaan Steenbergerpark",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/way/1033175062",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-fietscrossclub-wijkeroog-node-2776085868",
+      "name": "Fietscrossclub Wijkeroog",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/node/2776085868",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-se-fjardhundra-aktivitetscenter-way-925875175",
+      "name": "Fjärdhundra Aktivitetscenter",
+      "country": "Sweden",
+      "sourceUrl": "https://www.openstreetmap.org/way/925875175",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-fliegewiese-way-298558640",
+      "name": "Fliegewiese",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/298558640",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-flying-finches-way-1221709806",
+      "name": "Flying Finches",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/1221709806",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-fun-park-relation-4288590",
+      "name": "Fun-Park",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/relation/4288590",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-no-ganddal-bmx-relation-18352367",
+      "name": "Ganddal BMX",
+      "country": "Norway",
+      "sourceUrl": "https://www.openstreetmap.org/relation/18352367",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-my-gelanggang-bmx-way-1472547321",
+      "name": "Gelanggang BMX",
+      "country": "Malaysia",
+      "sourceUrl": "https://www.openstreetmap.org/way/1472547321",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-se-gipen-bmx-bana-way-49323590",
+      "name": "Gipen BMX bana",
+      "country": "Sweden",
+      "sourceUrl": "https://www.openstreetmap.org/way/49323590",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-gosport-bmx-track-node-2246297354",
+      "name": "Gosport BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/node/2246297354",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-gracemount-bmx-track-node-441585472",
+      "name": "Gracemount BMX track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/node/441585472",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-great-baddow-bmx-track-way-142710504",
+      "name": "Great Baddow BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/142710504",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-gurnell-bmx-track-way-222014523",
+      "name": "Gurnell BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/222014523",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-haddenham-bmx-bike-track-way-598027441",
+      "name": "Haddenham BMX Bike Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/598027441",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-ham-lands-bmx-track-way-490044200",
+      "name": "Ham Lands BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/490044200",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-hammersmith-bmx-track-way-361992691",
+      "name": "Hammersmith BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/361992691",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-harpers-lane-bmx-track-way-1433106007",
+      "name": "Harpers Lane BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/1433106007",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-hayes-hawks-bmx-club-node-8822554052",
+      "name": "Hayes Hawks BMX Club",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/node/8822554052",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "hong-kong-jockey-club-international-bmx-park",
+      "name": "Hong Kong Jockey Club International BMX Park",
+      "country": "China",
+      "sourceUrl": "https://fpf.ccidahk.gov.hk/en/location/detail.php?id=1861",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-hornfair-park-bmx-track-way-241138397",
+      "name": "Hornfair Park BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/241138397",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-no-idrettsparken-bmx-bane-way-201204518",
+      "name": "Idrettsparken BMX-bane",
+      "country": "Norway",
+      "sourceUrl": "https://www.openstreetmap.org/way/201204518",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-dk-ikast-bmx-klub-way-114039642",
+      "name": "Ikast Bmx Klub",
+      "country": "Denmark",
+      "sourceUrl": "https://www.openstreetmap.org/way/114039642",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-instalacion-deportiva-municipal-basica-talbot-way-1315319160",
+      "name": "Instalación Deportiva Municipal Básica Talbot",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/1315319160",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-it-international-bmx-stadium-node-5310973853",
+      "name": "International BMX Stadium",
+      "country": "Italy",
+      "sourceUrl": "https://www.openstreetmap.org/node/5310973853",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-ipswitch-bmx-track-way-1331417443",
+      "name": "Ipswitch BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/1331417443",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-fi-iso-vilusen-bmx-rata-way-1222627881",
+      "name": "Iso-Vilusen BMX-rata",
+      "country": "Finland",
+      "sourceUrl": "https://www.openstreetmap.org/way/1222627881",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "jaburibari-bmx-track",
+      "name": "Jaburibari BMX Track",
+      "country": "Aruba",
+      "sourceUrl": "https://297sportsaruba.com/jaburibari-bmx-track-na-parke-curason-a-keda-una-beyesa/",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-sk-jama-way-338969635",
+      "name": "Jama",
+      "country": "Slovakia",
+      "sourceUrl": "https://www.openstreetmap.org/way/338969635",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-jubilee-bmx-track-way-462679739",
+      "name": "Jubilee BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/462679739",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-kalkofenweg-way-1117637909",
+      "name": "Kalkofenweg",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/1117637909",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-dk-kalundborg-bmx-way-706693829",
+      "name": "Kalundborg BMX",
+      "country": "Denmark",
+      "sourceUrl": "https://www.openstreetmap.org/way/706693829",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-hu-kerekparos-ugyessegi-palya-way-1179814196",
+      "name": "Kerékpáros ügyességi pálya",
+      "country": "Hungary",
+      "sourceUrl": "https://www.openstreetmap.org/way/1179814196",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-th-khao-mai-kaeo-bmx-tracks-node-3446267740",
+      "name": "Khao Mai Kaeo BMX tracks",
+      "country": "Thailand",
+      "sourceUrl": "https://www.openstreetmap.org/node/3446267740",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-kingsway-bmx-track-way-337196983",
+      "name": "Kingsway BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/337196983",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-kleine-bmx-bahn-way-635395752",
+      "name": "Kleine BMX-Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/635395752",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-knacker-cross-way-1271976934",
+      "name": "Knacker Cross",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1271976934",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-dk-k-benhavns-bmx-klub-way-123798190",
+      "name": "Københavns BMX klub",
+      "country": "Denmark",
+      "sourceUrl": "https://www.openstreetmap.org/way/123798190",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-no-krossl-ypa-way-29413825",
+      "name": "Krossløypa",
+      "country": "Norway",
+      "sourceUrl": "https://www.openstreetmap.org/way/29413825",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-se-kungsors-bmx-bana-node-4181796817",
+      "name": "Kungsörs BMX-bana",
+      "country": "Sweden",
+      "sourceUrl": "https://www.openstreetmap.org/node/4181796817",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-fi-kupittaan-bmx-rata-way-75265434",
+      "name": "Kupittaan BMX-rata",
+      "country": "Finland",
+      "sourceUrl": "https://www.openstreetmap.org/way/75265434",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-kwc-kampen-node-5862975685",
+      "name": "KWC Kampen",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/node/5862975685",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-it-lago-maggiore-bmx-park-way-1356472637",
+      "name": "Lago Maggiore BMX Park",
+      "country": "Italy",
+      "sourceUrl": "https://www.openstreetmap.org/way/1356472637",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-larbert-legacy-cycle-track-node-12609404670",
+      "name": "Larbert Legacy Cycle Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/node/12609404670",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-se-lerums-bmx-park-way-1429750846",
+      "name": "Lerums BMX Park",
+      "country": "Sweden",
+      "sourceUrl": "https://www.openstreetmap.org/way/1429750846",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-pl-lesny-tor-rowerowy-node-8730359150",
+      "name": "Leśny tor rowerowy",
+      "country": "Poland",
+      "sourceUrl": "https://www.openstreetmap.org/node/8730359150",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-lindwurmstra-e-way-293270576",
+      "name": "Lindwurmstraße",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/293270576",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-lion-d-or-way-866409405",
+      "name": "Lion d'Or",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/way/866409405",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-little-harlescott-lane-bmx-track-way-892630275",
+      "name": "Little Harlescott Lane BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/892630275",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-llanos-de-cordovilla-way-1459638424",
+      "name": "Llanos de Cordovilla",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/1459638424",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-llynfi-bmx-way-922117274",
+      "name": "Llynfi BMX",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/922117274",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-it-long-iceberg-way-1274572728",
+      "name": "Long iceberg",
+      "country": "Italy",
+      "sourceUrl": "https://www.openstreetmap.org/way/1274572728",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "manchester-bmx-track",
+      "name": "Manchester BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.britishcycling.org.uk/bmx",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-lv-mara-stromberga-bmx-trase-way-704274495",
+      "name": "Māra Štromberga BMX trase",
+      "country": "Latvia",
+      "sourceUrl": "https://www.openstreetmap.org/way/704274495",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-marsh-tracks-bmx-way-273383109",
+      "name": "Marsh Tracks BMX",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/273383109",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-lv-marupe-bmx-track-way-677861929",
+      "name": "Marupe BMX track",
+      "country": "Latvia",
+      "sourceUrl": "https://www.openstreetmap.org/way/677861929",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-fi-matinkylan-bmx-rata-way-576440104",
+      "name": "Matinkylän BMX-rata",
+      "country": "Finland",
+      "sourceUrl": "https://www.openstreetmap.org/way/576440104",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-mc-pei-enberg-way-430921511",
+      "name": "MC Peißenberg",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/430921511",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-merton-saints-bmx-club-way-206602640",
+      "name": "Merton Saints BMX Club",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/206602640",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-lv-mezaparka-bmx-trase-way-710363011",
+      "name": "Mežaparka BMX trase",
+      "country": "Latvia",
+      "sourceUrl": "https://www.openstreetmap.org/way/710363011",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-mickleover-bmx-track-way-468779994",
+      "name": "Mickleover BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/468779994",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-mid-lancs-bmx-way-787289751",
+      "name": "Mid Lancs BMX",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/787289751",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-fi-mikkeli-bmx-node-1818757306",
+      "name": "Mikkeli BMX",
+      "country": "Finland",
+      "sourceUrl": "https://www.openstreetmap.org/node/1818757306",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-dk-m-ldrup-bmx-bane-way-834165423",
+      "name": "Møldrup BMX Bane",
+      "country": "Denmark",
+      "sourceUrl": "https://www.openstreetmap.org/way/834165423",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-monasterium-way-1430523005",
+      "name": "Monasterium",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1430523005",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-no-moss-bmx-bane-way-19976299",
+      "name": "Moss BMX-bane",
+      "country": "Norway",
+      "sourceUrl": "https://www.openstreetmap.org/way/19976299",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-musselburgh-monarchs-bmx-track-way-338944993",
+      "name": "Musselburgh Monarchs BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/338944993",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-national-indoor-bmx-arena-way-167790343",
+      "name": "National Indoor BMX Arena",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/167790343",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-natur-bmx-bahn-way-953829911",
+      "name": "Natur-BMX-Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/953829911",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-newton-stewart-bmx-track-way-1197628291",
+      "name": "Newton Stewart BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/1197628291",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-nijkerkse-crossclub-node-2718959780",
+      "name": "Nijkerkse Crossclub",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/node/2718959780",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-jp-nixs-way-539597020",
+      "name": "NIXSスポーツアカデミー",
+      "country": "Japan",
+      "sourceUrl": "https://www.openstreetmap.org/way/539597020",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-north-hykeham-bmx-track-way-464324674",
+      "name": "North Hykeham BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/464324674",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-nutbush-way-468394624",
+      "name": "Nutbush",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/468394624",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-oamtc-2-rad-park-way-716889752",
+      "name": "ÖAMTC 2 Rad Park",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/716889752",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-hu-off-road-bmx-palya-way-1136956246",
+      "name": "Off road BMX pálya",
+      "country": "Hungary",
+      "sourceUrl": "https://www.openstreetmap.org/way/1136956246",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-old-bmx-track-way-923495820",
+      "name": "Old BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/923495820",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-dk-lsemagle-bmx-way-188308633",
+      "name": "Ølsemagle BMX",
+      "country": "Denmark",
+      "sourceUrl": "https://www.openstreetmap.org/way/188308633",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-olympic-bmx-track-way-127350090",
+      "name": "Olympic BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/127350090",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-ormeau-park-bmx-track-way-529686387",
+      "name": "Ormeau Park BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/529686387",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-dk-stjysk-bmx-klub-way-118442913",
+      "name": "Østjysk BMX Klub",
+      "country": "Denmark",
+      "sourceUrl": "https://www.openstreetmap.org/way/118442913",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-za-overberg-bmx-club-node-8284281439",
+      "name": "Overberg BMX Club",
+      "country": "South Africa",
+      "sourceUrl": "https://www.openstreetmap.org/node/8284281439",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-paddick-drive-bmx-track-way-626209908",
+      "name": "Paddick Drive BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/626209908",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-lt-panevezio-bmx-trasa-ekstrimas-way-315286076",
+      "name": "Panevėžio BMX trasa „Ekstrimas“",
+      "country": "Lithuania",
+      "sourceUrl": "https://www.openstreetmap.org/way/315286076",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "papendal-bmx-track",
+      "name": "Papendal BMX Track",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.uci.org/discipline/bmx-racing/2wPEZ3g9zV0Y0rT6rC7IZt",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ve-parque-bmx-daniel-dhers-node-10920326169",
+      "name": "Parque BMX Daniel Dhers",
+      "country": "Venezuela",
+      "sourceUrl": "https://www.openstreetmap.org/node/10920326169",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ve-parque-miranda-bici-cross-node-1834063859",
+      "name": "Parque Miranda Bici Cross",
+      "country": "Venezuela",
+      "sourceUrl": "https://www.openstreetmap.org/node/1834063859",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ve-parquex-way-1350533999",
+      "name": "Parquex",
+      "country": "Venezuela",
+      "sourceUrl": "https://www.openstreetmap.org/way/1350533999",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-th-pattaya-bmx-track-node-3335378657",
+      "name": "Pattaya BMX track",
+      "country": "Thailand",
+      "sourceUrl": "https://www.openstreetmap.org/node/3335378657",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-pennine-bmx-track-way-961147592",
+      "name": "Pennine BMX track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/961147592",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-peterborough-bmx-track-way-667259093",
+      "name": "Peterborough BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/667259093",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-pineham-bmx-track-node-403638532",
+      "name": "Pineham BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/node/403638532",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cl-pista-bicicross-way-1204232749",
+      "name": "Pista Bicicross",
+      "country": "Chile",
+      "sourceUrl": "https://www.openstreetmap.org/way/1204232749",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-co-pista-bicicross-way-379630790",
+      "name": "Pista Bicicross",
+      "country": "Colombia",
+      "sourceUrl": "https://www.openstreetmap.org/way/379630790",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-it-pista-bmx-way-245379285",
+      "name": "Pista Bmx",
+      "country": "Italy",
+      "sourceUrl": "https://www.openstreetmap.org/way/245379285",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ar-pista-bmx-way-592779691",
+      "name": "Pista BMX",
+      "country": "Argentina",
+      "sourceUrl": "https://www.openstreetmap.org/way/592779691",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-br-pista-bmx-way-1468595633",
+      "name": "Pista BMX",
+      "country": "Brazil",
+      "sourceUrl": "https://www.openstreetmap.org/way/1468595633",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-br-pista-bmx-way-504070271",
+      "name": "Pista BMX",
+      "country": "Brazil",
+      "sourceUrl": "https://www.openstreetmap.org/way/504070271",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cl-pista-bmx-way-1205668650",
+      "name": "Pista BMX",
+      "country": "Chile",
+      "sourceUrl": "https://www.openstreetmap.org/way/1205668650",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cl-pista-bmx-way-1225549610",
+      "name": "Pista BMX",
+      "country": "Chile",
+      "sourceUrl": "https://www.openstreetmap.org/way/1225549610",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cr-pista-bmx-way-341078568",
+      "name": "Pista BMX",
+      "country": "Costa Rica",
+      "sourceUrl": "https://www.openstreetmap.org/way/341078568",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-it-pista-bmx-way-202126951",
+      "name": "Pista BMX",
+      "country": "Italy",
+      "sourceUrl": "https://www.openstreetmap.org/way/202126951",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-it-pista-bmx-node-4739386232",
+      "name": "Pista BMX",
+      "country": "Italy",
+      "sourceUrl": "https://www.openstreetmap.org/node/4739386232",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-it-pista-bmx-way-774534466",
+      "name": "Pista BMX",
+      "country": "Italy",
+      "sourceUrl": "https://www.openstreetmap.org/way/774534466",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-mx-pista-bmx-way-1282625434",
+      "name": "Pista BMX",
+      "country": "Mexico",
+      "sourceUrl": "https://www.openstreetmap.org/way/1282625434",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-mx-pista-bmx-way-375259626",
+      "name": "Pista BMX",
+      "country": "Mexico",
+      "sourceUrl": "https://www.openstreetmap.org/way/375259626",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-pista-bmx-way-1314361191",
+      "name": "Pista BMX",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/1314361191",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ec-pista-bmx-bicicross-way-1456778104",
+      "name": "Pista BMX - Bicicross",
+      "country": "Ecuador",
+      "sourceUrl": "https://www.openstreetmap.org/way/1456778104",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-co-pista-bmx-daniel-eduardo-barragan-noguera-way-917213783",
+      "name": "Pista BMX Daniel Eduardo Barragán Noguera",
+      "country": "Colombia",
+      "sourceUrl": "https://www.openstreetmap.org/way/917213783",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-mx-pista-bmx-del-care-way-1421629226",
+      "name": "Pista BMX del CARE",
+      "country": "Mexico",
+      "sourceUrl": "https://www.openstreetmap.org/way/1421629226",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-it-pista-bmx-di-nomi-way-154193010",
+      "name": "pista BMX di Nomi",
+      "country": "Italy",
+      "sourceUrl": "https://www.openstreetmap.org/way/154193010",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-it-pista-bmx-libertas-lupatotina-node-448282927",
+      "name": "Pista BMX LIBERTAS LUPATOTINA",
+      "country": "Italy",
+      "sourceUrl": "https://www.openstreetmap.org/node/448282927",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-mx-pista-bmx-sx-centenario-way-1499703138",
+      "name": "Pista BMX SX \"Centenario\"",
+      "country": "Mexico",
+      "sourceUrl": "https://www.openstreetmap.org/way/1499703138",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-py-pista-de-bicicleta-bmx-way-1199580253",
+      "name": "Pista de Bicicleta BMX",
+      "country": "Paraguay",
+      "sourceUrl": "https://www.openstreetmap.org/way/1199580253",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-br-pista-de-bicicross-way-380144179",
+      "name": "Pista de bicicross",
+      "country": "Brazil",
+      "sourceUrl": "https://www.openstreetmap.org/way/380144179",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-br-pista-de-bicicross-way-549545215",
+      "name": "Pista de Bicicross",
+      "country": "Brazil",
+      "sourceUrl": "https://www.openstreetmap.org/way/549545215",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-br-pista-de-bicicross-way-276215874",
+      "name": "Pista de Bicicross",
+      "country": "Brazil",
+      "sourceUrl": "https://www.openstreetmap.org/way/276215874",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-co-pista-de-bicicross-way-1237680053",
+      "name": "Pista de Bicicross",
+      "country": "Colombia",
+      "sourceUrl": "https://www.openstreetmap.org/way/1237680053",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-br-pista-de-bicicross-bmx-way-752330058",
+      "name": "Pista de Bicicross BMX",
+      "country": "Brazil",
+      "sourceUrl": "https://www.openstreetmap.org/way/752330058",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-br-pista-de-bicicross-de-caraguatatuba-way-543830062",
+      "name": "Pista de Bicicross de Caraguatatuba",
+      "country": "Brazil",
+      "sourceUrl": "https://www.openstreetmap.org/way/543830062",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-br-pista-de-bicicross-de-cosmopolis-rodrigo-custodio-da-silva-way-1419237031",
+      "name": "Pista de Bicicross de Cosmópolis \"Rodrigo Custódio da Silva\"",
+      "country": "Brazil",
+      "sourceUrl": "https://www.openstreetmap.org/way/1419237031",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-br-pista-de-bicicross-de-pocos-de-caldas-way-754576667",
+      "name": "Pista de Bicicross de Poços de Caldas",
+      "country": "Brazil",
+      "sourceUrl": "https://www.openstreetmap.org/way/754576667",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-br-pista-de-bicicross-luciano-bruni-way-1348720079",
+      "name": "Pista de Bicicross Luciano Bruni",
+      "country": "Brazil",
+      "sourceUrl": "https://www.openstreetmap.org/way/1348720079",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-co-pista-de-bicicross-mariana-pajon-way-314771439",
+      "name": "Pista de bicicross Mariana Pajón",
+      "country": "Colombia",
+      "sourceUrl": "https://www.openstreetmap.org/way/314771439",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ec-pista-de-bicicross-yacucalle-way-200504002",
+      "name": "Pista de Bicicross Yacucalle",
+      "country": "Ecuador",
+      "sourceUrl": "https://www.openstreetmap.org/way/200504002",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ar-pista-de-bmx-way-754145939",
+      "name": "Pista de BMX",
+      "country": "Argentina",
+      "sourceUrl": "https://www.openstreetmap.org/way/754145939",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-br-pista-de-bmx-way-1210764592",
+      "name": "Pista de BMX",
+      "country": "Brazil",
+      "sourceUrl": "https://www.openstreetmap.org/way/1210764592",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-br-pista-de-bmx-way-560767813",
+      "name": "Pista de BMX",
+      "country": "Brazil",
+      "sourceUrl": "https://www.openstreetmap.org/way/560767813",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-co-pista-de-bmx-way-1056478927",
+      "name": "Pista de BMX",
+      "country": "Colombia",
+      "sourceUrl": "https://www.openstreetmap.org/way/1056478927",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-co-pista-de-bmx-way-1305491838",
+      "name": "Pista de BMX",
+      "country": "Colombia",
+      "sourceUrl": "https://www.openstreetmap.org/way/1305491838",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-co-pista-de-bmx-way-1113474907",
+      "name": "Pista de BMX",
+      "country": "Colombia",
+      "sourceUrl": "https://www.openstreetmap.org/way/1113474907",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ec-pista-de-bmx-way-304914583",
+      "name": "Pista de BMX",
+      "country": "Ecuador",
+      "sourceUrl": "https://www.openstreetmap.org/way/304914583",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-pt-pista-de-bmx-way-1420618778",
+      "name": "Pista de BMX",
+      "country": "Portugal",
+      "sourceUrl": "https://www.openstreetmap.org/way/1420618778",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-pista-de-bmx-way-261412515",
+      "name": "Pista de BMX",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/261412515",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-pista-de-bmx-node-3265707945",
+      "name": "Pista de BMX",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/node/3265707945",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-br-pista-de-bmx-parque-dos-amigos-way-1009019352",
+      "name": "Pista de BMX - Parque dos Amigos",
+      "country": "Brazil",
+      "sourceUrl": "https://www.openstreetmap.org/way/1009019352",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-pt-pista-de-bmx-de-anadia-way-1306911311",
+      "name": "Pista de BMX de Anadia",
+      "country": "Portugal",
+      "sourceUrl": "https://www.openstreetmap.org/way/1306911311",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-pt-pista-de-bmx-de-quarteira-way-1122144862",
+      "name": "Pista de BMX de Quarteira",
+      "country": "Portugal",
+      "sourceUrl": "https://www.openstreetmap.org/way/1122144862",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-co-pista-de-bmx-el-salitre-way-713409276",
+      "name": "Pista de BMX El Salitre",
+      "country": "Colombia",
+      "sourceUrl": "https://www.openstreetmap.org/way/713409276",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-co-pista-de-bmx-tulio-ospina-way-754966201",
+      "name": "Pista de BMX Tulio Ospina",
+      "country": "Colombia",
+      "sourceUrl": "https://www.openstreetmap.org/way/754966201",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-pista-deportiva-para-ciclismo-bmx-da-cidade-da-cultura-way-1103908875",
+      "name": "Pista Deportiva para Ciclismo BMX da Cidade da Cultura",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/1103908875",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-pista-municipal-de-bmx-way-369883172",
+      "name": "Pista municipal de BMX",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/369883172",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-br-pista-municipal-de-bmx-way-1526602200",
+      "name": "Pista Municipal de BMX",
+      "country": "Brazil",
+      "sourceUrl": "https://www.openstreetmap.org/way/1526602200",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-pt-pista-municipal-de-bmx-way-1046335192",
+      "name": "Pista Municipal de BMX",
+      "country": "Portugal",
+      "sourceUrl": "https://www.openstreetmap.org/way/1046335192",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-br-pista-olimpica-de-bicicross-bmx-relation-12098277",
+      "name": "Pista Olímpica de Bicicross BMX",
+      "country": "Brazil",
+      "sourceUrl": "https://www.openstreetmap.org/relation/12098277",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ch-piste-bmx-way-514568048",
+      "name": "Piste BMX",
+      "country": "Switzerland",
+      "sourceUrl": "https://www.openstreetmap.org/way/514568048",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-pontesbury-bmx-track-way-297108064",
+      "name": "Pontesbury BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/297108064",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-portugalete-way-1314609995",
+      "name": "Portugalete",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/1314609995",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ch-powerbike-winterthur-way-49157212",
+      "name": "Powerbike Winterthur",
+      "country": "Switzerland",
+      "sourceUrl": "https://www.openstreetmap.org/way/49157212",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-lv-preilu-bmx-trase-way-1215827690",
+      "name": "Preiļu BMX trase",
+      "country": "Latvia",
+      "sourceUrl": "https://www.openstreetmap.org/way/1215827690",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-preston-pirates-bmx-park-way-31768851",
+      "name": "Preston Pirates BMX Park",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/31768851",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-pummptrack-elbart-way-1293418877",
+      "name": "Pummptrack Elbart",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1293418877",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-queen-s-park-bmx-track-way-1241579567",
+      "name": "Queen's Park BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/1241579567",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-rad-cross-bahn-way-1314335920",
+      "name": "Rad-Cross-Bahn",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1314335920",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-it-rampa-way-1445757496",
+      "name": "Rampa",
+      "country": "Italy",
+      "sourceUrl": "https://www.openstreetmap.org/way/1445757496",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ie-ratoath-bmx-track-way-1126511820",
+      "name": "Ratoath BMX Track",
+      "country": "Ireland",
+      "sourceUrl": "https://www.openstreetmap.org/way/1126511820",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-rc50-erlangen-way-150026748",
+      "name": "RC50 Erlangen",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/150026748",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-rhiwfawr-bmx-track-way-438210803",
+      "name": "Rhiwfawr BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/438210803",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-riedspitz-way-1321907444",
+      "name": "Riedspitz",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/1321907444",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-rollsportfreunde-koln-way-1152783236",
+      "name": "Rollsportfreunde Köln",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/1152783236",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-pl-rowerowy-park-umiejetnosci-w-droglowicach-way-1120548090",
+      "name": "Rowerowy Park Umiejętności w Droglowicach",
+      "country": "Poland",
+      "sourceUrl": "https://www.openstreetmap.org/way/1120548090",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-royston-bmx-club-way-187037812",
+      "name": "Royston BMX Club",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/187037812",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-runnymede-rockets-bmx-club-way-161969571",
+      "name": "Runnymede Rockets BMX Club",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/161969571",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "saint-quentin-bmx-stadium",
+      "name": "Saint-Quentin-en-Yvelines BMX Stadium",
+      "country": "France",
+      "sourceUrl": "https://www.uci.org/discipline/bmx-racing/2wPEZ3g9zV0Y0rT6rC7IZt",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-br-sebastiao-custodio-de-souza-seba-way-843507854",
+      "name": "Sebastião Custódio de Souza (SEBÁ)",
+      "country": "Brazil",
+      "sourceUrl": "https://www.openstreetmap.org/way/843507854",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ar-sector-bicicletas-way-497898730",
+      "name": "Sector Bicicletas",
+      "country": "Argentina",
+      "sourceUrl": "https://www.openstreetmap.org/way/497898730",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-shorncliffe-drive-bmx-track-way-874854861",
+      "name": "Shorncliffe Drive BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/874854861",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-lt-siauliu-bmx-trasa-way-55953170",
+      "name": "Šiaulių BMX trasa",
+      "country": "Lithuania",
+      "sourceUrl": "https://www.openstreetmap.org/way/55953170",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-dk-skanderborg-bmx-klub-way-1357709383",
+      "name": "Skanderborg BMX Klub",
+      "country": "Denmark",
+      "sourceUrl": "https://www.openstreetmap.org/way/1357709383",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-slopestyle-way-910164245",
+      "name": "slopestyle",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/910164245",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-sloughbottom-bmx-track-way-114164993",
+      "name": "Sloughbottom BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/114164993",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-lv-smeceres-sila-bmx-trase-way-710359117",
+      "name": "Smeceres sila BMX trase",
+      "country": "Latvia",
+      "sourceUrl": "https://www.openstreetmap.org/way/710359117",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-no-sola-bmx-way-78401940",
+      "name": "Sola BMX",
+      "country": "Norway",
+      "sourceUrl": "https://www.openstreetmap.org/way/78401940",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-es-sopuerta-way-1358721778",
+      "name": "Sopuerta",
+      "country": "Spain",
+      "sourceUrl": "https://www.openstreetmap.org/way/1358721778",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ch-speedpower-way-122580728",
+      "name": "SpeedPower",
+      "country": "Switzerland",
+      "sourceUrl": "https://www.openstreetmap.org/way/122580728",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-stanton-low-park-bmx-track-node-6147230576",
+      "name": "Stanton Low Park BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/node/6147230576",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-sk-stara-bikroska-iuventa-way-182824582",
+      "name": "Stará bikroska Iuventa",
+      "country": "Slovakia",
+      "sourceUrl": "https://www.openstreetmap.org/way/182824582",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-se-stockholm-bmx-arena-way-23517554",
+      "name": "Stockholm BMX Arena",
+      "country": "Sweden",
+      "sourceUrl": "https://www.openstreetmap.org/way/23517554",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "street-wise-bmx-track",
+      "name": "Street Wise BMX Track",
+      "country": "Aruba",
+      "sourceUrl": "https://mapcarta.com/W620434279",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-sugar-hills-way-498440487",
+      "name": "Sugar Hills",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/way/498440487",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-swanmore-bmx-track-way-988123207",
+      "name": "Swanmore BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/988123207",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-tal-y-sarn-bmx-track-way-1097564962",
+      "name": "Tal-y-sarn BMX track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/1097564962",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-lt-taurages-kalnu-dviraciu-parkas-way-1536245441",
+      "name": "Tauragės kalnų dviračių parkas",
+      "country": "Lithuania",
+      "sourceUrl": "https://www.openstreetmap.org/way/1536245441",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-tayport-bmx-track-way-909346406",
+      "name": "Tayport BMX track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/909346406",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-it-team-bmx-panther-boys-padova-node-7687784145",
+      "name": "Team Bmx Panther Boys Padova",
+      "country": "Italy",
+      "sourceUrl": "https://www.openstreetmap.org/node/7687784145",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-the-bmx-devils-way-1306997542",
+      "name": "The BMX Devils",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/1306997542",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-the-bmx-track-london-way-545286392",
+      "name": "The BMX Track London",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/545286392",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-the-track-cycle-racing-facility-way-469218709",
+      "name": "The Track (Cycle Racing Facility)",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/469218709",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-dk-thy-bmx-way-610876354",
+      "name": "THY BMX",
+      "country": "Denmark",
+      "sourceUrl": "https://www.openstreetmap.org/way/610876354",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-tiverton-bmx-way-148577761",
+      "name": "Tiverton BMX",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/148577761",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cz-tj-bmx-pardubice-way-46731173",
+      "name": "TJ BMX Pardubice",
+      "country": "Czech Republic",
+      "sourceUrl": "https://www.openstreetmap.org/way/46731173",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-pl-tor-rowerowy-way-444603251",
+      "name": "Tor rowerowy",
+      "country": "Poland",
+      "sourceUrl": "https://www.openstreetmap.org/way/444603251",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-pl-tor-rowerowy-bmx-way-747102628",
+      "name": "Tor rowerowy BMX",
+      "country": "Poland",
+      "sourceUrl": "https://www.openstreetmap.org/way/747102628",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-tower-hamlets-bmx-way-412720831",
+      "name": "Tower Hamlets BMX",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/412720831",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-my-trek-bicycle-bmx-way-1502392279",
+      "name": "Trek Bicycle BMX",
+      "country": "Malaysia",
+      "sourceUrl": "https://www.openstreetmap.org/way/1502392279",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-tumps-bmx-track-way-603518756",
+      "name": "Tumps BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/603518756",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-two-riversmeet-bmx-track-way-1075155113",
+      "name": "Two Riversmeet BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/1075155113",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ee-uuesalu-taismoodus-bmx-krossi-rada-365-m-way-1307193276",
+      "name": "Uuesalu täismõõdus BMX-krossi rada (365 m)",
+      "country": "Estonia",
+      "sourceUrl": "https://www.openstreetmap.org/way/1307193276",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-nl-uwtc-bmx-track-way-722705536",
+      "name": "UWTC BMX track",
+      "country": "Netherlands",
+      "sourceUrl": "https://www.openstreetmap.org/way/722705536",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-at-valisera-bahn-talstation-way-1526218545",
+      "name": "Valisera Bahn Talstation",
+      "country": "Austria",
+      "sourceUrl": "https://www.openstreetmap.org/way/1526218545",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-no-vasshaug-bmx-bane-way-1346451349",
+      "name": "Vasshaug BMX-Bane",
+      "country": "Norway",
+      "sourceUrl": "https://www.openstreetmap.org/way/1346451349",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-vauxhall-park-bmx-facility-way-174379105",
+      "name": "Vauxhall Park BMX Facility",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/174379105",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-lv-vecpiebalgas-bmx-trase-way-288634422",
+      "name": "Vecpiebalgas BMX trase",
+      "country": "Latvia",
+      "sourceUrl": "https://www.openstreetmap.org/way/288634422",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-vegesacker-bmx-club-node-2412315161",
+      "name": "Vegesacker BMX Club",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/node/2412315161",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ee-velo-jalgrattaklubi-way-30234837",
+      "name": "Velo jalgrattaklubi",
+      "country": "Estonia",
+      "sourceUrl": "https://www.openstreetmap.org/way/30234837",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ch-veloparcours-murmeliwiese-way-396049800",
+      "name": "Veloparcours Murmeliwiese",
+      "country": "Switzerland",
+      "sourceUrl": "https://www.openstreetmap.org/way/396049800",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ch-velopark-rutihof-node-5812269964",
+      "name": "Velopark Rütihof",
+      "country": "Switzerland",
+      "sourceUrl": "https://www.openstreetmap.org/node/5812269964",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-id-venue-bmx-kabupaten-siak-way-1338778808",
+      "name": "Venue BMX Kabupaten Siak",
+      "country": "Indonesia",
+      "sourceUrl": "https://www.openstreetmap.org/way/1338778808",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-vivash-park-bmx-track-way-884336379",
+      "name": "Vivash Park BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/884336379",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-voltex-race-arena-way-386523704",
+      "name": "Voltex Race Arena",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/386523704",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-dk-vra-bmx-way-1139043227",
+      "name": "Vrå BMX",
+      "country": "Denmark",
+      "sourceUrl": "https://www.openstreetmap.org/way/1139043227",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-wargrave-bmx-track-way-696943466",
+      "name": "Wargrave BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/696943466",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-wasteland-volmershoven-e-v-way-220463432",
+      "name": "Wasteland Volmershoven e.V.",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/220463432",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-whittaker-park-bmx-track-way-463130862",
+      "name": "Whittaker Park BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/463130862",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-woosehill-bmx-track-way-528536130",
+      "name": "Woosehill BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/528536130",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-wotton-bmx-track-way-719367586",
+      "name": "Wotton BMX Track",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/719367586",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-gb-wrekin-riders-bmx-club-way-1111113741",
+      "name": "Wrekin Riders BMX Club",
+      "country": "United Kingdom",
+      "sourceUrl": "https://www.openstreetmap.org/way/1111113741",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-de-x-park-way-41584863",
+      "name": "X-Park",
+      "country": "Germany",
+      "sourceUrl": "https://www.openstreetmap.org/way/41584863",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-ar-yarara-park-bmx-node-10910171803",
+      "name": "Yarará Park BMX",
+      "country": "Argentina",
+      "sourceUrl": "https://www.openstreetmap.org/node/10910171803",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cz-zavodiste-bmx-way-129151717",
+      "name": "Závodiště BMX",
+      "country": "Czech Republic",
+      "sourceUrl": "https://www.openstreetmap.org/way/129151717",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-be-zdenek-stybar-crossplein-way-393228775",
+      "name": "Zdeněk Štybar Crossplein",
+      "country": "Belgium",
+      "sourceUrl": "https://www.openstreetmap.org/way/393228775",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-il-bmx-node-3878047752",
+      "name": "מתחם bmx",
+      "country": "Israel",
+      "sourceUrl": "https://www.openstreetmap.org/node/3878047752",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-kr-bmx-way-1087846961",
+      "name": "강화아시아드BMX경기장",
+      "country": "South Korea",
+      "sourceUrl": "https://www.openstreetmap.org/way/1087846961",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-kr-bmx-way-923593459",
+      "name": "세종BMX경기장",
+      "country": "South Korea",
+      "sourceUrl": "https://www.openstreetmap.org/way/923593459",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-kr-bmx-way-957780709",
+      "name": "양양BMX경기장",
+      "country": "South Korea",
+      "sourceUrl": "https://www.openstreetmap.org/way/957780709",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cn-on-fuk-street-playground-way-369106411",
+      "name": "安福街遊樂場 On Fuk Street Playground",
+      "country": "China",
+      "sourceUrl": "https://www.openstreetmap.org/way/369106411",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cn--way-987881054",
+      "name": "立水桥泵道",
+      "country": "China",
+      "sourceUrl": "https://www.openstreetmap.org/way/987881054",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cn--way-1182409926",
+      "name": "立水桥泵道",
+      "country": "China",
+      "sourceUrl": "https://www.openstreetmap.org/way/1182409926",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-jp--way-783877114",
+      "name": "筑波山ゲートパーク",
+      "country": "Japan",
+      "sourceUrl": "https://www.openstreetmap.org/way/783877114",
+      "reason": "No venue-level federation race-directory provenance"
+    },
+    {
+      "id": "osm-cn--way-1190613675",
+      "name": "里水羽毛球场",
+      "country": "China",
+      "sourceUrl": "https://www.openstreetmap.org/way/1190613675",
+      "reason": "No venue-level federation race-directory provenance"
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import { isRacingDirectoryTrack } from '../lib/racingTrackDirectory';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   Bike,
@@ -313,7 +314,7 @@ export function PublicBikeShopDirectory({
   const hierarchyCatalogTotal = hierarchyCountries.reduce((total, item) => total + item.count, 0);
   const selectedShop = visibleShops.find((shop) => shop.id === selectedShopId) ?? visibleShops[0] ?? null;
   const nearbyTracks = useMemo(
-    () => selectedShop ? nearbyTracksForShop(selectedShop, tracks, 50) : [],
+    () => selectedShop ? nearbyTracksForShop(selectedShop, tracks.filter(isRacingDirectoryTrack), 50) : [],
     [selectedShop, tracks],
   );
   const selectedShopPhoneHref = selectedShop ? phoneHref(selectedShop.phone) : null;

@@ -29,7 +29,7 @@ export const discoveryGuideSections: AppGuideSection[] = [
         bullets: [
           'Sign in to save favorite tracks and return to them through Favorites.',
           'Copy a track link or share a track with a TrackLab friend. Received tracks appear in Friends under Shared tracks.',
-          'Directory records combine federation directories and community sources. Contact and location details depend on the information available for each track.',
+          'Global BMX search lists race venues from federation and sanctioning-body directories. Unverified community-map locations are excluded while awaiting race-venue verification. Coverage varies by country; confirm opening times and current racing with the club.',
         ],
       },
       {

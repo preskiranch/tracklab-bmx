@@ -10,6 +10,7 @@ const tracks = Array.from({ length: trackCount }, (_, index) => ({
   state: 'California',
   region: 'California',
   source: 'Playwright random-selection fixture',
+  providerId: 'usabmx', sourceType: 'sanctioning-body-track-directory', verificationStatus: 'official-track-directory',
   address: `${100 + index} Starting Gate Road, Fixture City, CA 900${String(index).padStart(2, '0')}`,
   city: 'Fixture City',
   postalCode: `900${String(index).padStart(2, '0')}`,
