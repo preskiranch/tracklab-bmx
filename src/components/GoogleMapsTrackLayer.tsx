@@ -87,8 +87,7 @@ import {
   ghostPlaybackGlow,
   ghostPlaybackHighlight,
 } from '../lib/ghosts';
-import { riderFallbackRigBaseAssetByColor, riderRigBaseAssetByColor } from '../lib/riderAssets';
-import { EVERGREEN_RIDER_FILTER } from '../lib/playerPalette';
+import { riderFallbackRigBaseAssetByColor } from '../lib/riderAssets';
 
 type GoogleMapsTrackLayerProps = {
   track: TrackRecord;
@@ -959,7 +958,7 @@ function drawRiderCrankAndLegRig(
   context.stroke();
 }
 
-function drawUprightRiderCanvas(
+export function drawUprightRiderCanvas(
   canvas: HTMLCanvasElement,
   image: HTMLImageElement,
   player: PlayerSlot,
@@ -985,9 +984,8 @@ function drawUprightRiderCanvas(
     ? riderMarkerMaximumShadowBlurPixels
     : riderMarkerShadowBlurPixels;
   context.shadowOffsetY = riderMarkerShadowOffsetYPixels;
-  context.filter = appearance !== 'ghost' && player.colorName === 'lime'
-    ? EVERGREEN_RIDER_FILTER
-    : 'none';
+  // Evergreen is baked into the source so iOS canvas filter support is irrelevant.
+  context.filter = 'none';
   context.drawImage(
     image,
     -riderMarkerDrawSize / 2,
@@ -1043,7 +1041,7 @@ async function uprightRiderIconUrl(
   animation: RiderAnimationState,
   appearance: RiderMarkerAppearance = 'live',
 ) {
-  const imageUrl = riderRigBaseAssetByColor[player.colorName];
+  const imageUrl = riderFallbackRigBaseAssetByColor[player.colorName];
   const orientation = uprightRiderOrientation(rotationDegrees);
   const leanBucket = riderLeanBucket(rotationDegrees);
   const cacheKey = `${appearance}:${player.colorName}:${player.accent}:${orientation.mirrored ? 'left' : 'right'}:${leanBucket}:${animation.crankStep}:${animation.wheelFrameIndex}`;
@@ -1201,7 +1199,7 @@ function createPersistentRiderOverlay(
     }
   };
 
-  void loadRiderImage(riderRigBaseAssetByColor[player.colorName])
+  void loadRiderImage(riderFallbackRigBaseAssetByColor[player.colorName])
     .then((image) => {
       if (disposed) {
         return;

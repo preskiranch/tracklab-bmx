@@ -76,6 +76,13 @@ describe('rider rig source assets', () => {
     // A long flat occupied edge means the rear tire was sliced before the
     // transparent padding was added. A complete curved wheel touches briefly.
     expect(longestOccupiedRunAtLeftEdge).toBeLessThanOrEqual(16);
+    let rightRun = 0;
+    let longestRightRun = 0;
+    for (let y = 0; y < image.height; y += 1) {
+      rightRun = image.data[((y * image.width) + maximumX) * 4 + 3] > 8 ? rightRun + 1 : 0;
+      longestRightRun = Math.max(longestRightRun, rightRun);
+    }
+    expect(longestRightRun).toBeLessThanOrEqual(16);
   });
 
   it.each(colors)('keeps the complete %s rider inside the 3D marker envelope while leaning', async (color) => {

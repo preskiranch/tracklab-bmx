@@ -7,9 +7,9 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const assetDirectory = path.join(repoRoot, 'public', 'assets');
 const colors = ['lime', 'red', 'blue', 'yellow'];
 const sourceFrameCount = 9;
-// Frame zero is the complete stopped pose. The former final-frame extraction
-// inherited a flat crop through the rear tire from the generated atlas.
-const stationaryFrameIndex = 0;
+// Frame one is the complete pose: frame zero clips the front tire and
+// frame two clips the rear tire. Animation is rendered by the runtime leg rig.
+const stationaryFrameIndex = 1;
 
 function clampChannel(value) {
   return Math.max(0, Math.min(255, Math.round(value)));
@@ -17,26 +17,15 @@ function clampChannel(value) {
 
 function evergreenFilteredCopy(source) {
   const output = PNG.sync.read(PNG.sync.write(source));
-  const saturation = 1.35;
-  const brightness = 0.64;
-  const contrast = 1.08;
+  // Recolor only the lime material to the card's Evergreen hue. Preserve
+  // highlights, shading, the black frame and the original alpha silhouette.
   for (let offset = 0; offset < output.data.length; offset += 4) {
-    if (output.data[offset + 3] === 0) continue;
-    const red = output.data[offset];
-    const green = output.data[offset + 1];
-    const blue = output.data[offset + 2];
-    const saturatedRed = ((0.213 + (0.787 * saturation)) * red)
-      + ((0.715 - (0.715 * saturation)) * green)
-      + ((0.072 - (0.072 * saturation)) * blue);
-    const saturatedGreen = ((0.213 - (0.213 * saturation)) * red)
-      + ((0.715 + (0.285 * saturation)) * green)
-      + ((0.072 - (0.072 * saturation)) * blue);
-    const saturatedBlue = ((0.213 - (0.213 * saturation)) * red)
-      + ((0.715 - (0.715 * saturation)) * green)
-      + ((0.072 + (0.928 * saturation)) * blue);
-    output.data[offset] = clampChannel((((saturatedRed * brightness) - 128) * contrast) + 128);
-    output.data[offset + 1] = clampChannel((((saturatedGreen * brightness) - 128) * contrast) + 128);
-    output.data[offset + 2] = clampChannel((((saturatedBlue * brightness) - 128) * contrast) + 128);
+    const [r, g, b, a] = output.data.subarray(offset, offset + 4);
+    if (!a || g <= b * 1.3 || r <= b * 1.15 || g < r * 0.85) continue;
+    const shade = Math.max(r, g, b) / 255;
+    output.data[offset] = clampChannel(23 * shade);
+    output.data[offset + 1] = clampChannel(143 * shade);
+    output.data[offset + 2] = clampChannel(77 * shade);
   }
   return output;
 }

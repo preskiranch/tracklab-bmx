@@ -65,8 +65,7 @@ import {
   ghostPlaybackColorName,
   ghostPlaybackGlow,
 } from '../lib/ghosts';
-import { riderRigBaseAssetByColor } from '../lib/riderAssets';
-import { EVERGREEN_RIDER_FILTER } from '../lib/playerPalette';
+import { riderFallbackRigBaseAssetByColor } from '../lib/riderAssets';
 
 type GoogleMaps3DTrackLayerProps = {
   track: TrackRecord;
@@ -476,7 +475,7 @@ function createRiderContent(
   const image = document.createElement('img');
   image.className = 'map-3d-rider-image';
   image.alt = label;
-  image.src = riderRigBaseAssetByColor[
+  image.src = riderFallbackRigBaseAssetByColor[
     appearance === 'ghost' ? ghostPlaybackColorName : player.colorName
   ];
   image.style.display = 'block';
@@ -492,7 +491,7 @@ function createRiderContent(
     image.style.filter = `hue-rotate(-28deg) saturate(2.6) brightness(1.18) drop-shadow(0 0 5px ${ghostPlaybackGlow})`;
     image.style.opacity = '0.72';
   } else if (player.colorName === 'lime') {
-    image.style.filter = `${EVERGREEN_RIDER_FILTER} drop-shadow(0 3px 2px rgba(0,0,0,.42))`;
+    image.style.filter = 'drop-shadow(0 3px 2px rgba(0,0,0,.42))';
   }
   content.append(image);
   return content;
