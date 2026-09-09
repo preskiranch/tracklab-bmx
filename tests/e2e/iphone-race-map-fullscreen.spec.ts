@@ -544,3 +544,17 @@ test('scales the demo game timing cards to two portrait rows and one landscape r
     expect(cardsFit).toBe(true);
   }
 });
+
+test('race tree hardware stays black regardless of page theme', async ({ page }) => {
+  await page.setContent('<div class="start-tree-light"><span class="tree-lamp red"></span><span class="tree-lamp yellow"></span><span class="tree-lamp green"></span></div>');
+  await installTrackStyles(page);
+  for (const theme of ['#fff', '#000']) {
+    await page.evaluate(color => document.documentElement.style.setProperty('--panel-soft', color), theme);
+    expect(await page.locator('.start-tree-light').evaluate(el => getComputedStyle(el).backgroundImage)).toContain('rgb(5, 5, 5)');
+    expect(await page.locator('.tree-lamp').first().evaluate(el => getComputedStyle(el).backgroundImage)).toContain('rgb(11, 11, 11)');
+  }
+  await page.locator('.tree-lamp').evaluateAll(lamps => lamps.forEach(el => el.classList.add('active')));
+  for (const [color, expected] of [['red', 'rgb(255, 75, 75)'], ['yellow', 'rgb(255, 216, 77)'], ['green', 'rgb(101, 240, 108)']]) {
+    expect(await page.locator(`.tree-lamp.${color}`).evaluate(el => getComputedStyle(el).backgroundImage)).toContain(expected);
+  }
+});
