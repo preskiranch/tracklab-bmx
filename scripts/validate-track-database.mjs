@@ -1,4 +1,3 @@
-import { isRacingDirectoryTrack } from './lib/racing-directory-policy.mjs';
 import { readFile } from 'node:fs/promises';
 import {
   isNormalizedPhoneNumber,
@@ -130,13 +129,12 @@ if (Number(database.trackCount) !== tracks.length) {
 }
 
 const locatorTracks = Array.isArray(locatorDatabase.tracks) ? locatorDatabase.tracks : [];
-const eligibleTracks = tracks.filter(isRacingDirectoryTrack);
-if (Number(locatorDatabase.trackCount) !== eligibleTracks.length || locatorTracks.length !== eligibleTracks.length) {
+if (Number(locatorDatabase.trackCount) !== tracks.length || locatorTracks.length !== tracks.length) {
   errors.push(`public locator contains ${locatorTracks.length} of ${tracks.length} tracks`);
 }
 const locatorTracksById = new Map(locatorTracks.map((track) => [track.id, track]));
-errors.push(...validateTrackSocialLinkParity({ ...socialLinkRegistry, links: socialLinkRegistry.links.filter(entry => eligibleTracks.some(track => track.id === entry.trackId)) }, locatorTracks, 'public locator'));
-for (const track of eligibleTracks) {
+errors.push(...validateTrackSocialLinkParity(socialLinkRegistry, locatorTracks, 'public locator'));
+for (const track of tracks) {
   const locatorTrack = locatorTracksById.get(track.id);
   if (!locatorTrack) {
     errors.push(`${track.id}: missing from public locator`);
@@ -158,7 +156,6 @@ for (const track of eligibleTracks) {
   }
 }
 for (const track of locatorTracks) {
-  if (!isRacingDirectoryTrack(track)) errors.push(`${track.id}: unverified race venue in global search`);
   const label = track.id || track.name || 'unknown locator track';
   if (!String(track.name ?? '').trim() || !String(track.country ?? '').trim()) {
     errors.push(`${label}: public locator is missing identifying fields`);

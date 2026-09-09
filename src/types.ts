@@ -1105,9 +1105,6 @@ export type TrackRecord = {
 };
 
 export type TrackLocatorRecord = Pick<TrackRecord,
-  | 'providerId'
-  | 'sourceType'
-  | 'verificationStatus'
   | 'id'
   | 'name'
   | 'country'

@@ -8,7 +8,6 @@ const contactTrack = {
   state: 'California',
   region: 'California',
   source: 'Verified test directory',
-  providerId: 'usabmx', sourceType: 'sanctioning-body-track-directory', verificationStatus: 'official-track-directory',
   address: '123 Start Hill, Napa, CA 94558',
   city: 'Napa',
   postalCode: '94558',
@@ -211,18 +210,4 @@ test('track contacts and map actions stay clear, callable, and responsive', asyn
   await expect(locator.getByRole('link', { name: /^Call / })).toHaveCount(0);
   await expect(locator.getByRole('group', { name: `Directions to ${noContactTrack.name}` })).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`locator=${noContactTrack.id}`));
-});
-
-test('global search excludes a generic BMX park even with a federation link', async ({ page }) => {
-  await page.route('**/api/auth/me', route => route.fulfill({ json: { user: null } }));
-  await page.route('**/data/track-locator.json', route => route.fulfill({ json: { tracks: [contactTrack, {
-    ...contactTrack, id: 'unverified-flatland', name: 'BMX Flatland', providerId: 'openstreetmap-overpass',
-    sourceType: 'community-map', verificationStatus: 'supplemental',
-  }] } }));
-  await page.goto(`/?locator=${contactTrack.id}`);
-  const locator = page.locator('#track-locator');
-  await locator.getByLabel('Search tracks').fill('Flatland');
-  await expect(locator.getByText('0 found', { exact: true })).toBeVisible();
-  await locator.getByLabel('Search tracks').fill('Clean Links');
-  await expect(locator.getByText('1 found', { exact: true })).toBeVisible();
 });

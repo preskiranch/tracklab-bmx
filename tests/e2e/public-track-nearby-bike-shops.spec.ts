@@ -8,7 +8,6 @@ const selectedTrack = {
   state: 'California',
   region: 'California',
   source: 'Playwright fixture',
-  providerId: 'usabmx', sourceType: 'sanctioning-body-track-directory', verificationStatus: 'official-track-directory',
   address: '700 Start Hill Road, Sacramento, CA 95814',
   city: 'Sacramento',
   postalCode: '95814',

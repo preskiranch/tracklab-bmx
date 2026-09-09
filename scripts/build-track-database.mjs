@@ -1,4 +1,3 @@
-import { isRacingDirectoryTrack } from './lib/racing-directory-policy.mjs';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -461,9 +460,7 @@ const database = {
   generatedAt,
   ...databaseBody,
 };
-const racingDirectoryTracks = database.tracks.filter(isRacingDirectoryTrack);
 const locatorFields = [
-  'providerId', 'sourceType', 'verificationStatus',
   'id',
   'name',
   'country',
@@ -489,14 +486,9 @@ const locatorFields = [
 ];
 const locatorDatabase = {
   generatedAt,
-  trackCount: racingDirectoryTracks.length,
-  coverage: {
-    countries: new Set(racingDirectoryTracks.map(track => track.country)).size,
-    officialRecords: racingDirectoryTracks.length,
-    supplementalRecords: 0,
-    recordsByCountry: Object.fromEntries([...new Set(racingDirectoryTracks.map(t => t.country))].map(country => [country, racingDirectoryTracks.filter(t => t.country === country).length])),
-  },
-  tracks: racingDirectoryTracks.map((track) => Object.fromEntries(
+  trackCount: database.trackCount,
+  coverage: database.coverage,
+  tracks: database.tracks.map((track) => Object.fromEntries(
     locatorFields
       .filter((field) => track[field] !== undefined)
       .map((field) => [field, track[field]]),
