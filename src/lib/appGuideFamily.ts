@@ -19,9 +19,10 @@ export const familyGuideSection: AppGuideSection = {
         'For an athlete who trains at a TrackLab club, connect their unclaimed Club Connect invitation to the selected managed child. This attaches that exact athlete’s available studio records and future recorded club sessions without renaming the parent or moving another child’s history.',
       ],
       steps: [
-        'Open the club’s athlete invitation and choose I’m the parent or guardian. Create or sign into your own account with your email.',
+        'Create or sign into your own parent account. Open My Profile → Family → Add child → Claim existing studio athlete. Paste the athlete invitation link from your studio and choose Review athlete invitation.',
+        'Check the athlete and studio names. Create the child profile or choose that child’s existing managed profile, confirm guardian authorization, and choose Claim child’s profile. Available previous studio sessions and future recorded sessions stay connected to that athlete and appear on their training calendar.',
         'If you are also an athlete, first open your own studio invitation, choose I’m the athlete, and claim your personal records. Stay signed into that same account when opening each child’s invitation and choose I’m the parent or guardian. Your personal workouts stay separate from each child’s records.',
-        'For a sibling, open that sibling’s separate studio invitation while signed into the same parent account. Create a new child profile or select that sibling’s existing profile. Never assign a sibling’s invitation to the first child.',
+        'For a sibling, return to Family → Add child and paste that sibling’s separate studio invitation while signed into the same parent account. Create a new child profile or select that sibling’s existing profile. Never assign a sibling’s invitation to the first child.',
         'Enter the child’s name or choose their existing managed profile, confirm guardian authorization, and claim the studio record. You can also connect an unclaimed invitation from Family.',
         'On the child’s phone, install TrackLab from the Preski Labs beta page and sign in with the parent account. Open My Profile → Family, select the child, and choose Use this device as [child’s name]. Confirm the device belongs to that child. Only this device switches to child access; the parent’s other devices remain signed in. A private setup link remains available as an alternative.',
       ],

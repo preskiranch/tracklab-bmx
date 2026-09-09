@@ -5599,6 +5599,10 @@ async function handleFamilyRequest(request, response, requestUrl) {
       reply(200, { children: authorizedChildren, archivedChildren: current.archivedChildren.map((child) => publicFamilyChild(child)), invitations: current.invitations.map(publicFamilyInvitation),
         sharedWith: current.sharedWith.map((item) => ({ id: item.id, parentName: item.parentName,
           createdAt: item.createdAt, permissions: { activity: true, health: false } })) });
+    } else if (pathname === '/api/family/club-claim/preview' && request.method === 'POST') {
+      const body = await readJsonBody(request, 8_000);
+      const invite = validFamilyToken(body?.token) ? await persistence.previewFamilyClubInvite(tokenHash(body.token)) : null;
+      reply(invite ? 200 : 409, invite ?? { error: 'This studio invitation expired or was already claimed. Check your existing family profiles or ask the studio for a new link.' });
     } else if (pathname === '/api/family/club-claim' && request.method === 'POST') {
       const body = await readJsonBody(request, 8_000);
       if (body?.guardianConsent !== true || !validFamilyToken(body?.token)

@@ -13853,6 +13853,24 @@ export async function saveClubInvite({
   return row ? { id: row.id, expiresAt: new Date(row.expires_at).getTime() } : null;
 }
 
+export async function previewFamilyClubInvite(hash) {
+  if (!pool) {
+    const invite = memoryClubInvitesByHash.get(hash);
+    const member = invite && memoryClubMembers.get(clubMemberKey(invite.clubId, invite.studioRiderId));
+    const club = invite && memoryClubsById.get(invite.clubId);
+    if (!invite || !member || !club || invite.claimedAt != null || invite.revokedAt != null
+      || invite.expiresAt <= Date.now() || member.athleteProfileKey || member.status !== 'unclaimed') return null;
+    return { riderName: member.riderName, clubName: club.name };
+  }
+  const result = await query(`SELECT members.rider_name, clubs.name AS club_name
+    FROM ${schema}.club_invites invites JOIN ${schema}.clubs clubs ON clubs.id=invites.club_id
+    JOIN ${schema}.club_members members ON members.club_id=invites.club_id AND members.studio_rider_id=invites.studio_rider_id
+    WHERE invites.token_hash=$1 AND invites.claimed_at IS NULL AND invites.revoked_at IS NULL
+      AND invites.expires_at>now() AND members.athlete_profile_key IS NULL AND members.status='unclaimed'`, [hash]);
+  const row = result?.rows?.[0];
+  return row ? { riderName: row.rider_name, clubName: row.club_name } : null;
+}
+
 export async function claimClubInvite(tokenHash, athleteProfileKey, athleteName) {
   return withFamilyLock(
     (client) => claimClubInviteWithClient(tokenHash, athleteProfileKey, athleteName, client),

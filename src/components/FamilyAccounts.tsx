@@ -9,6 +9,7 @@ import {
 import { FamilyAthleteHistory } from './FamilyAthleteHistory';
 import { RiderAvatar } from './RiderAvatar';
 import './FamilyAccounts.css';
+import { FamilyStudioClaim } from './FamilyStudioClaim';
 import { ChildPhoneSetup } from './ChildPhoneSetup';
 
 type FamilyAccountsProps = {
@@ -189,9 +190,10 @@ function FamilyAccountsContent({ accountId, accountName, speedUnit, distanceUnit
     {notice && <p className="family-notice" role="status">{notice}</p>}
     {loading && <p role="status">Loading family access…</p>}
     {family && <>
-      <details className="family-setup" open={family.children.length === 0}><summary>Add or link a child</summary><div className="family-setup-grid">
+      <details className="family-setup" open={family.children.length === 0}><summary>Add child</summary><div className="family-setup-grid">
+        <FamilyStudioClaim onClaimed={(child) => { void refresh().then(() => { if (alive.current) { setSelectedId(child.id); setNotice(`${child.name}’s studio records are connected. Choose a training date in their calendar below. Add each sibling with their own invitation.`); } }); }} />
         <section className="family-card" aria-labelledby={`${formId}-create`}>
-          <UserPlus size={23} /><h2 id={`${formId}-create`}>Create a child profile</h2><p>For a child you manage who does not have an account. No email or password is needed for the child.</p>
+          <UserPlus size={23} /><h2 id={`${formId}-create`}>Create a new child profile</h2><p>For a child without existing studio records. No email or password is needed for the child.</p>
           <form onSubmit={createChild}><label htmlFor={`${formId}-name`}>Child’s name</label><input id={`${formId}-name`} value={name} onChange={(event) => setName(event.target.value)} placeholder="Name shown on their records" autoComplete="off" maxLength={80} required disabled={Boolean(busy)} /><label className="family-consent"><input type="checkbox" checked={guardian} onChange={(event) => setGuardian(event.target.checked)} required disabled={Boolean(busy)} /><span>I am this child’s parent or guardian and am authorized to manage this profile.</span></label><button className="family-primary" type="submit" disabled={Boolean(busy) || !name.trim() || !guardian}>{busy === 'create-child' ? 'Creating profile…' : 'Create child profile'}</button></form>
         </section>
         <section className="family-card" aria-labelledby={`${formId}-link`}>

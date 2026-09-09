@@ -3,10 +3,10 @@ import { loadFamily, type FamilyChild } from '../lib/familyAccounts';
 import { childDeviceRequest } from '../lib/childDevices';
 import { ChildPhoneSetup } from './ChildPhoneSetup';
 
-export function ParentAthleteClaim({ token, onClaimed }: { token: string; onClaimed: () => void }) {
+export function ParentAthleteClaim({ token, onClaimed, initialName = '' }: { token: string; onClaimed: (child: FamilyChild) => void; initialName?: string }) {
   const [children, setChildren] = useState<FamilyChild[]>([]);
   const [selectedId, setSelectedId] = useState('');
-  const [name, setName] = useState('');
+  const [name, setName] = useState(initialName);
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -23,7 +23,7 @@ export function ParentAthleteClaim({ token, onClaimed }: { token: string; onClai
     if (busy) return; setBusy(true); setError('');
     try {
       const result = await childDeviceRequest('/api/family/club-claim', { token, name, childId: selectedId || undefined, guardianConsent: consent });
-      setClaimed(result.child); onClaimed();
+      setClaimed(result.child); onClaimed(result.child);
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Please try again.'); }
     finally { setBusy(false); }
   }

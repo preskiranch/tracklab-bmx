@@ -110,10 +110,16 @@ describe('parent-approved child phones', () => {
     expect((await api('/api/user-data', owner, { studioRiders: roster }, 'PATCH')).status).toBe(200);
     const childInvite = await (await api('/api/club-connect/invites', owner, { studioRiderId: roster[0].id })).json();
     const before = (await (await api('/api/family', parent)).json()).children.length;
+    expect((await api('/api/family/club-claim/preview', undefined, { token: childInvite.token })).status).toBe(401);
+    const preview = await api('/api/family/club-claim/preview', parent, { token: childInvite.token });
+    expect(preview.status).toBe(200);
+    expect(await preview.json()).toMatchObject({ riderName: 'Club child' });
+    expect((await api('/api/family/club-claim/preview', parent, { token: 'invalid' })).status).toBe(409);
     expect((await api('/api/family/club-claim', parent, { token: childInvite.token, name: 'Club child' })).status).toBe(400);
     const claimed = await api('/api/family/club-claim', parent, { token: childInvite.token, name: 'Club child', guardianConsent: true });
     expect(claimed.status, JSON.stringify(await claimed.clone().json())).toBe(201);
     const child = (await claimed.json()).child;
+    expect((await api('/api/family/club-claim/preview', parent, { token: childInvite.token })).status).toBe(409);
     const phone = await setupPhone(await phoneLink(parent, child.id));
     expect((await (await api('/api/club-connect', phone)).json()).memberships).toEqual(expect.arrayContaining([expect.objectContaining({ studioRiderId: roster[0].id })]));
     expect((await (await api(`/api/family/children/${child.id}/profile`, parent)).json()).accountProfile.personalRecords.reactionTestBestMs).toBe(119);
