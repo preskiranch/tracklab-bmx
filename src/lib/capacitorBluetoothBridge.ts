@@ -289,6 +289,18 @@ export async function installCapacitorBluetoothBridge({ nativeShell = false }: {
     return false;
   }
 
+  // Saved-device polling must return the same GATT object. Replacing it on
+  // every poll loses the connected flag and disconnect listeners, causing an
+  // idle but connected Wattbike to be connected again unnecessarily.
+  const devicesById = new Map<string, NativeBluetoothDevice>();
+  const rememberedDevice = (device: BleDevice) => {
+    let remembered = devicesById.get(device.deviceId);
+    if (!remembered) {
+      remembered = new NativeBluetoothDevice(device);
+      devicesById.set(device.deviceId, remembered);
+    }
+    return remembered;
+  };
   const bluetooth = {
     getDevices: async () => {
       const deviceIds = await readSavedNativeDeviceIds();
@@ -297,7 +309,7 @@ export async function installCapacitorBluetoothBridge({ nativeShell = false }: {
       }
       await initializeNativeBluetooth();
       const devices = await BleClient.getDevices(deviceIds);
-      return devices.map((device) => new NativeBluetoothDevice(device));
+      return devices.map(rememberedDevice);
     },
     requestDevice: async (options: BluetoothRequestDeviceOptions) => {
       await initializeNativeBluetooth();
@@ -309,7 +321,7 @@ export async function installCapacitorBluetoothBridge({ nativeShell = false }: {
         throw new Error(`Native Wattbike scan did not complete. ${message}`);
       }
       await saveNativeDeviceId(device.deviceId);
-      return new NativeBluetoothDevice(device);
+      return rememberedDevice(device);
     },
   };
 

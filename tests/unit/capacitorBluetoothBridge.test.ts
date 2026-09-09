@@ -274,6 +274,35 @@ describe('Capacitor Bluetooth bridge', () => {
     );
   });
 
+  it('keeps Bike 701 connected across saved-device polls and reconnects after a real disconnect', async () => {
+    const { fakeWindow } = installWindow(createStorage({
+      [savedDeviceIdsKey]: JSON.stringify([nativeBike701Id]),
+    }));
+    bleClient.getDevices.mockResolvedValue([{ deviceId: nativeBike701Id, name: 'WattbikePM25058701' }]);
+    bleClient.requestDevice.mockResolvedValue({ deviceId: nativeBike701Id, name: 'WattbikePM25058701' });
+    let onDisconnect: (() => void) | undefined;
+    bleClient.connect.mockImplementation(async (_id: string, callback: () => void) => { onDisconnect = callback; });
+    const { installCapacitorBluetoothBridge } = await loadBridge();
+    await installCapacitorBluetoothBridge();
+    const bluetooth = fakeWindow.navigator.bluetooth as InstalledBluetooth;
+    const [first] = await bluetooth.getDevices();
+    const disconnected = vi.fn();
+    first.addEventListener('gattserverdisconnected', disconnected);
+    await first.gatt.connect();
+    const [polled] = await bluetooth.getDevices();
+    expect(polled).toBe(first);
+    expect(polled.gatt.connected).toBe(true);
+    await polled.gatt.connect();
+    expect(bleClient.connect).toHaveBeenCalledTimes(1);
+    expect(await bluetooth.requestDevice({ optionalServices: [] })).toBe(first);
+    onDisconnect?.();
+    expect(disconnected).toHaveBeenCalledTimes(1);
+    expect(polled.gatt.connected).toBe(false);
+    await polled.gatt.connect();
+    expect(bleClient.connect).toHaveBeenCalledTimes(2);
+    expect(polled.gatt.connected).toBe(true);
+  });
+
   it('disconnects a partial native link when service discovery fails', async () => {
     const storage = createStorage({
       [savedDeviceIdsKey]: JSON.stringify([nativeBikeIds[0]]),
