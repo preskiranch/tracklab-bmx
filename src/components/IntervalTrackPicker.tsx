@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { TrackRecord, UserTrackMapping } from '../types';
 import './IntervalTrackPicker.css';
-import IntervalTrackPreview from './IntervalTrackPreview';
 import { playableIntervalTracks } from '../lib/playableIntervalTracks';
 export default function IntervalTrackPicker({tracks,mappings,selectedId,onSelect,locked,userId}: {
   tracks: TrackRecord[]; mappings: Record<string,UserTrackMapping>; selectedId: string;
@@ -81,7 +80,6 @@ export default function IntervalTrackPicker({tracks,mappings,selectedId,onSelect
       </div>
       {!userId&&<p>Sign in to request a track.</p>}
     </>}
-    {!all && playableIds.has(selectedId) && <IntervalTrackPreview key={selectedId} mapping={mappings[selectedId]}/> }
     <div role="status">{message}</div>
   </section>;
 }
