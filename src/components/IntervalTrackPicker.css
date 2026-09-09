@@ -21,3 +21,7 @@
 .interval-track-preview svg { display: block; width: 100%; height: 180px; padding: 12px; }
 
 .track-selectors > .interval-track-preview { grid-column: 1 / -1; min-width: 0; }
+
+.interval-picker-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 10px; margin: 12px 0; }
+.interval-picker-filters label, .interval-picker select, .interval-picker input { min-width: 0; max-width: 100%; }
+.interval-picker select, .interval-picker input { font-size: 16px; }

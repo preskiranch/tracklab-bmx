@@ -1,3 +1,4 @@
+import { hasPlayableIntervalZones } from './lib/playableIntervalTracks';
 import { setAnalyticsAppVisible } from './lib/adminAnalytics';
 import { childDeviceTokenFromHref } from './lib/childDevices';
 import {
@@ -3869,6 +3870,7 @@ export default function App() {
     : 0;
   const straightSprintMappedFeet = Math.round(straightSprintMappedRouteLengthMeters / 0.3048);
   const straightSprintDistanceMeters = straightSprintFeetToMeters(straightSprintDistanceFeet);
+  const intervalRouteReady = raceWorkspaceMode !== 'race' || hasPlayableIntervalZones(effectiveTrack);
   const straightSprintRouteReady = raceWorkspaceMode !== 'straight-sprint'
     || straightSprintMappedRouteLengthMeters + 0.5 >= straightSprintDistanceMeters;
   const straightSprintMaximumRouteReady = raceWorkspaceMode !== 'straight-sprint'
@@ -3893,6 +3895,10 @@ export default function App() {
       : null;
     setLapCount(eventLaps ?? multiplayerLaps ?? 1);
   }, [activeMultiplayerConfiguration, selectedTrack.id, raceRouteVariantId]);
+  const intervalTrackMappings = useMemo(() => Object.fromEntries(baseCatalogTracks.flatMap(track => {
+    const mapping = newestTrackMapping(developerUiActive ? storedMappings[track.id] : undefined, publicTrackMappings[track.id]);
+    return mapping ? [[track.id, mapping]] : [];
+  })), [baseCatalogTracks, developerUiActive, storedMappings, publicTrackMappings]);
   const multiplayerVoteCandidates = useMemo<MultiplayerTrackVoteCandidate[]>(() => {
     return catalogTracks.flatMap((track) => {
       const mapping = newestTrackMapping(
@@ -11822,6 +11828,7 @@ export default function App() {
     if (
       effectiveTrack.routeStatus !== 'user-mapped'
       || !straightSprintRouteReady
+      || !intervalRouteReady
       || startingRacePlayers.length === 0
     ) {
       return false;
@@ -12314,7 +12321,8 @@ export default function App() {
   const sessionTrackAvailable = raceWorkspaceMode !== 'straight-sprint' || selectedTrack.countryCode === 'CUSTOM';
   const workflowMapReady = sessionTrackAvailable
     && effectiveTrack.routeStatus === 'user-mapped'
-    && straightSprintRouteReady;
+    && straightSprintRouteReady
+    && intervalRouteReady;
   const workflowRaceReady = workflowConnectionReady
     && workflowRaceEntryReady
     && workflowMapReady
@@ -13640,9 +13648,9 @@ export default function App() {
                 <small>UCI start-cadence reaction practice</small>
               </span>
             </div>
-          ) : appMode === 'race' && !developerUiActive ? (
+          ) : appMode === 'race' && !mappingMode ? (
             <Suspense fallback={<span>Loading playable tracks…</span>}>
-              <IntervalTrackPicker key={authUser?.id ?? 'guest'} tracks={baseCatalogTracks} mappings={publicTrackMappings}
+              <IntervalTrackPicker key={authUser?.id ?? 'guest'} tracks={baseCatalogTracks} mappings={intervalTrackMappings}
                 selectedId={selectedTrackId} onSelect={handleTrackChange}
                 locked={clubEventConfigurationLocked || startGateStatus.active || raceState === 'racing'}
                 userId={authUser?.id}/>

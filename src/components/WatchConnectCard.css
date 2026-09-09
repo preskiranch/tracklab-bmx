@@ -5,6 +5,9 @@
   box-shadow: 0 8px 24px #1e1e1e12;
   color: var(--ink);
   display: grid;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   gap: 12px;
   padding: 14px;
 }
@@ -339,4 +342,26 @@
 
 @media (prefers-reduced-motion: reduce) {
   .watch-connect-card .spin { animation: none; }
+}
+
+/* Fieldsets otherwise retain their intrinsic minimum width in Safari. */
+.watch-connect-card > *,
+.watch-connect-card-consent,
+.watch-connect-card-consent label,
+.watch-connect-card-consent span {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+.watch-connect-card-consent legend {
+  max-inline-size: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.watch-connect-card-consent input { flex: 0 0 18px; }
+.watch-connect-owner-list,
+.watch-connect-owner-list li > span { min-width: 0; }
+.watch-connect-card .heart-rate-metric small {
+  max-width: 100%;
+  white-space: normal;
+  overflow: visible;
 }

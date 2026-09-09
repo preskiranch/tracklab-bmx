@@ -948,3 +948,29 @@ test('fullscreen Watch status stays clear of race voice and mapping controls', a
       .toBeGreaterThanOrEqual(280);
   }
 });
+
+test('connected studio Watch card fits portrait and landscape without clipping consent text', async ({ page }) => {
+  const user = signedInUser('watch-layout', 'Preski Ranch LLC');
+  const now = Date.now();
+  await page.addInitScript(() => Object.defineProperty(navigator, 'userAgent', { configurable: true, get: () => 'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148' }));
+  await routeSignedInShell(page, user);
+  await page.route('**/api/club-connect*', route => route.fulfill({ json: { canManageClub: false, ownedClub: null, memberships: [{ clubId: 'layout-club', clubName: 'Preski Ranch LLC', studioRiderId: 'layout-rider', riderName: user.name, claimedAt: now }] } }));
+  await page.route('**/api/heart-rate/watch-connect', route => route.fulfill({ json: {
+    enrollments: [{ id: 'layout-enrollment', scope: 'studio', clubId: 'layout-club', studioRiderId: 'layout-rider', state: 'trusted', liveStudioConsent: true, sessionStudioConsent: true, createdAt: now, updatedAt: now }],
+    connections: [{ id: 'layout-connection', enrollmentId: 'layout-enrollment', scope: 'studio', clubId: 'layout-club', studioRiderId: 'layout-rider', state: 'connected', connectedAt: now, connectedUntil: now + 14400000, remainingMs: 14400000, liveStudioConsent: true, sessionStudioConsent: true }],
+  } }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await openApp(page);
+  await page.locator('.side-nav .watch-connect-indicator').click();
+  const card = page.locator('.watch-connect-card');
+  await expect(card).toContainText('Studio sharing with Preski Ranch LLC');
+  for (const viewport of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 844, height: 390 }, { width: 820, height: 1180 }, { width: 1440, height: 900 }]) {
+    await page.setViewportSize(viewport);
+    const result = await card.evaluate(el => ({
+      pageFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      overflowing: [el, ...el.querySelectorAll<HTMLElement>('*')].filter(child => child.clientWidth > 0 && child.scrollWidth > child.clientWidth + 1).map(child => `${child.tagName}.${child.className}: ${child.scrollWidth}/${child.clientWidth} ${child.textContent?.slice(0,90)}`),
+    }));
+    expect(result, `${viewport.width}px`).toEqual({ pageFits: true, overflowing: [] });
+  }
+});

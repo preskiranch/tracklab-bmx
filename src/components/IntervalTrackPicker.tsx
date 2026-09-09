@@ -2,25 +2,23 @@ import { useEffect, useMemo, useState } from 'react';
 import type { TrackRecord, UserTrackMapping } from '../types';
 import './IntervalTrackPicker.css';
 import IntervalTrackPreview from './IntervalTrackPreview';
-export function playableIntervalTracks(tracks: TrackRecord[], mappings: Record<string, UserTrackMapping>) {
-  return tracks.filter(track => {
-    const m=mappings[track.id];
-    return m?.routeStatus === 'user-mapped' && m.centerline?.length >= 2
-      && m.zones?.some(zone => zone.type === 'pedal' && zone.endMeter > zone.startMeter);
-  });
-}
+import { playableIntervalTracks } from '../lib/playableIntervalTracks';
 export default function IntervalTrackPicker({tracks,mappings,selectedId,onSelect,locked,userId}: {
   tracks: TrackRecord[]; mappings: Record<string,UserTrackMapping>; selectedId: string;
   onSelect:(id:string)=>void; locked:boolean; userId?:string;
 }) {
   const [all,setAll]=useState(false);
   const [search,setSearch]=useState('');
+  const [country,setCountry]=useState('');
+  const [region,setRegion]=useState('');
   const [requested,setRequested]=useState<Record<string,boolean>>({});
   const [busy,setBusy]=useState('');
   const [message,setMessage]=useState('');
   const playable=useMemo(()=>playableIntervalTracks(tracks,mappings),[tracks,mappings]);
   const playableIds=useMemo(()=>new Set(playable.map(t=>t.id)),[playable]);
-  const matches=useMemo(()=>tracks.filter(t=>`${t.name} ${t.state} ${t.country}`.toLowerCase().includes(search.trim().toLowerCase())),[tracks,search]);
+  const countries=useMemo(()=>[...new Set(tracks.map(t=>t.country).filter(Boolean))].sort((a,b)=>a.localeCompare(b)),[tracks]);
+  const regions=useMemo(()=>[...new Set(tracks.filter(t=>!country||t.country===country).map(t=>t.state).filter(Boolean))].sort((a,b)=>a.localeCompare(b)),[tracks,country]);
+  const matches=useMemo(()=>tracks.filter(t=>(!country||t.country===country)&&(!region||t.state===region)&&`${t.name} ${t.state} ${t.country}`.toLowerCase().includes(search.trim().toLowerCase())),[tracks,search,country,region]);
   useEffect(()=>{
     if (!locked && playable.length && !playableIds.has(selectedId)) onSelect(playable[0].id);
   },[locked,onSelect,playable,playableIds,selectedId]);
@@ -47,7 +45,7 @@ export default function IntervalTrackPicker({tracks,mappings,selectedId,onSelect
       <button type="button" aria-pressed={!all} onClick={()=>setAll(false)}>Ready to race ({playable.length})</button>
       <button type="button" aria-pressed={all} onClick={()=>setAll(true)}>All tracks · Request mapping</button>
     </div>
-    {!all ? <label>Playable track
+    {!all ? <label>Playable track · saved pedal zones
       <select aria-label="Playable interval track" disabled={locked||!playable.length} value={playableIds.has(selectedId)?selectedId:''} onChange={e=>onSelect(e.target.value)}>
         {!playableIds.has(selectedId)&&<option value="">Choose a mapped track</option>}
         {playable.map(t=><option key={t.id} value={t.id}>{t.name} — {t.state}, {t.country}</option>)}
@@ -55,7 +53,22 @@ export default function IntervalTrackPicker({tracks,mappings,selectedId,onSelect
       {!playable.length&&<span>No playable mappings loaded yet. Browse all tracks to request one.</span>}
     </label> : <>
       <p>Missing your track? Request it for a future update. Availability is not guaranteed.</p>
+      <div className="interval-picker-filters">
+        <label>Country
+          <select aria-label="Mapping request country" value={country} onChange={e=>{setCountry(e.target.value);setRegion('');}}>
+            <option value="">All countries</option>
+            {countries.map(value=><option key={value} value={value}>{value}</option>)}
+          </select>
+        </label>
+        <label>State / Region
+          <select aria-label="Mapping request state or region" value={region} onChange={e=>setRegion(e.target.value)}>
+            <option value="">All states / regions</option>
+            {regions.map(value=><option key={value} value={value}>{value}</option>)}
+          </select>
+        </label>
+      </div>
       <input type="search" aria-label="Search all tracks" placeholder="Search track, state or country" value={search} onChange={e=>setSearch(e.target.value)}/>
+      <small aria-live="polite">{matches.length} tracks found</small>
       <div className="interval-track-results" role="list" aria-label="All BMX tracks">
         {matches.map(t=><div role="listitem" key={t.id}>
           <span><strong>{t.name}</strong><small>{t.state}, {t.country}</small></span>

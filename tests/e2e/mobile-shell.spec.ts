@@ -231,8 +231,8 @@ test('iPhone portrait shell is fixed-width with readable navigation and headers'
     const buttonRows = new Set(navItems.map((button) => Math.round(button.getBoundingClientRect().top)));
     const firstButtonStyle = buttons[0] ? getComputedStyle(buttons[0]) : null;
     const watch = navigation?.querySelector<HTMLElement>('.watch-connect-indicator');
-    const selectorLabel = document.querySelector<HTMLElement>('.track-selectors span');
-    const selector = document.querySelector<HTMLElement>('.track-selectors select');
+    const selectorLabel = document.querySelector<HTMLElement>('.interval-picker label');
+    const selector = document.querySelector<HTMLElement>('.interval-picker select');
     const readiness = document.querySelector<HTMLElement>('.race-readiness-strip');
     return {
       documentFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
@@ -274,7 +274,7 @@ test('iPhone portrait shell is fixed-width with readable navigation and headers'
     '.side-nav',
     '.platform-main',
     '.platform-topbar',
-    '.track-selectors',
+    '.interval-picker',
     '.race-readiness-strip',
     '.recovery-alert-card',
     '.dashboard-grid',
@@ -738,4 +738,86 @@ test('public track locator text remains legible in iPhone portrait', async ({ pa
   expect(typography.resultLocation).toBeGreaterThanOrEqual(14);
   expect(typography.searchHeight).toBeGreaterThanOrEqual(44);
   expect(typography.documentFits).toBe(true);
+});
+
+test('all navigation destinations fit phone portrait, landscape, tablet and desktop', async ({ page }) => {
+  test.setTimeout(240_000);
+  await mockSignedInRacer(page, null, true);
+  await page.route('**/api/admin/analytics?*', route => route.fulfill({ status: 503, json: { error: 'Fixture unavailable' } }));
+  const destinations = [
+    ['My Profile', false], ['Friends', false], ['BMX Race Intervals', false],
+    ['Reaction Test', false], ['Explore the World', false], ['Straight Sprint', false],
+    ['Get Pulled', false], ['Track', false], ['Riders', false], ['Results', false],
+    ['Family', true], ['Settings', true], ['Beta Testing', true], ['App Guide', true],
+    ['Beta Testing Info', true], ['Watch Connect', true], ['Community', true],
+    ['Track Locator', true], ['Global Bike Shop Directory', true], ['Live Monitor', true],
+    ['Bike Check', true], ['Tracks & Maps', true], ['Developer Tools', true],
+  ] as const;
+  for (const [name, more] of destinations) {
+    await page.setViewportSize(iphonePortrait);
+    await page.goto('/?track=oak-creek-bmx');
+    await openSignedInApp(page);
+    const nav = page.getByRole('navigation', { name: 'Primary' });
+    if (more) await nav.getByRole('button', { name: 'More', exact: true }).click();
+    await nav.getByRole('button', { name, exact: true }).click();
+    await page.evaluate(async () => { if (document.fullscreenElement) await document.exitFullscreen(); });
+    for (const viewport of [iphonePortrait, { width: 844, height: 390 }, { width: 820, height: 1180 }, { width: 1440, height: 900 }]) {
+      await page.setViewportSize(viewport);
+      await expect.poll(async () => page.evaluate(() => {
+        const width = document.documentElement.clientWidth;
+        return [...document.querySelectorAll<HTMLElement>('.platform-main, .watch-connect-card, [role="dialog"], .membership-hub, .settings-panel')]
+          .filter(el => el.getBoundingClientRect().width > 0)
+          .filter(el => el.getBoundingClientRect().right > width + 1 || el.getBoundingClientRect().left < -1 || el.scrollWidth > el.clientWidth + 1)
+          .map(el => `${el.className}: ${el.scrollWidth}/${el.clientWidth}; children: ${[...el.querySelectorAll<HTMLElement>('*')].filter(child => child.getBoundingClientRect().right > el.getBoundingClientRect().right + 1).slice(0, 12).map(child => child.className).join(',')}`);
+      }), { message: `${name} at ${viewport.width}` }).toEqual([]);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth), `${name} at ${viewport.width}`).toBeLessThanOrEqual(viewport.width);
+    }
+  }
+});
+
+
+test('mapping requests filter by country and region and keep search within those filters', async ({ page }) => {
+  await mockSignedInRacer(page);
+  await page.setViewportSize(iphonePortrait);
+  await page.goto('/');
+  await openSignedInApp(page);
+  await page.getByRole('button', { name: 'All tracks · Request mapping', exact: true }).click();
+  const country = page.getByLabel('Mapping request country');
+  const region = page.getByLabel('Mapping request state or region');
+  await country.selectOption('United States');
+  await region.selectOption('California');
+  const locations = page.locator('.interval-track-results [role="listitem"] small');
+  expect(await locations.count()).toBeGreaterThan(0);
+  expect((await locations.allTextContents()).every(value => value === 'California, United States')).toBe(true);
+  await page.getByLabel('Search all tracks', { exact: true }).fill('Chula Vista');
+  expect(await locations.count()).toBeGreaterThan(0);
+  expect((await page.locator('.interval-track-results strong').allTextContents()).every(value => value.includes('Chula Vista'))).toBe(true);
+  await page.getByLabel('Search all tracks', { exact: true }).fill('');
+  await country.selectOption('Canada');
+  await expect(region).toHaveValue('');
+  await expect(region.locator('option[value="California"]')).toHaveCount(0);
+  await region.selectOption('British Columbia');
+  expect((await locations.allTextContents()).every(value => value === 'British Columbia, Canada')).toBe(true);
+  for (const viewport of [iphonePortrait, { width: 844, height: 390 }, { width: 820, height: 1180 }, { width: 1440, height: 900 }]) {
+    await page.setViewportSize(viewport);
+    expect(await page.locator('.interval-picker').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+  }
+});
+
+test('race picker excludes saved routes without zones even for administrators', async ({ page }) => {
+  await mockSignedInRacer(page, null, true);
+  const zoned = mobileRaceTrackMapping;
+  const routeOnly = { ...zoned, trackId: 'oak-creek-bmx', trackName: 'Oak Creek BMX', zones: [] };
+  await page.route('**/api/public-track-mappings', route => route.fulfill({ json: { trackMappings: { [zoned.trackId]: zoned, [routeOnly.trackId]: routeOnly }, customRoutes: [] } }));
+  await page.goto('/?track=oak-creek-bmx');
+  await openSignedInApp(page);
+  const picker = page.getByLabel('Playable interval track');
+  await expect(picker).toHaveValue(zoned.trackId);
+  await expect(picker.locator('option[value="oak-creek-bmx"]')).toHaveCount(0);
+  await expect(picker.locator('option[value="black-mountain-bmx"]')).toHaveCount(1);
+  await page.getByRole('button', { name: 'All tracks · Request mapping', exact: true }).click();
+  await page.getByLabel('Search all tracks', { exact: true }).fill('Oak Creek');
+  await expect(page.locator('.interval-track-results').getByRole('button', { name: 'Race', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Request mapping for Oak Creek BMX', exact: true })).toBeVisible();
 });
