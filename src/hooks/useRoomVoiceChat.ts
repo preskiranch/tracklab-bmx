@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { uciGreenToneDurationSeconds } from '../lib/uciStartGate';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   MultiplayerRoom,
   MultiplayerVoiceSignal,
@@ -6,6 +7,7 @@ import type {
 } from '../types';
 
 type UseRoomVoiceChatOptions = {
+  cadenceActive?: boolean;
   currentRoom: MultiplayerRoom | null;
   currentUserId: string | null;
   voiceSignals: MultiplayerVoiceSignal[];
@@ -43,12 +45,20 @@ export function claimRoomVoiceReady(
 }
 
 export function useRoomVoiceChat({
+  cadenceActive = false,
   currentRoom,
   currentUserId,
   voiceSignals,
   sendVoiceSignal,
 }: UseRoomVoiceChatOptions) {
   const [enabled, setEnabled] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [finalTonePlaying, setFinalTonePlaying] = useState(false);
+  const gatePaused = cadenceActive || finalTonePlaying;
+  const gatePausedRef = useRef(gatePaused);
+  gatePausedRef.current = gatePaused;
+  const manuallyMutedRef = useRef(muted);
+  manuallyMutedRef.current = muted;
   const [requesting, setRequesting] = useState(false);
   const [status, setStatus] = useState('Voice off.');
   const [remoteCount, setRemoteCount] = useState(0);
@@ -65,6 +75,30 @@ export function useRoomVoiceChat({
   const lifecycleRuntimeRef = useRef<RoomVoiceLifecycleRuntime | null>(null);
   const lifecycleRuntimePromiseRef = useRef<Promise<RoomVoiceLifecycleRuntime> | null>(null);
   const streamManagerRef = useRef<RoomVoiceStreamManager | null>(null);
+
+
+  // Hold through the ACTUAL final tone onset + its full duration, not the
+  // 420ms green-light UI state. Silence incoming speech as well as the mic.
+  useEffect(() => {
+    let timer: number | undefined;
+    const onTone = (event: Event) => {
+      const detail = (event as CustomEvent<{ kind: string; atMonotonic: number }>).detail;
+      if (detail?.kind !== 'uci-green') return;
+      gatePausedRef.current = true;
+      streamManagerRef.current?.setMuted(true);
+      audioElementsRef.current.forEach(audio => { audio.muted = true; });
+      setFinalTonePlaying(true);
+      window.clearTimeout(timer);
+      const remaining = (uciGreenToneDurationSeconds * 1000) - Math.max(0, performance.now() - detail.atMonotonic);
+      timer = window.setTimeout(() => setFinalTonePlaying(false), Math.max(0, remaining));
+    };
+    window.addEventListener('tracklab-start-gate-tone', onTone);
+    return () => { window.clearTimeout(timer); window.removeEventListener('tracklab-start-gate-tone', onTone); };
+  }, []);
+  useLayoutEffect(() => {
+    streamManagerRef.current?.setMuted(muted || gatePaused);
+    audioElementsRef.current.forEach(audio => { audio.muted = gatePaused; });
+  }, [muted, gatePaused]);
 
   const roomId = currentRoom?.id ?? null;
 
@@ -153,6 +187,7 @@ export function useRoomVoiceChat({
     if (updateState) {
       setRemoteCount(0);
       setEnabled(false);
+      setMuted(false);
       setRequesting(false);
       setStatus('Voice off.');
     }
@@ -183,6 +218,7 @@ export function useRoomVoiceChat({
       pendingPeersRef.current,
       async () => {
         const stream = await streamManagerRef.current!.acquire();
+        streamManagerRef.current!.setMuted(manuallyMutedRef.current || gatePausedRef.current);
         if (!isCurrent()) throw roomVoiceStopped;
         const peer = runtime.createRoomVoicePeer({
           stream,
@@ -199,6 +235,7 @@ export function useRoomVoiceChat({
               document.body.appendChild(audio);
               audioElementsRef.current.set(remoteId, audio);
             }
+            audio.muted = gatePausedRef.current;
             audio.srcObject = remoteStream;
             void audio.play().catch(() => undefined);
             setRemoteCount(audioElementsRef.current.size);
@@ -273,6 +310,7 @@ export function useRoomVoiceChat({
         if (generation !== lifecycleGenerationRef.current) {
           throw roomVoiceStopped;
         }
+        streamManagerRef.current?.setMuted(manuallyMutedRef.current || gatePausedRef.current);
         enabledRef.current = true;
         setEnabled(true);
         setStatus('Voice on.');
@@ -285,6 +323,7 @@ export function useRoomVoiceChat({
           ? 'Microphone permission was not granted.'
           : 'Microphone access failed.');
         setEnabled(false);
+        setMuted(false);
       })
       .finally(() => {
         if (startPromiseRef.current === operation) startPromiseRef.current = null;
@@ -383,6 +422,13 @@ export function useRoomVoiceChat({
   ]);
 
   return {
+    gatePaused,
+    muted,
+    toggleMuted: () => {
+      const next = !muted;
+      streamManagerRef.current?.setMuted(next || gatePausedRef.current);
+      setMuted(next);
+    },
     enabled,
     remoteCount,
     requesting,

@@ -3942,9 +3942,9 @@ export async function saveRoom(room, host) {
   return query(
     `INSERT INTO ${schema}.rooms (
        id, host_guest_key, host_name, private, track, setup,
-       studio_club_id, matchmaking_scope, round_number
+       studio_club_id, matchmaking_scope, round_number, student_activity
      )
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10)
      ON CONFLICT (id) DO UPDATE SET
        track = EXCLUDED.track,
        private = EXCLUDED.private,
@@ -3952,6 +3952,7 @@ export async function saveRoom(room, host) {
        studio_club_id = EXCLUDED.studio_club_id,
        matchmaking_scope = EXCLUDED.matchmaking_scope,
        round_number = EXCLUDED.round_number,
+       student_activity = EXCLUDED.student_activity,
        closed_at = null`,
     [
       room.id,
@@ -3963,6 +3964,7 @@ export async function saveRoom(room, host) {
       room.studioClubId ?? null,
       room.matchmakingScope ?? null,
       Math.max(1, Math.round(Number(room.roundNumber) || 1)),
+      room.studentActivity ?? null,
     ],
   );
 }
@@ -4075,7 +4077,7 @@ export async function saveRoomMessage(roomId, client, message) {
 export async function loadRoom(roomId) {
   const result = await query(
     `SELECT id, host_guest_key, host_name, private, track, setup, studio_club_id,
-            matchmaking_scope, round_number, created_at
+            matchmaking_scope, round_number, student_activity, created_at
      FROM ${schema}.rooms WHERE id = $1 AND closed_at IS NULL`,
     [roomId],
   );
@@ -4106,6 +4108,7 @@ export async function loadRoom(roomId) {
     track: fromJson(row.track, null),
     setup: fromJson(row.setup, null),
     studioClubId: row.studio_club_id ?? null,
+    studentActivity: row.student_activity ?? null,
     matchmakingScope: row.matchmaking_scope ?? null,
     roundNumber: Math.max(1, Math.round(Number(row.round_number) || 1)),
     createdAt: new Date(row.created_at).getTime(),

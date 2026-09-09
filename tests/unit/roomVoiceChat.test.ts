@@ -116,6 +116,7 @@ describe('room voice chat seats', () => {
 
     const stream = {
       getTracks: () => [],
+      getAudioTracks: () => [],
     } as unknown as MediaStream;
     resolveStream!(stream);
     await expect(first).resolves.toBe(stream);
@@ -129,6 +130,7 @@ describe('room voice chat seats', () => {
     const track = { stop: vi.fn() };
     const stream = {
       getTracks: () => [track],
+      getAudioTracks: () => [track],
     } as unknown as MediaStream;
     const manager = createRoomVoiceStreamManager(() => new Promise<MediaStream>((resolve) => {
       resolveStream = resolve;
@@ -264,5 +266,24 @@ describe('room voice chat seats', () => {
       'ready-muted',
       'candidate-muted',
     ]));
+  });
+});
+
+
+describe('room microphone mute', () => {
+  it('mutes the microphone without closing the stream and stops it on leaving', async () => {
+    const track = { enabled: true, stop: vi.fn() };
+    const stream = { getTracks: () => [track], getAudioTracks: () => [track] } as unknown as MediaStream;
+    const manager = createRoomVoiceStreamManager(async () => stream);
+    await manager.acquire();
+    manager.setMuted(true);
+    expect(track.enabled).toBe(false);
+    expect(track.stop).not.toHaveBeenCalled();
+    expect(manager.current()).toBe(stream);
+    manager.setMuted(false);
+    expect(track.enabled).toBe(true);
+    manager.stop();
+    expect(track.stop).toHaveBeenCalledOnce();
+    expect(manager.current()).toBeNull();
   });
 });

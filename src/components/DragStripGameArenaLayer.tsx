@@ -1029,6 +1029,7 @@ export function DragStripGameArenaLayer({
 
   return (
     <div
+      className={showHud ? "drag-strip-arena has-rider-hud" : "drag-strip-arena"}
       aria-label="Drag Strip Game Arena"
       data-race-distance-meters={raceDistanceMeters.toFixed(3)}
       data-start-gate-active={startGateActive ? 'true' : 'false'}

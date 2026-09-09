@@ -2472,6 +2472,13 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           platform TEXT NOT NULL, PRIMARY KEY(day,user_id,platform))`,
       ],
     },
+    {
+      version: 54,
+      name: 'preserve private student room activity',
+      statements: [
+        `ALTER TABLE ${schema}.rooms ADD COLUMN IF NOT EXISTS student_activity TEXT`,
+      ],
+    },
   ];
 }
 

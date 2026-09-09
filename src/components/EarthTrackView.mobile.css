@@ -816,3 +816,25 @@
   width: 100% !important; height: 100% !important; transform: none !important;
 }
 .race-rider-overlay.phone-docked .race-rider-overlay-handle { cursor: default; }
+
+/* The sprint HUD gets its own layout row, including during rotation. */
+.drag-strip-arena.has-rider-hud {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+.drag-strip-arena.has-rider-hud > [data-arena-adaptive-viewport] {
+  position: relative !important;
+  inset: auto !important;
+  width: 100%;
+  min-width: 0;
+}
+.drag-strip-arena.has-rider-hud > .game-arena-hud {
+  position: relative !important;
+  inset: auto !important;
+  margin: 0;
+  border-radius: 0 !important;
+  box-sizing: border-box;
+  padding-bottom: max(5px, env(safe-area-inset-bottom, 0px)) !important;
+  padding-left: max(5px, env(safe-area-inset-left, 0px)) !important;
+  padding-right: max(5px, env(safe-area-inset-right, 0px)) !important;
+}

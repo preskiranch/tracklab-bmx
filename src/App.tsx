@@ -1,4 +1,5 @@
-import { hasPlayableIntervalZones } from './lib/playableIntervalTracks';
+import { ClubStudentLobby } from './components/ClubStudentLobby';
+import { hasPlayableIntervalZones, playableIntervalTracks } from './lib/playableIntervalTracks';
 import { setAnalyticsAppVisible } from './lib/adminAnalytics';
 import { childDeviceTokenFromHref } from './lib/childDevices';
 import {
@@ -4571,7 +4572,7 @@ export default function App() {
   // Coach-assigned club activities keep their authenticated transport;
   // ordinary users cannot enter public or private live rooms during beta.
   const liveRacingAvailable = publicLiveMultiplayerAvailable || Boolean(
-    clubEventLaunch?.eventId || (clubTabletDeviceActive && demoMode),
+    clubEventLaunch?.eventId || (clubTabletDeviceActive && demoMode) || clubTabletSessionActive,
   );
   const multiplayer = useMultiplayer({
     liveRacingAvailable,
@@ -4649,6 +4650,7 @@ export default function App() {
     playMode,
   ]);
   const roomVoice = useRoomVoiceChat({
+    cadenceActive: startGateStatus.phase === 'cadence' || startGateStatus.phase === 'go',
     currentRoom: multiplayer.currentRoom,
     currentUserId: multiplayer.clientId,
     voiceSignals: multiplayer.voiceSignals,
@@ -5654,6 +5656,7 @@ export default function App() {
     if (
       playMode !== 'multiplayer'
       || multiplayer.currentRoom?.setup
+      || multiplayer.currentRoom?.studentActivity
       || !multiplayer.currentRoom?.track.id
     ) {
       return;
@@ -5677,6 +5680,7 @@ export default function App() {
     if (
       playMode !== 'multiplayer'
       || multiplayer.currentRoom?.setup
+      || multiplayer.currentRoom?.studentActivity
       || !roomId
       || !roomTrackId
       || effectiveTrack.id === roomTrackId
@@ -13578,6 +13582,28 @@ export default function App() {
       </aside>
 
       <main className="platform-main" tabIndex={-1}>
+        {clubTabletSessionActive && !clubEventLaunch && !demoMode && (appMode === 'race' || appMode === 'straight-sprint') && <ClubStudentLobby
+          voice={roomVoice} activity={appMode === 'race' ? 'bmx-race' : 'straight-sprint'} entered={playMode === 'multiplayer'}
+          connected={multiplayer.connection === 'open'} room={multiplayer.currentRoom} riderId={multiplayer.clientId}
+          setup={localMultiplayerRaceSetup} problem={localMultiplayerSetupProblem} status={multiplayer.status}
+          setupReady={configuredMultiplayerRoomReady} clockOffsetMs={multiplayer.latency.clockOffsetMs}
+          onEnter={() => { primeRaceAudio(); setPlayMode('multiplayer'); }}
+          onSolo={() => { roomVoice.stop(); multiplayer.leaveRoom(); setPlayMode('local'); }}
+          onJoin={() => multiplayer.joinStudentRoom(appMode === 'race' ? 'bmx-race' : 'straight-sprint')}
+          onConfirm={multiplayer.confirmStudentChoice} onReset={multiplayer.resetStudentRoom}
+          onReady={() => { primeRaceAudio(); multiplayer.setRoomReady(true); }}
+        >
+          <label>Course<select value={selectedTrackId} onChange={event => handleTrackChange(event.target.value)}>
+            {(appMode === 'race' ? playableIntervalTracks(baseCatalogTracks, intervalTrackMappings) : savedStraightSprintCourses.map(entry => entry.track)).map(track => <option key={track.id} value={track.id}>{track.name}</option>)}
+          </select></label>
+          {appMode === 'race' && hasDualStartRoutes && <label>Route<select value={raceRouteVariantId} onChange={event => handleRaceRouteVariantChange(event.target.value as RaceRouteVariantId)}><option value="amateur">Amateur</option><option value="pro">Pro</option></select></label>}
+          {appMode === 'race' && isLoopTrack && <label>Laps<select value={lapCount} onChange={event => setLapCount(Number(event.target.value))}>{[1,2,3,4,5].map(n => <option key={n} value={n}>{n}</option>)}</select></label>}
+          {appMode === 'straight-sprint' && <>
+            <label>Distance<select value={straightSprintDistanceFeet} onChange={event => setStraightSprintDistanceFeet(Number(event.target.value) as typeof straightSprintDistanceFeet)}>{straightSprintDistanceOptions.map(n => <option key={n} value={n}>{n} ft</option>)}</select></label>
+            <label>Wattbike air setting<select value={straightSprintAirSetting} onChange={event => setStraightSprintAirSetting(Number(event.target.value) as typeof straightSprintAirSetting)}>{[1,2,3,4,5,6,7,8,9,10].map(n => <option key={n} value={n}>{n}</option>)}</select></label>
+          </>}
+        </ClubStudentLobby>}
+
         <header className="platform-topbar">
           {appMode === 'club-tablet' ? (
             <div className="explore-topbar-heading">
@@ -14431,6 +14457,7 @@ export default function App() {
 
                 {(appMode === 'race' || appMode === 'straight-sprint')
                   && !clubTabletDemoClubLiveActive
+                  && !clubTabletSessionActive
                   && !multiplayer.currentRoom?.clubEventId ? (
                   <Suspense fallback={panelLoadingFallback}>
                     <QuickRaceLobby

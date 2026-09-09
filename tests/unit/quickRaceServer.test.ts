@@ -1060,5 +1060,37 @@ describe('configured Quick Race server protocol', () => {
       (message) => message.type === 'room-state'
         && message.room?.readyMemberIds?.includes(message.room?.hostId),
     )).toBe(false);
-  }, 40_000);
+
+    // Students can self-organize without a coach or public matchmaking.
+    for (const tablet of tabletSockets) {
+      const index = tablet.messages.length;
+      tablet.socket.send(JSON.stringify({ type: 'leave-room' }));
+      await tablet.waitFor(message => message.type === 'room-left', index);
+      await hello(tablet, 1);
+    }
+    const studentIndexes = tabletSockets.map(tablet => tablet.messages.length);
+    for (let i = 0; i < 4; i += 1) {
+      tabletSockets[i].socket.send(JSON.stringify({ type: 'club-student-join', activityType: 'bmx-race' }));
+      await tabletSockets[i].waitFor(message => message.type === 'room-state' && message.room?.studentActivity === 'bmx-race', studentIndexes[i]);
+    }
+    const lobby = await tabletSockets[0].waitFor(message => message.type === 'room-state' && message.room?.studentActivity === 'bmx-race' && message.room.members.length === 4, studentIndexes[0]);
+    expect(lobby.room.setup).toBeUndefined();
+    const selected = raceSetup({ trackRecord: trackRecord({ zones: [{ id: 'z1', name: 'Zone 1', startMeter: 0, endMeter: 100, type: 'pedal' }] }) });
+    const choiceIndex = tabletSockets[0].messages.length;
+    for (let i = 0; i < 4; i += 1) tabletSockets[i].socket.send(JSON.stringify({ type: 'club-student-choice', setup: i === 3 ? raceSetup({ ...selected.configuration, lapCount: 2 }) : selected }));
+    const disagreed = await tabletSockets[0].waitFor(message => message.type === 'room-state' && Object.keys(message.room?.studentChoices ?? {}).length === 4, choiceIndex);
+    expect(disagreed.room.setup).toBeUndefined();
+    tabletSockets[3].socket.send(JSON.stringify({ type: 'club-student-choice', setup: selected }));
+    const agreed = await tabletSockets[0].waitFor(message => message.type === 'room-state' && Boolean(message.room?.setup), choiceIndex);
+    expect(agreed.room.readyMemberIds).toEqual([]);
+    const startIndexes = tabletSockets.map(tablet => tablet.messages.length);
+    for (const tablet of tabletSockets) tablet.socket.send(JSON.stringify({ type: 'room-ready', ready: true, setupRevision: agreed.room.setup.revision }));
+    const started = await Promise.all(tabletSockets.map((tablet, i) => tablet.waitFor(message => message.type === 'room-state' && message.room?.flow.phase === 'race', startIndexes[i])));
+    expect(new Set(started.map(message => message.room.flow.raceStartAt)).size).toBe(1);
+    expect(started[0].room.flow.raceStartAt - Date.now()).toBeGreaterThan(9000);
+    const unauthorized = await connect(ownerCookie);
+    await hello(unauthorized);
+    unauthorized.socket.send(JSON.stringify({ type: 'club-student-join', activityType: 'bmx-race' }));
+    await unauthorized.waitFor(message => message.type === 'room-error' && /authorized club tablet/i.test(message.message));
+  }, 70_000);
 });

@@ -411,6 +411,8 @@ export type MultiplayerRider = {
 };
 
 export type MultiplayerRoom = {
+  studentActivity?: 'bmx-race' | 'straight-sprint';
+  studentChoices?: Record<string, { configurationId: string; configuration: { activityType: string; name: string; routeVariantId?: string; distanceFeet?: number; airSetting?: number } }>;
   id: string;
   /** Present only for secure rooms opened by a coach-led Club Event. */
   clubEventId?: string;

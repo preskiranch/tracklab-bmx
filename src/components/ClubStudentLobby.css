@@ -1,0 +1,15 @@
+.club-student-lobby { margin: 12px; padding: 16px; border: 1px solid #ccc; border-radius: 16px; background: #fff; color: #171717; min-width: 0; }
+.club-student-lobby h2 { font-size: 20px; margin: 0 0 8px; }
+.club-student-lobby p { margin: 10px 0; }
+.club-student-lobby button, .club-student-lobby select { min-height: 44px; padding: 10px; max-width: 100%; font-size: 16px; white-space: normal; }
+.club-student-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.club-student-lobby ul { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(210px,100%),1fr)); gap: 8px; padding: 0; list-style: none; }
+.club-student-lobby li { display: grid; padding: 10px; border: 1px solid #ccc; border-radius: 10px; overflow-wrap: anywhere; }
+.club-student-lobby fieldset { min-width: 0; display: grid; gap: 10px; }
+.club-student-lobby label { min-width: 0; display: grid; gap: 5px; }
+.club-student-countdown { font-size: 28px; font-weight: bold; }
+.race-fullscreen .club-student-lobby { display: none; }
+
+.club-student-lobby select { width: 100%; min-width: 0; box-sizing: border-box; }
+
+.club-student-lobby label { overflow: hidden; }

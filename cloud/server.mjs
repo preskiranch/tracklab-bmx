@@ -1,3 +1,4 @@
+import { clubStudentAgreement } from './clubStudentRoom.mjs';
 import { normalizeAnalyticsEvent, analyticsDays } from './adminAnalytics.mjs';
 import { createMappingRequestStore, isPlayableIntervalMapping, sendMappingRequestEmail } from './trackMappingRequests.mjs';
 import { accountEmailConfigured, accountEmailVerificationEnabled, accountEmailHash, validAccountEmailToken, sendAccountEmail } from './accountEmail.mjs';
@@ -12573,6 +12574,7 @@ function publicRoom(room) {
     track: room.track,
     ...(room.setup ? { setup: room.setup } : {}),
     ...(room.studioClubId ? { studio: true } : {}),
+    ...(room.studentActivity ? { studentActivity: room.studentActivity, studentChoices: Object.fromEntries(Object.entries(room.studentChoices ?? {}).filter(([id]) => room.racers.has(id)).map(([id, choice]) => [id, { configurationId: choice.configurationId, configuration: { activityType: choice.configuration.activityType, name: choice.configuration.trackName ?? choice.configuration.courseName, routeVariantId: choice.configuration.routeVariantId, distanceFeet: choice.configuration.distanceFeet, airSetting: choice.configuration.airSetting } }])) } : {}),
     ...(room.matchmakingScope === 'studio' || room.matchmakingScope === 'world'
       ? { matchmakingScope: room.matchmakingScope }
       : {}),
@@ -12935,7 +12937,7 @@ function beginRoomRace(room, source = 'route selection') {
     phase: 'race',
     deadlineAt: null,
     raceToken: randomId('RACE', 10),
-    raceStartAt: Date.now() + synchronizedLeadMs,
+    raceStartAt: Date.now() + (room.studentActivity ? 10_000 : synchronizedLeadMs),
   };
   cloudTelemetry.increment('tracklab_multiplayer_races_started_total');
   cloudTelemetry.info('multiplayer.race_started', {
@@ -13892,6 +13894,10 @@ async function joinRoom(
   requestedSeatCount = 1,
   { broadcast = true, reconnectActiveRace = false } = {},
 ) {
+  if (room.studentActivity && !client.clubTabletSessionTokenHash) {
+    send(client, { type: 'room-error', message: 'This room is only for authorized club tablets.' });
+    return false;
+  }
   if (
     room.studioClubId
     && room.studioClubId !== sanitizeText(client.clubLiveAccess?.clubId, '', 160)
@@ -14042,6 +14048,11 @@ async function joinRoom(
   // A newly joined/reconnected socket must explicitly confirm that it loaded
   // the room's current immutable setup before it can participate in a start.
   room.readyMemberIds.delete(client.id);
+  if (room.studentActivity && !reconnectActiveRace) {
+    room.readyMemberIds.clear();
+    room.studentChoices = {};
+    room.setup = null;
+  }
   if (preferredRole === 'spectator') {
     room.racers.delete(client.id);
     room.spectators.add(client.id);
@@ -14103,6 +14114,8 @@ function createRoom(host, track, privateRoom = true, hostSeatCount = 1, options 
     track: sanitizeTrack(track ?? host.track),
     setup: options.setup ?? null,
     studioClubId: sanitizeText(options.studioClubId, '', 160) || null,
+    studentActivity: options.studentActivity ?? null,
+    studentChoices: {},
     matchmakingScope: options.matchmakingScope === 'studio' || options.matchmakingScope === 'world'
       ? options.matchmakingScope
       : null,
@@ -14603,9 +14616,12 @@ async function findRoom(roomId) {
       await persistence.closeRoom(savedRoom.id);
       return null;
     }
+    savedRoom.studentActivity = ['bmx-race', 'straight-sprint'].includes(savedRoom.studentActivity) ? savedRoom.studentActivity : null;
+    savedRoom.studentChoices = {};
+    if (savedRoom.studentActivity) savedRoom.setup = null;
     savedRoom.purpose = 'race';
     savedRoom.flow = defaultRoomFlow();
-    savedRoom.setup = persistedSetup;
+    savedRoom.setup = savedRoom.studentActivity ? null : persistedSetup;
     savedRoom.studioClubId = sanitizeText(savedRoom.studioClubId, '', 160) || null;
     savedRoom.matchmakingScope = savedRoom.matchmakingScope === 'studio'
       || savedRoom.matchmakingScope === 'world'
@@ -14890,6 +14906,81 @@ async function handleClientMessage(client, rawMessage) {
       selectedTrackId: room.track.id,
     };
     beginRoomRace(room, 'matched Club Tablet demo setup');
+    return;
+  }
+
+  if (message.type === 'club-student-join') {
+    const session = client.clubTabletSessionTokenHash
+      ? await loadClubTabletSessionByHash(client.clubTabletSessionTokenHash, { renew: true }) : null;
+    const activity = message.activityType;
+    if (!session || session.demoMode || !clientHasRacerAccess(client)
+      || session.clubId !== client.clubLiveAccess?.clubId
+      || !['bmx-race', 'straight-sprint'].includes(activity)) {
+      send(client, { type: 'room-error', message: 'Choose an athlete on an authorized club tablet before joining students.' });
+      return;
+    }
+    if (client.roomId && rooms.get(client.roomId)?.studentActivity === activity) {
+      send(client, roomState(rooms.get(client.roomId)));
+      return;
+    }
+    const existing = [...rooms.values()].find(room => room.studioClubId === session.clubId && room.studentActivity === activity);
+    if (existing && existing.flow?.phase !== 'lobby') {
+      send(client, { type: 'room-error', message: 'Your club race is in progress. Wait for the students to open the next round.' });
+      return;
+    }
+    if (existing) await joinRoom(client, existing, 'racer', 1);
+    else createRoom(client, client.track, true, 1, { studioClubId: session.clubId, matchmakingScope: 'studio', studentActivity: activity });
+    return;
+  }
+
+  if (message.type === 'club-student-choice' || message.type === 'club-student-reset') {
+    const room = rooms.get(client.roomId);
+    if (!room?.studentActivity || !room.racers.has(client.id)
+      || !client.clubTabletSessionTokenHash || !clientHasRacerAccess(client)
+      || room.studioClubId !== client.clubLiveAccess?.clubId) return;
+    if (!['lobby', 'round-complete'].includes(room.flow.phase)) {
+      send(client, { type: 'room-error', message: 'Wait for this race to finish before changing your choice.' });
+      return;
+    }
+    if (message.type === 'club-student-reset') {
+      clearRoomTimers(room.id);
+      room.studentChoices = {};
+      room.setup = null;
+      room.readyMemberIds.clear();
+      room.raceStates.clear();
+      room.flow = defaultRoomFlow();
+      broadcastRoom(room.id, roomState(room));
+      return;
+    }
+    if (room.setup) {
+      send(client, { type: 'room-error', message: 'Choose Change course/settings before making a new choice.' });
+      return;
+    }
+    const choice = sanitizeMultiplayerRaceSetup(message.setup);
+    if (!choice || choice.configuration.activityType !== room.studentActivity
+      || (room.studentActivity === 'bmx-race' && !choice.configuration.trackRecord?.zones?.some(zone => zone.type === 'pedal' && zone.endMeter > zone.startMeter))) {
+      send(client, { type: 'room-error', message: 'Choose a playable saved course and complete race settings.' });
+      return;
+    }
+    room.studentChoices[client.id] = choice;
+    room.readyMemberIds.clear();
+    const agreed = clubStudentAgreement(room.racers, room.studentChoices);
+    if (agreed) {
+      room.setup = { ...agreed, revision: (room.roundNumber ?? 1) };
+      applyRoomTrack(room, multiplayerSetupTrack(room.setup));
+      addRoomSystemMessage(room, 'Everyone chose the same course and settings. Each student can now tap Ready to race.');
+    }
+    broadcastRoom(room.id, roomState(room));
+    return;
+  }
+
+  // Student rooms use unanimous choices and individual Ready, never legacy
+  // host controls that could bypass those choices or restart without consent.
+  if (rooms.get(client.roomId)?.studentActivity && [
+    'room-track', 'room-vote-start', 'room-vote', 'room-start',
+    'room-setup', 'room-setup-edit', 'room-next-round', 'room-route-choice', 'room-reset-lobby',
+  ].includes(message.type)) {
+    send(client, { type: 'room-error', message: 'Use your club room choices and Ready controls for this race.' });
     return;
   }
 

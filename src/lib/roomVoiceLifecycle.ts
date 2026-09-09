@@ -18,6 +18,7 @@ export function createRoomVoiceStreamManager(
   let generation = 0;
   let currentStream: MediaStream | null = null;
   let pendingStream: Promise<MediaStream> | null = null;
+  let muted = false;
 
   return {
     acquire() {
@@ -32,6 +33,7 @@ export function createRoomVoiceStreamManager(
             stopMediaStream(stream);
             throw cancelled;
           }
+          stream.getAudioTracks().forEach(track => { track.enabled = !muted; });
           currentStream = stream;
           return stream;
         })
@@ -42,9 +44,14 @@ export function createRoomVoiceStreamManager(
       return operation;
     },
     current: () => currentStream,
+    setMuted(value: boolean) {
+      muted = value;
+      currentStream?.getAudioTracks().forEach(track => { track.enabled = !muted; });
+    },
     requesting: () => pendingStream != null,
     stop() {
       generation += 1;
+      muted = false;
       pendingStream = null;
       const stream = currentStream;
       currentStream = null;
