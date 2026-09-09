@@ -188,10 +188,10 @@ export function reactionRatingForStage(stage: ReactionTestStage): ReactionTestRa
   return null;
 }
 
-/** Round milliseconds to the hundredths-of-a-second value displayed to riders. */
+/** Round milliseconds to the thousandths-of-a-second value displayed to riders. */
 export function formatReactionTime(reactionTimeMs: number | null) {
-  if (reactionTimeMs == null || !Number.isFinite(reactionTimeMs)) return '--.--';
-  return (Math.max(0, reactionTimeMs) / 1_000).toFixed(2);
+  if (reactionTimeMs == null || !Number.isFinite(reactionTimeMs)) return '--.---';
+  return (Math.max(0, reactionTimeMs) / 1_000).toFixed(3);
 }
 
 export function createReactionTestResult(input: {
