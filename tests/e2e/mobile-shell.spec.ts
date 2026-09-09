@@ -841,3 +841,18 @@ test('Straight Sprint saved course controls fit iPhone portrait and landscape', 
     expect(overflow, `${viewport.width}`).toEqual([]);
   }
 });
+
+test('iPhone navigation covers the status-bar area while content scrolls', async ({ page }) => {
+  await page.setViewportSize(iphonePortrait);
+  await mockSignedInRacer(page);
+  await page.goto('/');
+  await openSignedInApp(page);
+  const nav = page.getByRole('navigation', { name: 'Primary' });
+  await expect(nav).toBeVisible();
+  await page.evaluate(() => window.scrollTo(0, 1000));
+  await expect.poll(() => nav.evaluate(el => Math.round(el.getBoundingClientRect().top))).toBe(0);
+  expect(await nav.evaluate(el => getComputedStyle(el).backgroundColor)).toBe('rgb(255, 255, 255)');
+  expect(await page.evaluate(() => document.elementFromPoint(195, 1)?.closest('.side-nav') !== null)).toBe(true);
+  await page.evaluate(() => window.scrollBy(0, 300));
+  await expect.poll(() => nav.evaluate(el => Math.round(el.getBoundingClientRect().top))).toBe(0);
+});

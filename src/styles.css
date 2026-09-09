@@ -7677,14 +7677,14 @@ input:focus {
 
   .side-nav {
     position: sticky;
-    top: env(safe-area-inset-top);
+    top: 0;
     z-index: 50;
     order: 2;
     width: 100%;
     max-width: 100%;
     min-width: 0;
     grid-template-columns: repeat(5, minmax(0, 1fr));
-    padding: 7px;
+    padding: calc(7px + env(safe-area-inset-top, 0px)) 7px 7px;
     overflow-x: hidden;
     overflow-x: clip;
     border-bottom: 1px solid var(--line);

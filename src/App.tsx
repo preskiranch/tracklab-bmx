@@ -4989,9 +4989,13 @@ export default function App() {
   const applyRaceViewPreferences = useCallback((preferences: RaceViewPreferences) => {
     const normalized = normalizeRaceViewPreferences(preferences);
     raceViewPreferencesRef.current = normalized;
-    setEarthCamerasByTrack(normalized.earthCamerasByTrack);
+    // Background account refreshes must not reapply an unchanged saved camera:
+    // doing so resets the map view even when the user is simply reading a panel.
+    setEarthCamerasByTrack(current => JSON.stringify(current) === JSON.stringify(normalized.earthCamerasByTrack)
+      ? current : normalized.earthCamerasByTrack);
     setRaceCameraLocked(normalized.cameraLocked);
-    setRiderOverlaysByTrack(normalized.riderOverlaysByTrack);
+    setRiderOverlaysByTrack(current => JSON.stringify(current) === JSON.stringify(normalized.riderOverlaysByTrack)
+      ? current : normalized.riderOverlaysByTrack);
     setDemoRiderNames(normalized.demoRiderNames);
     setDemoRiderPhotos(normalized.demoRiderPhotos);
     setRaceCommentaryPreferences(normalized.commentary);
