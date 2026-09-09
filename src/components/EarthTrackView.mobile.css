@@ -792,17 +792,20 @@
   }
 }
 
-/* Keep the entire authored map visible above a separate phone rider strip. */
+/* Reserve a separate bottom strip; the map fills all remaining space. */
 .race-map-surface { position: absolute; inset: 0; }
 .race-fullscreen .race-rider-overlay.phone-docked {
   left: max(8px, env(safe-area-inset-left, 0px));
   right: max(8px, env(safe-area-inset-right, 0px));
   top: auto;
-  bottom: max(8px, env(safe-area-inset-bottom, 0px));
+  bottom: 0;
   width: auto;
-  height: 110px;
+  height: 128px;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  box-sizing: border-box;
   max-width: none;
-  min-height: 110px;
+  min-height: 128px;
+  max-height: 128px;
   --rr-compact-toolbar: 20px;
   --rr-compact-place: 21px;
   --rr-compact-avatar: 28px;

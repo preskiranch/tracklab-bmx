@@ -570,14 +570,14 @@ test('phone landscape rider dock leaves the complete map unobstructed', async ({
       surface.className = 'race-map-surface';
       map.replaceWith(surface);
       surface.append(map);
-      const stage = surface.parentElement!;
-      surface.style.transform = `scale(${(stage.clientHeight - 144) / stage.clientHeight})`;
-      surface.style.transformOrigin = 'top center';
+      surface.style.bottom = '128px';
       document.querySelector('.race-rider-overlay')!.classList.add('phone-docked');
     });
     const map = await page.locator('.race-map-surface').boundingBox();
     const dock = await page.locator('.race-rider-overlay').boundingBox();
-    expect(map!.y + map!.height).toBeLessThanOrEqual(dock!.y);
+    expect(map!.y + map!.height).toBeCloseTo(dock!.y, 0);
+    expect(map!.width).toBeCloseTo(viewport.width, 0);
+    expect(dock!.y + dock!.height).toBeCloseTo(viewport.height, 0);
     expect(dock!.width).toBeGreaterThan(viewport.width - 25);
     await expectInsideViewport(page, page.locator('.race-rider-overlay'));
     await expectViewportLocked(page, page.locator('.earth-stage'));

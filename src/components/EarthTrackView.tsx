@@ -334,8 +334,8 @@ export function EarthTrackView({
   const phoneLandscapeDock = raceViewFullscreen && !showingGameArena && Boolean(presentationViewport
     && presentationViewport.width > presentationViewport.height
     && presentationViewport.width <= 1000 && presentationViewport.height <= 500);
-  const phoneMapScale = phoneLandscapeDock && presentationViewport
-    ? Math.max(0.1, (presentationViewport.height - 144) / presentationViewport.height) : 1;
+  const mapPresentationViewport = phoneLandscapeDock && presentationViewport
+    ? { ...presentationViewport, height: presentationViewport.height - 128 } : presentationViewport;
   const cameraReferenceViewport = normalizeRacePresentationViewport(
     raceCameraSnapshot?.referenceViewport,
   ) ?? legacyRacePresentationViewport;
@@ -343,7 +343,7 @@ export function EarthTrackView({
     riderOverlayPreference?.referenceViewport,
   ) ?? cameraReferenceViewport;
   const cameraPresentationFrame = raceCameraImmutable && presentationViewport
-    ? racePresentationFrame(cameraReferenceViewport, presentationViewport)
+    ? racePresentationFrame(cameraReferenceViewport, mapPresentationViewport!)
     : null;
   const riderPresentationScale = normalizeRiderPresentationScale(
     cameraPresentationFrame?.uniformScale ?? 1,
@@ -593,7 +593,7 @@ export function EarthTrackView({
         data-race-camera-reference-height={cameraReferenceViewport.height}
       >
         <div className="race-map-surface" style={phoneLandscapeDock ? {
-          transform: `scale(${phoneMapScale})`, transformOrigin: 'top center',
+          bottom: '128px',
         } : undefined}>
         {showingGameArena ? (
           <Suspense fallback={<div className="google-map-status loading">Loading BMX game arena…</div>}>
