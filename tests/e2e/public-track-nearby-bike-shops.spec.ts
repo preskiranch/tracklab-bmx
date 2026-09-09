@@ -233,12 +233,17 @@ test('nearby bike shop preview remains contained on desktop and phone', async ({
 
   for (const viewport of [
     { label: 'desktop', width: 1440, height: 900 },
+    { label: 'iPad landscape', width: 1180, height: 820 },
+    { label: 'iPad portrait', width: 820, height: 1180 },
     { label: 'iPhone portrait', width: 390, height: 844 },
   ]) {
     await page.setViewportSize(viewport);
     await nearbyRegion.scrollIntoViewIfNeeded();
     await expect(nearbyRegion).toBeVisible();
 
+    for (const title of await nearbyRegion.locator('li button strong').all()) {
+      expect(await title.evaluate(element => ({wrap:getComputedStyle(element).whiteSpace, clipped:element.scrollHeight > element.clientHeight + 1}))).toEqual({wrap:'normal',clipped:false});
+    }
     const geometry = await nearbyRegion.evaluate((element) => {
       const parent = element.closest<HTMLElement>('.public-locator-preview');
       if (!parent) throw new Error('Nearby shops must remain inside the selected-track preview.');

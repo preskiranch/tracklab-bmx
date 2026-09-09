@@ -2091,6 +2091,10 @@ input:focus {
 }
 
 .side-nav-more {
+  max-height: min(60dvh, var(--more-available-height, 60dvh));
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
   display: grid;
   grid-column: 1 / -1;
   gap: 3px;
@@ -9615,3 +9619,9 @@ button:focus-visible { outline-color: var(--line-strong); }
 .interval-training-note { margin: 12px 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); font-size: 14px; line-height: 1.5; }
 .interval-training-note summary { cursor: pointer; font-weight: 600; }
 .interval-training-note p { margin: 10px 0 0; }
+
+@media (max-width: 720px) {
+  .side-nav-more { max-height: var(--more-available-height, calc(100dvh - 360px)); }
+  .side-nav-more button { flex-direction: row; justify-content: flex-start; min-height: 48px; padding: 10px 12px; gap: 12px; font-size: 16px; text-align: left; }
+}
+.platform-main:focus { outline: none; }

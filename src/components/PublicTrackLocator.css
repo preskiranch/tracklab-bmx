@@ -556,8 +556,8 @@
 
 .public-track-nearby-shops {
   display: grid;
-  grid-template-areas: "heading results all";
-  grid-template-columns: minmax(170px, 0.75fr) minmax(0, 2fr) auto;
+  grid-template-areas: "heading all" "results results";
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px 12px;
   min-width: 0;
@@ -650,18 +650,18 @@
 
 .public-track-nearby-shops > ul button strong,
 .public-track-nearby-shops > ul button small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
 }
 
 .public-track-nearby-shops > ul button strong {
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .public-track-nearby-shops > ul button small {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .public-track-nearby-shops > ul button b {

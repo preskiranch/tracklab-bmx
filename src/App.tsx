@@ -2262,6 +2262,19 @@ export default function App() {
   const [unitPreferencesSyncMessage, setUnitPreferencesSyncMessage] = useState('Loading saved display units.');
   const [chatDraft, setChatDraft] = useState('');
   const [sidebarMoreOpen, setSidebarMoreOpen] = useState(false);
+  useLayoutEffect(() => {
+    if (!sidebarMoreOpen) return;
+    const updateMenuHeight = () => {
+      const menu = document.querySelector<HTMLElement>('.side-nav-more');
+      if (!menu) return;
+      const available = window.innerHeight - Math.max(0, menu.getBoundingClientRect().top) - 24;
+      menu.style.setProperty('--more-available-height', `${Math.max(96, available)}px`);
+    };
+    updateMenuHeight();
+    window.addEventListener('resize', updateMenuHeight);
+    window.addEventListener('scroll', updateMenuHeight, { passive: true });
+    return () => { window.removeEventListener('resize', updateMenuHeight); window.removeEventListener('scroll', updateMenuHeight); };
+  }, [sidebarMoreOpen]);
   const [familyOpen, setFamilyOpen] = useState(false);
   const [childDeviceToken, setChildDeviceToken] = useState(() => childDeviceTokenFromHref(window.location.href));
   const [onboardingClaimRole, setOnboardingClaimRole] = useState<'athlete' | 'parent' | undefined>();
@@ -13427,7 +13440,20 @@ export default function App() {
             More
           </button>
           {sidebarMoreOpen && (
-            <div className="side-nav-more">
+            <div className="side-nav-more" aria-label="More navigation" onClick={(event) => {
+              if (!(event.target instanceof Element) || !event.target.closest('button')) return;
+              setSidebarMoreOpen(false);
+              // Wait for the chosen workspace and collapsed navigation to render.
+              window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+                const main = document.querySelector<HTMLElement>('.platform-main');
+                if (!main) return;
+                const nav = document.querySelector<HTMLElement>('.side-nav');
+                const sticky = nav && getComputedStyle(nav).position === 'sticky';
+                const inset = sticky ? nav.getBoundingClientRect().height + (parseFloat(getComputedStyle(nav).top) || 0) + 8 : 0;
+                window.scrollTo({ top: Math.max(0, window.scrollY + main.getBoundingClientRect().top - inset), behavior: 'instant' });
+                main.focus({ preventScroll: true });
+              }));
+            }}>
               {!authUser?.managedChild && <button type="button" onClick={() => { setMappingMode(false); setAppMode('profile'); setFamilyOpen(true); setSidebarMoreOpen(false); }}>
                 <UserPlus size={17} /> Family
               </button>}
@@ -13540,7 +13566,7 @@ export default function App() {
         />}
       </aside>
 
-      <main className="platform-main">
+      <main className="platform-main" tabIndex={-1}>
         <header className="platform-topbar">
           {appMode === 'club-tablet' ? (
             <div className="explore-topbar-heading">
