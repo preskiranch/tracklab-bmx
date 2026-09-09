@@ -3,6 +3,8 @@ import { hasPlayableIntervalZones, playableIntervalTracks } from '../../src/lib/
 import type { TrackRecord, UserTrackMapping } from '../../src/types';
 const mapping = {
   routeStatus: 'user-mapped',
+  lengthMeters: 100, restAfterSeconds: 1, splitSections: [],
+  startGate: {lat:1,lng:1}, finishLine: {lat:1,lng:2},
   centerline: [{ lat: 1, lng: 1 }, { lat: 1, lng: 2 }],
   zones: [{ id: 'zone-1', name: 'Zone 1', type: 'pedal', startMeter: 0, endMeter: 30 }],
 } as UserTrackMapping;
@@ -13,6 +15,10 @@ describe('interval course eligibility', () => {
     expect(hasPlayableIntervalZones({ ...mapping, centerline: [] })).toBe(false);
     expect(hasPlayableIntervalZones({ ...mapping, zones: [{ ...mapping.zones[0], endMeter: 0 }] })).toBe(false);
     expect(hasPlayableIntervalZones(mapping)).toBe(true);
+  });
+  it('rejects legacy whole-route placeholder zones when saved boundaries are empty', () => {
+    const placeholder = { ...mapping, zoneBoundaryMeters: [], zoneBoundarySets: [], zones: [{ ...mapping.zones[0], name: 'Sprint 1', endMeter: 100 }] };
+    expect(playableIntervalTracks([{ id: 'unfinished' } as TrackRecord], { unfinished: placeholder })).toEqual([]);
   });
   it('keeps unmapped and route-only tracks out of the race list', () => {
     const tracks = ['unmapped', 'route-only', 'zoned'].map(id => ({ id } as TrackRecord));

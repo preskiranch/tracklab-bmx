@@ -808,7 +808,7 @@ test('mapping requests filter by country and region and keep search within those
 test('race picker excludes saved routes without zones even for administrators', async ({ page }) => {
   await mockSignedInRacer(page, null, true);
   const zoned = mobileRaceTrackMapping;
-  const routeOnly = { ...zoned, trackId: 'oak-creek-bmx', trackName: 'Oak Creek BMX', zones: [] };
+  const routeOnly = { ...zoned, trackId: 'oak-creek-bmx', trackName: 'Oak Creek BMX', zoneBoundaryMeters: [], zoneBoundarySets: [], zones: [{ id: 'user-zone-1', name: 'Sprint 1', type: 'pedal', startMeter: 0, endMeter: zoned.lengthMeters }] };
   await page.route('**/api/public-track-mappings', route => route.fulfill({ json: { trackMappings: { [zoned.trackId]: zoned, [routeOnly.trackId]: routeOnly }, customRoutes: [] } }));
   await page.goto('/?track=oak-creek-bmx');
   await openSignedInApp(page);
@@ -820,4 +820,24 @@ test('race picker excludes saved routes without zones even for administrators', 
   await page.getByLabel('Search all tracks', { exact: true }).fill('Oak Creek');
   await expect(page.locator('.interval-track-results').getByRole('button', { name: 'Race', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Request mapping for Oak Creek BMX', exact: true })).toBeVisible();
+});
+
+test('Straight Sprint saved course controls fit iPhone portrait and landscape', async ({ page }) => {
+  await mockSignedInRacer(page, null, true);
+  const route = { id: 'custom-portrait-sprint', name: 'Nelson Road Downhill Sprints', country: 'Custom Routes', countryCode: 'CUSTOM', state: 'California', region: 'California', source: 'Custom', sourceUrl: 'local://sprint', latitude: 38, longitude: -121, lengthMeters: 500, elevationMeters: 0, surface: 'Custom sprint route', outline: [{lat:38,lng:-121},{lat:38.004,lng:-121}], routeStatus: 'user-mapped', zones: [], leaderboards: {rpm:[],speed:[]} };
+  const mapping = { ...mobileRaceTrackMapping, trackId: route.id, trackName: route.name, country: route.country, centerline: route.outline, startGate: route.outline[0], finishLine: route.outline[1], zones: [], zoneBoundaryMeters: [], zoneBoundarySets: [], lengthMeters: 500 };
+  await page.route('**/api/public-track-mappings', r => r.fulfill({json:{trackMappings:{[route.id]:mapping}, customRoutes:[route]}}));
+  await page.setViewportSize(iphonePortrait);
+  await page.goto('/');
+  await openSignedInApp(page);
+  await page.getByRole('navigation', {name:'Primary'}).getByRole('button',{name:'Straight Sprint',exact:true}).click();
+  await expect(page.locator('.custom-route-open').filter({hasText:route.name})).toBeVisible();
+  for(const viewport of [{width:320,height:568},iphonePortrait,{width:844,height:390}]){
+    await page.setViewportSize(viewport);
+    const overflow = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.platform-main *')].filter(el => {
+      const rect=el.getBoundingClientRect();
+      return rect.width>0 && (rect.right>innerWidth+1 || rect.left < -1) && !el.closest('.race-summary-table-wrap, .race-review-zone-table-wrap');
+    }).map(el=>`${el.tagName}.${el.className}: ${Math.round(el.getBoundingClientRect().right)} / ${innerWidth}; width ${getComputedStyle(el).width}, min ${getComputedStyle(el).minWidth}, grid ${getComputedStyle(el).gridTemplateColumns}, parent ${el.parentElement?.className} ${el.parentElement?.clientWidth}`));
+    expect(overflow, `${viewport.width}`).toEqual([]);
+  }
 });

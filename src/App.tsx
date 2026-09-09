@@ -13954,6 +13954,7 @@ export default function App() {
                   );
                   if (track.routeStatus !== 'user-mapped' && !mapping) return [];
                   const course = mapping ? applyUserTrackMapping(track, mapping) : track;
+                  if (!hasPlayableIntervalZones(course)) return [];
                   const camera = clubEventCameraSnapshot(earthCamerasByTrack[track.id]);
                   const riderOverlay = clubEventRiderOverlaySnapshot(riderOverlaysByTrack[track.id]);
                   return [{
