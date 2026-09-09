@@ -331,6 +331,11 @@ export function EarthTrackView({
     && race3DFallbackTrackId !== track.id;
   const showingGameArena = raceViewMode === 'game';
   const showingAny3D = showingPedalZone3D || showingRace3D;
+  const phoneLandscapeDock = raceViewFullscreen && !showingGameArena && Boolean(presentationViewport
+    && presentationViewport.width > presentationViewport.height
+    && presentationViewport.width <= 1000 && presentationViewport.height <= 500);
+  const phoneMapScale = phoneLandscapeDock && presentationViewport
+    ? Math.max(0.1, (presentationViewport.height - 144) / presentationViewport.height) : 1;
   const cameraReferenceViewport = normalizeRacePresentationViewport(
     raceCameraSnapshot?.referenceViewport,
   ) ?? legacyRacePresentationViewport;
@@ -587,6 +592,9 @@ export function EarthTrackView({
         data-race-camera-reference-width={cameraReferenceViewport.width}
         data-race-camera-reference-height={cameraReferenceViewport.height}
       >
+        <div className="race-map-surface" style={phoneLandscapeDock ? {
+          transform: `scale(${phoneMapScale})`, transformOrigin: 'top center',
+        } : undefined}>
         {showingGameArena ? (
           <Suspense fallback={<div className="google-map-status loading">Loading BMX game arena…</div>}>
             <DragStripGameArenaLayer
@@ -736,6 +744,8 @@ export function EarthTrackView({
             </a>
           </div>
         )}
+
+        </div>
 
         <div className="google-map-caption">
           {track.routeStatus === 'user-mapped' ? `${imageryLabel} with saved ride line` : imageryLabel}
@@ -895,9 +905,10 @@ export function EarthTrackView({
               speedUnit={speedUnit}
               trackLengthMeters={progressLengthMeters}
               preference={presentedRiderOverlayPreference}
-              presentationScale={raceCameraImmutable
+              presentationScale={!phoneLandscapeDock && raceCameraImmutable
                 ? riderOverlayPresentationFrame?.uniformScale ?? 1
                 : 1}
+              docked={phoneLandscapeDock}
               canEditLayout={canEditRaceLayout}
               editorPreview={showPlayerCardEditor}
               showPreviewPlaceholders={showPlayerCardEditor}

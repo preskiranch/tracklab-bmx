@@ -558,3 +558,30 @@ test('race tree hardware stays black regardless of page theme', async ({ page })
     expect(await page.locator(`.tree-lamp.${color}`).evaluate(el => getComputedStyle(el).backgroundImage)).toContain(expected);
   }
 });
+
+test('phone landscape rider dock leaves the complete map unobstructed', async ({ page }) => {
+  for (const viewport of [{ width: 844, height: 390 }, { width: 667, height: 375 }, { width: 932, height: 430 }]) {
+    await page.setViewportSize(viewport);
+    await page.setContent('<meta name="viewport" content="width=device-width, initial-scale=1">' + raceMarkup(220));
+    await installTrackStyles(page);
+    await page.evaluate(() => {
+      const map = document.querySelector('.google-map-layer')!;
+      const surface = document.createElement('div');
+      surface.className = 'race-map-surface';
+      map.replaceWith(surface);
+      surface.append(map);
+      const stage = surface.parentElement!;
+      surface.style.transform = `scale(${(stage.clientHeight - 144) / stage.clientHeight})`;
+      surface.style.transformOrigin = 'top center';
+      document.querySelector('.race-rider-overlay')!.classList.add('phone-docked');
+    });
+    const map = await page.locator('.race-map-surface').boundingBox();
+    const dock = await page.locator('.race-rider-overlay').boundingBox();
+    expect(map!.y + map!.height).toBeLessThanOrEqual(dock!.y);
+    expect(dock!.width).toBeGreaterThan(viewport.width - 25);
+    await expectInsideViewport(page, page.locator('.race-rider-overlay'));
+    await expectViewportLocked(page, page.locator('.earth-stage'));
+    for (const card of await page.locator('.race-rider-overlay-card').all()) await expectInsideViewport(page, card);
+    await page.screenshot({ path: `/tmp/rider-dock-${viewport.width}.png` });
+  }
+});

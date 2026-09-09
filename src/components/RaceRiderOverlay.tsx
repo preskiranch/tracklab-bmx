@@ -71,6 +71,7 @@ type RaceRiderOverlayProps = {
   trackLengthMeters: number;
   preference?: RaceRiderOverlayLayout;
   presentationScale?: number;
+  docked?: boolean;
   canEditLayout: boolean;
   editorPreview?: boolean;
   showPreviewPlaceholders?: boolean;
@@ -262,6 +263,7 @@ export function RaceRiderOverlay({
   trackLengthMeters,
   preference,
   presentationScale = 1,
+  docked = false,
   canEditLayout,
   editorPreview = false,
   showPreviewPlaceholders = false,
@@ -698,7 +700,7 @@ export function RaceRiderOverlay({
 
   return (
     <div
-      className={`race-rider-overlay${!canEditLayout || layout.locked ? ' locked' : ''}${presentationScaled ? ' presentation-scaled' : ''}${editorPreview ? ' editor-preview' : ''}`}
+      className={`race-rider-overlay${docked ? ' phone-docked' : ''}${!canEditLayout || layout.locked ? ' locked' : ''}${presentationScaled ? ' presentation-scaled' : ''}${editorPreview ? ' editor-preview' : ''}`}
       ref={overlayRef}
       aria-label={editorPreview ? 'Player card layout preview' : 'Race rider positions'}
       style={{
@@ -748,17 +750,17 @@ export function RaceRiderOverlay({
       <div className="race-rider-overlay-toolbar">
         <div
           className="race-rider-overlay-handle"
-          onPointerDown={beginMove}
+          onPointerDown={docked ? undefined : beginMove}
           role="button"
-          tabIndex={!canEditLayout || layout.locked ? -1 : 0}
-          aria-disabled={!canEditLayout || layout.locked}
-          aria-label={!canEditLayout || layout.locked ? 'Rider panel position locked' : 'Move rider panel'}
+          tabIndex={docked || !canEditLayout || layout.locked ? -1 : 0}
+          aria-disabled={docked || !canEditLayout || layout.locked}
+          aria-label={docked || !canEditLayout || layout.locked ? 'Rider panel position locked' : 'Move rider panel'}
         >
           <GripHorizontal size={16} />
-          <span>{editorPreview ? 'Player card preview' : 'Rider positions'}</span>
-          {canEditLayout && !layout.locked && <small>Drag to move / drag corner to resize</small>}
+          <span>{docked ? 'Rider positions · below map' : editorPreview ? 'Player card preview' : 'Rider positions'}</span>
+          {canEditLayout && !docked && !layout.locked && <small>Drag to move / drag corner to resize</small>}
         </div>
-        {canEditLayout ? (
+        {canEditLayout && !docked ? (
           <button
             className="race-rider-overlay-lock"
             type="button"
@@ -858,7 +860,7 @@ export function RaceRiderOverlay({
         ))}
       </div>
       </div>
-      {canEditLayout && !layout.locked && (
+      {canEditLayout && !docked && !layout.locked && (
         <button
           className="race-rider-overlay-resize"
           type="button"

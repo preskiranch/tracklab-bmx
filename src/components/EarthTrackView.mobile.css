@@ -791,3 +791,25 @@
     margin: 0 3px 3px !important;
   }
 }
+
+/* Keep the entire authored map visible above a separate phone rider strip. */
+.race-map-surface { position: absolute; inset: 0; }
+.race-fullscreen .race-rider-overlay.phone-docked {
+  left: max(8px, env(safe-area-inset-left, 0px));
+  right: max(8px, env(safe-area-inset-right, 0px));
+  top: auto;
+  bottom: max(8px, env(safe-area-inset-bottom, 0px));
+  width: auto;
+  height: 110px;
+  max-width: none;
+  min-height: 110px;
+  --rr-compact-toolbar: 20px;
+  --rr-compact-place: 21px;
+  --rr-compact-avatar: 28px;
+  --rr-compact-gap: 3px;
+  --rr-compact-padding: 3px;
+}
+.race-rider-overlay.phone-docked .race-rider-overlay-presentation {
+  width: 100% !important; height: 100% !important; transform: none !important;
+}
+.race-rider-overlay.phone-docked .race-rider-overlay-handle { cursor: default; }
