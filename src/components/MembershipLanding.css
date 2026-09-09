@@ -199,3 +199,9 @@
   .membership-hub-nav { order: 3; flex-basis: 100%; justify-content: flex-start; overflow-x: auto; }
   .membership-hub-account, .membership-hub-signin { margin-left: auto; }
 }
+
+.membership-beta-notice { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 24px; margin-bottom: 28px; border: 1px solid var(--border, #d2d2d7); border-radius: 20px; background: var(--surface, #fff); }
+.membership-beta-notice h2 { margin: 8px 0; font-size: clamp(22px, 2.4vw, 30px); line-height: 1.2; letter-spacing: -.025em; }
+.membership-beta-notice p { max-width: 760px; color: var(--muted); line-height: 1.5; }
+.membership-beta-notice > button { flex-shrink: 0; }
+@media (max-width: 900px) { .membership-beta-notice { flex-direction: column; align-items: flex-start; padding: 20px; } .membership-beta-notice > button { white-space: normal; } }

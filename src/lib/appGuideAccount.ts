@@ -3,7 +3,7 @@ import type { AppGuideSection } from './appGuideTypes';
 export const betaGuideSection: AppGuideSection = {
   id: 'beta-start',
   title: 'Start testing TrackLab',
-  summary: 'Sign in for public beta access, connect a compatible Wattbike, and send useful feedback.',
+  summary: 'Free public beta testing is currently ongoing. Sign in for beta access, connect a compatible Wattbike, and send useful feedback.',
   articles: [
     {
       title: 'Verify your email or recover your password',
@@ -71,7 +71,7 @@ export const accountGuideSections: AppGuideSection[] = [
       {
         title: 'Start with a free account',
         paragraphs: [
-          'Free membership includes public track and mapped bike shop directories, Reaction Test, a community profile, and saved track favorites. Sign in to keep account features associated with your profile. Live personal Wattbike training requires active Racer access, which can come from automatic public beta enrollment, an individual beta invitation, or a verified subscription when purchasing is available.',
+          'Free membership includes the global BMX track directory and global bike shop directory, Reaction Test, a community profile, and saved track favorites. Sign in to keep account features associated with your profile. Live personal Wattbike training requires active Racer access, which can come from automatic public beta enrollment, an individual beta invitation, or a verified subscription when purchasing is available.',
           'An athlete can view and download their claimed club training history without buying a personal bike connection. Training through an enrolled club uses that club’s available capacity. Personal pairing at home requires your own active Wattbike access.',
         ],
       },

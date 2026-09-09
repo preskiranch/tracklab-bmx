@@ -56,7 +56,7 @@ export default function AppGuide({ beta, billingReady, onOpenTracks, onOpenShops
         <span className="app-guide-kicker">{beta ? <FlaskConical size={19} /> : <BookOpen size={19} />}{beta ? 'Your beta field guide' : 'Discover what you can do'}</span>
         <h2>{beta ? 'Test the possibilities.' : 'A world of riding. One place to begin.'}</h2>
         <p>{beta
-          ? 'Sign in for beta access, connect your Wattbike, and put TrackLab through its paces. This guide includes the full feature tour, what to test, and how access works after beta.'
+          ? 'Free beta testing is currently ongoing. Sign in for beta access, connect your Wattbike, and put TrackLab through its paces. This guide includes the full feature tour, what to test, and how access works after beta.'
           : 'Find a BMX track, discover a nearby bike shop, practice your start, or turn a connected Wattbike session into a ride across the world. Get to know the tools and the account that brings your progress together.'}</p>
         <div className="app-guide-actions">
           <button className="primary-button" type="button" onClick={() => jumpTo(beta ? 'beta-start' : 'wattbike')}>{beta ? 'Start beta testing' : 'Connect and ride'} <ArrowUpRight size={16} /></button>
@@ -68,7 +68,7 @@ export default function AppGuide({ beta, billingReady, onOpenTracks, onOpenShops
 
       <div className="app-guide-access" aria-label="Access at a glance">
         <article><span>01 / Free</span><h3>Discover. Practice. Connect.</h3><p>Browse tracks and bike shops without signing in. A free account adds the Reaction Test, track favorites, a community profile, and Friends.</p></article>
-        <article><span>02 / Public beta</span><h3>Bring your Wattbike.</h3><p>While public beta enrollment is open, signed-in testers automatically receive four simultaneous Wattbike connections for a limited period. No purchase or separate beta invitation is required.</p></article>
+        <article><span>02 / Free public beta</span><h3>Bring your Wattbike.</h3><p>Free beta testing is currently ongoing. Eligible new testers who sign in automatically receive four simultaneous Wattbike connections for a limited period. No purchase or separate beta invitation is required.</p></article>
         <article><span>03 / Outside beta</span><h3>Choose your connections.</h3><p>Racer plans support one to four simultaneous Wattbike connections. When purchasing is available, Apple shows the monthly price and terms before you confirm.</p></article>
       </div>
       <p className="app-guide-availability">Public live multiplayer: <strong>Coming soon.</strong> Eligible solo ride records still upload, and recorded ghost racing remains available with bike access. Authorized club sessions have separate controls.</p>

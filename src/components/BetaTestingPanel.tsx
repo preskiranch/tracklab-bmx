@@ -86,7 +86,7 @@ export function BetaTestingPanel({ user, focusRequested = false, onFocusHandled,
   return (
     <section className="beta-testing app-settings-card" id="beta-testing" aria-labelledby="beta-testing-heading">
       <header><div><span className="eyebrow">Early access</span><h2 id="beta-testing-heading">Beta Testing</h2></div><FlaskConical size={22} /></header>
-      <p>Train with your Wattbike, upload your records, and race other riders’ ghosts. Live multiplayer is coming soon.</p>
+      <p>Free beta testing is currently ongoing. Train with your Wattbike, upload your records, and race other riders’ ghosts. Live multiplayer is coming soon.</p>
       {loading ? <p role="status">Loading beta access…</p> : beta?.active ? (
         <div className="beta-access-summary"><strong>{beta.bikeSeats} Wattbike connection{beta.bikeSeats === 1 ? '' : 's'} included</strong><span>Beta access through {dateLabel(beta.expiresAt)}. No purchase required.</span></div>
       ) : !user.admin && <p>No active Wattbike beta grant is available for this account. Automatic enrollment applies while the public beta is open; expired or revoked access is not renewed by signing in. Contact the beta organizer if you need access.</p>}

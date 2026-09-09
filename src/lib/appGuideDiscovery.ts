@@ -23,7 +23,7 @@ export const discoveryGuideSections: AppGuideSection[] = [
       {
         title: 'Find your next BMX track',
         paragraphs: [
-          'Open BMX Tracks to search the public directory by track name, city, state, or country. Narrow the list with the Country and State / region filters, then choose a track to see its location on satellite imagery. You can browse the directory without an account.',
+          'Open BMX Tracks to search the global BMX track directory by track name, city, state, or country. Narrow the list with the Country and State / region filters, then choose a track to see its location on satellite imagery. You can browse the directory without an account.',
           'Track details include the listed address and source, plus available official website, federation, phone, and social links. Use Maps for Google Maps directions or Google Earth to explore the location in 3D. The global directory includes places to visit; training uses the courses that have a saved race mapping.',
         ],
         bullets: [

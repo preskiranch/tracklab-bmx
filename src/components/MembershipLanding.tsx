@@ -364,6 +364,14 @@ export function MembershipLanding({
 
       {activeTab === 'home' && (
         <>
+          <section className="membership-beta-notice" aria-labelledby="membership-beta-heading">
+            <div>
+              <span className="eyebrow">Free public beta</span>
+              <h2 id="membership-beta-heading">Free beta testing is currently ongoing.</h2>
+              <p>Create a free account, verify your email, and sign in to start testing. Eligible new testers receive temporary Wattbike access with no purchase required. Beta access does not automatically become a paid subscription.</p>
+            </div>
+            <button className="primary-button" type="button" onClick={() => selectTab('beta-info')}>How to join the free beta <ArrowUpRight size={17} /></button>
+          </section>
           <section className="membership-hub-intro">
             <div>
               <h2>The BMX experience. <span>Built around you.</span></h2>
@@ -387,7 +395,7 @@ export function MembershipLanding({
               <div className="membership-feature-copy">
                 <span className="eyebrow">BMX tracks</span>
                 <h2>Your next track.<br />Closer than you think.</h2>
-                <p>Explore the global BMX directory.</p>
+                <p>Explore the global BMX track directory.</p>
                 <button className="membership-feature-link" type="button" onClick={() => selectTab('tracks')}>Open track finder <ArrowUpRight size={17} /></button>
               </div>
               <div className="membership-track-art" aria-hidden="true">
@@ -404,7 +412,7 @@ export function MembershipLanding({
               <div className="membership-feature-copy">
                 <span className="eyebrow">Bike shops</span>
                 <h2>Local knowledge.<br />A world of support.</h2>
-                <p>Find the people who keep you riding.</p>
+                <p>Explore the global bike shop directory.</p>
                 <button className="membership-feature-link" type="button" onClick={() => selectTab('shops')}>Open shop finder <ArrowUpRight size={17} /></button>
               </div>
               <div className="membership-bike-art" aria-hidden="true">
@@ -488,7 +496,7 @@ export function MembershipLanding({
           {clubClaimRole === 'parent' && !profileComplete && <p>Use your own name and email here. In the next step, you’ll claim your child’s studio profile and set up their phone separately. Already have a parent account? Choose Sign in below.</p>}
           <p>
             Browse BMX tracks and bike shops without signing in. A free account adds the Reaction Test, favorites,
-            and community features. Racer or invited beta access unlocks connected Wattbike training and recorded ghost racing.
+            and community features. Free public beta access is currently available to eligible new testers after sign-in. Active beta or Racer access unlocks connected Wattbike training and recorded ghost racing.
             Public live multiplayer is coming soon.
           </p>
           {shopClaimPrompt && !profileComplete && <p className="shop-claim-account-prompt" role="status">{shopClaimPrompt}</p>}
@@ -586,11 +594,11 @@ export function MembershipLanding({
           <span className="eyebrow">Free account</span>
           <h3>Free membership</h3>
           <p>
-            Explore the public BMX track and mapped bike shop directories, run the Reaction Test, save favorites, and build your community profile without a paid bike seat.
+            Explore the global BMX track directory and global bike shop directory, run the Reaction Test, save favorites, and build your community profile without a paid bike seat.
           </p>
           <ul>
-            <li>Public track directory</li>
-            <li>Mapped bike shop directory</li>
+            <li>Global BMX track directory</li>
+            <li>Global bike shop directory</li>
             <li>Free Reaction Test</li>
             <li>Community profile</li>
             <li>Saved track favorites</li>
@@ -610,7 +618,7 @@ export function MembershipLanding({
             <p className="apple-plan-price">{selectedOffer?.displayPrice} / month</p>
           )}
           <p>
-            Choose a fixed plan for one to four simultaneous Wattbike connections. Every plan includes live Wattbike
+            Free beta testing is currently ongoing; eligible testers do not need to purchase a plan. Outside beta access, choose a fixed plan for one to four simultaneous Wattbike connections. Every plan includes live Wattbike
             telemetry, cloud training records, recorded ghost racing, and access to authorized club tools. Public live multiplayer is coming soon.
           </p>
           {membership.tier === 'racer' && (
