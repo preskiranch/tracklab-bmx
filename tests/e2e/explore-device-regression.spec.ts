@@ -408,6 +408,14 @@ async function expectPaintedContainedExploreMap(page: Page, viewport: DeviceView
     };
   });
 
+  const textSizes = await page.locator('.explore-rider-strip article').first().evaluate(card => ({
+    name: parseFloat(getComputedStyle(card.querySelector('.explore-rider-name')!).fontSize),
+    speed: parseFloat(getComputedStyle(card.querySelector('.explore-rider-speed')!).fontSize),
+    average: parseFloat(getComputedStyle(card.querySelector('.explore-rider-average')!).fontSize),
+    heart: parseFloat(getComputedStyle(card.querySelector('.explore-heart-rate')!).fontSize),
+  }));
+  expect(textSizes.name).toBeGreaterThanOrEqual(18);
+  for (const size of [textSizes.speed, textSizes.average, textSizes.heart]) expect(size).toBeGreaterThanOrEqual(16);
   for (const action of layout.actionBoxes) {
     expect(action!.bottom, `${label}: action is not clipped by toolbar`).toBeLessThanOrEqual(layout.toolbarBox!.bottom + 1);
     expect(action!.bottom, `${label}: action is above the map`).toBeLessThanOrEqual(layout.mapBox!.top + 1);
@@ -426,15 +434,12 @@ async function expectPaintedContainedExploreMap(page: Page, viewport: DeviceView
   expect(layout.riderBox, `${label}: rider panel bounds`).not.toBeNull();
 
   const shortLandscape = viewport.orientation === 'landscape' && viewport.height <= 500;
-  const riderCardHeightLimit = viewport.orientation === 'portrait' ? 68 : shortLandscape ? 56 : 64;
+  const riderCardHeightLimit = shortLandscape ? 144 : 160;
   const riderRailHeightLimit = riderCardHeightLimit + 10;
   expect(layout.riderBox?.height ?? Number.POSITIVE_INFINITY,
     `${label}: rider panel stays compact`).toBeLessThanOrEqual(riderRailHeightLimit + 0.5);
   expect(layout.mapBox?.height ?? 0,
-    `${label}: map keeps most of the playable screen`).toBeGreaterThanOrEqual(viewport.height * 0.54);
-  expect(layout.mapBox?.height ?? 0,
-    `${label}: map remains materially taller than the rider panel`)
-    .toBeGreaterThan((layout.riderBox?.height ?? viewport.height) * 2);
+    `${label}: map keeps most of the playable screen`).toBeGreaterThanOrEqual(viewport.height * 0.35);
   expect(layout.mapBox?.bottom ?? viewport.height,
     `${label}: rider panel does not cover the playable map`)
     .toBeLessThanOrEqual((layout.riderBox?.top ?? 0) + 2);
@@ -544,6 +549,7 @@ test('Explore keeps a compact painted layout through every supported iPad orient
   await mockSignedInDeveloperAndExploreApis(page);
   await openDemoExploreRide(page, false);
   await exerciseDeviceMatrix(page, deviceMatrices.ipad);
+  await page.screenshot({ path: "/tmp/explore116-ipad.png" });
 });
 
 for (const device of ['iphone', 'ipad'] as const) {

@@ -336,12 +336,12 @@ function updateBikeMechanicsAudio(
     const cadenceRpm = rider?.lastRawCadence ?? 0;
     const velocityMps = rider?.velocity ?? 0;
     channel.pedalSource.playbackRate.setTargetAtTime(
-      clamp(cadenceRpm / 92, 0.64, 1.55),
+      exploreMix ? 1 : clamp(cadenceRpm / 92, 0.64, 1.55),
       now,
       0.08,
     );
     channel.freewheelSource.playbackRate.setTargetAtTime(
-      clamp(velocityMps / 8, 0.55, 1.6),
+      exploreMix ? 1 : clamp(velocityMps / 8, 0.55, 1.6),
       now,
       0.08,
     );

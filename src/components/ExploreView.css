@@ -4,7 +4,7 @@
   --explore-safe-bottom: env(safe-area-inset-bottom, 0px);
   --explore-safe-left: env(safe-area-inset-left, 0px);
   --explore-toolbar-reserve: calc(52px + var(--explore-safe-top));
-  --explore-rider-card-height: 64px;
+  --explore-rider-card-height: 160px;
   --explore-rider-strip-height: calc(var(--explore-rider-card-height) + 10px);
   --explore-rider-reserve: calc(var(--explore-rider-strip-height) + 6px + var(--explore-safe-bottom));
 }
@@ -129,7 +129,7 @@
 @media (orientation: portrait) {
   .platform-shell.explore-fullscreen {
     --explore-toolbar-reserve: calc(94px + var(--explore-safe-top));
-    --explore-rider-card-height: 68px;
+    --explore-rider-card-height: 160px;
   }
 
   .platform-shell.explore-fullscreen .explore-rider-strip {
@@ -141,7 +141,7 @@
 
 @media (max-height: 500px) and (orientation: landscape) {
   .platform-shell.explore-fullscreen {
-    --explore-rider-card-height: 56px;
+    --explore-rider-card-height: 144px;
   }
 
   .platform-shell.explore-fullscreen .explore-rider-strip article {
@@ -275,4 +275,64 @@
   .platform-shell .explore-camera-toolbar .explore-toolbar-toggle.distance .distance-short {
     display: none;
   }
+}
+
+/* Readable rider summaries reserve their own space below the map. */
+:is(.platform-shell, .platform-shell.explore-fullscreen) .explore-rider-strip article {
+  position: relative;
+  padding: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  max-inline-size: none;
+}
+:is(.platform-shell, .platform-shell.explore-fullscreen) .explore-rider-strip .explore-rider-details {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 4px 12px;
+  width: 100%;
+}
+:is(.platform-shell, .platform-shell.explore-fullscreen) .explore-rider-strip .explore-rider-name {
+  font-size: 18px;
+  line-height: 1.2;
+  min-height: 44px;
+  padding: 0 52px 0 56px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  grid-column: 1 / -1;
+}
+:is(.platform-shell, .platform-shell.explore-fullscreen) .explore-rider-strip article span,
+:is(.platform-shell, .platform-shell.explore-fullscreen) .explore-rider-strip .explore-air-status strong {
+  font-size: 16px;
+  line-height: 1.25;
+  color: #fff;
+  white-space: normal;
+  overflow: visible;
+}
+:is(.platform-shell, .platform-shell.explore-fullscreen) .explore-rider-strip article > img,
+:is(.platform-shell, .platform-shell.explore-fullscreen) .explore-rider-strip article > .explore-rider-initials {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: 44px;
+  height: 44px;
+}
+:is(.platform-shell, .platform-shell.explore-fullscreen) .explore-rider-strip .explore-rider-progress {
+  position: absolute;
+  right: 12px;
+  top: 20px;
+  font-size: 20px;
+}
+.platform-shell.explore-fullscreen .explore-rider-strip {
+  grid-template-columns: none;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(min(100%, 460px), 1fr);
+}
+.platform-shell.explore-fullscreen .explore-rider-strip article {
+  grid-template-columns: minmax(0, 1fr);
+  max-inline-size: none;
+  padding: 12px;
+}
+.platform-shell.explore-fullscreen .explore-rider-strip .explore-air-instruction { display: none; }
+.platform-shell.explore-fullscreen .explore-rider-strip .explore-elevation-status { display: block; }
+.platform-shell.explore-fullscreen .explore-landmark-hint {
+  bottom: calc(var(--explore-rider-reserve) + 8px);
 }
