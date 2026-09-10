@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import {
   useEffect,
   useId,
@@ -39,6 +40,7 @@ import type {
 import './TrainingResultsSpreadsheet.css';
 
 export type TrainingResultsSpreadsheetProps = Readonly<{
+  fullWidth?: boolean;
   sessions: readonly TrainingSession[];
   dateLabel: string;
   speedUnit: SpeedUnit;
@@ -339,16 +341,31 @@ function ResultTable({
   selectedSessionId: string | null;
   gridRef: RefObject<HTMLDivElement | null>;
 }) {
+  const orderedColumns = [
+    ...columns.filter(column => column.id === 'session'),
+    ...columns.filter(column => column.id === 'rider'),
+    ...columns.filter(column => column.id !== 'session' && column.id !== 'rider'),
+  ];
+  useLayoutEffect(() => {
+    const grid = gridRef.current;
+    const session = grid?.querySelector<HTMLElement>('thead [data-column="session"]');
+    if (!grid) return;
+    const measure = () => grid.style.setProperty('--session-column-width', `${session?.getBoundingClientRect().width ?? 0}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(session ?? grid);
+    return () => observer.disconnect();
+  }, [columns, gridRef]);
   return (
     <div className="training-results-grid" ref={gridRef} role="region" aria-label={regionLabel} tabIndex={0}>
       <table>
         <caption>{caption}</caption>
-        <thead><tr>{columns.map((column) => <th scope="col" className={column.numeric ? 'number' : undefined} key={column.id}>{column.label}</th>)}</tr></thead>
+        <thead><tr>{orderedColumns.map((column) => <th data-column={column.id} scope="col" className={column.numeric ? 'number' : undefined} key={column.id}>{column.label}</th>)}</tr></thead>
         <tbody>{rows.map((row) => (
           <tr className={row.sessionId === selectedSessionId ? 'selected' : undefined} key={row.id}>
-            {columns.map((column, index) => {
+            {orderedColumns.map((column, index) => {
               const Cell = index === 0 ? 'th' : 'td';
-              return <Cell scope={index === 0 ? 'row' : undefined} className={column.numeric ? 'number' : undefined} key={column.id}>{column.render(row)}</Cell>;
+              return <Cell data-column={column.id} scope={index === 0 ? 'row' : undefined} className={column.numeric ? 'number' : undefined} key={column.id}>{column.render(row)}</Cell>;
             })}
           </tr>
         ))}</tbody>
@@ -375,6 +392,7 @@ function PowerTable({ matrix, dateLabel }: { matrix: TrainingPowerRepMatrix; dat
 }
 
 export function TrainingResultsSpreadsheet({
+  fullWidth = false,
   sessions,
   dateLabel,
   speedUnit,
@@ -390,6 +408,8 @@ export function TrainingResultsSpreadsheet({
   consentedClubHeartRateBySession,
   renderSessionDetail,
 }: TrainingResultsSpreadsheetProps) {
+  const [outlet, setOutlet] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => { setOutlet(fullWidth ? document.getElementById('training-results-outlet') : null); }, [fullWidth]);
   const regionId = useId().replace(/:/g, '');
   const rows = useMemo(() => buildTrainingResultRows(sessions), [sessions]);
   const powerMatrix = useMemo(() => buildTrainingPowerRepMatrix(sessions, rows), [rows, sessions]);
@@ -530,7 +550,7 @@ export function TrainingResultsSpreadsheet({
     lastVisibleResultRowsRef.current = { sheetId: activeSheet.id, dateLabel, version: visibleResultRowsVersion };
   }, [activeSheet.id, dateLabel, visibleResultRowsVersion]);
 
-  return (
+  const content = (
     <section
       ref={resultsSectionRef}
       className="training-results-sheet"
@@ -585,4 +605,5 @@ export function TrainingResultsSpreadsheet({
       </> : <div className="training-results-empty"><TableProperties size={32} /><strong>No training saved on this day</strong><p>Finished races, sprints, pulls, and Explore rides will appear here automatically.</p></div>}
     </section>
   );
+  return outlet ? createPortal(content, outlet) : content;
 }

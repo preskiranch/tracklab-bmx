@@ -14600,6 +14600,7 @@ export default function App() {
           </>
         )}
       </main>
+      <div id="training-results-outlet" />
     </div>
   );
 }

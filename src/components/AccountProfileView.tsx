@@ -1514,6 +1514,7 @@ export function AccountProfileView({
         </section>
 
         <TrainingResultsSpreadsheet
+          fullWidth
           sessions={selectedSessions}
           dateLabel={selectedDateLabel}
           speedUnit={speedUnit}
