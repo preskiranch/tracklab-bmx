@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  exploreCameraOffsetMeters,
   exploreRouteHeading,
   exploreRoutePoint,
   exploreRoutePoints,
-  smoothExploreCameraPoint,
   smoothExploreHeading,
 } from '../lib/explore';
 import {
@@ -26,7 +24,7 @@ import {
 } from './ExploreMapPanel';
 
 const exploreRiderPin3DAnchorLeft = '-50%';
-const exploreRiderPin3DAnchorTop = '-100%';
+const exploreRiderPin3DAnchorTop = '-22px';
 const exploreRiderPin3DAltitudeMeters = 0.15;
 
 function explore3DRange(followZoom: number) {
@@ -46,7 +44,7 @@ export function ExploreGoogle3DMapPanel({
   route,
   distanceUnit,
   followZoom,
-  cameraFollowPosition,
+  cameraRecenterRequest,
   cameraFollowEnabled,
   showMapLabels,
   followTravelHeading,
@@ -283,16 +281,16 @@ export function ExploreGoogle3DMapPanel({
     );
     const center = exploreRoutePoint(
       routePoints,
-      averageDistanceMeters + exploreCameraOffsetMeters(cameraFollowPosition, followZoom),
+      averageDistanceMeters,
       route.distanceMeters,
     ) ?? positions[0].position;
     cameraTargetRef.current = center;
-    if (!cameraCenterRef.current) {
+    if (!interactionActiveRef.current) {
       cameraCenterRef.current = center;
       map.center = { ...center, altitude: 0 };
     }
   }, [
-    cameraFollowPosition,
+    cameraRecenterRequest,
     cameraFollowEnabled,
     followTravelHeading,
     followZoom,
@@ -332,7 +330,7 @@ export function ExploreGoogle3DMapPanel({
         lastUpdateAt = now;
       } else if (map && current && target && now - lastUpdateAt >= 32) {
         const elapsedMs = Math.min(250, Math.max(0, now - previousAt));
-        const next = smoothExploreCameraPoint(current, target, elapsedMs);
+        const next = target;
         cameraCenterRef.current = next;
         map.center = { ...next, altitude: 0 };
         if (cameraFollowEnabled) {

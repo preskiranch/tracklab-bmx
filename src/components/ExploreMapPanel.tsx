@@ -8,13 +8,10 @@ import {
 } from 'react';
 import { loadGoogleMaps } from '../lib/googleMaps';
 import {
-  exploreCameraOffsetMeters,
   exploreRouteHeading,
   exploreRoutePoint,
   exploreRoutePoints,
-  smoothExploreCameraPoint,
   smoothExploreHeading,
-  type ExploreCameraFollowPosition,
   type ExploreViewportGroup,
 } from '../lib/explore';
 import type {
@@ -37,7 +34,7 @@ export type ExploreMapPanelProps = {
   route: ExploreRouteModel;
   distanceUnit: ExploreDistanceUnit;
   followZoom: number;
-  cameraFollowPosition: ExploreCameraFollowPosition;
+  cameraRecenterRequest: number;
   cameraFollowEnabled: boolean;
   showMapLabels: boolean;
   followTravelHeading: boolean;
@@ -219,7 +216,7 @@ export function createExploreRiderPinElement(rider: ExploreRider): ExploreRiderP
     const avatar = nextRider.photoUrl
       ? document.createElement('img')
       : document.createElement('span');
-    const avatarSizePx = window.matchMedia('(max-width: 720px)').matches ? 40 : 44;
+    const avatarSizePx = 44;
     avatar.className = 'explore-map-rider-avatar';
     avatar.style.cssText = `position:relative;z-index:2;display:grid;place-items:center;width:${avatarSizePx}px;height:${avatarSizePx}px;overflow:hidden;border:2px solid ${safeRiderAccent(nextRider.accent, nextRider.colorName)};border-radius:50%;background:#101823;color:#fff;box-shadow:0 0 0 2px rgba(255,255,255,.92);font-size:12px;font-weight:900;line-height:1;object-fit:cover`;
     if (avatar instanceof HTMLImageElement) {
@@ -296,7 +293,7 @@ function createExploreRiderMarker(
   const presentation = createExploreRiderPinElement(rider);
   const { element } = presentation;
   element.style.position = 'absolute';
-  element.style.transform = 'translate3d(-50%, -100%, 0)';
+  element.style.transform = 'translate3d(-50%, -22px, 0)';
   element.style.zIndex = String(zIndex);
 
   let markerPosition = position;
@@ -334,7 +331,7 @@ export function ExploreMapPanel({
   route,
   distanceUnit,
   followZoom,
-  cameraFollowPosition,
+  cameraRecenterRequest,
   cameraFollowEnabled,
   showMapLabels,
   followTravelHeading,
@@ -552,11 +549,11 @@ export function ExploreMapPanel({
     );
     const center = exploreRoutePoint(
       routePoints,
-      averageDistanceMeters + exploreCameraOffsetMeters(cameraFollowPosition, followZoom),
+      averageDistanceMeters,
       route.distanceMeters,
     ) ?? riderCenter;
     cameraTargetRef.current = center;
-    if (!cameraCenterRef.current) {
+    if (!interactionActiveRef.current) {
       cameraCenterRef.current = center;
       map.moveCamera?.({ center });
       if (!map.moveCamera) {
@@ -564,7 +561,7 @@ export function ExploreMapPanel({
       }
     }
   }, [
-    cameraFollowPosition,
+    cameraRecenterRequest,
     cameraFollowEnabled,
     followZoom,
     group,
@@ -602,7 +599,6 @@ export function ExploreMapPanel({
     }
 
     let frameRequest = 0;
-    let previousAt = window.performance.now();
     let lastMapUpdateAt = 0;
     const updateCamera = (now: number) => {
       const map = mapRef.current;
@@ -614,21 +610,18 @@ export function ExploreMapPanel({
         if (interactiveCenter) {
           cameraCenterRef.current = interactiveCenter;
         }
-        previousAt = now;
         lastMapUpdateAt = now;
       } else if (map && current && target && now - lastMapUpdateAt >= 32) {
         const needsMovement = Math.abs(target.lat - current.lat) > 1e-8
           || Math.abs(target.lng - current.lng) > 1e-8;
         if (needsMovement) {
-          const elapsedMs = Math.min(250, Math.max(0, now - previousAt));
-          const next = smoothExploreCameraPoint(current, target, elapsedMs);
+          const next = target;
           cameraCenterRef.current = next;
           map.moveCamera?.({ center: next });
           if (!map.moveCamera) {
             map.setCenter?.(next);
           }
         }
-        previousAt = now;
         lastMapUpdateAt = now;
       }
       frameRequest = window.requestAnimationFrame(updateCamera);

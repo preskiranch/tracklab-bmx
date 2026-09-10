@@ -135,7 +135,10 @@ async function installPaintedGoogleMaps(
       getHeading() { return this.heading; }
       getZoom() { return this.zoom; }
       moveCamera(options: { center?: Point; zoom?: number; renderingType?: string }) {
-        if (options.center) this.center = options.center;
+        if (options.center) {
+          this.center = options.center;
+          this.element.dataset.center = JSON.stringify(this.center);
+        }
         if (options.zoom != null) this.zoom = options.zoom;
       }
       setCenter(center: Point) { this.center = center; }
@@ -549,6 +552,8 @@ for (const device of ['iphone', 'ipad'] as const) {
     await installPaintedGoogleMaps(page, device);
     await mockSignedInDeveloperAndExploreApis(page);
     await openDemoExploreRide(page, false);
+    const options = page.getByRole('button', { name: 'View options', exact: true });
+    if (await options.isVisible()) await options.click();
     await page.getByRole('button', { name: 'Direction of travel up', exact: true }).click();
     await expect.poll(async () => Number(await page.locator('.explore-map-canvas').first().getAttribute('data-heading'))).toBeGreaterThan(5);
     await page.getByRole('button', { name: 'North up', exact: true }).click();
@@ -618,4 +623,35 @@ test('Smart Route sends the selected surface through planning and route building
     await expect.poll(() => routeRequests.at(-1)).toMatchObject({ routeSurface: surface, waypoints: [] });
     await expect(page.getByRole('button', { name: 'Find and build this ride' })).toBeEnabled();
   }
+});
+
+
+test('Explore phone keeps its center across labeled view changes and rotation', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await installPaintedGoogleMaps(page, 'iphone');
+  await mockSignedInDeveloperAndExploreApis(page);
+  await openDemoExploreRide(page, false);
+  await page.getByRole('button', { name: 'Pause ride' }).click();
+  await page.waitForTimeout(500);
+  const center = JSON.parse((await page.locator('.explore-map-canvas').first().getAttribute('data-center'))!);
+  const expectSameCenter = async () => {
+    await expect.poll(async () => {
+      const recentered = JSON.parse((await page.locator('.explore-map-canvas').first().getAttribute('data-center'))!);
+      return Math.abs(recentered.lat - center.lat) + Math.abs(recentered.lng - center.lng);
+    }).toBeLessThan(0.00001);
+  };
+  await page.getByRole('button', { name: 'View options', exact: true }).click();
+  for (const label of ['North up', 'Travel up', 'Free camera', 'Resume', 'Exit view']) {
+    await expect(page.locator('.explore-camera-toolbar').getByText(label, { exact: true })).toBeVisible();
+  }
+  for (const name of ['Direction of travel up', 'North up', 'Enable free camera', 'Center rider', 'Show more of the route', 'Move closer to the riders']) {
+    await page.getByRole('button', { name, exact: true }).click();
+    await expectSameCenter();
+  }
+  await page.screenshot({ path: '/tmp/explore115-phone-options.png' });
+  await page.getByRole('button', { name: 'Close options' }).click();
+  await page.screenshot({ path: '/tmp/explore115-phone.png' });
+  await transitionExploreViewport(page, deviceMatrices.iphone[3]);
+  await expectSameCenter();
+  await page.screenshot({ path: '/tmp/explore115-landscape.png' });
 });

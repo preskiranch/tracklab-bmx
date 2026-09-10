@@ -45,7 +45,6 @@ import {
   groupExploreRiders,
   exploreGridClass,
   exploreRemoteStateFreshMs,
-  type ExploreCameraFollowPosition,
 } from '../lib/explore';
 import { exploreRolloutConfig } from '../game/exploreRollout';
 import {
@@ -289,21 +288,6 @@ function safeExternalHttpUrl(value: string) {
   }
 }
 
-const exploreCameraFollowLabels: Record<ExploreCameraFollowPosition, string> = {
-  behind: 'Behind',
-  center: 'Centered',
-  ahead: 'Ahead',
-};
-
-function nextExploreCameraFollowPosition(
-  position: ExploreCameraFollowPosition,
-): ExploreCameraFollowPosition {
-  if (position === 'center') {
-    return 'ahead';
-  }
-  return position === 'ahead' ? 'behind' : 'center';
-}
-
 function exploreAutocompleteError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   if (/REQUEST_DENIED|blocked|not allowed|not authorized|places\.googleapis\.com/i.test(message)) {
@@ -480,8 +464,9 @@ export function ExploreView({
   const [selectedDestinationPrediction, setSelectedDestinationPrediction] = useState<PlacePredictionOption | null>(null);
   const exploreDistanceUnit: ExploreDistanceUnit = distanceUnit === 'm' ? 'km' : 'mi';
   const [followZoom, setFollowZoom] = useState(18);
-  const [cameraFollowPosition, setCameraFollowPosition] = useState<ExploreCameraFollowPosition>('center');
+  const [cameraRecenterRequest, setCameraRecenterRequest] = useState(0);
   const [cameraFollowEnabled, setCameraFollowEnabled] = useState(true);
+  const [cameraOptionsOpen, setCameraOptionsOpen] = useState(false);
   // This remains a per-browser rider preference and is intentionally not
   // included in multiplayer state, so every rider controls their own map.
   const [showMapLabels, setShowMapLabels] = useState(true);
@@ -1078,11 +1063,20 @@ export function ExploreView({
     const toolbar = cameraToolbarRef.current;
     const stage = toolbar?.parentElement;
     if (!toolbar || !stage || !fullscreen) return;
-    const measure = () => stage.style.setProperty('--explore-toolbar-measured', `${toolbar.getBoundingClientRect().height}px`);
+    const shell = toolbar.closest<HTMLElement>('.platform-shell');
+    const measure = () => {
+      const height = `${toolbar.getBoundingClientRect().height}px`;
+      stage.style.setProperty('--explore-toolbar-measured', height);
+      shell?.style.setProperty('--explore-toolbar-measured', height);
+    };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(toolbar);
-    return () => { observer.disconnect(); stage.style.removeProperty('--explore-toolbar-measured'); };
+    return () => {
+      observer.disconnect();
+      stage.style.removeProperty('--explore-toolbar-measured');
+      shell?.style.removeProperty('--explore-toolbar-measured');
+    };
   }, [fullscreen, route]);
 
   useEffect(() => {
@@ -2350,7 +2344,7 @@ export function ExploreView({
                     setFollowZoom((zoom) => Math.max(12, zoom - 1));
                   }}
                 >
-                  <ZoomOut size={18} />
+                  <ZoomOut size={18} /><span className="explore-zoom-label">Wider</span>
                 </button>
                 <label>
                   <span>Follow zoom</span>
@@ -2379,32 +2373,18 @@ export function ExploreView({
                     setFollowZoom((zoom) => Math.min(20, zoom + 1));
                   }}
                 >
-                  <ZoomIn size={18} />
+                  <ZoomIn size={18} /><span className="explore-zoom-label">Closer</span>
                 </button>
-                <button
-                  className={`explore-camera-position-toggle ${cameraFollowPosition}${cameraFollowPosition === 'center'
-                    ? ''
-                    : ' explore-map-labels-toggle active'}`}
-                  type="button"
-                  aria-label={`Camera follow position: ${exploreCameraFollowLabels[cameraFollowPosition].toLowerCase()}`}
-                  title={`Camera focus: ${exploreCameraFollowLabels[cameraFollowPosition]}. Select to change.`}
-                  onClick={() => {
-                    setCameraFollowEnabled(true);
-                    setCameraFollowPosition((position) => (
-                      nextExploreCameraFollowPosition(position)
-                    ));
-                  }}
-                >
-                  {cameraFollowPosition === 'center'
-                    ? <LocateFixed size={18} />
-                    : (
-                      <Navigation2
-                        className={cameraFollowPosition}
-                        size={18}
-                      />
-                    )}
-                  <span>{exploreCameraFollowLabels[cameraFollowPosition]}</span>
+                <button className="explore-center-rider" type="button"
+                  onClick={() => setCameraRecenterRequest((request) => request + 1)}>
+                  <LocateFixed size={18} /><span>Center rider</span>
                 </button>
+                <button type="button" className="explore-options-toggle"
+                  aria-expanded={cameraOptionsOpen}
+                  onClick={() => setCameraOptionsOpen((open) => !open)}>
+                  {cameraOptionsOpen ? 'Close options' : 'View options'}
+                </button>
+                <div className={`explore-extra-controls${cameraOptionsOpen ? ' open' : ''}`}>
                 <button
                   className={`explore-map-labels-toggle${cameraFollowEnabled ? '' : ' active'}`}
                   type="button"
@@ -2499,6 +2479,7 @@ export function ExploreView({
                     <span>{voiceEnabled ? 'Mic on' : 'Mic off'}</span>
                   </button>
                 )}
+                </div>
                 {fullscreen && (
                   <div className="explore-session-actions">
                     {!serverControlledExplore && (ride.status === 'riding' ? (
@@ -2535,7 +2516,7 @@ export function ExploreView({
                       onClick={() => onFullscreenChange(false)}
                     >
                       <Minimize2 size={18} />
-                      <span>Exit full screen</span>
+                      <span>Exit view</span>
                     </button>
                   </div>
                 )}
@@ -2567,7 +2548,7 @@ export function ExploreView({
                         route={route}
                         distanceUnit={exploreDistanceUnit}
                         followZoom={followZoom}
-                        cameraFollowPosition={cameraFollowPosition}
+                        cameraRecenterRequest={cameraRecenterRequest}
                         cameraFollowEnabled={cameraFollowEnabled}
                         showMapLabels={showMapLabels}
                         followTravelHeading={followTravelHeading}
@@ -2580,7 +2561,7 @@ export function ExploreView({
                         route={route}
                         distanceUnit={exploreDistanceUnit}
                         followZoom={followZoom}
-                        cameraFollowPosition={cameraFollowPosition}
+                        cameraRecenterRequest={cameraRecenterRequest}
                         cameraFollowEnabled={cameraFollowEnabled}
                         showMapLabels={showMapLabels}
                         followTravelHeading={followTravelHeading}
