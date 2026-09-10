@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   generateSmartExplorePlan,
+  smartRouteSurface,
+  exploreRoutingOptions,
   sanitizeSmartExplorePlan,
 } from '../../cloud/exploreSmartRoute.mjs';
 
@@ -58,5 +60,31 @@ describe('Smart Explore route planning', () => {
       targetDistanceMiles: 10,
       sources: [{ title: 'Visit Malibu', url: 'https://example.com/malibu' }],
     });
+  });
+});
+
+
+describe('Smart Route street and path instructions', () => {
+  it('honors explicit instructions without confusing excluded paths with included paths', () => {
+    expect(smartRouteSurface('Only take city streets', 'streets-and-paths')).toBe('streets');
+    expect(smartRouteSurface('Go to the square, do not include bike paths')).toBe('streets');
+    expect(smartRouteSurface('Include bike paths to the square', 'streets')).toBe('streets-and-paths');
+    expect(smartRouteSurface('Cliff House to Ghirardelli Square', 'streets')).toBe('streets');
+    expect(exploreRoutingOptions('streets')).toEqual({ travelMode: 'DRIVE', routeModifiers: { avoidHighways: true, avoidTolls: true, avoidFerries: true } });
+    expect(exploreRoutingOptions('streets-and-paths')).toEqual({ travelMode: 'BICYCLE' });
+  });
+
+  it('removes unsolicited neighborhood sightseeing checkpoints from a simple A-to-B request', async () => {
+    const plan = await generateSmartExplorePlan({
+      description: 'Cliffhouse neighborhood in San Francisco to Ghirardelli Square',
+      routeSurface: 'streets', apiKey: 'test', model: 'test',
+      fetchImplementation: async () => new Response(JSON.stringify({ output_text: JSON.stringify({
+        originQuery: 'Cliff House, San Francisco', destinationQuery: 'Ghirardelli Square, San Francisco',
+        waypointQueries: ['Sutro Heights Park', 'Legion of Honor'], routeKind: 'point-to-point',
+        routeSurface: 'streets-and-paths',
+      }) })),
+    });
+    expect(plan.waypointQueries).toEqual([]);
+    expect(plan.routeSurface).toBe('streets');
   });
 });

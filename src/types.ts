@@ -241,6 +241,7 @@ export type ExploreRoute = {
   originLabel: string;
   destinationLabel: string;
   travelMode: ExploreTravelMode;
+  routeSurface?: 'streets' | 'streets-and-paths';
   distanceMeters: number;
   durationSeconds: number;
   encodedPolyline: string;

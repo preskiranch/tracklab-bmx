@@ -27,6 +27,7 @@ type ExploreRouteRequest = {
   originLabel: string;
   destinationLabel: string;
   travelMode: ExploreTravelMode;
+  routeSurface?: 'streets' | 'streets-and-paths';
   routeName?: string;
   waypoints?: ExploreRouteWaypoint[];
 };
@@ -45,6 +46,7 @@ export type ExploreSmartRoutePlan = {
   originQuery: string;
   destinationQuery: string;
   waypointQueries: string[];
+  routeSurface?: 'streets' | 'streets-and-paths';
   targetDistanceMiles: number;
   routeKind: 'point-to-point' | 'loop' | 'event-stage';
   disclaimer: string;
@@ -91,7 +93,7 @@ export async function upgradeExploreRoutesToBicycleRoads(
   let failedCount = 0;
 
   for (const route of routes) {
-    if (route.travelMode === 'bicycle') {
+    if (route.travelMode === 'bicycle' || route.routeSurface === 'streets') {
       upgradedRoutes.push(route);
       continue;
     }
@@ -125,6 +127,7 @@ export async function upgradeExploreRoutesToBicycleRoads(
 export async function fetchSmartExploreRoutePlan(
   description: string,
   access?: ExploreRequestAccess | null,
+  routeSurface: 'streets' | 'streets-and-paths' = 'streets-and-paths',
 ) {
   const response = await fetch('/api/explore/smart-route', {
     method: 'POST',
@@ -133,7 +136,7 @@ export async function fetchSmartExploreRoutePlan(
       'Content-Type': 'application/json',
       ...exploreRequestHeaders(access),
     },
-    body: JSON.stringify({ description }),
+    body: JSON.stringify({ description, routeSurface }),
   });
   const payload = await response.json().catch(() => null) as {
     plan?: ExploreSmartRoutePlan;

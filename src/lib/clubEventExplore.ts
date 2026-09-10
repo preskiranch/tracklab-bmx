@@ -46,7 +46,7 @@ function explorePoint(value: unknown): TrackPoint | null {
     : null;
 }
 
-/** Copies only the immutable bicycle-route fields accepted by Club Events. */
+/** Copies only the immutable Explore route fields accepted by Club Events. */
 export function sanitizeClubEventExploreRoute(value: unknown): ExploreRoute | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const candidate = value as Partial<ExploreRoute>;
@@ -64,7 +64,7 @@ export function sanitizeClubEventExploreRoute(value: unknown): ExploreRoute | nu
     || !destination
     || !encodedPolyline
     || encodedPolyline.length > 120_000
-    || candidate.travelMode !== 'bicycle'
+    || (candidate.travelMode !== 'bicycle' && !(candidate.travelMode === 'drive' && candidate.routeSurface === 'streets'))
     || !Number.isFinite(distanceMeters)
     || distanceMeters <= 1
     || distanceMeters > 2_000_000
@@ -108,7 +108,8 @@ export function sanitizeClubEventExploreRoute(value: unknown): ExploreRoute | nu
     destination,
     originLabel: text(candidate.originLabel, 160) || 'Selected start',
     destinationLabel: text(candidate.destinationLabel, 160) || 'Selected destination',
-    travelMode: 'bicycle',
+    travelMode: candidate.travelMode === 'drive' ? 'drive' : 'bicycle',
+    ...(candidate.routeSurface ? { routeSurface: candidate.routeSurface } : {}),
     distanceMeters,
     durationSeconds,
     encodedPolyline,

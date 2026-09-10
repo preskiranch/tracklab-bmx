@@ -85,7 +85,7 @@ import {
 } from './httpSecurity.mjs';
 import { nativeRuntimeConfigPayload } from './nativeRuntimeConfig.mjs';
 import { fetchExploreElevationProfile } from './exploreElevation.mjs';
-import { generateSmartExplorePlan } from './exploreSmartRoute.mjs';
+import { generateSmartExplorePlan, exploreRoutingOptions } from './exploreSmartRoute.mjs';
 import { createAuthSessionCache } from './authSessionCache.mjs';
 import { moderateRoomChatText } from './roomChatModeration.mjs';
 import {
@@ -3400,7 +3400,8 @@ async function computeExploreRoute(payload, signal) {
   if (!origin || !destination) {
     throw new HttpRequestError(400, 'Choose a valid starting point and destination.');
   }
-  const travelMode = 'bicycle';
+  const routeSurface = payload?.routeSurface === 'streets' ? 'streets' : 'streets-and-paths';
+  const travelMode = routeSurface === 'streets' ? 'drive' : 'bicycle';
   const waypoints = Array.isArray(payload?.waypoints)
     ? payload.waypoints.flatMap((value) => {
       const point = sanitizeExplorePoint(value?.point);
@@ -3425,7 +3426,7 @@ async function computeExploreRoute(payload, signal) {
           location: { latLng: { latitude: point.lat, longitude: point.lng } },
         })),
       } : {}),
-      travelMode: 'BICYCLE',
+      ...exploreRoutingOptions(routeSurface),
       // Overview geometry follows the routed roads without the lane- and
       // crosswalk-level offsets that look like lateral wobble in a tilted map.
       polylineQuality: 'OVERVIEW',
@@ -3451,7 +3452,7 @@ async function computeExploreRoute(payload, signal) {
   const distanceMeters = finiteNumber(candidate?.distanceMeters, 0);
   const durationSeconds = Number.parseFloat(String(candidate?.duration ?? '').replace(/s$/, ''));
   if (!encodedPolyline || distanceMeters <= 1) {
-    throw new HttpRequestError(404, 'No connected bicycle route was found between those locations.');
+    throw new HttpRequestError(404, 'No connected route matching this choice was found between those locations.');
   }
 
   const elevationProfile = await exploreElevationForRoute(
@@ -3472,6 +3473,7 @@ async function computeExploreRoute(payload, signal) {
     originLabel: sanitizeText(payload?.originLabel, 'Selected start', 160),
     destinationLabel: sanitizeText(payload?.destinationLabel, 'Selected destination', 160),
     travelMode,
+    routeSurface,
     distanceMeters,
     durationSeconds: Number.isFinite(durationSeconds) ? durationSeconds : 1,
     encodedPolyline,
@@ -7587,7 +7589,7 @@ function sanitizeClubEventActivityConfiguration(activityType, value) {
     // before constructing the small, canonical event configuration.
     const route = sanitizeExploreRoute(value.route);
     const routeId = sanitizeText(value.routeId, '', 96);
-    if (!route || route.travelMode !== 'bicycle' || !routeId || route.id !== routeId) return null;
+    if (!route || (route.travelMode !== 'bicycle' && route.routeSurface !== 'streets') || !routeId || route.id !== routeId) return null;
     const configuration = {
       origin: route.originLabel,
       destination: route.destinationLabel,
@@ -11019,6 +11021,7 @@ function sanitizeExploreRoute(value) {
     originLabel: sanitizeText(value.originLabel, 'Selected start', 160),
     destinationLabel: sanitizeText(value.destinationLabel, 'Selected destination', 160),
     travelMode: value.travelMode,
+    ...(value.routeSurface === 'streets' || value.routeSurface === 'streets-and-paths' ? { routeSurface: value.routeSurface } : {}),
     distanceMeters,
     durationSeconds: Math.max(1, Math.min(14 * 24 * 60 * 60, finiteNumber(value.durationSeconds, 0))),
     encodedPolyline,
@@ -20419,6 +20422,7 @@ async function serveStatic(request, response) {
     try {
       const plan = await generateSmartExplorePlan({
         description: payload?.description,
+        routeSurface: payload?.routeSurface,
         apiKey: openAiApiKey(),
         model: commentaryEngineModel,
       });

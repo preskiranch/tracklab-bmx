@@ -135,6 +135,7 @@ export function sanitizeRecentExploreRoute(value: unknown): ExploreRoute | null 
     originLabel: String(route.originLabel || 'Selected start').slice(0, 160),
     destinationLabel: String(route.destinationLabel || 'Selected destination').slice(0, 160),
     travelMode: route.travelMode === 'drive' ? 'drive' : 'bicycle',
+    ...(route.routeSurface === 'streets' || route.routeSurface === 'streets-and-paths' ? { routeSurface: route.routeSurface } : {}),
     distanceMeters,
     durationSeconds,
     encodedPolyline,

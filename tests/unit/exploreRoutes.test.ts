@@ -35,6 +35,13 @@ afterEach(() => {
 });
 
 describe('saved Explore route upgrades', () => {
+  it('preserves an explicitly selected streets route when reopening history', async () => {
+    const route = { ...savedRoute('streets-route', 'drive'), routeSurface: 'streets' as const };
+    const rebuild = vi.fn();
+    expect(await upgradeExploreRoutesToBicycleRoads([route], rebuild)).toEqual({ routes: [route], upgradedCount: 0, failedCount: 0 });
+    expect(rebuild).not.toHaveBeenCalled();
+  });
+
   it('rebuilds driving geometry as a bicycle route without duplicating the saved route', async () => {
     const legacy = savedRoute('saved-malibu', 'drive');
     const existingBicycle = savedRoute('saved-sf', 'bicycle');

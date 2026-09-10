@@ -588,3 +588,34 @@ test('Explore produces audible bike output during a demo ride', async ({ page })
     }));
   }), { timeout: 20000 }).toBeGreaterThan(0.008);
 });
+
+test('Smart Route sends the selected surface through planning and route building', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 960 });
+  await installPaintedGoogleMaps(page, 'ipad');
+  await mockSignedInDeveloperAndExploreApis(page);
+  const planRequests: unknown[] = [];
+  const routeRequests: unknown[] = [];
+  await page.route('**/api/explore/smart-route', async route => {
+    const request = route.request().postDataJSON();
+    planRequests.push(request);
+    await route.fulfill({ json: { plan: {
+      name: 'Direct city ride', originQuery: '38.5, -120.2', destinationQuery: '43.252, -126.453',
+      routeSurface: request.routeSurface, routeKind: 'point-to-point', waypointQueries: [], sources: [],
+    } } });
+  });
+  page.on('request', request => {
+    if (request.url().endsWith('/api/explore/route')) routeRequests.push(request.postDataJSON());
+  });
+  await page.goto('/');
+  await openSignedInApp(page);
+  await page.getByRole('button', { name: /Demo/i }).first().click();
+  await page.getByRole('button', { name: 'Explore the World', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Describe your Smart Route' }).fill('Cliff House to Ghirardelli Square');
+  for (const surface of ['streets', 'streets-and-paths']) {
+    await page.getByRole('combobox', { name: 'Smart Route type' }).selectOption(surface);
+    await page.getByRole('button', { name: 'Find and build this ride' }).click();
+    await expect.poll(() => planRequests.at(-1)).toMatchObject({ routeSurface: surface });
+    await expect.poll(() => routeRequests.at(-1)).toMatchObject({ routeSurface: surface, waypoints: [] });
+    await expect(page.getByRole('button', { name: 'Find and build this ride' })).toBeEnabled();
+  }
+});

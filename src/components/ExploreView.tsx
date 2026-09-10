@@ -468,6 +468,7 @@ export function ExploreView({
   const [destinationText, setDestinationText] = useState(initialRoute?.destinationLabel ?? '');
   const [routeName, setRouteName] = useState(initialRoute?.name ?? '');
   const [smartRoutePrompt, setSmartRoutePrompt] = useState('');
+  const [smartRouteSurface, setSmartRouteSurface] = useState<'streets' | 'streets-and-paths'>('streets-and-paths');
   const [smartRoutePlan, setSmartRoutePlan] = useState<ExploreSmartRoutePlan | null>(null);
   const [selectedOrigin, setSelectedOrigin] = useState<ExploreOrigin | null>(() => (
     initialRoute ? { point: initialRoute.origin, label: initialRoute.originLabel } : null
@@ -1514,7 +1515,7 @@ export function ExploreView({
     setRouteMessage('Smart Route is researching locations and matching your ride…');
     setSmartRoutePlan(null);
     try {
-      const plan = await fetchSmartExploreRoutePlan(smartRoutePrompt.trim(), exploreRequestAccess);
+      const plan = await fetchSmartExploreRoutePlan(smartRoutePrompt.trim(), exploreRequestAccess, smartRouteSurface);
       const origin = await resolveLocationText(plan.originQuery);
       const waypointLocations = [];
       for (const query of plan.waypointQueries) {
@@ -1528,6 +1529,7 @@ export function ExploreView({
         originLabel: origin.label ?? plan.originQuery,
         destinationLabel: destination.label ?? plan.destinationQuery,
         travelMode: exploreTravelMode,
+        routeSurface: plan.routeSurface ?? smartRouteSurface,
         routeName: plan.name,
         waypoints: waypointLocations,
       }, exploreRequestAccess);
@@ -1545,6 +1547,7 @@ export function ExploreView({
       setDestinationText(destination.label ?? plan.destinationQuery);
       setRouteName(plan.name);
       setSmartRoutePlan(plan);
+      setSmartRouteSurface(plan.routeSurface ?? smartRouteSurface);
       resetPlaceAutocompleteSession();
       resetLocalRide();
       applyExploreRoute(nextRoute, plan.summary);
@@ -2113,6 +2116,15 @@ export function ExploreView({
                 maxLength={600}
                 onChange={(event) => setSmartRoutePrompt(event.target.value)}
               />
+              <label>
+                <span>Route type</span>
+                <select aria-label="Smart Route type" value={smartRouteSurface}
+                  disabled={!canChooseRoute || routeStatus === 'loading'}
+                  onChange={(event) => setSmartRouteSurface(event.target.value as 'streets' | 'streets-and-paths')}>
+                  <option value="streets">City streets</option>
+                  <option value="streets-and-paths">City streets + bike paths</option>
+                </select>
+              </label>
               <button
                 type="button"
                 disabled={!canChooseRoute || routeStatus === 'loading' || smartRoutePrompt.trim().length < 8}
@@ -2277,7 +2289,7 @@ export function ExploreView({
               </section>
             )}
             <small className="explore-route-warning">
-              Routes favor bicycle-accessible roads and paths and avoid major interstates. This is an indoor virtual ride—not outdoor navigation.
+              Choose streets or include bike paths. Simple A-to-B requests use no extra stops. Google determines the final course; streets mode requests avoidance of highways, tolls, and ferries. Indoor virtual riding only.
             </small>
           </section>
           )}
