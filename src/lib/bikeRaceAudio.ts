@@ -13,6 +13,11 @@ const bikeAudioCommentaryDuckMix = 0.26;
 const pedalLayerVolume = 0.44;
 const freewheelLayerVolume = 0.085;
 const minimumCoastingVelocityMps = 0.4;
+// The pedal recording has ~0.011 RMS versus ~0.096 for the freewheel.
+// Explore's previous race-bed mix reduced both to roughly -50 dB RMS.
+// Balance them near -33 dB for a solo ride, sharing headroom across riders.
+const explorePedalVolume = 5.7;
+const exploreFreewheelVolume = 0.65;
 
 export type BikeRaceAudioMode = 'silent' | 'pedaling' | 'freewheel';
 
@@ -29,6 +34,7 @@ type BikeRaceAudioDebug = {
   seenModes: Record<number, BikeRaceAudioMode[]>;
 };
 
+let lastBikeAudioLoadAttempt = -Infinity;
 let bikeAudioBufferPromise: Promise<AudioBuffer | null> | null = null;
 let bikeAudioContext: AudioContext | null = null;
 let bikeAudioMasterGain: GainNode | null = null;
@@ -108,6 +114,8 @@ function publishBikeAudioDebug(modes: Record<number, BikeRaceAudioMode>) {
 
 function loadBikeAudioBuffer(context: AudioContext) {
   if (!bikeAudioBufferPromise) {
+    if (Date.now() - lastBikeAudioLoadAttempt < 5_000) return Promise.resolve(null);
+    lastBikeAudioLoadAttempt = Date.now();
     bikeAudioBufferPromise = fetch(bmxBikeMechanicsUrl)
       .then((response) => {
         if (!response.ok) {
@@ -116,7 +124,11 @@ function loadBikeAudioBuffer(context: AudioContext) {
         return response.arrayBuffer();
       })
       .then((buffer) => context.decodeAudioData(buffer))
-      .catch(() => null);
+      .catch(() => {
+        // A failed first download must not silence every subsequent ride.
+        bikeAudioBufferPromise = null;
+        return null;
+      });
   }
   return bikeAudioBufferPromise;
 }
@@ -294,13 +306,14 @@ function updateBikeMechanicsAudio(
     RiderState,
     'playerId' | 'driveAllowed' | 'finishedAt' | 'lastRawCadence' | 'velocity'
   >>,
+  exploreMix = false,
 ) {
   const generation = ++bikeAudioUpdateGeneration;
   if (!bikeAudioContext || bikeAudioContext.state !== 'running' || bikeAudioChannels.size === 0) {
     if (raceState === 'racing') {
       void ensureBikeAudioChannels().then((ready) => {
         if (ready && generation === bikeAudioUpdateGeneration) {
-          updateBikeMechanicsAudio(raceState, riders);
+          updateBikeMechanicsAudio(raceState, riders, exploreMix);
         }
       });
     }
@@ -334,12 +347,12 @@ function updateBikeMechanicsAudio(
     );
     setLayerVolume(
       channel.pedalGain,
-      mode === 'pedaling' ? pedalLayerVolume : 0,
+      mode === 'pedaling' ? (exploreMix ? explorePedalVolume / Math.max(1, riders.length) : pedalLayerVolume) : 0,
       now,
     );
     setLayerVolume(
       channel.freewheelGain,
-      mode === 'freewheel' ? freewheelLayerVolume : 0,
+      mode === 'freewheel' ? (exploreMix ? exploreFreewheelVolume / Math.max(1, riders.length) : freewheelLayerVolume) : 0,
       now,
     );
   });
@@ -359,6 +372,7 @@ export function updateExploreBikeAudio(
       lastRawCadence: rider.cadence ?? 0,
       velocity: rider.velocityMps,
     })),
+    true,
   );
 }
 

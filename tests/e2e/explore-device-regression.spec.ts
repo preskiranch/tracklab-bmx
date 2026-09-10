@@ -10,6 +10,7 @@ const deviceMatrices = {
     { label: 'iPhone Plus landscape', orientation: 'landscape', width: 932, height: 430 },
   ],
   ipad: [
+    { label: 'iPad screenshot landscape', orientation: 'landscape', width: 1280, height: 960 },
     { label: 'iPad mini portrait', orientation: 'portrait', width: 744, height: 1133 },
     { label: 'iPad mini landscape', orientation: 'landscape', width: 1133, height: 744 },
     { label: 'iPad Pro portrait', orientation: 'portrait', width: 1024, height: 1366 },
@@ -393,6 +394,8 @@ async function expectPaintedContainedExploreMap(page: Page, viewport: DeviceView
       documentFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
       horizontalContainers,
       lastPaint: paints.at(-1) ?? null,
+      toolbarBox: box(document.querySelector('.explore-camera-toolbar')),
+      actionBoxes: [...document.querySelectorAll('.explore-session-actions button')].map(button => box(button)),
       mapBox: box(mapGrid),
       orientation: matchMedia('(orientation: portrait)').matches ? 'portrait' : 'landscape',
       riderBox: box(riderStrip),
@@ -402,6 +405,10 @@ async function expectPaintedContainedExploreMap(page: Page, viewport: DeviceView
     };
   });
 
+  for (const action of layout.actionBoxes) {
+    expect(action!.bottom, `${label}: action is not clipped by toolbar`).toBeLessThanOrEqual(layout.toolbarBox!.bottom + 1);
+    expect(action!.bottom, `${label}: action is above the map`).toBeLessThanOrEqual(layout.mapBox!.top + 1);
+  }
   expect(layout.documentFits, `${label}: document horizontal containment`).toBe(true);
   expect(layout.orientation, `${label}: active CSS orientation`).toBe(viewport.orientation);
   expect(layout.viewport, `${label}: exact viewport`).toEqual({
@@ -551,3 +558,33 @@ for (const device of ['iphone', 'ipad'] as const) {
     }).toBeLessThan(1);
   });
 }
+
+test('Explore produces audible bike output during a demo ride', async ({ page }) => {
+  await page.addInitScript(() => {
+    const audioWindow = window as typeof window & { bikeOutput?: AnalyserNode[] };
+    audioWindow.bikeOutput = [];
+    const connect = AudioNode.prototype.connect;
+    AudioNode.prototype.connect = function (destination: AudioNode, ...args: number[]) {
+      if (destination instanceof AudioDestinationNode) {
+        const analyser = this.context.createAnalyser();
+        analyser.fftSize = 2048;
+        audioWindow.bikeOutput!.push(analyser);
+        connect.call(analyser, destination);
+        return connect.call(this, analyser);
+      }
+      return connect.call(this, destination, ...args);
+    } as typeof connect;
+  });
+  await page.setViewportSize({ width: 1280, height: 960 });
+  await installPaintedGoogleMaps(page, 'ipad');
+  await mockSignedInDeveloperAndExploreApis(page);
+  await openDemoExploreRide(page, false);
+  await expect.poll(() => page.evaluate(() => {
+    const outputs = (window as typeof window & { bikeOutput?: AnalyserNode[] }).bikeOutput ?? [];
+    return Math.max(0, ...outputs.map(analyser => {
+      const samples = new Float32Array(analyser.fftSize);
+      analyser.getFloatTimeDomainData(samples);
+      return Math.sqrt(samples.reduce((sum, sample) => sum + sample * sample, 0) / samples.length);
+    }));
+  }), { timeout: 20000 }).toBeGreaterThan(0.008);
+});

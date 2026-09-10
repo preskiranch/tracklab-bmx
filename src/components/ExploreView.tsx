@@ -36,6 +36,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { primeAudioCues } from '../lib/audioCues';
 import { primeBikeRaceAudio, stopBikeRaceAudio, updateExploreBikeAudio } from '../lib/bikeRaceAudio';
 import {
   exploreAverageSpeedMph,
@@ -485,6 +486,7 @@ export function ExploreView({
   const [showMapLabels, setShowMapLabels] = useState(true);
   const [followTravelHeading, setFollowTravelHeading] = useState(false);
   const [mapRenderer, setMapRenderer] = useState<ExploreMapRenderer>(savedExploreMapRenderer);
+  const cameraToolbarRef = useRef<HTMLDivElement>(null);
   const [viewportOrientation, setViewportOrientation] = useState(currentExploreViewportOrientation);
   const [routeStatus, setRouteStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [routeMessage, setRouteMessage] = useState(
@@ -1072,6 +1074,17 @@ export function ExploreView({
   }, [closeLandmark, closeStreetView, showMapLabels]);
 
   useEffect(() => {
+    const toolbar = cameraToolbarRef.current;
+    const stage = toolbar?.parentElement;
+    if (!toolbar || !stage || !fullscreen) return;
+    const measure = () => stage.style.setProperty('--explore-toolbar-measured', `${toolbar.getBoundingClientRect().height}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(toolbar);
+    return () => { observer.disconnect(); stage.style.removeProperty('--explore-toolbar-measured'); };
+  }, [fullscreen, route]);
+
+  useEffect(() => {
     updateExploreBikeAudio(ride.status, ride.riders);
   }, [ride.riders, ride.status]);
 
@@ -1250,7 +1263,7 @@ export function ExploreView({
       clearScheduledStart();
       // Warm audio during the shared countdown. Fetching or decoding audio
       // must never delay the server-clock start on a slower tablet.
-      void primeBikeRaceAudio();
+      void primeAudioCues(); void primeBikeRaceAudio();
       scheduledStartTimerRef.current = window.setTimeout(
         attemptStart,
         Math.max(0, localStartAt - Date.now()),
@@ -1607,7 +1620,7 @@ export function ExploreView({
 
   const startOrResume = async () => {
     if (serverControlledExplore) return;
-    void primeBikeRaceAudio();
+    void primeAudioCues(); void primeBikeRaceAudio();
     if (playMode === 'multiplayer') {
       if (!roomHost || (clubTabletDemoRoom && !demoParticipantEligible)) {
         return;
@@ -2306,7 +2319,7 @@ export function ExploreView({
                 </dl>
               </header>
 
-              <div className="explore-camera-toolbar" aria-label="Explore camera controls">
+              <div ref={cameraToolbarRef} className="explore-camera-toolbar" aria-label="Explore camera controls">
                 <div
                   className="explore-destination-overlay"
                   aria-label={`Destination: ${route.destinationLabel}`}
@@ -2491,7 +2504,7 @@ export function ExploreView({
                       <button
                         className="explore-resume-ride"
                         type="button"
-                        onPointerDown={() => { void primeBikeRaceAudio(); }}
+                        onPointerDown={() => { void primeAudioCues(); void primeBikeRaceAudio(); }}
                         onClick={startOrResume}
                         disabled={
                           players.length === 0
@@ -2816,7 +2829,7 @@ export function ExploreView({
                   <button
                     className="primary"
                     type="button"
-                    onPointerDown={() => { void primeBikeRaceAudio(); }}
+                    onPointerDown={() => { void primeAudioCues(); void primeBikeRaceAudio(); }}
                     onClick={startOrResume}
                     disabled={
                       players.length === 0

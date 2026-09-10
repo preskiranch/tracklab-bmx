@@ -14,7 +14,7 @@
 .platform-shell.explore-fullscreen .explore-map-grid.split,
 .platform-shell.explore-fullscreen .explore-map-grid.three-way,
 .platform-shell.explore-fullscreen .explore-map-grid.four-way {
-  inset: var(--explore-toolbar-reserve) 0 var(--explore-rider-reserve);
+  inset: var(--explore-toolbar-measured, var(--explore-toolbar-reserve)) 0 var(--explore-rider-reserve);
   width: auto;
   height: auto;
 }
@@ -49,7 +49,8 @@
 
 .platform-shell.explore-fullscreen .explore-camera-toolbar {
   align-content: center;
-  block-size: var(--explore-toolbar-reserve);
+  block-size: auto;
+  min-block-size: var(--explore-toolbar-reserve);
   box-sizing: border-box;
   flex-wrap: wrap;
   overflow-x: hidden;
