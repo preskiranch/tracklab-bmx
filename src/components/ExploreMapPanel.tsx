@@ -391,6 +391,7 @@ export function ExploreMapPanel({
           keyboardShortcuts: true,
           mapTypeControl: false,
           mapTypeId: initialShowMapLabelsRef.current ? 'hybrid' : 'satellite',
+          renderingType: google.maps.RenderingType?.VECTOR,
           rotateControl: false,
           scaleControl: true,
           streetViewControl: false,

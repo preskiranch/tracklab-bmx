@@ -63,11 +63,6 @@ describe('Explore the World iOS map viewport regressions', () => {
     expect(exploreViewSource).toContain("${viewportOrientation}");
   });
 
-  it('keeps the standard Google satellite renderer instead of forcing a WebGL vector canvas', () => {
-    expect(exploreMapSource).not.toMatch(/RenderingType\??\.VECTOR/u);
-    expect(exploreMapSource).not.toContain('renderingType:');
-  });
-
   it('lets native UIKit own Explore fullscreen while keeping browser fullscreen on the web', () => {
     const exploreFullscreenHandler = appSource.match(
       /const handleExploreFullscreenChange = useCallback\(\(enabled: boolean\) => \{[\s\S]*?\n  \}, \[\]\);/u,

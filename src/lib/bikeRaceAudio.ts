@@ -35,6 +35,8 @@ let bikeAudioMasterGain: GainNode | null = null;
 let bikeAudioChannels = new Map<number, BikeAudioChannel>();
 let bikeAudioSeenModes = new Map<number, Set<BikeRaceAudioMode>>();
 let bikeAudioCommentaryDucked = false;
+let bikeAudioUpdateGeneration = 0;
+let bikeAudioPreparation: Promise<boolean> | null = null;
 
 function effectiveBikeAudioMasterVolume() {
   return bikeAudioMasterVolume
@@ -202,7 +204,16 @@ function createBikeAudioChannel(
   };
 }
 
-async function ensureBikeAudioChannels() {
+function ensureBikeAudioChannels(): Promise<boolean> {
+  if (!bikeAudioPreparation) {
+    bikeAudioPreparation = prepareBikeAudioChannels().finally(() => {
+      bikeAudioPreparation = null;
+    });
+  }
+  return bikeAudioPreparation;
+}
+
+async function prepareBikeAudioChannels() {
   const context = getTrackLabAudioContext();
   if (!context || context.state === 'closed') {
     return false;
@@ -284,10 +295,11 @@ function updateBikeMechanicsAudio(
     'playerId' | 'driveAllowed' | 'finishedAt' | 'lastRawCadence' | 'velocity'
   >>,
 ) {
-  if (!bikeAudioContext || bikeAudioChannels.size === 0) {
+  const generation = ++bikeAudioUpdateGeneration;
+  if (!bikeAudioContext || bikeAudioContext.state !== 'running' || bikeAudioChannels.size === 0) {
     if (raceState === 'racing') {
       void ensureBikeAudioChannels().then((ready) => {
-        if (ready) {
+        if (ready && generation === bikeAudioUpdateGeneration) {
           updateBikeMechanicsAudio(raceState, riders);
         }
       });
@@ -384,6 +396,7 @@ export function exploreBikeAudioMode(
 }
 
 export function stopBikeRaceAudio() {
+  bikeAudioUpdateGeneration += 1;
   if (!bikeAudioContext) {
     publishBikeAudioDebug({});
     return;

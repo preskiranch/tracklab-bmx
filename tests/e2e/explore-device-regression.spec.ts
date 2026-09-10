@@ -35,7 +35,7 @@ type DeviceViewport = {
   height: number;
 };
 
-async function installPaintedGoogleMapsRaster(
+async function installPaintedGoogleMaps(
   page: Page,
   device: keyof typeof iosUserAgents,
   legacyApplePreference = false,
@@ -67,11 +67,13 @@ async function installPaintedGoogleMapsRaster(
     class MockMap {
       private center: Point;
       private heading = 0;
+      private renderingType?: string;
       private zoom: number;
       private readonly element: HTMLElement;
 
-      constructor(element: HTMLElement, options: { center?: Point; zoom?: number }) {
+      constructor(element: HTMLElement, options: { center?: Point; zoom?: number; renderingType?: string }) {
         this.element = element;
+        this.renderingType = options.renderingType;
         this.center = options.center ?? { lat: 38.5, lng: -120.2 };
         this.zoom = options.zoom ?? 18;
         regressionWindow.__tracklabExploreMapInstances =
@@ -131,12 +133,15 @@ async function installPaintedGoogleMapsRaster(
       getCenter() { return { toJSON: () => this.center }; }
       getHeading() { return this.heading; }
       getZoom() { return this.zoom; }
-      moveCamera(options: { center?: Point; zoom?: number }) {
+      moveCamera(options: { center?: Point; zoom?: number; renderingType?: string }) {
         if (options.center) this.center = options.center;
         if (options.zoom != null) this.zoom = options.zoom;
       }
       setCenter(center: Point) { this.center = center; }
-      setHeading(heading: number) { this.heading = heading; }
+      setHeading(heading: number) {
+        if (this.renderingType === 'VECTOR') this.heading = heading;
+        this.element.dataset.heading = String(this.heading);
+      }
       setOptions() {}
       setTilt() {}
       setZoom(zoom: number) { this.zoom = zoom; }
@@ -196,6 +201,7 @@ async function installPaintedGoogleMapsRaster(
         Polyline: MockPolyline,
         Size: MockSize,
         SymbolPath: { CIRCLE: 'circle' },
+        RenderingType: { VECTOR: 'VECTOR', RASTER: 'RASTER' },
         places,
         importLibrary: async (name: string) => (name === 'places' ? places : {}),
         event: {
@@ -515,7 +521,7 @@ async function exerciseDeviceMatrix(page: Page, viewports: readonly DeviceViewpo
 test('Explore keeps a compact painted layout through every supported iPhone orientation', async ({ page }) => {
   test.setTimeout(120_000);
   await page.setViewportSize(deviceMatrices.iphone[0]);
-  await installPaintedGoogleMapsRaster(page, 'iphone', true);
+  await installPaintedGoogleMaps(page, 'iphone', true);
   await mockSignedInDeveloperAndExploreApis(page);
   await openDemoExploreRide(page, true);
   await exerciseDeviceMatrix(page, deviceMatrices.iphone);
@@ -524,8 +530,24 @@ test('Explore keeps a compact painted layout through every supported iPhone orie
 test('Explore keeps a compact painted layout through every supported iPad orientation', async ({ page }) => {
   test.setTimeout(120_000);
   await page.setViewportSize(deviceMatrices.ipad[0]);
-  await installPaintedGoogleMapsRaster(page, 'ipad');
+  await installPaintedGoogleMaps(page, 'ipad');
   await mockSignedInDeveloperAndExploreApis(page);
   await openDemoExploreRide(page, false);
   await exerciseDeviceMatrix(page, deviceMatrices.ipad);
 });
+
+for (const device of ['iphone', 'ipad'] as const) {
+  test(`Explore ${device} switches between travel heading and north`, async ({ page }) => {
+    await page.setViewportSize(deviceMatrices[device][1]);
+    await installPaintedGoogleMaps(page, device);
+    await mockSignedInDeveloperAndExploreApis(page);
+    await openDemoExploreRide(page, false);
+    await page.getByRole('button', { name: 'Direction of travel up', exact: true }).click();
+    await expect.poll(async () => Number(await page.locator('.explore-map-canvas').first().getAttribute('data-heading'))).toBeGreaterThan(5);
+    await page.getByRole('button', { name: 'North up', exact: true }).click();
+    await expect.poll(async () => {
+      const heading = Number(await page.locator('.explore-map-canvas').first().getAttribute('data-heading'));
+      return Math.min(heading, 360 - heading);
+    }).toBeLessThan(1);
+  });
+}
