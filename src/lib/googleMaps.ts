@@ -199,6 +199,7 @@ type GoogleStreetViewPanoramaData = {
   location?: {
     description?: string;
     pano?: string;
+    latLng?: { toJSON: () => LatLngLiteral };
     shortDescription?: string;
   };
 };
@@ -333,6 +334,7 @@ export type GoogleLandmarkDetails = {
 };
 
 export type GoogleStreetViewSession = {
+  distanceFromTargetMeters: number | null;
   copyright: string;
   description: string;
   destroy: () => void;
@@ -995,8 +997,8 @@ export async function createGoogleStreetViewSession(
   try {
     response = await new StreetViewService().getPanorama({
       location: point,
-      preference: 'best',
-      radius: 120,
+      preference: 'nearest',
+      radius: 50,
     });
   } catch {
     throw new Error('No Street View imagery was found near this landmark.');
@@ -1007,7 +1009,14 @@ export async function createGoogleStreetViewSession(
     throw new Error('No Street View imagery was found near this landmark.');
   }
 
+  const cameraPoint = response.data.location?.latLng?.toJSON();
+  const distanceFromTargetMeters = cameraPoint ? distanceBetweenTrackPoints(cameraPoint, point) : null;
+  if (distanceFromTargetMeters != null && distanceFromTargetMeters > 51) {
+    throw new Error('Google has no Street View imagery close enough to this location.');
+  }
   const panorama = new StreetViewPanorama(element, {
+    ...(cameraPoint && distanceFromTargetMeters != null && distanceFromTargetMeters > 2
+      ? { pov: { heading: bearingBetweenTrackPoints(cameraPoint, point), pitch: 0 } } : {}),
     addressControl: true,
     clickToGo: true,
     disableDefaultUI: false,
@@ -1027,6 +1036,7 @@ export async function createGoogleStreetViewSession(
   });
 
   return {
+    distanceFromTargetMeters,
     copyright: response.data.copyright?.trim() ?? '',
     description: response.data.location?.description?.trim()
       || response.data.location?.shortDescription?.trim()

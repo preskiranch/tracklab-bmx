@@ -49,6 +49,7 @@ export function ExploreGoogle3DMapPanel({
   showMapLabels,
   followTravelHeading,
   onLandmarkSelect,
+  onRiderSelect,
   onCameraInteraction,
 }: ExploreMapPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -63,6 +64,8 @@ export function ExploreGoogle3DMapPanel({
   const travelHeadingRef = useRef(0);
   const showMapLabelsRef = useRef(showMapLabels);
   const onLandmarkSelectRef = useRef(onLandmarkSelect);
+  const onRiderSelectRef = useRef(onRiderSelect);
+  onRiderSelectRef.current = onRiderSelect;
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState('');
   const routePoints = useMemo(
@@ -224,12 +227,14 @@ export function ExploreGoogle3DMapPanel({
         riderPresentationsRef.current.delete(riderId);
       }
     });
-    const Marker = library.MarkerElement ?? library.Marker3DElement;
+    const interactiveMarker = library.MarkerInteractiveElement ?? library.Marker3DInteractiveElement;
+    const htmlMarker = library.MarkerInteractiveElement ?? library.MarkerElement;
+    const Marker = htmlMarker ?? library.Marker3DInteractiveElement ?? library.Marker3DElement;
     const positions = exploreGroupPositions(group, route, routePoints);
     positions.forEach(({ rider, position }) => {
       let marker = riderMarkersRef.current.get(rider.id);
       if (!marker && Marker) {
-        marker = new Marker(library.MarkerElement ? {
+        marker = new Marker(htmlMarker ? {
           anchorLeft: exploreRiderPin3DAnchorLeft,
           anchorTop: exploreRiderPin3DAnchorTop,
           altitudeMode: 'RELATIVE_TO_GROUND',
@@ -245,8 +250,11 @@ export function ExploreGoogle3DMapPanel({
           zIndex: 500 + rider.playerId,
         });
         marker.style.zIndex = String(500 + rider.playerId);
-        const presentation = createExploreRiderPinElement(rider);
-        if (library.MarkerElement) {
+        const activate = () => onRiderSelectRef.current?.(rider.id);
+        const usesInteractiveMarker = Marker === interactiveMarker;
+        if (usesInteractiveMarker) marker.addEventListener('gmp-click', activate);
+        const presentation = createExploreRiderPinElement(rider, usesInteractiveMarker ? undefined : activate);
+        if (htmlMarker) {
           marker.append(presentation.element);
           riderPresentationsRef.current.set(rider.id, presentation);
         } else {

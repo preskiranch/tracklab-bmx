@@ -1,3 +1,4 @@
+import { exploreRoutePoint, exploreRoutePoints } from '../lib/explore';
 import {
   ArrowLeftRight,
   Bike,
@@ -919,6 +920,16 @@ export function ExploreView({
         }
       });
   }, [closeLandmark]);
+
+  const openRiderStreetView = useCallback((riderId: string) => {
+    const rider = visibleRiders.find(candidate => candidate.id === riderId);
+    if (!route || !rider) return;
+    openStreetView({
+      name: `${rider.name} · current route position`,
+      point: exploreRoutePoint(exploreRoutePoints(route), rider.distanceMeters, route.distanceMeters),
+      placeId: `rider-${rider.id}`, address: '', category: '', googleMapsUrl: '', phoneNumber: '', websiteUrl: '',
+    });
+  }, [openStreetView, route, visibleRiders]);
 
   const toggleInteractiveLandmarks = useCallback(() => {
     setShowMapLabels((visible) => !visible);
@@ -2595,6 +2606,7 @@ export function ExploreView({
                         followTravelHeading={followTravelHeading}
                         onCameraInteraction={useFreeCamera}
                         onLandmarkSelect={selectLandmark}
+                        onRiderSelect={openRiderStreetView}
                       />
                     ) : (
                       <ExploreMapPanel
@@ -2608,6 +2620,7 @@ export function ExploreView({
                         followTravelHeading={followTravelHeading}
                         onCameraInteraction={useFreeCamera}
                         onLandmarkSelect={selectLandmark}
+                        onRiderSelect={openRiderStreetView}
                       />
                     )}
                   </Suspense>

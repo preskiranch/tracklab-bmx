@@ -39,6 +39,7 @@ export type ExploreMapPanelProps = {
   showMapLabels: boolean;
   followTravelHeading: boolean;
   onLandmarkSelect: (placeId: string) => void;
+  onRiderSelect?: (riderId: string) => void;
   onCameraInteraction: () => void;
 };
 
@@ -192,10 +193,21 @@ function exploreRiderPinDataUrl(accent: string, playerId: number, colorName?: Ex
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(exploreRiderPinSvg(accent, playerId, colorName))}`;
 }
 
-export function createExploreRiderPinElement(rider: ExploreRider): ExploreRiderPinPresentation {
+export function createExploreRiderPinElement(rider: ExploreRider, onActivate?: () => void): ExploreRiderPinPresentation {
   const element = document.createElement('div');
   element.className = 'explore-map-rider-marker';
   element.style.cssText = 'display:flex;flex-direction:column;align-items:center;width:52px;pointer-events:none;filter:drop-shadow(0 3px 4px rgba(0,0,0,.48))';
+  if (onActivate) {
+    element.style.pointerEvents = 'auto';
+    element.style.cursor = 'pointer';
+    element.setAttribute('role', 'button');
+    element.tabIndex = 0;
+    element.addEventListener('pointerdown', event => event.stopPropagation());
+    element.addEventListener('click', event => { event.stopPropagation(); onActivate(); });
+    element.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); onActivate(); }
+    });
+  }
   let signature = '';
 
   const update = (nextRider: ExploreRider) => {
@@ -210,7 +222,7 @@ export function createExploreRiderPinElement(rider: ExploreRider): ExploreRiderP
     }
     signature = nextSignature;
     element.title = nextRider.name;
-    element.setAttribute('aria-label', `${nextRider.name} map position`);
+    element.setAttribute('aria-label', `${nextRider.name} map position${onActivate ? ' — open Street View' : ''}`);
     element.style.setProperty('--player-color', safeRiderAccent(nextRider.accent, nextRider.colorName));
 
     const avatar = nextRider.photoUrl
@@ -256,6 +268,7 @@ function createExploreRiderMarker(
   position: TrackPoint,
   rider: ExploreRider,
   zIndex: number,
+  onActivate?: () => void,
 ): ExploreRiderMarker {
   if (!google.maps.OverlayView) {
     let appearanceSignature = `${rider.name}|${rider.accent}|${rider.playerId}`;
@@ -270,6 +283,7 @@ function createExploreRiderMarker(
       title: rider.name,
       zIndex,
     });
+    if (onActivate) marker.addListener?.('click', onActivate);
     return {
       setMap: (nextMap) => marker.setMap(nextMap),
       setPosition: (nextPosition) => marker.setPosition(nextPosition),
@@ -290,7 +304,7 @@ function createExploreRiderMarker(
   }
 
   const overlay = new google.maps.OverlayView();
-  const presentation = createExploreRiderPinElement(rider);
+  const presentation = createExploreRiderPinElement(rider, onActivate);
   const { element } = presentation;
   element.style.position = 'absolute';
   element.style.transform = 'translate3d(-50%, -100%, 0)';
@@ -336,11 +350,14 @@ export function ExploreMapPanel({
   showMapLabels,
   followTravelHeading,
   onLandmarkSelect,
+  onRiderSelect,
   onCameraInteraction,
 }: ExploreMapPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const googleRef = useRef<GoogleMapsRuntime | null>(null);
   const mapRef = useRef<GoogleMap | null>(null);
+  const onRiderSelectRef = useRef(onRiderSelect);
+  onRiderSelectRef.current = onRiderSelect;
   const travelHeadingRef = useRef(0);
   const routeLineRef = useRef<GooglePolyline | null>(null);
   const markerRefs = useRef<ExploreMarkerRefs>(new Map());
@@ -520,6 +537,7 @@ export function ExploreMapPanel({
           position,
           rider,
           500 + rider.playerId,
+          () => onRiderSelectRef.current?.(rider.id),
         );
         markerRefs.current.set(rider.id, marker);
       } else {

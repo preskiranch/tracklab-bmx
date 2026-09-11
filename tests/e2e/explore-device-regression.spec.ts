@@ -130,7 +130,8 @@ async function installPaintedGoogleMaps(
         this.paint();
       }
 
-      addListener(_eventName: string, _handler: MockMapListener) {
+      addListener(eventName: string, handler: MockMapListener) {
+        if (eventName === 'click') (window as any).__selectMockPlace = handler;
         return { remove() {} };
       }
 
@@ -207,7 +208,25 @@ async function installPaintedGoogleMaps(
       }
     }
 
+    class MockPlace {
+      displayName = 'Selected beach business';
+      formattedAddress = 'Business address';
+      location = {toJSON: () => ({lat:38.5002,lng:-120.201})};
+      async fetchFields() {}
+    }
+    class MockStreetViewService {
+      async getPanorama(request: any) {
+        (window as any).__streetRequest = request;
+        if ((window as any).__streetUnavailable) throw new Error('ZERO_RESULTS');
+        return {data:{location:{pano:'selected-panorama',latLng:{toJSON:()=>({lat:request.location.lat-0.0001,lng:request.location.lng})}}}};
+      }
+    }
+    class MockStreetViewPanorama {
+      constructor(_element: HTMLElement, options: any) { (window as any).__streetOptions=options; }
+      setVisible() {}
+    }
     const places = {
+      Place: MockPlace,
       AutocompleteService: MockAutocompleteService,
       AutocompleteSessionToken: MockAutocompleteSessionToken,
     };
@@ -224,7 +243,7 @@ async function installPaintedGoogleMaps(
         SymbolPath: { CIRCLE: 'circle' },
         RenderingType: { VECTOR: 'VECTOR', RASTER: 'RASTER' },
         places,
-        importLibrary: async (name: string) => (name === 'places' ? places : {}),
+        importLibrary: async (name: string) => (name === 'places' ? places : name === 'streetView' ? {StreetViewService:MockStreetViewService, StreetViewPanorama:MockStreetViewPanorama} : {}),
         event: {
           trigger: (target: { handleResize?: () => void }, eventName: string) => {
             if (eventName === 'resize') target.handleResize?.();
@@ -762,4 +781,27 @@ test('Explore anchors the pin tip on the route coordinate across rotation', asyn
       return Math.max(Math.abs(pin.bottom-(box.top+box.height/2)), Math.abs(pin.left+pin.width/2-(box.left+box.width/2)), avatar.bottom-pin.bottom);
     })).toBeLessThan(2);
   }
+});
+
+
+test('Street View targets the selected business or tapped rider and reports missing imagery', async ({page}) => {
+  await page.setViewportSize({width:1280,height:960});
+  await installPaintedGoogleMaps(page, 'ipad');
+  await mockSignedInDeveloperAndExploreApis(page);
+  await openDemoExploreRide(page, false);
+  await page.getByRole('button', {name:'Pause ride'}).click();
+  await page.evaluate(()=>(window as any).__selectMockPlace({placeId:'beach-business',stop(){}}));
+  await page.getByRole('button', {name:'View Street View'}).click();
+  await expect(page.getByRole('dialog', {name:'Street View: Selected beach business'})).toBeVisible();
+  await expect.poll(()=>page.evaluate(()=>(window as any).__streetRequest)).toEqual({location:{lat:38.5002,lng:-120.201},preference:'nearest',radius:50});
+  await expect.poll(()=>page.evaluate(()=>(window as any).__streetOptions.pov.heading)).toBeCloseTo(0,1);
+  await expect(page.getByText(/Camera is 11 m from/)).toBeVisible();
+  await page.getByRole('button', {name:'Back to map',exact:true}).click();
+  await page.getByRole('button', {name:'Demo Rider 4 map position — open Street View',exact:true}).click();
+  await expect(page.getByRole('dialog', {name:'Street View: Demo Rider 4 · current route position'})).toBeVisible();
+  await expect.poll(()=>page.evaluate(()=>(window as any).__streetRequest.location.lng)).not.toBe(-120.201);
+  await page.getByRole('button', {name:'Back to map',exact:true}).click();
+  await page.evaluate(()=>(window as any).__streetUnavailable=true);
+  await page.getByRole('button', {name:'Demo Rider 4 map position — open Street View',exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText('Street View is not available here');
 });

@@ -81,7 +81,7 @@ export function ExploreStreetViewOverlay({
       {status === 'loading' && (
         <div className="explore-street-view-status" aria-live="polite">
           <span className="explore-landmark-spinner" aria-hidden="true" />
-          <strong>Finding the best nearby Street View…</strong>
+          <strong>Finding the nearest Street View…</strong>
         </div>
       )}
       {status === 'error' && (
@@ -101,6 +101,11 @@ export function ExploreStreetViewOverlay({
       {status === 'ready' && (
         <footer>
           <strong>{session?.description || landmark.name}</strong>
+          <span>{session?.distanceFromTargetMeters == null
+            ? 'Nearby imagery; exact camera location is unavailable.'
+            : session.distanceFromTargetMeters > 2
+              ? `Camera is ${Math.round(session.distanceFromTargetMeters)} m from the selected location, facing toward it.`
+              : 'Imagery at the selected location.'}</span>
           <span>
             {[session?.imageDate && `Imagery ${session.imageDate}`, session?.copyright]
               .filter(Boolean)
