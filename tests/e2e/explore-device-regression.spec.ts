@@ -893,12 +893,13 @@ test('route preview stays in setup, orbits for 60 seconds and preserves zoom wit
   await page.getByRole('button', {name:'Preview route · 1 min'}).click();
   await page.locator('.explore-route-preview-controls').screenshot({path:'/tmp/preview124-controls.png'});
   const canvas = page.locator('.explore-map-canvas').first();
+  await expect(canvas).toHaveAttribute('data-zoom', '14');
   await page.clock.runFor(10_000);
   await expect(canvas).toHaveAttribute('data-heading', /6[0-9]/);
   await page.getByRole('button', {name:'Pause preview', exact:true}).click();
   const center = await canvas.getAttribute('data-center');
   await page.getByRole('button', {name:'Show more of the route', exact:true}).click();
-  await expect(canvas).toHaveAttribute('data-zoom','17');
+  await expect(canvas).toHaveAttribute('data-zoom','13');
   await page.clock.runFor(1000);
   expect(await canvas.getAttribute('data-center')).toBe(center);
   await expect(start).toBeVisible();
@@ -912,9 +913,11 @@ test('route preview stays in setup, orbits for 60 seconds and preserves zoom wit
   await expect(canvas).toHaveAttribute('data-route-overview','true');
   await expect(start).toBeVisible();
   await page.getByRole('button', {name:'Replay', exact:true}).click();
+  await expect(canvas).toHaveAttribute('data-zoom', '14');
   await page.clock.runFor(1000);
   await page.getByRole('button', {name:'Exit preview', exact:true}).click();
   await expect(page.getByRole('button', {name:'Preview route · 1 min'})).toBeVisible();
+  await expect(canvas).toHaveAttribute('data-zoom', '18');
 });
 
 

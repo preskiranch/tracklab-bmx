@@ -475,6 +475,9 @@ export function ExploreView({
   const exploreDistanceUnit: ExploreDistanceUnit = distanceUnit === 'm' ? 'km' : 'mi';
   const [followZoom, setFollowZoom] = useState(18);
   const [routePreview, setRoutePreview] = useState<{ progress: number; heading: number; playing: boolean } | null>(null);
+  const [previewZoom, setPreviewZoom] = useState(14);
+  const cameraZoom = routePreview ? previewZoom : followZoom;
+  const setCameraZoom = routePreview ? setPreviewZoom : setFollowZoom;
   const orbitSettings = useExplorePreviewSettings(exploreRequestAccess, developerMode);
   const orbitSpeedRef = useRef(orbitSettings.speed);
   orbitSpeedRef.current = orbitSettings.speed;
@@ -506,6 +509,7 @@ export function ExploreView({
   }, [routePreview?.playing]);
   const beginRoutePreview = () => {
     previewElapsedRef.current = 0;
+    setPreviewZoom(14);
     setCameraFollowEnabled(false);
     previewHeadingRef.current = 0;
     void orbitSettings.refresh();
@@ -2529,10 +2533,10 @@ export function ExploreView({
                   type="button"
                   aria-label="Show more of the route"
                   title="Show more of the route"
-                  disabled={followZoom <= 12}
+                  disabled={cameraZoom <= 12}
                   onClick={() => {
                     if (!routePreview) setCameraFollowEnabled(true);
-                    setFollowZoom((zoom) => Math.max(12, zoom - 1));
+                    setCameraZoom((zoom) => Math.max(12, zoom - 1));
                   }}
                 >
                   <ZoomOut size={18} /><span className="explore-zoom-label">Wider</span>
@@ -2544,24 +2548,24 @@ export function ExploreView({
                     min="12"
                     max="20"
                     step="1"
-                    value={followZoom}
+                    value={cameraZoom}
                     aria-label="Follow camera zoom"
-                    aria-valuetext={`${followZoom}, ${followZoom <= 14 ? 'more route visible' : followZoom >= 19 ? 'closer rider view' : 'balanced rider view'}`}
+                    aria-valuetext={`${cameraZoom}, ${cameraZoom <= 14 ? 'more route visible' : cameraZoom >= 19 ? 'closer rider view' : 'balanced rider view'}`}
                     onChange={(event) => {
                       if (!routePreview) setCameraFollowEnabled(true);
-                      setFollowZoom(Number(event.target.value));
+                      setCameraZoom(Number(event.target.value));
                     }}
                   />
-                  <small>{followZoom <= 14 ? 'More route' : followZoom >= 19 ? 'Closer' : 'Balanced'}</small>
+                  <small>{cameraZoom <= 14 ? 'More route' : cameraZoom >= 19 ? 'Closer' : 'Balanced'}</small>
                 </label>
                 <button
                   type="button"
                   aria-label="Move closer to the riders"
                   title="Move closer to the riders"
-                  disabled={followZoom >= 20}
+                  disabled={cameraZoom >= 20}
                   onClick={() => {
                     if (!routePreview) setCameraFollowEnabled(true);
-                    setFollowZoom((zoom) => Math.min(20, zoom + 1));
+                    setCameraZoom((zoom) => Math.min(20, zoom + 1));
                   }}
                 >
                   <ZoomIn size={18} /><span className="explore-zoom-label">Closer</span>
@@ -2755,10 +2759,10 @@ export function ExploreView({
                         group={group}
                         route={route}
                         distanceUnit={exploreDistanceUnit}
-                        followZoom={followZoom}
+                        followZoom={cameraZoom}
                         cameraRecenterRequest={cameraRecenterRequest}
                         cameraFollowEnabled={cameraFollowEnabled && !routePreview}
-                        previewProgress={routePreview?.progress ?? null}
+                        previewProgress={routePreview ? routePreview.progress ** 2 * (3 - 2 * routePreview.progress) : null}
                         previewHeading={routePreview?.heading ?? 0}
                         showMapLabels={showMapLabels}
                         followTravelHeading={followTravelHeading}
@@ -2771,10 +2775,10 @@ export function ExploreView({
                         group={group}
                         route={route}
                         distanceUnit={exploreDistanceUnit}
-                        followZoom={followZoom}
+                        followZoom={cameraZoom}
                         cameraRecenterRequest={cameraRecenterRequest}
                         cameraFollowEnabled={cameraFollowEnabled && !routePreview}
-                        previewProgress={routePreview?.progress ?? null}
+                        previewProgress={routePreview ? routePreview.progress ** 2 * (3 - 2 * routePreview.progress) : null}
                         previewHeading={routePreview?.heading ?? 0}
                         showMapLabels={showMapLabels}
                         followTravelHeading={followTravelHeading}
