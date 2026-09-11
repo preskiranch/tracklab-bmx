@@ -996,3 +996,27 @@ test('preview settings endpoint allows reads but rejects unsigned changes', asyn
   const update = await request.patch('/api/explore/preview-settings', {data:{orbitSpeed:2}});
   expect(update.status()).toBe(401);
 });
+
+
+test('landmark tip auto hides after ten riding seconds and dismisses immediately on tap', async ({page}) => {
+  await page.setViewportSize({width:1280,height:960});
+  await installPaintedGoogleMaps(page, 'ipad');
+  await mockSignedInDeveloperAndExploreApis(page);
+  await openDemoExploreRide(page, false);
+  const tip = page.getByRole('button', {name:'Dismiss landmark tip', exact:true});
+  await expect(tip).toBeVisible();
+  await page.clock.install();
+  await page.clock.runFor(11_000);
+  await expect(tip).toHaveCount(0);
+  await page.getByRole('button', {name:'Pause ride', exact:true}).click();
+  await page.getByRole('button', {name:'Exit full screen'}).click();
+  await page.getByRole('button', {name:'Reset', exact:true}).last().click();
+  await expect(tip).toBeVisible();
+  await tip.click();
+  await expect(tip).toHaveCount(0);
+  await page.getByRole('button', {name:'Start Explore the World ride', exact:true}).click();
+  await page.setViewportSize({width:390,height:844});
+  await expect(tip).toHaveCount(0);
+  await page.setViewportSize({width:844,height:390});
+  await expect(tip).toHaveCount(0);
+});

@@ -398,3 +398,6 @@
 .explore-orbit-settings input { width: min(100%, 320px); display: block; min-height: 44px; }
 .explore-orbit-settings p { margin: 8px 0; font-size: 14px; }
 .explore-orbit-settings button { margin: 4px; }
+
+.platform-shell .explore-landmark-hint { cursor: pointer; min-height: 44px; }
+.platform-shell .explore-landmark-hint:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }

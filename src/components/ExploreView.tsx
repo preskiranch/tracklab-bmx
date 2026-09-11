@@ -519,6 +519,7 @@ export function ExploreView({
   // This remains a per-browser rider preference and is intentionally not
   // included in multiplayer state, so every rider controls their own map.
   const [showMapLabels, setShowMapLabels] = useState(true);
+  const [landmarkHintDismissed, setLandmarkHintDismissed] = useState(false);
   const [followTravelHeading, setFollowTravelHeading] = useState(false);
   const [mapRenderer, setMapRenderer] = useState<ExploreMapRenderer>(savedExploreMapRenderer);
   const cameraToolbarRef = useRef<HTMLDivElement>(null);
@@ -609,6 +610,7 @@ export function ExploreView({
   useEffect(() => {
     if (clubExploreEvent && route) onClubEventProgramReady?.(clubExploreEvent.eventId);
   }, [clubExploreEvent, onClubEventProgramReady, route]);
+  useEffect(() => { setLandmarkHintDismissed(false); }, [route?.id]);
   const effectiveMapRenderer = developerMode ? mapRenderer : 'google-satellite';
   const localClientId = currentUserId ?? 'local';
   const ride = useExploreRide({
@@ -2723,12 +2725,15 @@ export function ExploreView({
               </div>
 
               {showMapLabels
+                && !landmarkHintDismissed
+                && ride.elapsedMs < 10_000
                 && !selectedLandmark
                 && !streetViewLandmark && (
-                <div className="explore-landmark-hint" role="status">
+                <button type="button" className="explore-landmark-hint" aria-label="Dismiss landmark tip" onClick={() => setLandmarkHintDismissed(true)}>
                   <Landmark size={16} />
                   <span><strong>Landmarks are interactive.</strong> Every landmark card includes Street View, its official website, and details—the ride keeps moving.</span>
-                </div>
+                  <X size={18} aria-hidden="true" />
+                </button>
               )}
 
               <div className={exploreGridClass(groups.length)}>
