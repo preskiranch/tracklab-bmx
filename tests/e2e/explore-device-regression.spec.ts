@@ -465,7 +465,7 @@ async function expectPaintedContainedExploreMap(page: Page, viewport: DeviceView
   }
 }
 
-async function openDemoExploreRide(page: Page, legacyApplePreference: boolean) {
+async function openDemoExploreRide(page: Page, legacyApplePreference: boolean, riderName?: string) {
   await page.goto('/');
   await openSignedInApp(page);
   await page.getByRole('button', { name: /Demo/i }).first().click();
@@ -490,6 +490,10 @@ async function openDemoExploreRide(page: Page, legacyApplePreference: boolean) {
   await expect(page.locator('.explore-route-summary')).toBeVisible();
   await expect(page.locator('.tracklab-mock-route-line').first()).toBeVisible();
 
+  if (riderName) {
+    await page.getByRole('textbox', { name: /^Name for player/ }).first().fill(riderName);
+    await page.getByRole('textbox', { name: /^Name for player/ }).first().press('Tab');
+  }
   await page.getByRole('button', { name: 'Start Explore the World ride' }).click();
   await expect(page.locator('.platform-shell')).toHaveClass(/explore-fullscreen/);
   await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
@@ -688,4 +692,39 @@ test('Explore deletes a saved route only after confirmation and keeps it removed
   await openSignedInApp(page);
   await page.getByRole('button', { name: 'Explore the World', exact: true }).click();
   await expect(page.getByText('Manage routes', { exact: true })).toHaveCount(0);
+});
+
+test('Explore setup rider cards use available width and readable text on phone tablet and PC', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 960 });
+  await installPaintedGoogleMaps(page, 'ipad');
+  await mockSignedInDeveloperAndExploreApis(page);
+  await openDemoExploreRide(page, false, 'Rasheen The Machine Hicks');
+  await page.getByRole('button', { name: 'Pause ride' }).click();
+  await page.getByRole('button', { name: 'Exit full screen' }).click();
+  await expect(page.locator('.explore-rider-name').first()).toHaveText('Rasheen The Machine Hicks');
+  for (const viewport of [{width:1280,height:960}, {width:390,height:844}, {width:844,height:390}, {width:1920,height:1080}]) {
+    await page.setViewportSize(viewport);
+    const cards = page.locator('.explore-rider-strip article');
+    await expect(cards.first()).toBeVisible();
+    const layouts = await cards.evaluateAll(items => items.map(card => {
+      const name = card.querySelector('.explore-rider-name')!;
+      const speed = card.querySelector('.explore-rider-speed')!;
+      const style = getComputedStyle(name);
+      return {
+        width: card.getBoundingClientRect().width,
+        nameHeight: name.getBoundingClientRect().height,
+        nameLineHeight: parseFloat(style.lineHeight),
+        foreground: getComputedStyle(speed).color,
+        background: getComputedStyle(card).backgroundColor,
+        contained: card.getBoundingClientRect().right <= innerWidth + 1,
+      };
+    }));
+    for (const layout of layouts) {
+      expect(layout.width).toBeGreaterThan(270);
+      expect(layout.nameHeight).toBeLessThanOrEqual(layout.nameLineHeight * 3);
+      expect(layout.foreground).not.toBe(layout.background);
+      expect(layout.contained).toBe(true);
+    }
+    if (viewport.width === 1280) await page.locator('.explore-rider-strip').screenshot({path:'/tmp/explore118-setup-cards.png'});
+  }
 });

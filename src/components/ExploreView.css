@@ -343,3 +343,19 @@
 .explore-saved-route-row strong { flex: 1 1 180px; overflow-wrap: anywhere; font-size: 16px; }
 .explore-saved-route-row > div { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .explore-saved-route-row button { min-height: 44px; padding: 8px 12px; }
+
+/* The setup page has a narrower content column than the full-screen ride. */
+.platform-shell:not(.explore-fullscreen) .explore-rider-strip {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  align-items: start;
+  min-width: 0;
+}
+.platform-shell:not(.explore-fullscreen) .explore-rider-strip article {
+  min-width: 0;
+  height: auto;
+  align-items: start;
+}
+.platform-shell:not(.explore-fullscreen) .explore-rider-strip article span,
+.platform-shell:not(.explore-fullscreen) .explore-rider-strip .explore-air-status strong {
+  color: var(--ink);
+}
