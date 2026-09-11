@@ -34,6 +34,7 @@ export type ExploreMapPanelProps = {
   route: ExploreRouteModel;
   distanceUnit: ExploreDistanceUnit;
   followZoom: number;
+  previewProgress?: number | null;
   cameraRecenterRequest: number;
   cameraFollowEnabled: boolean;
   showMapLabels: boolean;
@@ -345,6 +346,7 @@ export function ExploreMapPanel({
   route,
   distanceUnit,
   followZoom,
+  previewProgress = null,
   cameraRecenterRequest,
   cameraFollowEnabled,
   showMapLabels,
@@ -353,6 +355,8 @@ export function ExploreMapPanel({
   onRiderSelect,
   onCameraInteraction,
 }: ExploreMapPanelProps) {
+  const previewActiveRef = useRef(false);
+  previewActiveRef.current = previewProgress !== null;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const googleRef = useRef<GoogleMapsRuntime | null>(null);
   const mapRef = useRef<GoogleMap | null>(null);
@@ -546,6 +550,7 @@ export function ExploreMapPanel({
       marker.setRider(rider);
     });
 
+    if (previewActiveRef.current || !cameraFollowEnabled) return;
     if (positions.length === 0) {
       return;
     }
@@ -590,7 +595,7 @@ export function ExploreMapPanel({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!cameraFollowEnabled) {
+    if (!cameraFollowEnabled && !previewActiveRef.current) {
       lastFollowZoomRef.current = null;
       return;
     }
@@ -623,6 +628,10 @@ export function ExploreMapPanel({
       const current = cameraCenterRef.current;
       const target = cameraTargetRef.current;
 
+      if (previewActiveRef.current) {
+        frameRequest = window.requestAnimationFrame(updateCamera);
+        return;
+      }
       if (map && interactionActiveRef.current) {
         const interactiveCenter = map.getCenter?.()?.toJSON();
         if (interactiveCenter) {
@@ -676,6 +685,29 @@ export function ExploreMapPanel({
     frameRequest = window.requestAnimationFrame(alignCamera);
     return () => window.cancelAnimationFrame(frameRequest);
   }, [cameraFollowEnabled, followTravelHeading, status]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const google = googleRef.current;
+    if (!map || !google || status !== 'ready' || previewProgress === null) return;
+    cameraTargetRef.current = null;
+    if (previewProgress === 1) {
+      const bounds = new google.maps.LatLngBounds();
+      routePoints.forEach(point => bounds.extend(point));
+      map.setTilt(0);
+      map.setHeading(0);
+      map.fitBounds(bounds, 50);
+      return;
+    }
+    const center = exploreRoutePoint(routePoints, route.distanceMeters * previewProgress, route.distanceMeters);
+    if (!center || interactionActiveRef.current) return;
+    map.moveCamera?.({ center, heading: previewProgress * 360, tilt: 45 });
+    if (!map.moveCamera) {
+      map.setCenter?.(center);
+      map.setHeading(previewProgress * 360);
+      map.setTilt(45);
+    }
+  }, [previewProgress, routePoints, route.distanceMeters, status]);
 
   useExploreMapViewportRefresh(containerRef, () => {
     const google = googleRef.current;

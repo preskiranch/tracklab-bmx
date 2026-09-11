@@ -5,7 +5,7 @@ import type {
   TrackPoint,
 } from '../types';
 
-const recentExploreRouteLimit = 8;
+const recentExploreRouteLimit = 100;
 const recentExploreRoutesStoragePrefix = 'tracklab-explore-recent-routes-v1';
 const clubTabletExploreRouteScopePrefix = 'club-tablet-route-history-v1:';
 
@@ -225,4 +225,19 @@ export function writeRecentExploreRoutes(profileKey: string, routes: readonly Ex
     // Private browsing or storage pressure can disable the offline cache.
   }
   return nextRoutes;
+}
+
+
+export function loadExploreRouteVisits(profileKey: string): Record<string, number> {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(`${storageKey(profileKey)}:visits`) || '{}');
+    return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1])));
+  } catch { return {}; }
+}
+
+export function rememberExploreRouteVisit(profileKey: string, routeId: string) {
+  const visits = { ...loadExploreRouteVisits(profileKey), [routeId]: Date.now() };
+  const recent = Object.fromEntries(Object.entries(visits).sort((a, b) => b[1] - a[1]).slice(0, 100));
+  try { window.localStorage.setItem(`${storageKey(profileKey)}:visits`, JSON.stringify(recent)); } catch { /* Optional recency cache. */ }
+  return recent;
 }

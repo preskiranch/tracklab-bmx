@@ -39,7 +39,7 @@ afterEach(() => {
 });
 
 describe('recent Explore routes', () => {
-  it('keeps the eight most recent routes per account and moves reused routes to the top', () => {
+  it('keeps the saved library beyond eight routes per account and moves reused routes to the top', () => {
     const storage = new Map<string, string>();
     vi.stubGlobal('window', {
       localStorage: {
@@ -52,7 +52,7 @@ describe('recent Explore routes', () => {
       rememberRecentExploreRoute('rider@example.com', route(index));
     }
     const recent = loadRecentExploreRoutes('rider@example.com');
-    expect(recent).toHaveLength(8);
+    expect(recent).toHaveLength(10);
     expect(recent.map((candidate) => candidate.id)).toEqual([
       'EXPLORE-9',
       'EXPLORE-8',
@@ -62,6 +62,8 @@ describe('recent Explore routes', () => {
       'EXPLORE-4',
       'EXPLORE-3',
       'EXPLORE-2',
+      'EXPLORE-1',
+      'EXPLORE-0',
     ]);
     expect(recent[0]).toMatchObject({
       name: 'Route 9',

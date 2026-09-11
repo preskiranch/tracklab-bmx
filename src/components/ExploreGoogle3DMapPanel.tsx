@@ -44,6 +44,7 @@ export function ExploreGoogle3DMapPanel({
   route,
   distanceUnit,
   followZoom,
+  previewProgress = null,
   cameraRecenterRequest,
   cameraFollowEnabled,
   showMapLabels,
@@ -52,6 +53,8 @@ export function ExploreGoogle3DMapPanel({
   onRiderSelect,
   onCameraInteraction,
 }: ExploreMapPanelProps) {
+  const previewActiveRef = useRef(false);
+  previewActiveRef.current = previewProgress !== null;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<GoogleMap3DElement | null>(null);
   const libraryRef = useRef<GoogleMaps3DLibrary | null>(null);
@@ -270,6 +273,7 @@ export function ExploreGoogle3DMapPanel({
         riderPresentationsRef.current.get(rider.id)?.update(rider);
       }
     });
+    if (previewActiveRef.current || !cameraFollowEnabled) return;
     if (positions.length === 0) {
       if (cameraFollowEnabled) {
         const center = routePoints[Math.floor(routePoints.length / 2)] ?? routePoints[0];
@@ -330,6 +334,10 @@ export function ExploreGoogle3DMapPanel({
       const map = mapRef.current;
       const current = cameraCenterRef.current;
       const target = cameraTargetRef.current;
+      if (previewActiveRef.current) {
+        frameRequest = requestAnimationFrame(updateCamera);
+        return;
+      }
       if (map && interactionActiveRef.current) {
         if (map.center) {
           cameraCenterRef.current = { lat: map.center.lat, lng: map.center.lng };
@@ -356,6 +364,25 @@ export function ExploreGoogle3DMapPanel({
     frameRequest = requestAnimationFrame(updateCamera);
     return () => cancelAnimationFrame(frameRequest);
   }, [cameraFollowEnabled, followTravelHeading, status]);
+
+  const previewActive = previewProgress !== null;
+  useEffect(() => {
+    if (previewActive && status === 'ready' && mapRef.current) {
+      mapRef.current.range = explore3DRange(followZoom);
+    }
+  }, [previewActive, followZoom, status]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || status !== 'ready' || previewProgress === null) return;
+    cameraTargetRef.current = null;
+    const center = exploreRoutePoint(routePoints, route.distanceMeters * (previewProgress === 1 ? 0.5 : previewProgress), route.distanceMeters);
+    if (!center || interactionActiveRef.current) return;
+    map.center = { ...center, altitude: 0 };
+    map.heading = previewProgress * 360;
+    map.tilt = previewProgress === 1 ? 0 : 55;
+    if (previewProgress === 1) map.range = Math.max(500, route.distanceMeters * 1.35);
+  }, [previewProgress, routePoints, route.distanceMeters, status]);
 
   useExploreMapViewportRefresh(containerRef, () => {
     const map = mapRef.current;

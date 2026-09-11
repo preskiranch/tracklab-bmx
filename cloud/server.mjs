@@ -11050,7 +11050,7 @@ function sanitizeExploreRouteHistory(value) {
       seen.add(route.id);
       return [route];
     })
-    .slice(0, 8);
+    .slice(0, 100);
 }
 
 function mergeExploreRouteHistory(preferred, fallback) {

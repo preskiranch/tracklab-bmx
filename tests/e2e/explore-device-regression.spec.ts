@@ -72,7 +72,7 @@ async function installPaintedGoogleMaps(
       private zoom: number;
       private readonly element: HTMLElement;
 
-      constructor(element: HTMLElement, options: { center?: Point; zoom?: number; renderingType?: string }) {
+      constructor(element: HTMLElement, options: { center?: Point; zoom?: number; heading?: number; renderingType?: string }) {
         this.element = element;
         this.renderingType = options.renderingType;
         this.center = options.center ?? { lat: 38.5, lng: -120.2 };
@@ -135,16 +135,17 @@ async function installPaintedGoogleMaps(
         return { remove() {} };
       }
 
-      fitBounds() {}
+      fitBounds() { this.element.dataset.routeOverview = "true"; }
       getCenter() { return { toJSON: () => this.center }; }
       getHeading() { return this.heading; }
       getZoom() { return this.zoom; }
-      moveCamera(options: { center?: Point; zoom?: number; renderingType?: string }) {
+      moveCamera(options: { center?: Point; zoom?: number; heading?: number; renderingType?: string }) {
         if (options.center) {
           this.center = options.center;
           this.element.dataset.center = JSON.stringify(this.center);
         }
         if (options.zoom != null) this.zoom = options.zoom;
+        if (options.heading != null) this.setHeading(options.heading);
       }
       setCenter(center: Point) { this.center = center; }
       setHeading(heading: number) {
@@ -153,7 +154,7 @@ async function installPaintedGoogleMaps(
       }
       setOptions() {}
       setTilt() {}
-      setZoom(zoom: number) { this.zoom = zoom; }
+      setZoom(zoom: number) { this.zoom = zoom; this.element.dataset.zoom = String(zoom); }
     }
 
     class MockMarker {
@@ -874,4 +875,72 @@ test('Explore defaults to sound enabled and toggles immediately even when audio 
   await unmute.click();
   await expect(mute).toHaveText('Mute');
   await expect(mute).toHaveAttribute('aria-pressed','false');
+});
+
+
+test('route preview stays in setup, orbits for 30 seconds and preserves zoom without starting a ride', async ({page}) => {
+  await page.setViewportSize({width:1280,height:960});
+  await installPaintedGoogleMaps(page, 'ipad');
+  await mockSignedInDeveloperAndExploreApis(page);
+  await openDemoExploreRide(page, false);
+  await page.getByRole('button', {name:'Pause ride', exact:true}).click();
+  await page.getByRole('button', {name:'Exit full screen'}).click();
+  await page.getByRole('button', {name:'Reset', exact:true}).last().click();
+  const start = page.getByRole('button', {name:'Start Explore the World ride', exact:true});
+  await expect(start).toBeVisible();
+  await page.clock.install();
+  await page.getByRole('button', {name:'Preview route · 30 sec'}).click();
+  await page.locator('.explore-route-preview-controls').screenshot({path:'/tmp/preview124-controls.png'});
+  const canvas = page.locator('.explore-map-canvas').first();
+  await page.clock.runFor(10_000);
+  await expect(canvas).toHaveAttribute('data-heading', /1[12][0-9]/);
+  await page.getByRole('button', {name:'Pause preview', exact:true}).click();
+  const center = await canvas.getAttribute('data-center');
+  await page.getByRole('button', {name:'Show more of the route', exact:true}).click();
+  await expect(canvas).toHaveAttribute('data-zoom','17');
+  await page.clock.runFor(1000);
+  expect(await canvas.getAttribute('data-center')).toBe(center);
+  await expect(start).toBeVisible();
+  await page.setViewportSize({width:390,height:844});
+  await page.getByRole('button', {name:'Resume preview', exact:true}).click();
+  await page.clock.runFor(10_000);
+  await expect(canvas).toHaveAttribute('data-heading', /2[34][0-9]/);
+  await page.setViewportSize({width:844,height:390});
+  await page.clock.runFor(10_500);
+  await expect(page.getByText('Preview complete', {exact:true})).toBeVisible();
+  await expect(canvas).toHaveAttribute('data-route-overview','true');
+  await expect(start).toBeVisible();
+  await page.getByRole('button', {name:'Replay', exact:true}).click();
+  await page.clock.runFor(1000);
+  await page.getByRole('button', {name:'Exit preview', exact:true}).click();
+  await expect(page.getByRole('button', {name:'Preview route · 30 sec'})).toBeVisible();
+});
+
+
+test('create save and preview a route with no bike or demo riders then restore it later', async ({page}) => {
+  await page.setViewportSize({width:1280,height:960});
+  await installPaintedGoogleMaps(page, 'ipad');
+  await mockSignedInDeveloperAndExploreApis(page);
+  await page.goto('/');
+  await openSignedInApp(page);
+  await page.getByRole('button', {name:'Explore the World', exact:true}).click();
+  await page.getByRole('textbox', {name:'Starting location', exact:true}).fill('38.5, -120.2');
+  await page.getByRole('textbox', {name:'Destination', exact:true}).fill('43.252, -126.453');
+  const saved = page.waitForResponse(response => response.url().includes('/api/explore/recent-routes') && response.request().method() === 'POST');
+  await page.getByRole('button', {name:'Build Explore the World route'}).click();
+  expect((await saved).ok()).toBe(true);
+  await expect(page.getByRole('button', {name:'Start Explore the World ride', exact:true})).toBeDisabled();
+  await expect(page.getByText('Saved to Recent routes · ready whenever you are')).toBeVisible();
+  await page.getByRole('button', {name:'Preview route · 30 sec'}).click();
+  await expect(page.getByRole('button', {name:'Pause preview', exact:true})).toBeVisible();
+  await page.reload();
+  await openSignedInApp(page);
+  await page.getByRole('button', {name:'Explore the World', exact:true}).click();
+  await page.getByRole('button', {name:'Saved routes (1)', exact:true}).click();
+  await page.getByRole('combobox', {name:'Saved Explore routes'}).selectOption('EXPLORE-device-regression');
+  await expect(page.locator('.explore-route-summary')).toBeVisible();
+  await page.getByRole('button', {name:'Recent routes', exact:true}).click();
+  await expect(page.getByRole('combobox', {name:'Recent Explore routes'})).toHaveValue('EXPLORE-device-regression');
+  await expect(page.getByRole('button', {name:'Preview route · 30 sec'})).toBeVisible();
+  await expect(page.getByRole('button', {name:'Start Explore the World ride', exact:true})).toBeDisabled();
 });

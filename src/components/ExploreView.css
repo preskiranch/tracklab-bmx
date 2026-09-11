@@ -359,3 +359,36 @@
 .platform-shell:not(.explore-fullscreen) .explore-rider-strip .explore-air-status strong {
   color: var(--ink);
 }
+
+.explore-route-preview-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0;
+}
+.explore-route-preview-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 8px 12px;
+}
+.explore-route-preview-controls span { flex-basis: 100%; font-size: 14px; }
+.explore-route-preview-controls button {
+  border: 1px solid #c9c9cf;
+  border-radius: 10px;
+  background: #fff;
+  color: #202124;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.explore-route-preview-controls button:focus-visible { outline: 2px solid #246ad0; outline-offset: 2px; }
+.explore-route-planning-note { font-size: 14px; line-height: 1.45; }
+.explore-route-saved { color: #287344; }
+
+.explore-route-library-tabs { display: flex; gap: 4px; padding: 4px; border-radius: 12px; background: #f1f1f4; margin: 12px 0; }
+.explore-route-library-tabs button { flex: 1; min-width: 0; min-height: 44px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #303034; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.explore-route-library-tabs button[aria-pressed="true"] { background: white; border-color: #d6d6dc; box-shadow: 0 1px 3px #0001; }

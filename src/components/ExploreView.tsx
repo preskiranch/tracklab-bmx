@@ -1,3 +1,4 @@
+import { loadExploreRouteVisits, rememberExploreRouteVisit } from '../lib/exploreRecentRoutes';
 import { exploreRoutePoint, exploreRoutePoints } from '../lib/explore';
 import {
   ArrowLeftRight,
@@ -469,6 +470,38 @@ export function ExploreView({
   const [selectedDestinationPrediction, setSelectedDestinationPrediction] = useState<PlacePredictionOption | null>(null);
   const exploreDistanceUnit: ExploreDistanceUnit = distanceUnit === 'm' ? 'km' : 'mi';
   const [followZoom, setFollowZoom] = useState(18);
+  const [routePreview, setRoutePreview] = useState<{ progress: number; playing: boolean } | null>(null);
+  const previewElapsedRef = useRef(0);
+  useEffect(() => {
+    if (!routePreview?.playing) return;
+    let frame = 0;
+    let last = performance.now();
+    let lastPaint = last;
+    const tick = (now: number) => {
+      // Backgrounding the app pauses the tour instead of skipping the route.
+      if (!document.hidden) previewElapsedRef.current += Math.min(now - last, 100);
+      last = now;
+      if (now - lastPaint >= 32) {
+        const progress = Math.min(1, previewElapsedRef.current / 30_000);
+        setRoutePreview({ progress, playing: progress < 1 });
+        lastPaint = now;
+        if (progress === 1) return;
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [routePreview?.playing]);
+  const beginRoutePreview = () => {
+    previewElapsedRef.current = 0;
+    setCameraFollowEnabled(false);
+    setRoutePreview({ progress: 0, playing: true });
+  };
+  const exitRoutePreview = () => {
+    setRoutePreview(null);
+    setCameraFollowEnabled(true);
+    setCameraRecenterRequest(value => value + 1);
+  };
   const [cameraRecenterRequest, setCameraRecenterRequest] = useState(0);
   const [cameraFollowEnabled, setCameraFollowEnabled] = useState(true);
   const [cameraOptionsOpen, setCameraOptionsOpen] = useState(false);
@@ -493,6 +526,14 @@ export function ExploreView({
       ? loadRecentExploreRoutes(recentProfileKey)
       : [],
   }));
+  const [routeLibraryTab, setRouteLibraryTab] = useState<'saved' | 'recent'>('recent');
+  const [routeVisits, setRouteVisits] = useState<{ profileKey: string | null; visits: Record<string, number> }>({profileKey: null, visits: {}});
+  useEffect(() => {
+    setRouteVisits({profileKey: recentProfileKey, visits: recentProfileKey ? loadExploreRouteVisits(recentProfileKey) : {}});
+  }, [recentProfileKey]);
+  const recordRouteVisit = (routeId: string) => {
+    if (recentProfileKey) setRouteVisits({profileKey: recentProfileKey, visits: rememberExploreRouteVisit(recentProfileKey, routeId)});
+  };
   const [routeToDelete, setRouteToDelete] = useState<string | null>(null);
   const [routeDeleting, setRouteDeleting] = useState(false);
   const [routeDeleteError, setRouteDeleteError] = useState('');
@@ -503,6 +544,11 @@ export function ExploreView({
   const recentRoutes = recentRouteState.profileKey === recentProfileKey
     ? recentRouteState.routes
     : [];
+  const libraryRoutes = [...recentRoutes].sort((a, b) => routeLibraryTab === 'saved'
+    ? (a.name || a.originLabel).localeCompare(b.name || b.originLabel)
+    : ((routeVisits.profileKey === recentProfileKey ? routeVisits.visits[b.id] : 0) || b.createdAt)
+      - ((routeVisits.profileKey === recentProfileKey ? routeVisits.visits[a.id] : 0) || a.createdAt));
+  const listedRoutes = routeLibraryTab === 'recent' ? libraryRoutes.slice(0, 8) : libraryRoutes;
   const [elevationRecoveryStatus, setElevationRecoveryStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [recoveredElevation, setRecoveredElevation] = useState<RecoveredExploreElevation | null>(null);
   const [selectedLandmark, setSelectedLandmark] = useState<ExploreLandmarkPopup | null>(null);
@@ -569,6 +615,10 @@ export function ExploreView({
       }
       : null,
   });
+  useEffect(() => {
+    setRoutePreview(null);
+    previewElapsedRef.current = 0;
+  }, [route?.id, ride.status]);
   const {
     pause: pauseLocalRide,
     reset: resetLocalRide,
@@ -1139,7 +1189,7 @@ export function ExploreView({
     if (recentRouteSelectRef.current) {
       recentRouteSelectRef.current.value = route?.id ?? '';
     }
-  }, [route?.id, recentRoutes]);
+  }, [route?.id, recentRoutes, routeLibraryTab]);
 
   useEffect(() => {
     if (
@@ -1445,6 +1495,7 @@ export function ExploreView({
       onSyncRoute(nextRoute);
     }
     if (remember) rememberExploreRoute(nextRoute);
+    recordRouteVisit(nextRoute.id);
     setRouteStatus('idle');
     setRouteMessage(message);
   };
@@ -1678,6 +1729,7 @@ export function ExploreView({
   };
 
   const startOrResume = async () => {
+    exitRoutePreview();
     if (serverControlledExplore) return;
     void primeAudioCues(); void primeBikeRaceAudio();
     if (playMode === 'multiplayer') {
@@ -2141,19 +2193,24 @@ export function ExploreView({
           {!serverControlledExplore && (
           <section className="explore-route-builder">
             <span className="eyebrow">Route</span>
+            <p className="explore-route-planning-note">Plan now, ride later. Routes save to Recent routes when you build them. No Wattbike connection or ride required.</p>
+            <div className="explore-route-library-tabs" role="group" aria-label="Route library">
+              <button type="button" aria-pressed={routeLibraryTab === 'saved'} onClick={() => setRouteLibraryTab('saved')}>Saved routes ({recentRoutes.length})</button>
+              <button type="button" aria-pressed={routeLibraryTab === 'recent'} onClick={() => setRouteLibraryTab('recent')}>Recent routes</button>
+            </div>
             <label className="explore-recent-route-field">
-              <span>Recent routes</span>
+              <span>{routeLibraryTab === 'saved' ? 'Your saved routes' : 'Recently opened'}</span>
               <select
-                aria-label="Recent Explore routes"
+                aria-label={routeLibraryTab === 'saved' ? 'Saved Explore routes' : 'Recent Explore routes'}
                 ref={recentRouteSelectRef}
                 defaultValue=""
                 disabled={!canChooseRoute || recentRoutes.length === 0}
                 onChange={(event) => applyRecentRoute(event.target.value)}
               >
                 <option value="">
-                  {recentRoutes.length > 0 ? 'Choose a recent route…' : 'No recent routes yet'}
+                  {recentRoutes.length > 0 ? (routeLibraryTab === 'saved' ? 'Choose a saved route…' : 'Choose a recent route…') : 'No saved routes yet'}
                 </option>
-                {recentRoutes.map((recentRoute) => (
+                {listedRoutes.map((recentRoute) => (
                   <option key={recentRoute.id} value={recentRoute.id}>
                     {recentRoute.name || `${recentRoute.originLabel} → ${recentRoute.destinationLabel}`}
                   </option>
@@ -2407,6 +2464,26 @@ export function ExploreView({
                 </dl>
               </header>
 
+              {!fullscreen && ride.status === 'ready' && (
+                <div className="explore-route-preview-controls" aria-label="Route preview">
+                  {recentRoutes.some(saved => saved.id === route.id) && <span className="explore-route-saved">Saved to Recent routes · ready whenever you are</span>}
+                  {!routePreview ? (
+                    <button type="button" onClick={beginRoutePreview}><Play size={18} /> Preview route · 30 sec</button>
+                  ) : (
+                    <>
+                      <strong>{routePreview.progress === 1 ? 'Preview complete' : `Route preview · ${Math.floor(routePreview.progress * 30)} / 30 sec`}</strong>
+                      {routePreview.progress < 1 && <button type="button" onClick={() => setRoutePreview(value => value && ({ ...value, playing: !value.playing }))}>
+                        {routePreview.playing ? <Pause size={18} /> : <Play size={18} />}
+                        {routePreview.playing ? 'Pause preview' : 'Resume preview'}
+                      </button>}
+                      <button type="button" onClick={beginRoutePreview}><RotateCcw size={18} /> Replay</button>
+                      <button type="button" onClick={exitRoutePreview}>Exit preview</button>
+                      <span>Zoom in or out while viewing the route. Your ride has not started.</span>
+                    </>
+                  )}
+                </div>
+              )}
+
               <div ref={cameraToolbarRef} className="explore-camera-toolbar" aria-label="Explore camera controls">
                 <div
                   className="explore-destination-overlay"
@@ -2422,7 +2499,7 @@ export function ExploreView({
                   title="Show more of the route"
                   disabled={followZoom <= 12}
                   onClick={() => {
-                    setCameraFollowEnabled(true);
+                    if (!routePreview) setCameraFollowEnabled(true);
                     setFollowZoom((zoom) => Math.max(12, zoom - 1));
                   }}
                 >
@@ -2439,7 +2516,7 @@ export function ExploreView({
                     aria-label="Follow camera zoom"
                     aria-valuetext={`${followZoom}, ${followZoom <= 14 ? 'more route visible' : followZoom >= 19 ? 'closer rider view' : 'balanced rider view'}`}
                     onChange={(event) => {
-                      setCameraFollowEnabled(true);
+                      if (!routePreview) setCameraFollowEnabled(true);
                       setFollowZoom(Number(event.target.value));
                     }}
                   />
@@ -2451,7 +2528,7 @@ export function ExploreView({
                   title="Move closer to the riders"
                   disabled={followZoom >= 20}
                   onClick={() => {
-                    setCameraFollowEnabled(true);
+                    if (!routePreview) setCameraFollowEnabled(true);
                     setFollowZoom((zoom) => Math.min(20, zoom + 1));
                   }}
                 >
@@ -2646,7 +2723,8 @@ export function ExploreView({
                         distanceUnit={exploreDistanceUnit}
                         followZoom={followZoom}
                         cameraRecenterRequest={cameraRecenterRequest}
-                        cameraFollowEnabled={cameraFollowEnabled}
+                        cameraFollowEnabled={cameraFollowEnabled && !routePreview}
+                        previewProgress={routePreview?.progress ?? null}
                         showMapLabels={showMapLabels}
                         followTravelHeading={followTravelHeading}
                         onCameraInteraction={useFreeCamera}
@@ -2660,7 +2738,8 @@ export function ExploreView({
                         distanceUnit={exploreDistanceUnit}
                         followZoom={followZoom}
                         cameraRecenterRequest={cameraRecenterRequest}
-                        cameraFollowEnabled={cameraFollowEnabled}
+                        cameraFollowEnabled={cameraFollowEnabled && !routePreview}
+                        previewProgress={routePreview?.progress ?? null}
                         showMapLabels={showMapLabels}
                         followTravelHeading={followTravelHeading}
                         onCameraInteraction={useFreeCamera}
