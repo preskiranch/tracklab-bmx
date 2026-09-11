@@ -293,7 +293,7 @@ function createExploreRiderMarker(
   const presentation = createExploreRiderPinElement(rider);
   const { element } = presentation;
   element.style.position = 'absolute';
-  element.style.transform = 'translate3d(-50%, -22px, 0)';
+  element.style.transform = 'translate3d(-50%, -100%, 0)';
   element.style.zIndex = String(zIndex);
 
   let markerPosition = position;

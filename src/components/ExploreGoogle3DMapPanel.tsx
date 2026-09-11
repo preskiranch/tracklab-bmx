@@ -24,7 +24,7 @@ import {
 } from './ExploreMapPanel';
 
 const exploreRiderPin3DAnchorLeft = '-50%';
-const exploreRiderPin3DAnchorTop = '-22px';
+const exploreRiderPin3DAnchorTop = '-100%';
 const exploreRiderPin3DAltitudeMeters = 0.15;
 
 function explore3DRange(followZoom: number) {

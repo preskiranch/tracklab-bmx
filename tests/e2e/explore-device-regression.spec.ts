@@ -110,7 +110,11 @@ async function installPaintedGoogleMaps(
           ].join(';');
           surface.append(routeLine);
         }
-        this.element.replaceChildren(surface);
+        this.element.replaceChildren(surface, ...this.element.querySelectorAll('.explore-map-rider-marker'));
+        this.element.querySelectorAll<HTMLElement>('.explore-map-rider-marker').forEach(marker => {
+          marker.style.left = `${this.element.clientWidth / 2}px`;
+          marker.style.top = `${this.element.clientHeight / 2}px`;
+        });
         const bounds = this.element.getBoundingClientRect();
         regressionWindow.__tracklabExploreMapPaints ??= [];
         regressionWindow.__tracklabExploreMapPaints.push({
@@ -174,6 +178,17 @@ async function installPaintedGoogleMaps(
       extend() {}
     }
 
+    class MockOverlayView {
+      map: any;
+      onAdd = () => {};
+      onRemove = () => {};
+      draw = () => {};
+      setMap(map: any) { this.map = map; if (map) { this.onAdd(); this.draw(); } else this.onRemove(); }
+      getPanes() { return { overlayMouseTarget: this.map.element }; }
+      getProjection() { return { fromLatLngToDivPixel: () => ({ x: this.map.element.clientWidth / 2, y: this.map.element.clientHeight / 2 }) }; }
+    }
+    class MockLatLng { constructor(public lat: number, public lng: number) {} }
+
     class MockPoint {
       constructor(public x: number, public y: number) {}
     }
@@ -199,6 +214,8 @@ async function installPaintedGoogleMaps(
     (window as typeof window & { google?: unknown }).google = {
       maps: {
         LatLngBounds: MockLatLngBounds,
+        LatLng: MockLatLng,
+        OverlayView: MockOverlayView,
         Map: MockMap,
         Marker: MockMarker,
         Point: MockPoint,
@@ -726,5 +743,23 @@ test('Explore setup rider cards use available width and readable text on phone t
       expect(layout.contained).toBe(true);
     }
     if (viewport.width === 1280) await page.locator('.explore-rider-strip').screenshot({path:'/tmp/explore118-setup-cards.png'});
+  }
+});
+
+
+test('Explore anchors the pin tip on the route coordinate across rotation', async ({page}) => {
+  await page.setViewportSize({width:1280,height:960});
+  await installPaintedGoogleMaps(page, 'ipad');
+  await mockSignedInDeveloperAndExploreApis(page);
+  await openDemoExploreRide(page, false);
+  await page.getByRole('button', {name:'Pause ride'}).click();
+  for (const viewport of [{width:1280,height:960},{width:390,height:844},{width:844,height:390}]) {
+    await page.setViewportSize(viewport);
+    await expect.poll(async () => page.locator('.explore-map-rider-marker').first().evaluate(marker => {
+      const pin=marker.querySelector('.explore-map-rider-pin')!.getBoundingClientRect();
+      const avatar=marker.querySelector('.explore-map-rider-avatar')!.getBoundingClientRect();
+      const box=marker.parentElement!.getBoundingClientRect();
+      return Math.max(Math.abs(pin.bottom-(box.top+box.height/2)), Math.abs(pin.left+pin.width/2-(box.left+box.width/2)), avatar.bottom-pin.bottom);
+    })).toBeLessThan(2);
   }
 });
