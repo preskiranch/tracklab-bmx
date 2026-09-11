@@ -1,3 +1,4 @@
+import { hasExploreDemoRecovery, setExploreDemoRecovery } from './lib/exploreDemoRecovery';
 import { chooseOpeningTrack, openingTrackStorageKey, automaticTrackHistoryKey } from './lib/openingTrack';
 import { ClubStudentLobby } from './components/ClubStudentLobby';
 import { hasPlayableIntervalZones, playableIntervalTracks } from './lib/playableIntervalTracks';
@@ -2070,7 +2071,7 @@ export default function App() {
   const [studioRiderAssignments, setStudioRiderAssignments] = useState<StudioRiderAssignments>({});
   const [bikeConnectionSource, setBikeConnectionSource] = useState<BikeConnectionSource>(readStoredBikeConnectionSource);
   const [connectorLaunchMessage, setConnectorLaunchMessage] = useState<string | null>(null);
-  const [demoMode, setDemoMode] = useState(false);
+  const [demoMode, setDemoMode] = useState(hasExploreDemoRecovery);
   const [bluetoothPairingOpen, setBluetoothPairingOpen] = useState(false);
   const [demoBikeCount, setDemoBikeCount] = useState(Math.min(4, maxPlayers));
   const [selectedDemoPlayerIds, setSelectedDemoPlayerIds] = useState<PlayerSlot['id'][]>(
@@ -2090,10 +2091,10 @@ export default function App() {
   const [raceCommentaryPreferences, setRaceCommentaryPreferences] = useState<RaceCommentaryPreferences>(
     () => raceViewPreferencesRef.current.commentary,
   );
-  const [appMode, setAppMode] = useState<AppMode>(
+  const [appMode, setAppMode] = useState<AppMode>(() =>
     initialClubTabletDeviceRef.current
       ? 'club-tablet'
-      : initialTrack.countryCode === 'CUSTOM' ? 'straight-sprint' : 'race',
+      : hasExploreDemoRecovery() ? 'explore' : initialTrack.countryCode === 'CUSTOM' ? 'straight-sprint' : 'race',
   );
   const reactionReturnModeRef = useRef<AppMode>('race');
   const lastRaceWasSprintRef = useRef(false);
@@ -2108,11 +2109,14 @@ export default function App() {
     || (resultsMode && lastRaceWasSprintRef.current) ? 'straight-sprint' : 'race';
   const [membership, setMembership] = useState<MembershipState>(() => initialMembershipRef.current ?? createMembership('visitor'));
   const [showMembershipLanding, setShowMembershipLanding] = useState(
-    () => !initialClubTabletDeviceRef.current && shouldOpenCommunityHomeOnLaunch(
+    () => !hasExploreDemoRecovery() && !initialClubTabletDeviceRef.current && shouldOpenCommunityHomeOnLaunch(
       typeof window === 'undefined' ? '/' : window.location.href,
     ),
   );
   useEffect(() => { setAnalyticsAppVisible(!showMembershipLanding); }, [showMembershipLanding]);
+  useEffect(() => {
+    if (showMembershipLanding || appMode !== 'explore' || !demoMode) setExploreDemoRecovery(false);
+  }, [appMode, demoMode, showMembershipLanding]);
   const [appleConnectionCount, setAppleConnectionCount] = useState(() => (
     clampAppleWattbikeConnections(initialMembershipRef.current?.bikeSeats ?? 1)
   ));

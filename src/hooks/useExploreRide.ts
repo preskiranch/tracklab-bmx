@@ -275,6 +275,12 @@ export function useExploreRide({
         return;
       }
 
+      // Cap React/map updates at 30 Hz even on 120 Hz iPads. Keep elapsed
+      // time based on the frame delta, so speed and finish times do not change.
+      if (lastFrameRef.current && frameTime - lastFrameRef.current < 1000 / 30) {
+        frameRef.current = window.requestAnimationFrame(tick);
+        return;
+      }
       const previousFrame = lastFrameRef.current || frameTime;
       const deltaSeconds = Math.max(0.001, Math.min(0.1, (frameTime - previousFrame) / 1000));
       lastFrameRef.current = frameTime;

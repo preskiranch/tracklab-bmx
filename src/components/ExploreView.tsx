@@ -1,3 +1,4 @@
+import { setExploreDemoRecovery } from '../lib/exploreDemoRecovery';
 import { useExplorePreviewSettings } from '../hooks/useExplorePreviewSettings';
 import { loadExploreRouteVisits, rememberExploreRouteVisit } from '../lib/exploreRecentRoutes';
 import { exploreRoutePoint, exploreRoutePoints } from '../lib/explore';
@@ -422,10 +423,13 @@ export function ExploreView({
     const clubTabletDeviceToken = requestAccess?.clubTabletDeviceToken?.trim() ?? '';
     return clubTabletDeviceToken ? { clubTabletDeviceToken } : null;
   }, [requestAccess?.clubTabletDeviceToken, requestAccess?.clubTabletSessionToken]);
-  const initialCheckpointRef = useRef<ExploreRideCheckpoint | null>(
-    recentProfileKey && !demoMode ? loadExploreRideCheckpoint(recentProfileKey) : null,
+  // Demo progress must never overwrite a real athlete's training checkpoint.
+  const checkpointProfileKey = recentProfileKey ? `${recentProfileKey}${demoMode ? ':demo' : ''}` : null;
+  const [initialCheckpoint] = useState<ExploreRideCheckpoint | null>(() =>
+    checkpointProfileKey ? loadExploreRideCheckpoint(checkpointProfileKey) : null,
   );
-  const loadedCheckpointProfileRef = useRef(recentProfileKey);
+  const initialCheckpointRef = useRef(initialCheckpoint);
+  const loadedCheckpointProfileRef = useRef(checkpointProfileKey);
   const pendingCheckpointRef = useRef<ExploreRideCheckpoint | null>(null);
   const rideSessionRef = useRef<LocalExploreRideSession | null>(
     initialCheckpointRef.current?.sessionId
@@ -526,7 +530,7 @@ export function ExploreView({
   const [viewportOrientation, setViewportOrientation] = useState(currentExploreViewportOrientation);
   const [routeStatus, setRouteStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [routeMessage, setRouteMessage] = useState(
-    initialRoute ? 'Unfinished ride restored. Pair your Wattbike, then press Resume ride when ready.' : '',
+    initialRoute ? demoMode ? 'Demo ride restored. Press Resume ride to continue.' : 'Unfinished ride restored. Pair your Wattbike, then press Resume ride when ready.' : '',
   );
   const [mapPickerOpen, setMapPickerOpen] = useState(false);
   const [recentRouteState, setRecentRouteState] = useState<{
@@ -612,14 +616,15 @@ export function ExploreView({
   }, [clubExploreEvent, onClubEventProgramReady, route]);
   useEffect(() => { setLandmarkHintDismissed(false); }, [route?.id]);
   const effectiveMapRenderer = developerMode ? mapRenderer : 'google-satellite';
-  const localClientId = currentUserId ?? 'local';
+  // A socket reconnect changes currentUserId, not the identity of a solo ride.
+  const localClientId = playMode === 'local' ? `local:${recentProfileKey ?? 'guest'}` : currentUserId ?? 'local';
   const ride = useExploreRide({
     clientId: localClientId,
     players,
     route,
     samplesByDevice,
     demoMode,
-    restoredRide: playMode === 'local' && !demoMode && initialCheckpointRef.current
+    restoredRide: playMode === 'local' && initialCheckpointRef.current
       ? {
         routeId: initialCheckpointRef.current.route.id,
         riders: initialCheckpointRef.current.riders,
@@ -722,15 +727,15 @@ export function ExploreView({
   }, [exploreRequestAccess, recentProfileKey]);
 
   useEffect(() => {
-    if (loadedCheckpointProfileRef.current === recentProfileKey) {
+    if (loadedCheckpointProfileRef.current === checkpointProfileKey) {
       return;
     }
-    loadedCheckpointProfileRef.current = recentProfileKey;
+    loadedCheckpointProfileRef.current = checkpointProfileKey;
     pendingCheckpointRef.current = null;
     resetLocalRide();
 
-    const checkpoint = recentProfileKey && !demoMode
-      ? loadExploreRideCheckpoint(recentProfileKey)
+    const checkpoint = checkpointProfileKey
+      ? loadExploreRideCheckpoint(checkpointProfileKey)
       : null;
     rideSessionRef.current = checkpoint?.sessionId
       ? {
@@ -768,16 +773,16 @@ export function ExploreView({
       label: checkpoint.route.destinationLabel,
     });
     setRouteStatus('idle');
-    setRouteMessage('Unfinished ride restored. Pair your Wattbike, then press Resume ride when ready.');
-  }, [demoMode, recentProfileKey, resetLocalRide]);
+    setRouteMessage(demoMode ? 'Demo ride restored. Press Resume ride to continue.' : 'Unfinished ride restored. Pair your Wattbike, then press Resume ride when ready.');
+  }, [checkpointProfileKey, demoMode, recentProfileKey, resetLocalRide]);
 
   useEffect(() => {
-    if (playMode !== 'local' || demoMode) {
+    if (playMode !== 'local') {
       return;
     }
     const checkpoint = pendingCheckpointRef.current
-      ?? (ride.status === 'ready' && recentProfileKey
-        ? loadExploreRideCheckpoint(recentProfileKey)
+      ?? (ride.status === 'ready' && checkpointProfileKey
+        ? loadExploreRideCheckpoint(checkpointProfileKey)
         : null);
     if (!checkpoint || localRoute?.id !== checkpoint.route.id) {
       return;
@@ -789,9 +794,9 @@ export function ExploreView({
       activeClockSegments: checkpoint.activeClockSegments,
     })) {
       pendingCheckpointRef.current = null;
-      setRouteMessage('Unfinished ride restored. Pair your Wattbike, then press Resume ride when ready.');
+      setRouteMessage(demoMode ? 'Demo ride restored. Press Resume ride to continue.' : 'Unfinished ride restored. Pair your Wattbike, then press Resume ride when ready.');
     }
-  }, [demoMode, localRoute?.id, playMode, recentProfileKey, restoreLocalRide, ride.status]);
+  }, [checkpointProfileKey, demoMode, localRoute?.id, playMode, recentProfileKey, restoreLocalRide, ride.status]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1207,8 +1212,7 @@ export function ExploreView({
   useEffect(() => {
     if (
       playMode !== 'local'
-      || demoMode
-      || !recentProfileKey
+      || !checkpointProfileKey
       || !route
       || (ride.status !== 'riding' && ride.status !== 'paused')
     ) {
@@ -1220,7 +1224,7 @@ export function ExploreView({
       if (!latest.route || latest.route.id !== route.id || latest.riders.length === 0) {
         return;
       }
-      saveExploreRideCheckpoint(recentProfileKey, {
+      saveExploreRideCheckpoint(checkpointProfileKey, {
         route: latest.route,
         riders: latest.riders,
         elapsedMs: latest.elapsedMs,
@@ -1274,10 +1278,11 @@ export function ExploreView({
       document.removeEventListener('visibilitychange', persistWhenHidden);
       void nativeAppStateListener.then((listener) => listener?.remove());
     };
-  }, [demoMode, onRideSessionPause, pauseLocalRide, playMode, recentProfileKey, ride.activeClockSegments, ride.status, route]);
+  }, [checkpointProfileKey, demoMode, onRideSessionPause, pauseLocalRide, playMode, recentProfileKey, ride.activeClockSegments, ride.status, route]);
 
   useEffect(() => {
     if (demoMode) {
+      setExploreDemoRecovery(ride.status === 'riding' || ride.status === 'paused');
       onDemoRideStatusChange?.(ride.status);
     }
   }, [demoMode, onDemoRideStatusChange, ride.status]);
@@ -1411,7 +1416,7 @@ export function ExploreView({
     ) {
       const endedAt = Math.max(Date.now(), ...ride.riders.map((rider) => rider.finishedAt ?? 0));
       if (playMode === 'local' && recentProfileKey) {
-        clearExploreRideCheckpoint(recentProfileKey);
+        clearExploreRideCheckpoint(checkpointProfileKey ?? recentProfileKey);
       }
       if (route) {
         const session = rideSessionRef.current ?? {
@@ -1437,6 +1442,7 @@ export function ExploreView({
     }
     previousRideStatusRef.current = ride.status;
   }, [
+    checkpointProfileKey,
     fullscreen,
     onFullscreenChange,
     onRideComplete,
@@ -1501,7 +1507,7 @@ export function ExploreView({
   const applyExploreRoute = (nextRoute: ExploreRoute, message = '', remember = true) => {
     if (serverControlledExplore) return;
     if (playMode === 'local' && recentProfileKey && nextRoute.id !== localRoute?.id) {
-      clearExploreRideCheckpoint(recentProfileKey);
+      clearExploreRideCheckpoint(checkpointProfileKey ?? recentProfileKey);
     }
     setLocalRoute(nextRoute);
     if (playMode === 'multiplayer') {
@@ -1928,7 +1934,7 @@ export function ExploreView({
       completedRideSessionIdRef.current = null;
       restoredBindingPendingRef.current = false;
       if (recentProfileKey) {
-        clearExploreRideCheckpoint(recentProfileKey);
+        clearExploreRideCheckpoint(checkpointProfileKey ?? recentProfileKey);
       }
       resetLocalRide();
     }

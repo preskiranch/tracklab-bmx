@@ -1020,3 +1020,38 @@ test('landmark tip auto hides after ten riding seconds and dismisses immediately
   await page.setViewportSize({width:844,height:390});
   await expect(tip).toHaveCount(0);
 });
+
+
+test('solo demo survives socket identity changes and reload restores paused progress', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 960 });
+  await installPaintedGoogleMaps(page, 'ipad');
+  await mockSignedInDeveloperAndExploreApis(page);
+  let socket: { send: (data: string) => void } | undefined;
+  await page.route('**/api/auth/websocket-ticket', route => route.fulfill({ json: { ticket: 'a'.repeat(43), expiresAt: Date.now() + 600_000 } }));
+  await page.routeWebSocket(/multiplayer/, ws => {
+    socket = ws;
+    ws.send(JSON.stringify({ type: 'connected', clientId: 'first-connection' }));
+  });
+  await openDemoExploreRide(page, false);
+  await page.clock.install();
+  await page.clock.runFor(15_000);
+  const checkpoint = () => page.evaluate(() => {
+    const key = Object.keys(localStorage).find(key => key.startsWith('tracklab-explore-ride-checkpoint-v1:') && key.endsWith('%3Ademo'));
+    return key ? JSON.parse(localStorage.getItem(key)!) : null;
+  });
+  await expect.poll(async () => (await checkpoint())?.elapsedMs ?? 0).toBeGreaterThan(10_000);
+  const before = await checkpoint();
+  expect(socket).toBeDefined();
+  socket!.send(JSON.stringify({ type: 'connected', clientId: 'reconnected-client' }));
+  await page.clock.runFor(5_000);
+  await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
+  expect((await checkpoint()).elapsedMs).toBeGreaterThan(before.elapsedMs);
+  await page.reload();
+  await expect(page.locator('.explore-view')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Resume ride', exact: true })).toBeVisible();
+  const recovered = await checkpoint();
+  expect(recovered.elapsedMs).toBeGreaterThanOrEqual(before.elapsedMs);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'Resume ride', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
+});
