@@ -1,3 +1,4 @@
+import { useExplorePreviewNarration } from '../hooks/useExplorePreviewNarration';
 import { setExploreDemoRecovery } from '../lib/exploreDemoRecovery';
 import { useExplorePreviewSettings } from '../hooks/useExplorePreviewSettings';
 import { loadExploreRouteVisits, rememberExploreRouteVisit } from '../lib/exploreRecentRoutes';
@@ -508,6 +509,7 @@ export function ExploreView({
     return () => cancelAnimationFrame(frame);
   }, [routePreview?.playing]);
   const beginRoutePreview = () => {
+    previewNarration.start();
     previewElapsedRef.current = 0;
     setPreviewZoom(14);
     setCameraFollowEnabled(false);
@@ -614,6 +616,7 @@ export function ExploreView({
       elevationLossMeters: recoveredElevation.elevationLossMeters,
     };
   }, [recoveredElevation, sourceRoute]);
+  const previewNarration = useExplorePreviewNarration(route, routePreview, distanceUnit === 'm');
   useEffect(() => {
     if (clubExploreEvent && route) onClubEventProgramReady?.(clubExploreEvent.eventId);
   }, [clubExploreEvent, onClubEventProgramReady, route]);
@@ -2514,6 +2517,8 @@ export function ExploreView({
                       </button>}
                       <button type="button" onClick={beginRoutePreview}><RotateCcw size={18} /> Replay</button>
                       <button type="button" onClick={exitRoutePreview}>Exit preview</button>
+                      <button type="button" aria-pressed={previewNarration.enabled} onClick={previewNarration.toggle}>{previewNarration.enabled ? 'Narration on' : 'Narration off'}</button>
+                      {previewNarration.message && <span role="status">{previewNarration.message}</span>}
                       <span>Zoom in or out while viewing the route. Your ride has not started.</span>
                     </>
                   )}

@@ -889,8 +889,17 @@ test('route preview stays in setup, orbits for 60 seconds and preserves zoom wit
   await page.getByRole('button', {name:'Reset', exact:true}).last().click();
   const start = page.getByRole('button', {name:'Start Explore the World ride', exact:true});
   await expect(start).toBeVisible();
+  await page.evaluate(() => {
+    const events: string[] = [];
+    (window as unknown as { narrationEvents: string[] }).narrationEvents = events;
+    Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: {
+      speak: (utterance: SpeechSynthesisUtterance) => events.push('speak:' + utterance.text),
+      cancel: () => events.push('cancel'), pause: () => events.push('pause'), resume: () => events.push('resume'),
+    }});
+  });
   await page.clock.install();
   await page.getByRole('button', {name:'Preview route · 1 min'}).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { narrationEvents: string[] }).narrationEvents.filter(x => x.startsWith('speak:')).length)).toBe(1);
   await page.locator('.explore-route-preview-controls').screenshot({path:'/tmp/preview124-controls.png'});
   const canvas = page.locator('.explore-map-canvas').first();
   await expect(canvas).toHaveAttribute('data-zoom', '14');
@@ -918,6 +927,14 @@ test('route preview stays in setup, orbits for 60 seconds and preserves zoom wit
   await page.getByRole('button', {name:'Exit preview', exact:true}).click();
   await expect(page.getByRole('button', {name:'Preview route · 1 min'})).toBeVisible();
   await expect(canvas).toHaveAttribute('data-zoom', '18');
+  const narration = await page.evaluate(() => (window as unknown as { narrationEvents: string[] }).narrationEvents);
+  expect(narration).toContain('pause');
+  expect(narration.at(-1)).toBe('cancel');
+  const spoken = narration.filter(x => x.startsWith('speak:'));
+  expect(spoken.length).toBe(4);
+  expect(spoken[0]).not.toBe(spoken[3]);
+  await page.clock.runFor(20_000);
+  expect(await page.evaluate(() => (window as unknown as { narrationEvents: string[] }).narrationEvents.filter(x => x.startsWith('speak:')).length)).toBe(4);
 });
 
 
