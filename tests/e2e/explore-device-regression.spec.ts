@@ -1055,3 +1055,29 @@ test('solo demo survives socket identity changes and reload restores paused prog
   await page.getByRole('button', { name: 'Resume ride', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
 });
+
+test('Explore sound controls never prime race cadence or BMX ambience', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 960 });
+  await installPaintedGoogleMaps(page, 'ipad');
+  await mockSignedInDeveloperAndExploreApis(page);
+  await page.addInitScript(() => {
+    const audioWindow = window as typeof window & { exploreRaceAudioPlays?: string[] };
+    audioWindow.exploreRaceAudioPlays = [];
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+      if (document.querySelector('.explore-view') && /uci-random-start|bmx-event-ambience/.test(this.src)) {
+        audioWindow.exploreRaceAudioPlays!.push(this.src);
+      }
+      return play.call(this);
+    };
+  });
+  await openDemoExploreRide(page, false);
+  await page.getByRole('button', { name: 'Mute bike sounds', exact: true }).click();
+  await page.getByRole('button', { name: 'Unmute bike sounds', exact: true }).click();
+  await page.getByRole('button', { name: 'Pause ride', exact: true }).click();
+  await page.getByRole('button', { name: 'Resume', exact: true }).click();
+  await page.clock.install();
+  await page.clock.runFor(30_000);
+  expect(await page.evaluate(() => (window as typeof window & { exploreRaceAudioPlays?: string[] }).exploreRaceAudioPlays)).toEqual([]);
+  await expect(page.getByRole('button', { name: 'Pause ride', exact: true })).toBeVisible();
+});

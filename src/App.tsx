@@ -5305,8 +5305,13 @@ export default function App() {
     selectedGhostFinishMs,
     ghostPlaybackMs,
   );
+  const raceAudioActivityActive = raceWorkspaceActive && !showMembershipLanding;
+  const activeRaceCommentaryPreferences = useMemo(() => ({
+    ...raceCommentaryPreferences,
+    enabled: raceAudioActivityActive && raceCommentaryPreferences.enabled,
+  }), [raceAudioActivityActive, raceCommentaryPreferences]);
   const raceCommentary = useRaceCommentary({
-    preferences: raceCommentaryPreferences,
+    preferences: activeRaceCommentaryPreferences,
     clubTabletSessionToken: clubTabletSessionActive
       ? clubTabletSession?.sessionToken
       : null,
@@ -5336,12 +5341,12 @@ export default function App() {
     onRecentLinesChange: handleRaceCommentaryRecentLinesChange,
   });
   useEffect(() => {
-    if (appMode === 'explore') {
+    if (!raceAudioActivityActive) {
       raceCommentary.stop();
       stopBmxEventAmbience();
       stopRaceAudioKeepAlive();
     }
-  }, [appMode, raceCommentary.stop]);
+  }, [raceAudioActivityActive, raceCommentary.stop]);
   const primeRaceAudio = raceCommentary.prime;
   const finishingAnnouncementsActive = (
     raceState === 'finished' && !raceCommentary.finishAnnouncementsComplete
@@ -5375,7 +5380,7 @@ export default function App() {
   const canCancelRace = startGateStatus.active || raceState === 'racing';
 
   useEffect(() => {
-    if (raceAmbienceActive) {
+    if (raceAudioActivityActive && raceAmbienceActive) {
       if (raceCommentaryPreferences.ambientEnabled) {
         void startBmxEventAmbience(raceCommentaryPreferences.ambientVolume);
       } else {
@@ -5387,6 +5392,7 @@ export default function App() {
     stopBmxEventAmbience();
     stopRaceAudioKeepAlive();
   }, [
+    raceAudioActivityActive,
     raceAmbienceActive,
     raceCommentaryPreferences.ambientEnabled,
     raceCommentaryPreferences.ambientVolume,
@@ -5461,6 +5467,10 @@ export default function App() {
       setReactionTimesByPlayer({});
     }
   }, [cancelStartGateSequence]);
+
+  useEffect(() => {
+    if (!raceAudioActivityActive) clearStartGateSequence(true);
+  }, [raceAudioActivityActive, clearStartGateSequence]);
 
   const cancelActiveClubEventGateAndRace = useCallback((reason: string) => {
     const eventId = activeClubEventGateIdRef.current;

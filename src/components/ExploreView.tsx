@@ -42,7 +42,6 @@ import {
   useRef,
   useState,
 } from 'react';
-import { primeAudioCues } from '../lib/audioCues';
 import { primeBikeRaceAudio, isBikeRaceAudioReady, stopBikeRaceAudio, updateExploreBikeAudio } from '../lib/bikeRaceAudio';
 import {
   exploreAverageSpeedMph,
@@ -1191,7 +1190,6 @@ export function ExploreView({
   useEffect(() => {
     const recover = () => {
       if (bikeSoundEnabled && !isBikeRaceAudioReady()) {
-        void primeAudioCues();
         void primeBikeRaceAudio();
       }
     };
@@ -1384,7 +1382,7 @@ export function ExploreView({
       clearScheduledStart();
       // Warm audio during the shared countdown. Fetching or decoding audio
       // must never delay the server-clock start on a slower tablet.
-      void primeAudioCues(); void primeBikeRaceAudio();
+      void primeBikeRaceAudio();
       scheduledStartTimerRef.current = window.setTimeout(
         attemptStart,
         Math.max(0, localStartAt - Date.now()),
@@ -1750,7 +1748,7 @@ export function ExploreView({
   const startOrResume = async () => {
     exitRoutePreview();
     if (serverControlledExplore) return;
-    void primeAudioCues(); void primeBikeRaceAudio();
+    void primeBikeRaceAudio();
     if (playMode === 'multiplayer') {
       if (!roomHost || (clubTabletDemoRoom && !demoParticipantEligible)) {
         return;
@@ -2585,7 +2583,6 @@ export function ExploreView({
                       stopBikeRaceAudio();
                     } else {
                       setBikeSoundEnabled(true);
-                      void primeAudioCues();
                       void primeBikeRaceAudio();
                     }
                   }}>
@@ -2705,7 +2702,7 @@ export function ExploreView({
                       <button
                         className="explore-resume-ride"
                         type="button"
-                        onPointerDown={() => { void primeAudioCues(); void primeBikeRaceAudio(); }}
+                        onPointerDown={() => { void primeBikeRaceAudio(); }}
                         onClick={startOrResume}
                         disabled={
                           players.length === 0
@@ -3039,7 +3036,7 @@ export function ExploreView({
                   <button
                     className="primary"
                     type="button"
-                    onPointerDown={() => { void primeAudioCues(); void primeBikeRaceAudio(); }}
+                    onPointerDown={() => { void primeBikeRaceAudio(); }}
                     onClick={startOrResume}
                     disabled={
                       players.length === 0
