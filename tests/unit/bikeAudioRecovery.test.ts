@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ExploreRider } from '../../src/types';
 
-async function setup(failFirstDownload = false) {
+async function setup(failFirstDownload = false, status = 200) {
   vi.resetModules();
   const gains: Array<{ value: number }> = [];
   const rates: Array<{ value: number }> = [];
@@ -28,7 +28,7 @@ async function setup(failFirstDownload = false) {
   };
   vi.doMock('../../src/lib/audioCues', () => ({ getTrackLabAudioContext: () => context }));
   let downloads = 0;
-  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: !failFirstDownload || downloads++ > 0, arrayBuffer: async () => new ArrayBuffer(1) })));
+  vi.stubGlobal('fetch', vi.fn(async () => ({ status, ok: status === 200 && (!failFirstDownload || downloads++ > 0), arrayBuffer: async () => new ArrayBuffer(1) })));
   const audio = await import('../../src/lib/bikeRaceAudio');
   await audio.primeBikeRaceAudio();
   const rider = { playerId: 1, cadence: 90, velocityMps: 8, finishedAt: null } as ExploreRider;
@@ -38,6 +38,22 @@ async function setup(failFirstDownload = false) {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.doUnmock('../../src/lib/audioCues'); });
 
 describe('Explore audio interruption recovery', () => {
+  it('decodes bundled iOS audio with status zero instead of treating it as a failed download', async () => {
+    vi.stubGlobal('window', { location: { protocol: 'capacitor:' } });
+    const { audio, context, gains, rider } = await setup(false, 0);
+    expect(context.decodeAudioData).toHaveBeenCalledTimes(1);
+    audio.updateExploreBikeAudio('riding', [rider]);
+    expect(audio.isBikeRaceAudioReady()).toBe(true);
+    expect(gains[1].value).toBeGreaterThan(0);
+  });
+
+  it('does not accept status zero as a successful web download', async () => {
+    vi.stubGlobal('window', { location: { protocol: 'https:' } });
+    const { audio, context } = await setup(false, 0);
+    expect(context.decodeAudioData).not.toHaveBeenCalled();
+    expect(audio.isBikeRaceAudioReady()).toBe(false);
+  });
+
   it('plays the original recording at normal speed while switching pedal and coast layers', async () => {
     const { audio, rates, gains, rider } = await setup();
     for (const cadence of [20, 90, 160]) {

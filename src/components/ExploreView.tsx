@@ -412,7 +412,6 @@ export function ExploreView({
   const clubTabletDemoActive = multiplayerAvailable && requestedClubTabletDemoActive;
   const clubEventLaunch = multiplayerAvailable ? requestedClubEventLaunch : null;
   const [bikeSoundEnabled, setBikeSoundEnabled] = useState(true);
-  const [bikeSoundReady, setBikeSoundReady] = useState(false);
   const recentRouteSelectRef = useRef<HTMLSelectElement>(null);
   const recentProfileKey = accountProfileKey?.trim() || null;
   const exploreRequestAccess = useMemo<ExploreRequestAccess | null>(() => {
@@ -1119,14 +1118,13 @@ export function ExploreView({
 
   useEffect(() => {
     updateExploreBikeAudio(bikeSoundEnabled ? ride.status : 'paused', ride.riders);
-    setBikeSoundReady(isBikeRaceAudioReady());
   }, [bikeSoundEnabled, ride.riders, ride.status]);
 
   useEffect(() => {
     const recover = () => {
       if (bikeSoundEnabled && !isBikeRaceAudioReady()) {
         void primeAudioCues();
-        void primeBikeRaceAudio().then(() => setBikeSoundReady(isBikeRaceAudioReady()));
+        void primeBikeRaceAudio();
       }
     };
     document.addEventListener('click', recover, true);
@@ -2469,19 +2467,19 @@ export function ExploreView({
                   {cameraOptionsOpen ? 'Close options' : 'View options'}
                 </button>
                 <div className={`explore-extra-controls${cameraOptionsOpen ? ' open' : ''}`}>
-                <button className="explore-bike-sound-toggle" type="button" title="Bike sounds" aria-label={bikeSoundEnabled && bikeSoundReady ? 'Mute bike sounds' : 'Enable bike sounds'}
+                <button className="explore-bike-sound-toggle" type="button" title="Bike sounds" aria-pressed={!bikeSoundEnabled} aria-label={bikeSoundEnabled ? 'Mute bike sounds' : 'Unmute bike sounds'}
                   onClick={() => {
-                    if (bikeSoundEnabled && bikeSoundReady) {
+                    if (bikeSoundEnabled) {
                       setBikeSoundEnabled(false);
                       stopBikeRaceAudio();
                     } else {
                       setBikeSoundEnabled(true);
                       void primeAudioCues();
-                      void primeBikeRaceAudio().then(() => setBikeSoundReady(isBikeRaceAudioReady()));
+                      void primeBikeRaceAudio();
                     }
                   }}>
-                  {bikeSoundEnabled && bikeSoundReady ? <Volume2 size={17} /> : <VolumeX size={17} />}
-                  <span>{bikeSoundEnabled && bikeSoundReady ? 'Sound on' : 'Enable sound'}</span>
+                  {bikeSoundEnabled ? <Volume2 size={17} /> : <VolumeX size={17} />}
+                  <span>{bikeSoundEnabled ? 'Mute' : 'Unmute'}</span>
                 </button>
                 <button
                   className={`explore-map-labels-toggle${cameraFollowEnabled ? '' : ' active'}`}

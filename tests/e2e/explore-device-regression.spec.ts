@@ -644,7 +644,7 @@ test('Explore produces audible bike output during a demo ride', async ({ page })
     }));
   }), { timeout: 20000 }).toBeGreaterThan(0.008);
   await page.getByRole('button', {name: 'Mute bike sounds'}).click();
-  await expect(page.getByRole('button', {name: 'Enable bike sounds'})).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Unmute bike sounds'})).toBeVisible();
   await expect.poll(() => page.evaluate(() => {
     const outputs = (window as typeof window & { bikeOutput?: AnalyserNode[] }).bikeOutput ?? [];
     return Math.max(0, ...outputs.map(analyser => {
@@ -653,7 +653,7 @@ test('Explore produces audible bike output during a demo ride', async ({ page })
       return Math.sqrt(samples.reduce((sum, sample) => sum + sample * sample, 0) / samples.length);
     }));
   })).toBeLessThan(0.001);
-  await page.getByRole('button', {name: 'Enable bike sounds'}).click();
+  await page.getByRole('button', {name: 'Unmute bike sounds'}).click();
   await expect(page.getByRole('button', {name: 'Mute bike sounds'})).toBeVisible();
   await page.screenshot({path:'/tmp/explore122-ipad-sound.png'});
 });
@@ -854,4 +854,24 @@ test('recent routes switch on one selection and ignore an older pending build', 
   await responded;
   await expect(recent).toHaveValue('EXPLORE-device-regression');
   await expect(page.locator('.explore-route-summary')).toContainText('38.5');
+});
+
+
+test('Explore defaults to sound enabled and toggles immediately even when audio cannot load', async ({page}) => {
+  await page.setViewportSize({width:1280,height:960});
+  await installPaintedGoogleMaps(page, 'ipad');
+  await mockSignedInDeveloperAndExploreApis(page);
+  await page.route('**/assets/bmx-bike-mechanics.mp3', route => route.fulfill({status:503,body:'Unavailable'}));
+  await openDemoExploreRide(page, false);
+  await page.getByRole('button', {name:'Pause ride'}).click();
+  const mute = page.getByRole('button', {name:'Mute bike sounds',exact:true});
+  const unmute = page.getByRole('button', {name:'Unmute bike sounds',exact:true});
+  await expect(mute).toHaveText('Mute');
+  await expect(mute).toHaveAttribute('aria-pressed','false');
+  await mute.click();
+  await expect(unmute).toHaveText('Unmute');
+  await expect(unmute).toHaveAttribute('aria-pressed','true');
+  await unmute.click();
+  await expect(mute).toHaveText('Mute');
+  await expect(mute).toHaveAttribute('aria-pressed','false');
 });

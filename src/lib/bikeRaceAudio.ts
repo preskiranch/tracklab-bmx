@@ -118,7 +118,12 @@ function loadBikeAudioBuffer(context: AudioContext) {
     lastBikeAudioLoadAttempt = Date.now();
     bikeAudioBufferPromise = fetch(bmxBikeMechanicsUrl)
       .then((response) => {
-        if (!response.ok) {
+        // WKWebView serves packaged assets through capacitor:// with status 0.
+        // Their bytes are valid even though Response.ok is false for that scheme.
+        const bundledNativeAsset = response.status === 0
+          && typeof window !== 'undefined'
+          && window.location.protocol === 'capacitor:';
+        if (!response.ok && !bundledNativeAsset) {
           throw new Error(`BMX bike audio returned ${response.status}`);
         }
         return response.arrayBuffer();
