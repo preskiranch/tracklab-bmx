@@ -277,7 +277,17 @@ function setLayerVolume(gain: GainNode, value: number, now: number) {
   gain.gain.setTargetAtTime(value, now, 0.035);
 }
 
+export function isBikeRaceAudioReady() {
+  return bikeAudioContext?.state === 'running' && bikeAudioChannels.size > 0;
+}
+
 export async function primeBikeRaceAudio() {
+  // Retry synchronously in this gesture even if a background resume is pending.
+  // WebKit can leave that earlier promise pending until a new user activation.
+  const context = getTrackLabAudioContext();
+  if (context && context.state !== 'running' && context.state !== 'closed') {
+    void context.resume().catch(() => undefined);
+  }
   bikeAudioSeenModes = new Map();
   const ready = await ensureBikeAudioChannels();
   publishBikeAudioDebug({});

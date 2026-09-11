@@ -22,6 +22,8 @@ import {
   Sparkles,
   Star,
   Users,
+  Volume2,
+  VolumeX,
   X,
   ZoomIn,
   ZoomOut,
@@ -38,7 +40,7 @@ import {
   useState,
 } from 'react';
 import { primeAudioCues } from '../lib/audioCues';
-import { primeBikeRaceAudio, stopBikeRaceAudio, updateExploreBikeAudio } from '../lib/bikeRaceAudio';
+import { primeBikeRaceAudio, isBikeRaceAudioReady, stopBikeRaceAudio, updateExploreBikeAudio } from '../lib/bikeRaceAudio';
 import {
   exploreAverageSpeedMph,
   exploreDemoMaximumCruiseMph,
@@ -409,6 +411,9 @@ export function ExploreView({
   const remoteStates = multiplayerAvailable ? requestedRemoteStates : unavailableExploreRemoteStates;
   const clubTabletDemoActive = multiplayerAvailable && requestedClubTabletDemoActive;
   const clubEventLaunch = multiplayerAvailable ? requestedClubEventLaunch : null;
+  const [bikeSoundEnabled, setBikeSoundEnabled] = useState(true);
+  const [bikeSoundReady, setBikeSoundReady] = useState(false);
+  const recentRouteSelectRef = useRef<HTMLSelectElement>(null);
   const recentProfileKey = accountProfileKey?.trim() || null;
   const exploreRequestAccess = useMemo<ExploreRequestAccess | null>(() => {
     const clubTabletSessionToken = requestAccess?.clubTabletSessionToken?.trim() ?? '';
@@ -1113,8 +1118,30 @@ export function ExploreView({
   }, [fullscreen, route]);
 
   useEffect(() => {
-    updateExploreBikeAudio(ride.status, ride.riders);
-  }, [ride.riders, ride.status]);
+    updateExploreBikeAudio(bikeSoundEnabled ? ride.status : 'paused', ride.riders);
+    setBikeSoundReady(isBikeRaceAudioReady());
+  }, [bikeSoundEnabled, ride.riders, ride.status]);
+
+  useEffect(() => {
+    const recover = () => {
+      if (bikeSoundEnabled && !isBikeRaceAudioReady()) {
+        void primeAudioCues();
+        void primeBikeRaceAudio().then(() => setBikeSoundReady(isBikeRaceAudioReady()));
+      }
+    };
+    document.addEventListener('click', recover, true);
+    document.addEventListener('keydown', recover, true);
+    return () => {
+      document.removeEventListener('click', recover, true);
+      document.removeEventListener('keydown', recover, true);
+    };
+  }, [bikeSoundEnabled]);
+
+  useEffect(() => {
+    if (recentRouteSelectRef.current) {
+      recentRouteSelectRef.current.value = route?.id ?? '';
+    }
+  }, [route?.id, recentRoutes]);
 
   useEffect(() => {
     if (
@@ -1410,7 +1437,7 @@ export function ExploreView({
     );
   };
 
-  const applyExploreRoute = (nextRoute: ExploreRoute, message = '') => {
+  const applyExploreRoute = (nextRoute: ExploreRoute, message = '', remember = true) => {
     if (serverControlledExplore) return;
     if (playMode === 'local' && recentProfileKey && nextRoute.id !== localRoute?.id) {
       clearExploreRideCheckpoint(recentProfileKey);
@@ -1419,7 +1446,7 @@ export function ExploreView({
     if (playMode === 'multiplayer') {
       onSyncRoute(nextRoute);
     }
-    rememberExploreRoute(nextRoute);
+    if (remember) rememberExploreRoute(nextRoute);
     setRouteStatus('idle');
     setRouteMessage(message);
   };
@@ -1447,6 +1474,9 @@ export function ExploreView({
     if (!recentRoute || !canChooseRoute) {
       return;
     }
+    // A saved route wins over any older in-flight route builder response.
+    routeRequestRef.current += 1;
+    setCameraRecenterRequest(request => request + 1);
     setSelectedOrigin({ point: recentRoute.origin, label: recentRoute.originLabel });
     setSelectedOriginPrediction(null);
     setOriginText(recentRoute.originLabel);
@@ -1460,6 +1490,7 @@ export function ExploreView({
     applyExploreRoute(
       recentRoute,
       `Recent route loaded: ${recentRoute.originLabel} to ${recentRoute.destinationLabel}.`,
+      false,
     );
   };
 
@@ -2116,7 +2147,8 @@ export function ExploreView({
               <span>Recent routes</span>
               <select
                 aria-label="Recent Explore routes"
-                value=""
+                ref={recentRouteSelectRef}
+                defaultValue=""
                 disabled={!canChooseRoute || recentRoutes.length === 0}
                 onChange={(event) => applyRecentRoute(event.target.value)}
               >
@@ -2437,6 +2469,20 @@ export function ExploreView({
                   {cameraOptionsOpen ? 'Close options' : 'View options'}
                 </button>
                 <div className={`explore-extra-controls${cameraOptionsOpen ? ' open' : ''}`}>
+                <button className="explore-bike-sound-toggle" type="button" title="Bike sounds" aria-label={bikeSoundEnabled && bikeSoundReady ? 'Mute bike sounds' : 'Enable bike sounds'}
+                  onClick={() => {
+                    if (bikeSoundEnabled && bikeSoundReady) {
+                      setBikeSoundEnabled(false);
+                      stopBikeRaceAudio();
+                    } else {
+                      setBikeSoundEnabled(true);
+                      void primeAudioCues();
+                      void primeBikeRaceAudio().then(() => setBikeSoundReady(isBikeRaceAudioReady()));
+                    }
+                  }}>
+                  {bikeSoundEnabled && bikeSoundReady ? <Volume2 size={17} /> : <VolumeX size={17} />}
+                  <span>{bikeSoundEnabled && bikeSoundReady ? 'Sound on' : 'Enable sound'}</span>
+                </button>
                 <button
                   className={`explore-map-labels-toggle${cameraFollowEnabled ? '' : ' active'}`}
                   type="button"
@@ -2534,6 +2580,7 @@ export function ExploreView({
                 </div>
                 {fullscreen && (
                   <div className="explore-session-actions">
+
                     {!serverControlledExplore && (ride.status === 'riding' ? (
                       <button
                         className="explore-pause-ride"
@@ -2592,7 +2639,7 @@ export function ExploreView({
                 }]).map((group) => (
                   <Suspense
                     fallback={<div className="explore-map-status">Loading comparison map…</div>}
-                    key={`${effectiveMapRenderer}-${group.id}-${fullscreen ? 'fullscreen' : 'setup'}-${viewportOrientation}`}
+                    key={`${route.id}-${effectiveMapRenderer}-${group.id}-${fullscreen ? 'fullscreen' : 'setup'}-${viewportOrientation}`}
                   >
                     {effectiveMapRenderer === 'google-3d' ? (
                       <ExploreGoogle3DMapPanel

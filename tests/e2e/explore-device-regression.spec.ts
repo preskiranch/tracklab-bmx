@@ -298,7 +298,8 @@ async function mockSignedInDeveloperAndExploreApis(page: Page) {
   }));
   await page.route('**/api/explore/recent-routes', async (route) => {
     if (route.request().method() === 'POST') {
-      recentRoutes = (route.request().postDataJSON() as { routes?: unknown[] }).routes ?? [];
+      const incoming = (route.request().postDataJSON() as { routes?: any[] }).routes ?? [];
+      recentRoutes = [...incoming, ...recentRoutes.filter((saved: any) => !incoming.some(item => item.id === saved.id))];
     }
     if (route.request().method() === 'DELETE') {
       const { routeId } = route.request().postDataJSON();
@@ -335,7 +336,7 @@ async function mockSignedInDeveloperAndExploreApis(page: Page) {
       contentType: 'application/json',
       body: JSON.stringify({
         route: {
-          id: 'EXPLORE-device-regression',
+          id: request.origin.lat === 38.5 ? 'EXPLORE-device-regression' : 'EXPLORE-second-route',
           origin: request.origin,
           destination: request.destination,
           originLabel: request.originLabel,
@@ -343,7 +344,7 @@ async function mockSignedInDeveloperAndExploreApis(page: Page) {
           travelMode: request.travelMode,
           distanceMeters: 1_000,
           durationSeconds: 300,
-          encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+          encodedPolyline: request.origin.lat === 38.5 ? '_p~iF~ps|U_ulLnnqC_mqNvxq`@' : '_se~F~ps|U_ulLnnqC_mqNvxq`@',
           elevationSamples: [
             { distanceMeters: 0, elevationMeters: 10 },
             { distanceMeters: 1_000, elevationMeters: 10 },
@@ -642,6 +643,19 @@ test('Explore produces audible bike output during a demo ride', async ({ page })
       return Math.sqrt(samples.reduce((sum, sample) => sum + sample * sample, 0) / samples.length);
     }));
   }), { timeout: 20000 }).toBeGreaterThan(0.008);
+  await page.getByRole('button', {name: 'Mute bike sounds'}).click();
+  await expect(page.getByRole('button', {name: 'Enable bike sounds'})).toBeVisible();
+  await expect.poll(() => page.evaluate(() => {
+    const outputs = (window as typeof window & { bikeOutput?: AnalyserNode[] }).bikeOutput ?? [];
+    return Math.max(0, ...outputs.map(analyser => {
+      const samples = new Float32Array(analyser.fftSize);
+      analyser.getFloatTimeDomainData(samples);
+      return Math.sqrt(samples.reduce((sum, sample) => sum + sample * sample, 0) / samples.length);
+    }));
+  })).toBeLessThan(0.001);
+  await page.getByRole('button', {name: 'Enable bike sounds'}).click();
+  await expect(page.getByRole('button', {name: 'Mute bike sounds'})).toBeVisible();
+  await page.screenshot({path:'/tmp/explore122-ipad-sound.png'});
 });
 
 test('Smart Route sends the selected surface through planning and route building', async ({ page }) => {
@@ -804,4 +818,40 @@ test('Street View targets the selected business or tapped rider and reports miss
   await page.evaluate(()=>(window as any).__streetUnavailable=true);
   await page.getByRole('button', {name:'Demo Rider 4 map position — open Street View',exact:true}).click();
   await expect(page.getByRole('alert')).toContainText('Street View is not available here');
+});
+
+
+test('recent routes switch on one selection and ignore an older pending build', async ({page}) => {
+  await page.setViewportSize({width:1280,height:960});
+  await installPaintedGoogleMaps(page, 'ipad');
+  await mockSignedInDeveloperAndExploreApis(page);
+  await openDemoExploreRide(page, false);
+  await page.getByRole('button', {name:'Pause ride'}).click();
+  await page.getByRole('button', {name:'Exit full screen'}).click();
+  const recent = page.getByRole('combobox', {name:'Recent Explore routes'});
+  await expect(recent).toHaveValue('EXPLORE-device-regression');
+  await page.getByRole('textbox', {name:'Starting location',exact:true}).fill('39.5, -120.2');
+  await page.getByRole('button', {name:'Build Explore the World route',exact:true}).click();
+  await expect(recent).toHaveValue('EXPLORE-second-route');
+  for (const id of ['EXPLORE-device-regression', 'EXPLORE-second-route', 'EXPLORE-device-regression']) {
+    await recent.selectOption(id);
+    await expect(recent).toHaveValue(id);
+    await expect(page.locator('.explore-route-summary')).toContainText(id === 'EXPLORE-second-route' ? '39.5' : '38.5');
+  }
+  let release!: () => void;
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/api/explore/route', async route => {
+    await hold;
+    await route.fallback();
+  });
+  await page.getByRole('textbox', {name:'Starting location',exact:true}).fill('39.5, -120.2');
+  const requested = page.waitForRequest('**/api/explore/route');
+  await page.getByRole('button', {name:'Build Explore the World route',exact:true}).click();
+  await requested;
+  await recent.selectOption('EXPLORE-device-regression');
+  const responded = page.waitForResponse('**/api/explore/route');
+  release();
+  await responded;
+  await expect(recent).toHaveValue('EXPLORE-device-regression');
+  await expect(page.locator('.explore-route-summary')).toContainText('38.5');
 });

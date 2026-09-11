@@ -81,6 +81,22 @@ describe('Explore audio interruption recovery', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  it('a fresh user gesture retries resume even while background recovery is pending', async () => {
+    const { audio, context, gains, rider } = await setup();
+    context.state = 'suspended';
+    let unblock!: () => void;
+    context.resume.mockImplementationOnce(() => new Promise<void>(resolve => { unblock = resolve; }));
+    audio.updateExploreBikeAudio('riding', [rider]);
+    expect(audio.isBikeRaceAudioReady()).toBe(false);
+    const prime = audio.primeBikeRaceAudio();
+    expect(context.resume).toHaveBeenCalledTimes(2);
+    unblock();
+    await prime;
+    audio.updateExploreBikeAudio('riding', [rider]);
+    expect(audio.isBikeRaceAudioReady()).toBe(true);
+    expect(gains[1].value).toBeGreaterThan(0);
+  });
+
   it('does not restart sound if the ride stops while recovery is pending', async () => {
     const { audio, context, gains, rider } = await setup();
     let resume!: () => void;
