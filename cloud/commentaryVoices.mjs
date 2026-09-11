@@ -79,6 +79,12 @@ export function commentarySpeechSpeed(eventKind) {
 }
 
 export function commentaryVoiceDefinition(_preset, eventKind, deliveryStyle) {
+  if (eventKind === 'route-preview') {
+    return {
+      voice: 'marin',
+      instructions: 'You are a warm, natural-sounding American female travel guide. Speak conversationally to one listener with relaxed pacing, gentle expression, natural breaths and short pauses. Sound interested and welcoming, never robotic, over-enunciated, breathless, theatrical or like a sales pitch. This is a calm route flyover before a ride, not a race. Read only the supplied narration, exactly as written. Do not invent facts or imitate a real person.',
+    };
+  }
   return {
     voice: commentaryVoice.voice,
     instructions: [
@@ -156,7 +162,7 @@ export function commentaryRealtimeResponseCreate(
         role: 'user',
         content: [{
           type: 'input_text',
-          text: `Perform this exact TrackLab BMX race call:\n${JSON.stringify(String(line))}`,
+          text: `Perform this exact ${eventKind === 'route-preview' ? 'route preview narration' : 'TrackLab BMX race call'}:\n${JSON.stringify(String(line))}`,
         }],
       }],
     },

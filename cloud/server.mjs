@@ -4290,7 +4290,7 @@ async function generateCommentarySpeech(
       deliveryStyle,
       signal: signalWithTimeout(
         signal,
-        eventKind === 'preview' ? 30_000 : eventKind === 'pre-race' ? 20_000 : 12_000,
+        (eventKind === 'preview' || eventKind === 'route-preview') ? 30_000 : eventKind === 'pre-race' ? 20_000 : 12_000,
       ),
     });
     commentarySpeechProviderStatus = 'ready';
@@ -20830,6 +20830,31 @@ async function serveStatic(request, response) {
       { line, model, source: 'local', deliveryStyle },
       { 'Cache-Control': 'no-store' },
     );
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/explore/preview-speech') {
+    if (request.method !== 'POST') { writeJson(response, 405, { error: 'Method not allowed' }); return; }
+    const access = await loadExploreRequestAccess(request, response);
+    if (!access) return;
+    if (!enforceRateLimit(request, response, commentaryRateLimiter, 40,
+      commentaryAccessRateLimitScope(access, 'explore-preview-speech'))) return;
+    const payload = await readJsonBody(request, 4_000);
+    const line = sanitizeText(payload?.line, '', 600);
+    if (!line) { writeJson(response, 400, { error: 'Preview narration is required.' }); return; }
+    if (!await requireCurrentExploreAccess(access, response)) return;
+    const cacheKey = commentarySpeechCacheKey(line, 'marin', 'route-preview', 'straight');
+    let speech = commentarySpeechCache.get(cacheKey);
+    if (!speech) {
+      const release = acquireCommentaryCapacity(response);
+      if (!release) return;
+      speech = commentarySpeechCache.setPending(cacheKey,
+        generateCommentarySpeech(line, 'marin', 'route-preview', 'straight', AbortSignal.timeout(30_000)).finally(release));
+    }
+    const audio = await speech.promise;
+    if (response.destroyed || response.writableEnded || !await requireCurrentExploreAccess(access, response)) return;
+    response.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store', 'Content-Length': audio.length });
+    response.end(audio);
     return;
   }
 

@@ -616,7 +616,7 @@ export function ExploreView({
       elevationLossMeters: recoveredElevation.elevationLossMeters,
     };
   }, [recoveredElevation, sourceRoute]);
-  const previewNarration = useExplorePreviewNarration(route, routePreview, distanceUnit === 'm');
+  const previewNarration = useExplorePreviewNarration(route, routePreview, distanceUnit === 'm', exploreRequestAccess);
   useEffect(() => {
     if (clubExploreEvent && route) onClubEventProgramReady?.(clubExploreEvent.eventId);
   }, [clubExploreEvent, onClubEventProgramReady, route]);

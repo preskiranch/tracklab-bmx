@@ -149,3 +149,11 @@ describe('commentary voice', () => {
     expect(peak).toBeLessThanOrEqual(Math.round(32_767 * 0.92));
   });
 });
+
+it('uses a natural female voice only for Explore route previews', () => {
+  const request = commentaryRealtimeSessionUpdate('marin', 'route-preview', 'straight');
+  expect(request.session.audio.output.voice).toBe('marin');
+  expect(request.session.instructions).toMatch(/female travel guide/);
+  expect(request.session.instructions).toMatch(/relaxed pacing/);
+  expect(commentaryVoiceDefinition('marin', 'race-start', 'straight').voice).toBe('cedar');
+});

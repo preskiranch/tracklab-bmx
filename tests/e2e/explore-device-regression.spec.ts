@@ -890,16 +890,33 @@ test('route preview stays in setup, orbits for 60 seconds and preserves zoom wit
   const start = page.getByRole('button', {name:'Start Explore the World ride', exact:true});
   await expect(start).toBeVisible();
   await page.evaluate(() => {
-    const events: string[] = [];
-    (window as unknown as { narrationEvents: string[] }).narrationEvents = events;
-    Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: {
-      speak: (utterance: SpeechSynthesisUtterance) => events.push('speak:' + utterance.text),
-      cancel: () => events.push('cancel'), pause: () => events.push('pause'), resume: () => events.push('resume'),
-    }});
+    const counts = { starts: 0, stops: 0 };
+    (window as unknown as { previewAudioCounts: typeof counts }).previewAudioCounts = counts;
+    const startNode = AudioBufferSourceNode.prototype.start;
+    const stopNode = AudioBufferSourceNode.prototype.stop;
+    AudioBufferSourceNode.prototype.start = function (...args) {
+      if (this.buffer?.duration === 1) counts.starts++;
+      return startNode.apply(this, args);
+    };
+    AudioBufferSourceNode.prototype.stop = function (...args) {
+      if (this.buffer?.duration === 1) counts.stops++;
+      return stopNode.apply(this, args);
+    };
+  });
+  const narrationRequests: string[] = [];
+  const wave = Buffer.alloc(44 + 48000);
+  wave.write('RIFF'); wave.writeUInt32LE(wave.length - 8, 4); wave.write('WAVEfmt ', 8);
+  wave.writeUInt32LE(16, 16); wave.writeUInt16LE(1, 20); wave.writeUInt16LE(1, 22);
+  wave.writeUInt32LE(24000, 24); wave.writeUInt32LE(48000, 28); wave.writeUInt16LE(2, 32); wave.writeUInt16LE(16, 34);
+  wave.write('data', 36); wave.writeUInt32LE(48000, 40);
+  await page.route('**/api/explore/preview-speech', async request => {
+    narrationRequests.push(request.request().postDataJSON().line);
+    await request.fulfill({contentType: 'audio/wav', body: wave});
   });
   await page.clock.install();
   await page.getByRole('button', {name:'Preview route · 1 min'}).click();
-  await expect.poll(() => page.evaluate(() => (window as unknown as { narrationEvents: string[] }).narrationEvents.filter(x => x.startsWith('speak:')).length)).toBe(1);
+  await expect.poll(() => narrationRequests.length).toBe(3);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { previewAudioCounts: { starts: number } }).previewAudioCounts.starts)).toBeGreaterThan(0);
   await page.locator('.explore-route-preview-controls').screenshot({path:'/tmp/preview124-controls.png'});
   const canvas = page.locator('.explore-map-canvas').first();
   await expect(canvas).toHaveAttribute('data-zoom', '14');
@@ -927,14 +944,10 @@ test('route preview stays in setup, orbits for 60 seconds and preserves zoom wit
   await page.getByRole('button', {name:'Exit preview', exact:true}).click();
   await expect(page.getByRole('button', {name:'Preview route · 1 min'})).toBeVisible();
   await expect(canvas).toHaveAttribute('data-zoom', '18');
-  const narration = await page.evaluate(() => (window as unknown as { narrationEvents: string[] }).narrationEvents);
-  expect(narration).toContain('pause');
-  expect(narration.at(-1)).toBe('cancel');
-  const spoken = narration.filter(x => x.startsWith('speak:'));
-  expect(spoken.length).toBe(4);
-  expect(spoken[0]).not.toBe(spoken[3]);
-  await page.clock.runFor(20_000);
-  expect(await page.evaluate(() => (window as unknown as { narrationEvents: string[] }).narrationEvents.filter(x => x.startsWith('speak:')).length)).toBe(4);
+  expect(narrationRequests.length).toBe(6);
+  expect(narrationRequests[0]).not.toBe(narrationRequests[3]);
+  await page.clock.runFor(1000);
+  expect(narrationRequests.length).toBe(6);
 });
 
 
@@ -1100,4 +1113,9 @@ test('Explore sound controls never prime race cadence or BMX ambience', async ({
   await page.clock.runFor(30_000);
   expect(await page.evaluate(() => (window as typeof window & { exploreRaceAudioPlays?: string[] }).exploreRaceAudioPlays)).toEqual([]);
   await expect(page.getByRole('button', { name: 'Pause ride', exact: true })).toBeVisible();
+});
+
+test('preview AI speech requires sign-in', async ({request}) => {
+  const response = await request.post('/api/explore/preview-speech', {data: {line: 'Preview this route.'}});
+  expect(response.status()).toBe(401);
 });
