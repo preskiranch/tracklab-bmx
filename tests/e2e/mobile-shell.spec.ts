@@ -856,3 +856,24 @@ test('iPhone navigation covers the status-bar area while content scrolls', async
   await page.evaluate(() => window.scrollBy(0, 300));
   await expect.poll(() => nav.evaluate(el => Math.round(el.getBoundingClientRect().top))).toBe(0);
 });
+
+test('app launch selects a different playable track on reload and respects shared links', async ({ page }) => {
+  await mockSignedInRacer(page, null, true);
+  const black = mobileRaceTrackMapping;
+  const chula = {...black, trackId:'chula-vista-elite-bmx', trackName:'Chula Vista Elite BMX', state:'California'};
+  await page.route('**/api/public-track-mappings', r=>r.fulfill({json:{trackMappings:{[black.trackId]:black,[chula.trackId]:chula},customRoutes:[]}}));
+  await page.goto('/');
+  await openSignedInApp(page);
+  await page.getByRole('button', {name:'BMX Race Intervals',exact:true}).click();
+  const picker=page.getByLabel('Playable interval track');
+  await expect.poll(()=>page.evaluate(()=>localStorage.getItem('tracklab-last-opening-track-v1'))).toMatch(/black-mountain-bmx|chula-vista-elite-bmx/);
+  const first=await picker.inputValue();
+  expect([black.trackId,chula.trackId]).toContain(first);
+  await page.reload();
+  await openSignedInApp(page);
+  await expect(picker).not.toHaveValue(first);
+  await expect(picker).toHaveValue(first===black.trackId?chula.trackId:black.trackId);
+  await page.goto('/?track=black-mountain-bmx');
+  await openSignedInApp(page);
+  await expect(picker).toHaveValue(black.trackId);
+});

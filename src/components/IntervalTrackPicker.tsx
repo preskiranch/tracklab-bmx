@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import type { TrackRecord, UserTrackMapping } from '../types';
 import './IntervalTrackPicker.css';
 import { playableIntervalTracks } from '../lib/playableIntervalTracks';
-export default function IntervalTrackPicker({tracks,mappings,selectedId,onSelect,locked,userId}: {
+export default function IntervalTrackPicker({tracks,mappings,selectedId,onSelect,locked,userId,autoSelect=true}: {
   tracks: TrackRecord[]; mappings: Record<string,UserTrackMapping>; selectedId: string;
-  onSelect:(id:string)=>void; locked:boolean; userId?:string;
+  onSelect:(id:string)=>void; locked:boolean; userId?:string; autoSelect?:boolean;
 }) {
   const [all,setAll]=useState(false);
   const [search,setSearch]=useState('');
@@ -19,8 +19,8 @@ export default function IntervalTrackPicker({tracks,mappings,selectedId,onSelect
   const regions=useMemo(()=>[...new Set(tracks.filter(t=>!country||t.country===country).map(t=>t.state).filter(Boolean))].sort((a,b)=>a.localeCompare(b)),[tracks,country]);
   const matches=useMemo(()=>tracks.filter(t=>(!country||t.country===country)&&(!region||t.state===region)&&`${t.name} ${t.state} ${t.country}`.toLowerCase().includes(search.trim().toLowerCase())),[tracks,search,country,region]);
   useEffect(()=>{
-    if (!locked && playable.length && !playableIds.has(selectedId)) onSelect(playable[0].id);
-  },[locked,onSelect,playable,playableIds,selectedId]);
+    if (autoSelect && !locked && playable.length && !playableIds.has(selectedId)) onSelect(playable[0].id);
+  },[autoSelect,locked,onSelect,playable,playableIds,selectedId]);
   useEffect(()=>{
     let active=true;setRequested({});setMessage('');
     if(userId)void fetch('/api/track-mapping-requests').then(async r=>{

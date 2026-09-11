@@ -1,3 +1,4 @@
+import { chooseOpeningTrack, openingTrackStorageKey, automaticTrackHistoryKey } from './lib/openingTrack';
 import { ClubStudentLobby } from './components/ClubStudentLobby';
 import { hasPlayableIntervalZones, playableIntervalTracks } from './lib/playableIntervalTracks';
 import { setAnalyticsAppVisible, setAnalyticsWattbikeConnections } from './lib/adminAnalytics';
@@ -1036,7 +1037,9 @@ function splitSectionPreviewFromDraft(draft: DraftTrackSplit): TrackSplitSection
 const currentSearchParam = (name: string) => new URLSearchParams(location.search).get(name);
 
 function readRequestedTrackId() {
-  return currentSearchParam('track')?.trim() || null;
+  const requested = currentSearchParam('track')?.trim() || null;
+  // Our own URL updates are not explicit incoming shared-track links.
+  return requested && window.history.state?.[automaticTrackHistoryKey] === requested ? null : requested;
 }
 
 function findInitialTrack(requestedTrackId: string | null, customRoutes: TrackRecord[] = []) {
@@ -1977,6 +1980,7 @@ export default function App() {
   const pendingInitialTrackIdRef = useRef(initialRequestedTrackId);
   const [initialUrlTrackPending, setInitialUrlTrackPending] = useState(initialRequestedTrackId !== null);
   const [initialTrack] = useState(() => findInitialTrack(initialRequestedTrackId, initialCustomRoutes));
+  const openingTrackChosenRef = useRef(initialRequestedTrackId !== null);
   const selectedTrackIdRef = useRef(initialTrack.id);
   const lastBmxTrackIdRef = useRef(initialTrack.countryCode === 'CUSTOM' ? defaultTrack.id : initialTrack.id);
   const lastStraightSprintTrackIdRef = useRef<string | null>(
@@ -1992,6 +1996,7 @@ export default function App() {
   const [storedMappings, setStoredMappings] = useState<StoredTrackMappings>(readStoredTrackMappings);
   const storedMappingsRef = useRef(storedMappings);
   const [publicTrackMappings, setPublicTrackMappings] = useState<StoredTrackMappings>({});
+  const [openingMappingsReady, setOpeningMappingsReady] = useState(false);
   const [mappingSaveStatus, setMappingSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [mappingSaveMessage, setMappingSaveMessage] = useState<string | null>(null);
   const [mappingMode, setMappingMode] = useState(false);
@@ -3432,6 +3437,7 @@ export default function App() {
         })
         .finally(() => {
           loading = false;
+          if (!cancelled) setOpeningMappingsReady(true);
         });
     };
     const refreshWhenVisible = () => {
@@ -3629,7 +3635,7 @@ export default function App() {
 
     const url = new URL(window.location.href);
     url.searchParams.set('track', selectedTrackId);
-    window.history.replaceState(null, '', url);
+    window.history.replaceState({ ...window.history.state, [automaticTrackHistoryKey]: selectedTrackId }, '', url);
   }, [initialUrlTrackPending, selectedTrackId, showMembershipLanding]);
 
   const countries = useMemo(() => countriesForCatalog(baseCatalogTracks), [baseCatalogTracks]);
@@ -5573,7 +5579,28 @@ export default function App() {
     }
   }, []);
 
+  useEffect(() => {
+    if (openingTrackChosenRef.current || !catalogDatabaseReady || !openingMappingsReady) return;
+    // Choose once at launch, never during a gate sequence, ride, or room setup.
+    if (selectedTrackId !== initialTrack.id || raceState !== 'ready' || startGateStatus.active
+      || clubEventLaunch || playMode === 'multiplayer' || mappingMode) {
+      openingTrackChosenRef.current = true;
+      return;
+    }
+    let previousId: string | null = null;
+    try { previousId = window.localStorage.getItem(openingTrackStorageKey); } catch { /* Storage is optional. */ }
+    const next = chooseOpeningTrack(baseCatalogTracks, intervalTrackMappings, previousId);
+    if (!next) return;
+    openingTrackChosenRef.current = true;
+    try { window.localStorage.setItem(openingTrackStorageKey, next.id); } catch { /* Keep the selected track. */ }
+    setSelectedCountry(next.country);
+    setSelectedState(next.state);
+    setSelectedTrackId(next.id);
+  }, [baseCatalogTracks, catalogDatabaseReady, clubEventLaunch, initialTrack.id, intervalTrackMappings,
+    mappingMode, openingMappingsReady, playMode, raceState, selectedTrackId, startGateStatus.active]);
+
   const prepareForTrackSelection = useCallback((nextTrackId: string) => {
+    openingTrackChosenRef.current = true;
     void cancelActiveClubOwnerTrainingGroup().catch((error: unknown) => {
       console.warn(`Could not cancel club training preparation while changing tracks: ${error instanceof Error ? error.message : String(error)}`);
     });
@@ -13680,7 +13707,7 @@ export default function App() {
             </div>
           ) : appMode === 'race' && !mappingMode ? (
             <Suspense fallback={<span>Loading playable tracks…</span>}>
-              <IntervalTrackPicker key={authUser?.id ?? 'guest'} tracks={baseCatalogTracks} mappings={intervalTrackMappings}
+              <IntervalTrackPicker autoSelect={openingTrackChosenRef.current} key={authUser?.id ?? 'guest'} tracks={baseCatalogTracks} mappings={intervalTrackMappings}
                 selectedId={selectedTrackId} onSelect={handleTrackChange}
                 locked={clubEventConfigurationLocked || startGateStatus.active || raceState === 'racing'}
                 userId={authUser?.id}/>
