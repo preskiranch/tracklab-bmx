@@ -45,6 +45,7 @@ export function ExploreGoogle3DMapPanel({
   distanceUnit,
   followZoom,
   previewProgress = null,
+  previewHeading = 0,
   cameraRecenterRequest,
   cameraFollowEnabled,
   showMapLabels,
@@ -379,10 +380,10 @@ export function ExploreGoogle3DMapPanel({
     const center = exploreRoutePoint(routePoints, route.distanceMeters * (previewProgress === 1 ? 0.5 : previewProgress), route.distanceMeters);
     if (!center || interactionActiveRef.current) return;
     map.center = { ...center, altitude: 0 };
-    map.heading = previewProgress * 360;
+    map.heading = previewHeading;
     map.tilt = previewProgress === 1 ? 0 : 55;
     if (previewProgress === 1) map.range = Math.max(500, route.distanceMeters * 1.35);
-  }, [previewProgress, routePoints, route.distanceMeters, status]);
+  }, [previewProgress, previewHeading, routePoints, route.distanceMeters, status]);
 
   useExploreMapViewportRefresh(containerRef, () => {
     const map = mapRef.current;

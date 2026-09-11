@@ -1,3 +1,4 @@
+import { useExplorePreviewSettings } from '../hooks/useExplorePreviewSettings';
 import { loadExploreRouteVisits, rememberExploreRouteVisit } from '../lib/exploreRecentRoutes';
 import { exploreRoutePoint, exploreRoutePoints } from '../lib/explore';
 import {
@@ -470,7 +471,11 @@ export function ExploreView({
   const [selectedDestinationPrediction, setSelectedDestinationPrediction] = useState<PlacePredictionOption | null>(null);
   const exploreDistanceUnit: ExploreDistanceUnit = distanceUnit === 'm' ? 'km' : 'mi';
   const [followZoom, setFollowZoom] = useState(18);
-  const [routePreview, setRoutePreview] = useState<{ progress: number; playing: boolean } | null>(null);
+  const [routePreview, setRoutePreview] = useState<{ progress: number; heading: number; playing: boolean } | null>(null);
+  const orbitSettings = useExplorePreviewSettings(exploreRequestAccess, developerMode);
+  const orbitSpeedRef = useRef(orbitSettings.speed);
+  orbitSpeedRef.current = orbitSettings.speed;
+  const previewHeadingRef = useRef(0);
   const previewElapsedRef = useRef(0);
   useEffect(() => {
     if (!routePreview?.playing) return;
@@ -479,11 +484,15 @@ export function ExploreView({
     let lastPaint = last;
     const tick = (now: number) => {
       // Backgrounding the app pauses the tour instead of skipping the route.
-      if (!document.hidden) previewElapsedRef.current += Math.min(now - last, 100);
+      if (!document.hidden) {
+        const elapsed = Math.min(now - last, 100);
+        previewElapsedRef.current += elapsed;
+        previewHeadingRef.current += elapsed / 1000 * 6 * orbitSpeedRef.current;
+      }
       last = now;
       if (now - lastPaint >= 32) {
-        const progress = Math.min(1, previewElapsedRef.current / 30_000);
-        setRoutePreview({ progress, playing: progress < 1 });
+        const progress = Math.min(1, previewElapsedRef.current / 60_000);
+        setRoutePreview({ progress, heading: previewHeadingRef.current % 360, playing: progress < 1 });
         lastPaint = now;
         if (progress === 1) return;
       }
@@ -495,7 +504,9 @@ export function ExploreView({
   const beginRoutePreview = () => {
     previewElapsedRef.current = 0;
     setCameraFollowEnabled(false);
-    setRoutePreview({ progress: 0, playing: true });
+    previewHeadingRef.current = 0;
+    void orbitSettings.refresh();
+    setRoutePreview({ progress: 0, heading: 0, playing: true });
   };
   const exitRoutePreview = () => {
     setRoutePreview(null);
@@ -2467,11 +2478,26 @@ export function ExploreView({
               {!fullscreen && ride.status === 'ready' && (
                 <div className="explore-route-preview-controls" aria-label="Route preview">
                   {recentRoutes.some(saved => saved.id === route.id) && <span className="explore-route-saved">Saved to Recent routes · ready whenever you are</span>}
+                  {developerMode && (
+                    <details className="explore-orbit-settings">
+                      <summary>Administrator · Orbit speed {orbitSettings.editing ? '(unlocked)' : '(locked)'}</summary>
+                      <p>Preview length: 1 minute. Rotation: {orbitSettings.speed.toFixed(1)}× · one turn every {Math.round(60 / orbitSettings.speed)} seconds.</p>
+                      {orbitSettings.editing ? <>
+                        <label>Orbit speed
+                          <input type="range" aria-label="Preview orbit speed" min="0.1" max="2" step="0.1" value={orbitSettings.speed} disabled={orbitSettings.saving}
+                            onChange={event => orbitSettings.setDraftSpeed(Number(event.target.value))} />
+                        </label>
+                        <button type="button" disabled={orbitSettings.saving} onClick={() => void orbitSettings.save()}>Save &amp; lock for all devices</button>
+                        <button type="button" disabled={orbitSettings.saving} onClick={orbitSettings.cancel}>Cancel speed change</button>
+                      </> : <button type="button" onClick={orbitSettings.unlock}>Unlock orbit speed</button>}
+                      <p role="status">{orbitSettings.message}</p>
+                    </details>
+                  )}
                   {!routePreview ? (
-                    <button type="button" onClick={beginRoutePreview}><Play size={18} /> Preview route · 30 sec</button>
+                    <button type="button" onClick={beginRoutePreview}><Play size={18} /> Preview route · 1 min</button>
                   ) : (
                     <>
-                      <strong>{routePreview.progress === 1 ? 'Preview complete' : `Route preview · ${Math.floor(routePreview.progress * 30)} / 30 sec`}</strong>
+                      <strong>{routePreview.progress === 1 ? 'Preview complete' : `Route preview · ${Math.floor(routePreview.progress * 60)} / 60 sec`}</strong>
                       {routePreview.progress < 1 && <button type="button" onClick={() => setRoutePreview(value => value && ({ ...value, playing: !value.playing }))}>
                         {routePreview.playing ? <Pause size={18} /> : <Play size={18} />}
                         {routePreview.playing ? 'Pause preview' : 'Resume preview'}
@@ -2725,6 +2751,7 @@ export function ExploreView({
                         cameraRecenterRequest={cameraRecenterRequest}
                         cameraFollowEnabled={cameraFollowEnabled && !routePreview}
                         previewProgress={routePreview?.progress ?? null}
+                        previewHeading={routePreview?.heading ?? 0}
                         showMapLabels={showMapLabels}
                         followTravelHeading={followTravelHeading}
                         onCameraInteraction={useFreeCamera}
@@ -2740,6 +2767,7 @@ export function ExploreView({
                         cameraRecenterRequest={cameraRecenterRequest}
                         cameraFollowEnabled={cameraFollowEnabled && !routePreview}
                         previewProgress={routePreview?.progress ?? null}
+                        previewHeading={routePreview?.heading ?? 0}
                         showMapLabels={showMapLabels}
                         followTravelHeading={followTravelHeading}
                         onCameraInteraction={useFreeCamera}

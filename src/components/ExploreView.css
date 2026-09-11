@@ -392,3 +392,9 @@
 .explore-route-library-tabs { display: flex; gap: 4px; padding: 4px; border-radius: 12px; background: #f1f1f4; margin: 12px 0; }
 .explore-route-library-tabs button { flex: 1; min-width: 0; min-height: 44px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #303034; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
 .explore-route-library-tabs button[aria-pressed="true"] { background: white; border-color: #d6d6dc; box-shadow: 0 1px 3px #0001; }
+
+.explore-orbit-settings { width: 100%; padding: 10px; border: 1px solid #d6d6dc; border-radius: 10px; }
+.explore-orbit-settings summary { cursor: pointer; font-weight: 600; }
+.explore-orbit-settings input { width: min(100%, 320px); display: block; min-height: 44px; }
+.explore-orbit-settings p { margin: 8px 0; font-size: 14px; }
+.explore-orbit-settings button { margin: 4px; }

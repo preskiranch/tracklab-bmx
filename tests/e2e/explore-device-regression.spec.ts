@@ -255,14 +255,14 @@ async function installPaintedGoogleMaps(
   }, { legacyApplePreference, userAgent: iosUserAgents[device] });
 }
 
-async function mockSignedInDeveloperAndExploreApis(page: Page) {
+async function mockSignedInDeveloperAndExploreApis(page: Page, administrator = true) {
   const now = Date.now();
   const user = {
-    id: 'explore-device-regression',
-    profileKey: 'user:explore-device-regression',
-    email: 'explore-device@tracklab.test',
+    id: administrator ? 'explore-device-regression' : 'other-preview-account',
+    profileKey: administrator ? 'user:explore-device-regression' : 'user:other-preview-account',
+    email: administrator ? 'explore-device@tracklab.test' : 'other-preview@tracklab.test',
     name: 'Explore Device Developer',
-    admin: true,
+    admin: administrator,
     membership: { tier: 'racer', bikeSeats: 4, updatedAt: now },
   };
   let recentRoutes: unknown[] = [];
@@ -878,7 +878,8 @@ test('Explore defaults to sound enabled and toggles immediately even when audio 
 });
 
 
-test('route preview stays in setup, orbits for 30 seconds and preserves zoom without starting a ride', async ({page}) => {
+test('route preview stays in setup, orbits for 60 seconds and preserves zoom without starting a ride', async ({page}) => {
+  test.setTimeout(120_000);
   await page.setViewportSize({width:1280,height:960});
   await installPaintedGoogleMaps(page, 'ipad');
   await mockSignedInDeveloperAndExploreApis(page);
@@ -889,11 +890,11 @@ test('route preview stays in setup, orbits for 30 seconds and preserves zoom wit
   const start = page.getByRole('button', {name:'Start Explore the World ride', exact:true});
   await expect(start).toBeVisible();
   await page.clock.install();
-  await page.getByRole('button', {name:'Preview route · 30 sec'}).click();
+  await page.getByRole('button', {name:'Preview route · 1 min'}).click();
   await page.locator('.explore-route-preview-controls').screenshot({path:'/tmp/preview124-controls.png'});
   const canvas = page.locator('.explore-map-canvas').first();
   await page.clock.runFor(10_000);
-  await expect(canvas).toHaveAttribute('data-heading', /1[12][0-9]/);
+  await expect(canvas).toHaveAttribute('data-heading', /6[0-9]/);
   await page.getByRole('button', {name:'Pause preview', exact:true}).click();
   const center = await canvas.getAttribute('data-center');
   await page.getByRole('button', {name:'Show more of the route', exact:true}).click();
@@ -904,16 +905,16 @@ test('route preview stays in setup, orbits for 30 seconds and preserves zoom wit
   await page.setViewportSize({width:390,height:844});
   await page.getByRole('button', {name:'Resume preview', exact:true}).click();
   await page.clock.runFor(10_000);
-  await expect(canvas).toHaveAttribute('data-heading', /2[34][0-9]/);
+  await expect(canvas).toHaveAttribute('data-heading', /1[12][0-9]/);
   await page.setViewportSize({width:844,height:390});
-  await page.clock.runFor(10_500);
+  await page.clock.runFor(40_500);
   await expect(page.getByText('Preview complete', {exact:true})).toBeVisible();
   await expect(canvas).toHaveAttribute('data-route-overview','true');
   await expect(start).toBeVisible();
   await page.getByRole('button', {name:'Replay', exact:true}).click();
   await page.clock.runFor(1000);
   await page.getByRole('button', {name:'Exit preview', exact:true}).click();
-  await expect(page.getByRole('button', {name:'Preview route · 30 sec'})).toBeVisible();
+  await expect(page.getByRole('button', {name:'Preview route · 1 min'})).toBeVisible();
 });
 
 
@@ -931,7 +932,7 @@ test('create save and preview a route with no bike or demo riders then restore i
   expect((await saved).ok()).toBe(true);
   await expect(page.getByRole('button', {name:'Start Explore the World ride', exact:true})).toBeDisabled();
   await expect(page.getByText('Saved to Recent routes · ready whenever you are')).toBeVisible();
-  await page.getByRole('button', {name:'Preview route · 30 sec'}).click();
+  await page.getByRole('button', {name:'Preview route · 1 min'}).click();
   await expect(page.getByRole('button', {name:'Pause preview', exact:true})).toBeVisible();
   await page.reload();
   await openSignedInApp(page);
@@ -941,6 +942,57 @@ test('create save and preview a route with no bike or demo riders then restore i
   await expect(page.locator('.explore-route-summary')).toBeVisible();
   await page.getByRole('button', {name:'Recent routes', exact:true}).click();
   await expect(page.getByRole('combobox', {name:'Recent Explore routes'})).toHaveValue('EXPLORE-device-regression');
-  await expect(page.getByRole('button', {name:'Preview route · 30 sec'})).toBeVisible();
+  await expect(page.getByRole('button', {name:'Preview route · 1 min'})).toBeVisible();
   await expect(page.getByRole('button', {name:'Start Explore the World ride', exact:true})).toBeDisabled();
+});
+
+
+test('administrator locks orbit speed globally and a different account receives it', async ({page, browser}) => {
+  let globalSpeed = 1;
+  const serveSettings = async (target: Page) => {
+    await target.route('**/api/explore/preview-settings', async route => {
+      if (route.request().method() === 'PATCH') globalSpeed = route.request().postDataJSON().orbitSpeed;
+      await route.fulfill({contentType:'application/json', body:JSON.stringify({orbitSpeed:globalSpeed, locked:true})});
+    });
+  };
+  const buildWithoutBike = async (target: Page) => {
+    await target.goto('/');
+    await openSignedInApp(target);
+    await target.getByRole('button', {name:'Explore the World', exact:true}).click();
+    await target.getByRole('textbox', {name:'Starting location', exact:true}).fill('38.5, -120.2');
+    await target.getByRole('textbox', {name:'Destination', exact:true}).fill('43.252, -126.453');
+    await target.getByRole('button', {name:'Build Explore the World route'}).click();
+  };
+  await page.setViewportSize({width:1280,height:960});
+  await installPaintedGoogleMaps(page, 'ipad');
+  await mockSignedInDeveloperAndExploreApis(page);
+  await serveSettings(page);
+  await buildWithoutBike(page);
+  await page.getByText('Administrator · Orbit speed (locked)', {exact:true}).click();
+  await page.getByRole('button', {name:'Unlock orbit speed', exact:true}).click();
+  await page.getByRole('slider', {name:'Preview orbit speed'}).fill('0.5');
+  await page.getByRole('button', {name:'Save & lock for all devices', exact:true}).click();
+  await expect(page.getByText('Saved and locked for all devices.', {exact:true})).toBeVisible();
+  expect(globalSpeed).toBe(0.5);
+  await expect(page.getByRole('slider', {name:'Preview orbit speed'})).toHaveCount(0);
+  const context = await browser.newContext({viewport:{width:390,height:844}});
+  const other = await context.newPage();
+  await installPaintedGoogleMaps(other, 'iphone');
+  await mockSignedInDeveloperAndExploreApis(other, false);
+  await serveSettings(other);
+  await buildWithoutBike(other);
+  await expect(other.getByText(/Administrator · Orbit speed/)).toHaveCount(0);
+  await other.clock.install();
+  await other.getByRole('button', {name:'Preview route · 1 min'}).click();
+  await other.clock.runFor(10_000);
+  await expect(other.locator('.explore-map-canvas').first()).toHaveAttribute('data-heading', /3[0-9]/);
+  await context.close();
+});
+
+test('preview settings endpoint allows reads but rejects unsigned changes', async ({request}) => {
+  const response = await request.get('/api/explore/preview-settings');
+  expect(response.ok()).toBe(true);
+  expect(await response.json()).toMatchObject({orbitSpeed:1, locked:true});
+  const update = await request.patch('/api/explore/preview-settings', {data:{orbitSpeed:2}});
+  expect(update.status()).toBe(401);
 });

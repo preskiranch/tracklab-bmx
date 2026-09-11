@@ -20569,6 +20569,40 @@ async function serveStatic(request, response) {
     return;
   }
 
+  if (requestUrl.pathname === '/api/explore/preview-settings') {
+    const profileKey = 'global:explore-preview-settings';
+    if (request.method === 'GET') {
+      const data = await persistence.loadUserData(profileKey);
+      const value = data?.accountProfile?.orbitSpeed;
+      const orbitSpeed = Number.isFinite(value) && value >= 0.1 && value <= 2 ? value : 1;
+      writeJson(response, 200, { orbitSpeed, locked: true }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (request.method === 'PATCH') {
+      const session = await requireAuthSession(request, response);
+      if (!session) return;
+      if (!session.user.admin && !isAdminEmail(session.user.email)) {
+        writeJson(response, 403, { error: 'Only the administrator can change the preview orbit speed.' });
+        return;
+      }
+      const payload = await readJsonBody(request, 4096);
+      const orbitSpeed = payload?.orbitSpeed;
+      if (typeof orbitSpeed !== 'number' || !Number.isFinite(orbitSpeed) || orbitSpeed < 0.1 || orbitSpeed > 2) {
+        writeJson(response, 400, { error: 'Choose an orbit speed between 0.1× and 2×.' });
+        return;
+      }
+      const saved = await persistence.saveUserData(profileKey, { accountProfile: { orbitSpeed, updatedAt: Date.now() } });
+      if (!saved) {
+        writeJson(response, 503, { error: 'Could not save the preview speed. Please retry.' });
+        return;
+      }
+      writeJson(response, 200, { orbitSpeed: saved.accountProfile.orbitSpeed, locked: true }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    writeJson(response, 405, { error: 'Method not allowed' });
+    return;
+  }
+
   if (requestUrl.pathname === '/api/global-race-view') {
     if (request.method === 'GET' || request.method === 'HEAD') {
       const userData = await persistence.loadUserData(globalRaceViewProfileKey);

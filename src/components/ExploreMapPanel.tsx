@@ -35,6 +35,7 @@ export type ExploreMapPanelProps = {
   distanceUnit: ExploreDistanceUnit;
   followZoom: number;
   previewProgress?: number | null;
+  previewHeading?: number;
   cameraRecenterRequest: number;
   cameraFollowEnabled: boolean;
   showMapLabels: boolean;
@@ -347,6 +348,7 @@ export function ExploreMapPanel({
   distanceUnit,
   followZoom,
   previewProgress = null,
+  previewHeading = 0,
   cameraRecenterRequest,
   cameraFollowEnabled,
   showMapLabels,
@@ -701,13 +703,13 @@ export function ExploreMapPanel({
     }
     const center = exploreRoutePoint(routePoints, route.distanceMeters * previewProgress, route.distanceMeters);
     if (!center || interactionActiveRef.current) return;
-    map.moveCamera?.({ center, heading: previewProgress * 360, tilt: 45 });
+    map.moveCamera?.({ center, heading: previewHeading, tilt: 45 });
     if (!map.moveCamera) {
       map.setCenter?.(center);
-      map.setHeading(previewProgress * 360);
+      map.setHeading(previewHeading);
       map.setTilt(45);
     }
-  }, [previewProgress, routePoints, route.distanceMeters, status]);
+  }, [previewProgress, previewHeading, routePoints, route.distanceMeters, status]);
 
   useExploreMapViewportRefresh(containerRef, () => {
     const google = googleRef.current;
