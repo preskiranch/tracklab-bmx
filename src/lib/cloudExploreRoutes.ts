@@ -42,3 +42,7 @@ export function saveCloudExploreRoutes(
     body: JSON.stringify({ routes }),
   }, access);
 }
+
+export function deleteCloudExploreRoute(routeId: string, access?: ExploreRequestAccess | null) {
+  return routeHistoryRequest({ method: 'DELETE', body: JSON.stringify({ routeId }) }, access);
+}

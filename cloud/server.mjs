@@ -1,3 +1,4 @@
+import { mergeExploreRouteHistoryEntries } from './exploreRouteHistory.mjs';
 import { clubStudentAgreement } from './clubStudentRoom.mjs';
 import { normalizeAnalyticsEvent, analyticsDays } from './adminAnalytics.mjs';
 import { createMappingRequestStore, isPlayableIntervalMapping, sendMappingRequestEmail } from './trackMappingRequests.mjs';
@@ -11053,10 +11054,7 @@ function sanitizeExploreRouteHistory(value) {
 }
 
 function mergeExploreRouteHistory(preferred, fallback) {
-  return sanitizeExploreRouteHistory([
-    ...(Array.isArray(preferred) ? preferred : []),
-    ...(Array.isArray(fallback) ? fallback : []),
-  ]);
+  return mergeExploreRouteHistoryEntries(preferred, fallback, sanitizeExploreRouteHistory);
 }
 
 function sanitizeExploreState(value, client, room) {
@@ -20356,6 +20354,30 @@ async function serveStatic(request, response) {
       writeJson(response, 200, {
         routes: sanitizeExploreRouteHistory(userData?.exploreRoutes),
       }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    if (request.method === 'DELETE') {
+      if (identity.kind === 'demo') {
+        writeJson(response, 403, { error: 'Demo routes are temporary.' });
+        return;
+      }
+      const payload = await readJsonBody(request, 4096);
+      const routeId = sanitizeText(payload?.routeId, '', 96);
+      if (!routeId) {
+        writeJson(response, 400, { error: 'Choose a saved route to delete.' });
+        return;
+      }
+      if (!await requireCurrentExploreAccess(access, response)) return;
+      const userData = await saveMergedUserData(identity.profileKey, {
+        exploreRoutes: [{ id: routeId, deletedAt: Date.now() }],
+      });
+      if (!userData) {
+        writeJson(response, 503, { error: 'Could not delete the route. Please try again.' });
+        return;
+      }
+      if (!await requireCurrentExploreAccess(access, response)) return;
+      writeJson(response, 200, { routes: sanitizeExploreRouteHistory(userData.exploreRoutes) }, { 'Cache-Control': 'no-store' });
       return;
     }
 

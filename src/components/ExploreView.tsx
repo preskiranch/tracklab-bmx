@@ -71,7 +71,7 @@ import {
   saveExploreRideCheckpoint,
   type ExploreRideCheckpoint,
 } from '../lib/exploreRideCheckpoint';
-import { loadCloudExploreRoutes, saveCloudExploreRoutes } from '../lib/cloudExploreRoutes';
+import { deleteCloudExploreRoute, loadCloudExploreRoutes, saveCloudExploreRoutes } from '../lib/cloudExploreRoutes';
 import {
   exploreElevationAtMeter,
   exploreGradeAtMeter,
@@ -488,6 +488,9 @@ export function ExploreView({
       ? loadRecentExploreRoutes(recentProfileKey)
       : [],
   }));
+  const [routeToDelete, setRouteToDelete] = useState<string | null>(null);
+  const [routeDeleting, setRouteDeleting] = useState(false);
+  const [routeDeleteError, setRouteDeleteError] = useState('');
   const recentRouteStateRef = useRef(recentRouteState);
   recentRouteStateRef.current = recentRouteState;
   // Fail closed during an athlete/device switch. Effects load the new scope
@@ -724,7 +727,7 @@ export function ExploreView({
 
   useEffect(() => {
     let cancelled = false;
-    recentRouteSaveSequenceRef.current += 1;
+    const loadSequence = ++recentRouteSaveSequenceRef.current;
     if (!recentProfileKey) {
       setRecentRouteState({ profileKey: null, routes: [] });
       return () => {
@@ -740,7 +743,7 @@ export function ExploreView({
     if (!cloudRecentRoutesEnabled) {
       void upgradeExploreRoutesToBicycleRoads(cachedRoutes)
         .then((migration) => {
-          if (cancelled || recentRouteProfileRef.current !== recentProfileKey) {
+          if (cancelled || loadSequence !== recentRouteSaveSequenceRef.current || recentRouteProfileRef.current !== recentProfileKey) {
             return;
           }
           const nextRoutes = writeRecentExploreRoutes(recentProfileKey, migration.routes);
@@ -765,19 +768,19 @@ export function ExploreView({
 
     void loadCloudExploreRoutes(exploreRequestAccess)
       .then(async (cloudRoutes) => {
-        if (cancelled || recentRouteProfileRef.current !== recentProfileKey) {
+        if (cancelled || loadSequence !== recentRouteSaveSequenceRef.current || recentRouteProfileRef.current !== recentProfileKey) {
           return;
         }
         const sourceRoutes = reconcileCloudExploreRouteHistory(
           cloudRoutes,
           cachedRoutes,
-          cloudRecentRoutesAuthoritative,
+          true,
         );
         const migration = await upgradeExploreRoutesToBicycleRoads(
           sourceRoutes,
           (request) => fetchExploreRoute(request, exploreRequestAccess),
         );
-        if (cancelled || recentRouteProfileRef.current !== recentProfileKey) {
+        if (cancelled || loadSequence !== recentRouteSaveSequenceRef.current || recentRouteProfileRef.current !== recentProfileKey) {
           return;
         }
         const nextRoutes = writeRecentExploreRoutes(recentProfileKey, migration.routes);
@@ -787,7 +790,7 @@ export function ExploreView({
         const nextIds = nextRoutes.map((route) => route.id).join('|');
         if (migration.upgradedCount > 0 || cloudIds !== nextIds) {
           const savedRoutes = await saveCloudExploreRoutes(nextRoutes, exploreRequestAccess);
-          if (!cancelled && recentRouteProfileRef.current === recentProfileKey) {
+          if (!cancelled && loadSequence === recentRouteSaveSequenceRef.current && recentRouteProfileRef.current === recentProfileKey) {
             const synchronizedRoutes = writeRecentExploreRoutes(recentProfileKey, savedRoutes);
             setRecentRouteState({ profileKey: recentProfileKey, routes: synchronizedRoutes });
           }
@@ -859,6 +862,25 @@ export function ExploreView({
     exploreRequestAccess,
     recentProfileKey,
   ]);
+
+  const deleteRecentRoute = async (routeId: string) => {
+    if (!recentProfileKey || routeDeleting) return;
+    const profileKey = recentProfileKey;
+    ++recentRouteSaveSequenceRef.current;
+    setRouteDeleting(true);
+    setRouteDeleteError('');
+    try {
+      const next = cloudRecentRoutesEnabled
+        ? await deleteCloudExploreRoute(routeId, exploreRequestAccess)
+        : recentRoutes.filter(saved => saved.id !== routeId);
+      if (recentRouteProfileRef.current !== profileKey) return;
+      const saved = writeRecentExploreRoutes(profileKey, next);
+      setRecentRouteState({ profileKey, routes: saved });
+      setRouteToDelete(null);
+    } catch (error) {
+      if (recentRouteProfileRef.current === profileKey) setRouteDeleteError(error instanceof Error ? error.message : 'Could not delete route. Try again.');
+    } finally { setRouteDeleting(false); }
+  };
 
   const closeLandmark = useCallback(() => {
     landmarkRequestRef.current += 1;
@@ -2097,6 +2119,25 @@ export function ExploreView({
                 ))}
               </select>
             </label>
+            {recentRoutes.length > 0 && (
+              <details className="explore-manage-routes">
+                <summary>Manage routes</summary>
+                <p>Remove saved routes. Completed training results stay saved.</p>
+                {recentRoutes.map(saved => (
+                  <div className="explore-saved-route-row" key={saved.id}>
+                    <strong>{saved.name || `${saved.originLabel} → ${saved.destinationLabel}`}</strong>
+                    {routeToDelete === saved.id ? (
+                      <div>
+                        <span>Delete this saved route?</span>
+                        <button type="button" disabled={routeDeleting} onClick={() => void deleteRecentRoute(saved.id)}>{routeDeleting ? 'Deleting…' : 'Delete route'}</button>
+                        <button type="button" disabled={routeDeleting} onClick={() => setRouteToDelete(null)}>Cancel</button>
+                      </div>
+                    ) : <button type="button" disabled={routeDeleting} aria-label={`Delete saved route ${saved.name || saved.originLabel}`} onClick={() => { setRouteDeleteError(''); setRouteToDelete(saved.id); }}>Delete</button>}
+                  </div>
+                ))}
+                {routeDeleteError && <p role="alert">{routeDeleteError}</p>}
+              </details>
+            )}
             <section className="explore-smart-route">
               <div>
                 <Sparkles size={17} />

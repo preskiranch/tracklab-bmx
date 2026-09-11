@@ -336,3 +336,10 @@
 .platform-shell.explore-fullscreen .explore-landmark-hint {
   bottom: calc(var(--explore-rider-reserve) + 8px);
 }
+.explore-manage-routes { min-width: 0; margin-block: 8px; }
+.explore-manage-routes summary { cursor: pointer; padding-block: 10px; font-weight: 700; }
+.explore-manage-routes p { font-size: 14px; }
+.explore-saved-route-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-block: 12px; border-bottom: 1px solid var(--line); }
+.explore-saved-route-row strong { flex: 1 1 180px; overflow-wrap: anywhere; font-size: 16px; }
+.explore-saved-route-row > div { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.explore-saved-route-row button { min-height: 44px; padding: 8px 12px; }

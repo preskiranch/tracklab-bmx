@@ -264,6 +264,10 @@ async function mockSignedInDeveloperAndExploreApis(page: Page) {
     if (route.request().method() === 'POST') {
       recentRoutes = (route.request().postDataJSON() as { routes?: unknown[] }).routes ?? [];
     }
+    if (route.request().method() === 'DELETE') {
+      const { routeId } = route.request().postDataJSON();
+      recentRoutes = recentRoutes.filter((saved: any) => saved.id !== routeId);
+    }
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ routes: recentRoutes }),
@@ -660,4 +664,28 @@ test('Explore phone keeps its center across labeled view changes and rotation', 
   await transitionExploreViewport(page, deviceMatrices.iphone[3]);
   await expectSameCenter();
   await page.screenshot({ path: '/tmp/explore115-landscape.png' });
+});
+
+
+test('Explore deletes a saved route only after confirmation and keeps it removed on reload', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await installPaintedGoogleMaps(page, 'iphone');
+  await mockSignedInDeveloperAndExploreApis(page);
+  await openDemoExploreRide(page, false);
+  await page.getByRole('button', { name: 'Pause ride' }).click();
+  await page.getByRole('button', { name: 'Exit full screen' }).click();
+  await page.getByText('Manage routes', { exact: true }).click();
+  await page.getByRole('button', { name: /^Delete saved route/ }).click();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.getByRole('button', { name: /^Delete saved route/ })).toHaveCount(1);
+  await page.getByRole('button', { name: /^Delete saved route/ }).click();
+  const deleted = page.waitForRequest(r => r.method() === 'DELETE' && r.url().includes('/api/explore/recent-routes'));
+  await page.getByRole('button', { name: 'Delete route', exact: true }).click();
+  expect((await deleted).postDataJSON()).toEqual({ routeId: 'EXPLORE-device-regression' });
+  await expect(page.getByText('Manage routes', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('combobox', { name: 'Recent Explore routes' })).toBeDisabled();
+  await page.reload();
+  await openSignedInApp(page);
+  await page.getByRole('button', { name: 'Explore the World', exact: true }).click();
+  await expect(page.getByText('Manage routes', { exact: true })).toHaveCount(0);
 });
