@@ -99,6 +99,7 @@ type EarthTrackViewProps = {
   raceState: RaceState;
   raceDistanceMeters?: number;
   raceAirSetting?: number;
+  privateSprintLabAllowed?: boolean;
   raceViewFullscreen: boolean;
   startGateActive: boolean;
   startGatePhase: 'idle' | 'staging' | 'cadence' | 'false-start' | 'go';
@@ -215,6 +216,7 @@ export function EarthTrackView({
   raceState,
   raceDistanceMeters,
   raceAirSetting,
+  privateSprintLabAllowed = false,
   raceViewFullscreen,
   startGateActive,
   startGatePhase,
@@ -329,6 +331,7 @@ export function EarthTrackView({
   const showingRace3D = raceViewMode === '3d'
     && !mappingMode
     && race3DFallbackTrackId !== track.id;
+  const [privateSprintLab, setPrivateSprintLab] = useState(false);
   const showingGameArena = raceViewMode === 'game';
   const showingAny3D = showingPedalZone3D || showingRace3D;
   const phoneLandscapeDock = raceViewFullscreen && !showingGameArena && Boolean(presentationViewport
@@ -568,6 +571,12 @@ export function EarthTrackView({
             {imageryLabel}
           </div>
           <h2>{track.name}</h2>
+          {showingGameArena && privateSprintLabAllowed && <button type="button"
+            disabled={raceState === 'racing' || startGateActive}
+            aria-pressed={privateSprintLab}
+            onClick={() => setPrivateSprintLab(value => !value)}>
+            {privateSprintLab ? 'Stadium test on · use original' : 'Try private stadium'}
+          </button>}
           <p>{track.address ?? `${track.state}, ${track.country}`} / {formatDistanceMeters(track.lengthMeters, distanceUnit)} / {track.surface}</p>
         </div>
         <div className="earth-meta">
@@ -598,6 +607,7 @@ export function EarthTrackView({
         {showingGameArena ? (
           <Suspense fallback={<div className="google-map-status loading">Loading BMX game arena…</div>}>
             <DragStripGameArenaLayer
+              privateStadium={privateSprintLabAllowed && privateSprintLab}
               riders={mapRiders}
               ghostRiders={mapGhostRiders}
               remoteRaceStates={mapRemoteRaceStates}
@@ -843,7 +853,7 @@ export function EarthTrackView({
             <strong>{raceState === 'racing' ? 'Live Race' : raceState === 'finished' ? 'Session Complete' : 'Ready'}</strong>
           </div>
         )}
-        <div className="earth-overlay bottom-left">
+        {!(showingGameArena && privateSprintLabAllowed && privateSprintLab) && <div className="earth-overlay bottom-left">
           <span>Angle {activeEarthAngle} deg</span>
           <span>Heading {activeEarthHeading} deg</span>
           <span>{showingPedalZone3D ? '3D obstacles' : showingRace3D ? '3D terrain' : showingGameArena ? 'Game arena' : 'Satellite'}</span>
@@ -872,7 +882,7 @@ export function EarthTrackView({
             </span>
           )}
           <span>{activeZones.length} pedal zone{activeZones.length === 1 ? '' : 's'}</span>
-        </div>
+        </div>}
 
         {raceViewFullscreen && startGateActive && (startGatePhase === 'staging' || startGatePhase === 'false-start') && (
           <div className="race-staging-countdown" role="status" aria-live="polite">

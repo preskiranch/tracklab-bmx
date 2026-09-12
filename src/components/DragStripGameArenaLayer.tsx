@@ -1,3 +1,4 @@
+import { PrivateSprintStadium } from './PrivateSprintStadium';
 import { useLayoutEffect, useMemo, useRef } from 'react';
 import { racePositionsAreEstablished } from '../lib/racePositionDisplay';
 import { riderAnimationState, riderCrankStepCount } from '../lib/riderAnimation';
@@ -22,7 +23,7 @@ import type {
 import { EVERGREEN_RIDER_FILTER } from '../lib/playerPalette';
 import type { PersonalRecordAchievements } from '../lib/personalRecords';
 
-type ArenaRider = {
+export type ArenaRider = {
   id: string;
   playerId: PlayerSlot['id'];
   name: string;
@@ -34,12 +35,14 @@ type ArenaRider = {
   speedKph: number | null;
   finishedAt: number | null;
   frame: number;
+  cadenceRpm?: number;
   ghost: boolean;
   local: boolean;
   disqualified: boolean;
 };
 
 type DragStripGameArenaLayerProps = {
+  privateStadium?: boolean;
   riders: RiderState[];
   ghostRiders: GhostPlaybackRider[];
   remoteRaceStates: MultiplayerRaceState[];
@@ -933,6 +936,7 @@ function ArenaPanel({
 }
 
 export function DragStripGameArenaLayer({
+  privateStadium = false,
   riders,
   ghostRiders,
   remoteRaceStates,
@@ -979,6 +983,7 @@ export function DragStripGameArenaLayer({
         rank: rider.rank,
         speedKph: rider.velocity > 0 ? rider.velocity * 3.6 : null,
         finishedAt: rider.finishedAt,
+        cadenceRpm: animation.pedaling ? sample?.cadence ?? 0 : 0,
         frame: animation.pedaling ? riderFrame(animation.crankStep) : 0,
         ghost: false,
         local: true,
@@ -996,6 +1001,7 @@ export function DragStripGameArenaLayer({
       rank: rider.rank,
       speedKph: rider.speedKph ?? (rider.velocity > 0 ? rider.velocity * 3.6 : null),
       finishedAt: rider.finishedAt,
+      cadenceRpm: rider.cadence ?? 0,
       frame: raceState === 'racing' && (rider.cadence ?? 0) >= 1
         ? Math.floor(Math.max(0, rider.distance) * 1.7) % 9
         : 0,
@@ -1014,6 +1020,7 @@ export function DragStripGameArenaLayer({
       rank: rider.rank,
       speedKph: rider.velocity > 0 ? rider.velocity * 3.6 : null,
       finishedAt: rider.finishedAt,
+      cadenceRpm: rider.velocity > 0 ? 90 : 0,
       frame: raceState === 'racing' ? Math.floor(Math.max(0, rider.distance) * 1.7) % 9 : 0,
       ghost: true,
       local: false,
@@ -1021,6 +1028,9 @@ export function DragStripGameArenaLayer({
     }));
     return [...local, ...remote, ...ghosts];
   }, [disqualifiedPlayerIdSet, ghostRiders, players, raceState, remoteRaceStates, riders, samplesByDevice]);
+  if (privateStadium) return <PrivateSprintStadium riders={arenaRiders}
+    raceDistanceMeters={raceDistanceMeters} raceState={raceState}
+    startGatePhase={startGatePhase} speedUnit={speedUnit} distanceUnit={distanceUnit} />;
   const activeRiders = arenaRiders.filter((rider) => !rider.ghost);
   const arenaViewport: ArenaViewport = {
     id: 'drag-strip-adaptive-viewport',

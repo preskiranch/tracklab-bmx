@@ -1,0 +1,25 @@
+.private-sprint-stadium { position:absolute; inset:0; display:grid; grid-template-rows:minmax(0,1fr) auto; overflow:hidden; background:#0a1018; color:#f4f7fa; font-family:system-ui,sans-serif; }
+.private-sprint-surface { position:relative; min-height:0; min-width:0; overflow:hidden; }
+.private-sprint-stadium canvas { position:absolute; inset:0; display:block; width:100%; height:100%; min-height:0; min-width:0; }
+.private-sprint-scoreboard { padding:8px 12px max(8px,env(safe-area-inset-bottom)); background:#0c121a; border-top:1px solid #546472; }
+.private-sprint-scoreboard header { display:flex; justify-content:space-between; gap:8px; font-size:10px; letter-spacing:.12em; color:#a9bac9; margin-bottom:6px; }
+.private-sprint-cards { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
+.private-sprint-cards article { min-width:0; display:grid; gap:3px; padding:9px 12px; border:1px solid #35414e; border-top:3px solid; border-radius:5px; background:linear-gradient(135deg,#1b2733,#101721); }
+.private-sprint-cards strong { font-size:clamp(12px,1.3vw,20px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.private-sprint-cards span { font-size:12px; color:#bac8d4; }
+.private-sprint-cards b { font-size:clamp(16px,2vw,26px); font-variant-numeric:tabular-nums; }
+.private-sprint-cards small { font-size:10px; color:#bac8d4; }
+@media (orientation:portrait) and (max-width:600px) { .private-sprint-cards { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (orientation:landscape) and (max-height:500px) { .private-sprint-scoreboard { padding:4px 8px max(4px,env(safe-area-inset-bottom)); } .private-sprint-cards article { padding:4px 8px; gap:1px; } .private-sprint-scoreboard header { margin-bottom:3px; font-size:9px; } .private-sprint-cards b { font-size:16px; } }
+
+.private-stadium-status { position:absolute; inset:0; display:grid; place-content:center; padding:24px; text-align:center; background:#0b1521; color:#f4f7fa; font-size:16px; }
+
+.private-sprint-scoreboard header { align-items:center; }
+.private-sprint-scoreboard header button { appearance:none; border:1px solid #526374; border-radius:6px; background:#1a2733; color:#edf3f7; padding:6px 12px; font:600 12px system-ui,sans-serif; cursor:pointer; }
+.private-sprint-scoreboard header button:focus-visible { outline:2px solid #b2f363; outline-offset:2px; }
+.private-sprint-scoreboard header button:disabled { opacity:.5; cursor:default; }
+
+.race-fullscreen .private-sprint-surface { margin-left:env(safe-area-inset-left,0px); margin-right:env(safe-area-inset-right,0px); }
+.private-sprint-scoreboard { padding-left:max(12px,env(safe-area-inset-left,0px)); padding-right:max(12px,env(safe-area-inset-right,0px)); }
+.private-sprint-cards strong { font-size:clamp(14px,1.3vw,20px); white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; line-height:1.2; }
+.private-sprint-cards span { font-size:13px; }

@@ -1,3 +1,4 @@
+import { canUsePrivateStadium } from './lib/privateStadiumAccess';
 import { hasExploreDemoRecovery, setExploreDemoRecovery } from './lib/exploreDemoRecovery';
 import { chooseOpeningTrack, openingTrackStorageKey, automaticTrackHistoryKey } from './lib/openingTrack';
 import { ClubStudentLobby } from './components/ClubStudentLobby';
@@ -14279,6 +14280,7 @@ export default function App() {
                 <div className="race-canvas-shell">
                   <Suspense fallback={lazyLoadingFallback}>
                   <EarthTrackView
+                  privateSprintLabAllowed={canUsePrivateStadium(authUser, clubTabletKioskMode, regularUserPreview)}
                   track={effectiveTrack}
                   riders={stagedRiders}
                   ghostRiders={selectedGhostRiders}
