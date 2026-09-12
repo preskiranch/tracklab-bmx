@@ -108,12 +108,10 @@ export function clubTabletAutoRestoreMayRun({
 /**
  * Chooses a logical Club Tablet only when this installation can identify it
  * without guessing. A device-only native binding is authoritative for the
- * same club. Older installations that predate that binding may recover from
- * one unique live Wattbike-to-tablet assignment instead.
+ * same club. Without that binding, recovery must be selected explicitly by the owner.
  */
 export function selectClubTabletAutoRestoreMatch({
   clubId,
-  connectedBikeDeviceIds,
   devices,
   recoveryHint,
 }: Readonly<{
@@ -131,16 +129,6 @@ export function selectClubTabletAutoRestoreMatch({
     if (boundDevice) return { device: boundDevice, reason: 'device-binding' };
   }
 
-  const connectedIds = new Set(connectedBikeDeviceIds.flatMap((value) => {
-    const deviceId = Math.round(Number(value));
-    return Number.isSafeInteger(deviceId) && deviceId > 0 ? [deviceId] : [];
-  }));
-  if (connectedIds.size === 0) return null;
-
-  const assignedMatches = clubDevices.filter((device) => (
-    device.pairedBike != null && connectedIds.has(device.pairedBike.deviceId)
-  ));
-  return assignedMatches.length === 1
-    ? { device: assignedMatches[0], reason: 'paired-wattbike' }
-    : null;
+  // A shared Wattbike identifies the bike, never this phone or tablet.
+  return null;
 }

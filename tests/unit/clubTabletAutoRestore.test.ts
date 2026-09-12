@@ -77,16 +77,16 @@ describe('Club Tablet automatic restore matching', () => {
     })).toEqual({ device: baseDevice, reason: 'device-binding' });
   });
 
-  it('ignores a binding from another club and uses one unique connected Wattbike assignment', () => {
+  it('never converts a phone based on a connected Wattbike or another club binding', () => {
     expect(selectClubTabletAutoRestoreMatch({
       clubId: baseDevice.clubId,
       connectedBikeDeviceIds: [58_701],
       devices: [baseDevice],
       recoveryHint: { clubId: 'another-club', deviceId: baseDevice.id },
-    })).toEqual({ device: baseDevice, reason: 'paired-wattbike' });
+    })).toBeNull();
   });
 
-  it('restores complete and restored rows because state is not physical-device presence', () => {
+  it('does not infer device identity from completed tablet rows', () => {
     for (const recoveryState of ['complete', 'restored'] as const) {
       const device = { ...baseDevice, recoveryState, recoveryCompleted: true };
       expect(selectClubTabletAutoRestoreMatch({
@@ -94,7 +94,7 @@ describe('Club Tablet automatic restore matching', () => {
         connectedBikeDeviceIds: [device.pairedBike!.deviceId],
         devices: [device],
         recoveryHint: null,
-      })).toEqual({ device, reason: 'paired-wattbike' });
+      })).toBeNull();
     }
   });
 

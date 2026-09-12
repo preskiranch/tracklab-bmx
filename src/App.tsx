@@ -317,6 +317,7 @@ import type {
 } from './components/ClubLiveAthleteBridge';
 import {
   clearNativeClubTabletCredential,
+  forgetNativeClubTabletAuthorization,
   saveNativeClubTabletRecoveryBinding,
 } from './lib/nativeClubTabletCredential';
 import { clubTabletAutoRestoreMayRun } from './lib/clubTabletAutoRestore';
@@ -2061,6 +2062,8 @@ export default function App() {
   const [nativeBluetoothStatus, setNativeBluetoothStatus] = useState<NativeBluetoothBootstrapStatus>(
     getNativeBluetoothBootstrapStatus,
   );
+  const [clubTabletExitBusy, setClubTabletExitBusy] = useState(false);
+  const [clubTabletExitError, setClubTabletExitError] = useState('');
   const clubTabletEmergencyExitRef = useRef<() => void>(() => undefined);
   const clubTabletSessionRef = useRef<ClubTabletSessionCredential | null>(clubTabletSession);
   const clubTabletCompletionReviewSessionTokenRef = useRef<string | null>(null);
@@ -11215,6 +11218,29 @@ export default function App() {
     };
   }, [clubEventLaunch?.eventId, clubTabletSession, handleClubTabletEndAthlete]);
 
+  const exitClubTabletMode = async () => {
+    if (clubTabletExitBusy) return;
+    setClubTabletExitBusy(true);
+    setClubTabletExitError('');
+    try {
+      // Remove only this installation's kiosk keys; retain queued athlete
+      // results and leave the club's other enrolled devices untouched.
+      await forgetNativeClubTabletAuthorization();
+      void handleClubTabletEndAthlete();
+      await logoutAuthUser().catch(() => undefined);
+      handleClubTabletDeviceChange(null);
+      setAuthUser(null);
+      setAuthStatus('signed-out');
+      setMembership(createMembership('visitor'));
+      setAppMode('race');
+      setShowMembershipLanding(true);
+    } catch {
+      setClubTabletExitError('Could not exit Club Tablet mode. Please try again.');
+    } finally {
+      setClubTabletExitBusy(false);
+    }
+  };
+
   const handleClubTabletExerciseReviewStart = useCallback((
     completedSession: ClubTabletSessionCredential,
   ) => {
@@ -13368,6 +13394,11 @@ export default function App() {
                     ? 'Exit demo activity'
                     : 'Club Tablet Home'}
               </button>
+              <button type="button" disabled={clubTabletExitBusy} onClick={() => void exitClubTabletMode()}>
+                {clubTabletExitBusy ? 'Exiting…' : 'Exit Club Tablet mode'}
+              </button>
+              {clubTabletExitError && <p role="alert">{clubTabletExitError}</p>}
+
             </>
           ) : (
           <>

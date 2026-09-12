@@ -266,7 +266,7 @@ export async function clearNativeClubTabletCredential() {
 
 /**
  * Permanently forgets both authorization and recovery identity. Use only for
- * an explicit owner revoke; expiry and verification failures must call the
+ * an explicit owner revoke or exit from kiosk mode; expiry and verification failures must call the
  * bearer-only clear above so the same physical tablet remains recoverable.
  */
 export async function forgetNativeClubTabletAuthorization() {

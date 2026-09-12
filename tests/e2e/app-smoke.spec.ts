@@ -8822,7 +8822,8 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
   await expect(monitor.getByText('Bike connected · PM 950', { exact: true })).toHaveCount(0);
 });
 
-test('native club owner sign-in restores the uniquely assigned Wattbike tablet into kiosk mode', async ({ page }) => {
+for (const exitOnly of [true, false]) {
+test(`native owner keeps personal mode until explicit tablet restore: ${exitOnly ? 'exit regression' : 'activity regression'}`, async ({ page }) => {
   test.setTimeout(120_000);
   const now = Date.now();
   const authUser = {
@@ -9397,6 +9398,13 @@ test('native club owner sign-in restores the uniquely assigned Wattbike tablet i
   raceViewSaveCompletedAt = 0;
   releaseClubConnect?.();
   await openSignedInAppIfNeeded(page);
+  await page.waitForTimeout(1000);
+  expect(recoveryRequests).toBe(0);
+  await expect(page.getByRole('heading', { name: 'Independent Training' })).toHaveCount(0);
+  await page.getByRole('button', {name: 'More', exact: true}).click();
+  await page.getByRole('button', {name: 'Club Tablets', exact: true}).click();
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', {name: 'Restore Preski Front Desk on this iPad', exact: true}).click();
   await expect.poll(() => recoveryRequests).toBe(1);
   await expect(page.getByRole('heading', { name: 'Independent Training' })).toBeVisible();
   expect(recoveryRequests).toBe(1);
@@ -9412,8 +9420,19 @@ test('native club owner sign-in restores the uniquely assigned Wattbike tablet i
   expect(logoutRequests).toBe(1);
 
   const primaryNav = page.getByRole('navigation', { name: 'Primary' });
-  await expect(primaryNav.getByRole('button')).toHaveCount(1);
+  await expect(primaryNav.getByRole('button')).toHaveCount(2);
   await expect(primaryNav.getByRole('button', { name: 'Club Tablet Home', exact: true })).toBeVisible();
+  if (exitOnly) {
+    await page.setViewportSize({width:390, height:844});
+    await page.getByRole('button', {name: 'Exit Club Tablet mode', exact: true}).click();
+    await expect(page.getByRole('heading', {name: 'Independent Training'})).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem('tracklab.club-tablet-device.v1'))).toBeNull();
+    await page.reload();
+    await expect(page.getByRole('button', {name: 'Exit Club Tablet mode', exact: true})).toHaveCount(0);
+    expect(recoveryRequests).toBe(1);
+    return;
+  }
+
   await expect(page.getByRole('button', { name: 'My Profile', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'More', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Club Live Monitor', exact: true })).toHaveCount(0);
@@ -9808,7 +9827,7 @@ test('native club owner sign-in restores the uniquely assigned Wattbike tablet i
   await expect.poll(() => logoutRequests).toBe(2);
   await page.waitForTimeout(250);
   expect(logoutRequests).toBe(2);
-  await expect(page.getByRole('navigation', { name: 'Primary' }).getByRole('button')).toHaveCount(1);
+  await expect(page.getByRole('navigation', { name: 'Primary' }).getByRole('button')).toHaveCount(2);
   await expect(page.getByRole('button', { name: /Rasheen Hicks/ })).toBeVisible();
 
   failNextRosterAuthorization = true;
@@ -9821,7 +9840,17 @@ test('native club owner sign-in restores the uniquely assigned Wattbike tablet i
   await page.getByRole('button', { name: 'Retry authorization', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Verifying tablet authorization…' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Independent Training' })).toBeVisible();
+  await page.setViewportSize({width:390, height:844});
+  await page.getByRole('button', {name: 'Exit Club Tablet mode', exact: true}).click();
+  await expect(page.getByRole('heading', {name: 'Independent Training'})).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem('tracklab.club-tablet-device.v1'))).toBeNull();
+  await page.reload();
+  await expect(page.getByRole('button', {name: 'Exit Club Tablet mode', exact: true})).toHaveCount(0);
+  expect(recoveryRequests).toBe(1);
+
 });
+
+}
 
 test('studio rider roster syncs to the account and can be assigned to a connected bike', async ({ page }) => {
   const bridge = await createMockBikeBridge([58701]);
